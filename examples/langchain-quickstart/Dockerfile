@@ -24,7 +24,7 @@
 # The published demo image keeps the tag-pinned form so unprivileged
 # contributors can reproduce it; CI/release builds should swap to a
 # digest before pushing to a registry consumers will pull from.
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
