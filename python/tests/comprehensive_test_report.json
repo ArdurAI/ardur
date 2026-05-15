@@ -1,0 +1,94 @@
+{
+  "test": "ardur_comprehensive_integration",
+  "total_duration_s": 11.6,
+  "scenarios_run": 13,
+  "scenarios_passed": 13,
+  "scenarios_failed": 0,
+  "environment": {
+    "tls_fingerprint": "64:D2:E9:AE:21:BA:F6:6E:24:E7:5A:ED:16:A5:AA:4C:8F:6A:65:15:DC:4B:CA:48:E2:C5:0F:AC:A0:48:05:CE",
+    "port": 56740,
+    "python_version": "3.13.13 (main, May  4 2026, 21:02:24) [Clang 22.1.3 ]",
+    "ollama_available": false,
+    "cloud_model": "n/a"
+  },
+  "scenarios": [
+    {
+      "scenario": "01_health_and_baseline",
+      "passed": true,
+      "duration_s": 0.02,
+      "notes": ""
+    },
+    {
+      "scenario": "02_jwt_session_lifecycle",
+      "passed": true,
+      "duration_s": 0.07,
+      "notes": ""
+    },
+    {
+      "scenario": "03_biscuit_spiffe_binding",
+      "passed": true,
+      "duration_s": 0.05,
+      "notes": ""
+    },
+    {
+      "scenario": "04_ollama_multi_turn",
+      "passed": true,
+      "duration_s": 0,
+      "notes": "SKIPPED \u2014 no OLLAMA_API_KEY"
+    },
+    {
+      "scenario": "05_jwt_delegation_chain",
+      "passed": true,
+      "duration_s": 0.11,
+      "notes": ""
+    },
+    {
+      "scenario": "06_biscuit_attenuation_chain",
+      "passed": true,
+      "duration_s": 0.12,
+      "notes": ""
+    },
+    {
+      "scenario": "07_kill_switch",
+      "passed": true,
+      "duration_s": 0.07,
+      "notes": ""
+    },
+    {
+      "scenario": "08_rate_limit_flooding",
+      "passed": true,
+      "duration_s": 0.31,
+      "notes": ""
+    },
+    {
+      "scenario": "09_metrics",
+      "passed": true,
+      "duration_s": 0.01,
+      "notes": ""
+    },
+    {
+      "scenario": "10_receipt_chain",
+      "passed": true,
+      "duration_s": 0.02,
+      "notes": ""
+    },
+    {
+      "scenario": "11_forbid_rules_composition",
+      "passed": true,
+      "duration_s": 0.05,
+      "notes": ""
+    },
+    {
+      "scenario": "12_three_backend_composition",
+      "passed": true,
+      "duration_s": 0.05,
+      "notes": ""
+    },
+    {
+      "scenario": "13_integrity_hash_enforcement",
+      "passed": true,
+      "duration_s": 0.03,
+      "notes": ""
+    }
+  ]
+}

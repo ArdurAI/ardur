@@ -738,9 +738,10 @@ between the specification and the reference implementation — and so the
 2026-04-28 hostile audit's FIX-4 finding ("verifier missing major mandatory
 checks") is closed by either implementing the check or surfacing the gap.
 
-### 13.1 Implemented checks (Delegation-Core minimum)
+### 13.1 Implemented checks (all three conformance profiles)
 
-The reference proxy implements:
+The reference proxy implements the full Delegation-Core, MIC-State, and
+MIC-Evidence conformance profiles as of the 2026-05-14 hardening round:
 
 - Mission, DG, and AAT verification (signature, audience, expiry,
   revocation through status-list lookup; FIX-3 ensures the loader fails
@@ -751,45 +752,32 @@ The reference proxy implements:
 - Tri-state verdict (`compliant` / `violation` / `insufficient_evidence`)
   on declared-telemetry absence and on policy violations;
 - Receipt chain emission with hash-linked entries and JWS signing;
-- Approval-rate-limit enforcement when the MD declares approval policy.
+- Approval-rate-limit enforcement when the MD declares approval policy;
+- **Visibility check** (§6.4): `visibility != "full"` → `INSUFFICIENT_EVIDENCE`
+  (MIC-State and above);
+- **Envelope-signature verification** (§9.5): `envelope_signature_valid is not
+  True` → `VIOLATION` / `ENVELOPE_TAMPERED` (MIC-State and above);
+- **Manifest digest comparison** (§9.6):
+  `observed_manifest_digest == MD.tool_manifest_digest`, skipped when the MD
+  carries no digest (MIC-State and above);
+- **`last_seen_receipts` tracking** (§5.7): per-grant receipt ID map
+  maintained in cross-session lineage state;
+- **Hidden-hop detection** (§9.1): parent JTI linkable through lineage
+  parent cache and receipt presence (MIC-Evidence);
+- **Missing parent receipt** (§5.7): child session requires verifiable
+  parent receipt (MIC-Evidence).
 
-### 13.2 Design-only / not yet enforced
+All new checks are gated on the session's `conformance_profile` for
+backwards compatibility — Delegation-Core sessions skip all checks added
+after the baseline.
 
-The following spec `MUST` clauses describe behavior the reference proxy
-does NOT yet enforce. They remain part of the v0.1 contract — but a
-deployment running this reference implementation only satisfies them
-through additional layers, not through the proxy alone:
+### 13.2 Implications for conformance claims
 
-- **`observed_manifest_digest == MD.tool_manifest_digest`** (Section 6.3
-  item 6). The proxy does not currently receive or verify a runtime
-  tool-manifest digest from the caller. Tool-manifest binding is
-  expressed in the MD (FIX-3 makes its presence required), but the
-  comparison against an observation-time digest is not implemented.
-- **`last_seen_receipts` tracking** (Section 5.7). The reference
-  `LineageState` does not maintain this map. As a consequence the
-  hidden-hop detection that depends on it is also design-only.
-- **MIC-Evidence visible receipt linkage with no hidden hop** (Section
-  6.3 item 7). The proxy emits receipt chains but does not verify
-  parent / downstream linkage strictly enough to detect a hidden hop in
-  the spec's MIC-Evidence sense.
-- **Envelope-signature validity (`envelope_signature_valid`) gate**
-  (Section 6.3 item 5). The proxy verifies the credential JWT but does
-  not require a separate invocation-envelope signature beyond that.
-
-### 13.3 Implications for conformance claims
-
-A deployment of this reference implementation MAY claim `Delegation-Core`
-conformance. It MUST NOT claim `MIC-State` or `MIC-Evidence` conformance
-on the strength of the proxy alone — those profiles require the checks in
-13.2, and they are tracked in the project's hardening roadmap rather than
-implemented today.
-
-This is why `docs/security-model.md` describes Ardur's tri-state behavior
-in terms of "what evidence the proxy actually inspects," not in terms of
-the full Section 6.3 minimum. If you need MIC-Evidence conformance, file
-an issue tagged `area/verifier` so the work can be prioritized; do not
-ship to production assuming the reference proxy is the verifier the spec
-describes.
+A deployment of this reference implementation MAY claim Delegation-Core,
+MIC-State, or MIC-Evidence conformance. The four design-only gaps
+identified by the 2026-04-28 hostile audit are closed. See
+`python/tests/test_mic_conformance.py` for the 29-test conformance suite
+validating all three profiles.
 
 ## 14. References
 

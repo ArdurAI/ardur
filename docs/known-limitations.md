@@ -33,25 +33,6 @@ Ardur is not:
 
 Those controls still matter around Ardur.
 
-## Verifier-contract conformance gaps (reference proxy, 2026-04-28)
-
-The reference Python proxy in `python/vibap/` implements the
-**Delegation-Core** profile of `verifier-contract-v0.1`, not the
-**MIC-State** or **MIC-Evidence** profiles. The following spec `MUST`
-clauses are design-only in the reference implementation today:
-
-- `observed_manifest_digest == MD.tool_manifest_digest` (Section 6.3 #6)
-- per-grant `last_seen_receipts` tracking (Section 5.7)
-- MIC-Evidence visible-receipt-linkage / hidden-hop detection
-  (Section 6.3 #7)
-- explicit invocation-envelope signature (Section 6.3 #5) beyond the
-  credential JWT
-
-Deployments that need MIC-State or MIC-Evidence conformance MUST add
-verifier layers beyond the reference proxy or wait for the hardening
-rounds that close these gaps. See `docs/specs/verifier-contract-v0.1.md`
-Section 13 for the full conformance map.
-
 ## Mission Declaration schema enforcement (2026-04-28 hardening)
 
 After the round-3 hostile re-audit, the MD loader unconditionally

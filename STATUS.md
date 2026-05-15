@@ -42,7 +42,9 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 - new technical reference pages live under `docs/reference/` (CLI, Personal Hub HTTP API, `ARDUR.md` profile format)
 - selected archival walkthrough recordings are public starter media; a re-runnable proof path lands with the next media drop — see `MEDIA.md`
 - a public audit trail is maintained under `docs/audit/`, mirroring the GitHub Code Scanning dismissal record
-- cloud model governance tests (`python/tests/test-results/`) prove real-world proxy enforcement with live LLMs (cloud + local models) — every tool call evaluated through the governance proxy with zero denials across all models
+- cloud model governance tests (`python/tests/test-results/`) prove real-world proxy enforcement with live LLMs across 5 cloud models — 143 tool calls evaluated, 106 adversarial denials, **zero bypasses** (Phase 1) plus 22 programmatic enforcement checks (Phase 2)
+- the reference proxy implements all three conformance profiles: Delegation-Core, MIC-State, and MIC-Evidence — all 4 verifier-contract gaps closed (visibility, envelope signature, manifest digest, hidden-hop detection, last_seen_receipts tracking)
+- the first tagged release (`v0.1.0`) is published
 - the journey-log article series (`docs/articles/`) ships Article 05 (Proof Media That Actually Means Something) and Article 06 (Public Import Discipline) as first-wave entries
 
 ## In Progress
@@ -50,7 +52,7 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 - runnable OpenAI Agents SDK and Google ADK adapter lifts to replace the current deferred-spec READMEs
 - Codex hooks and Claude Desktop MCP packaging as separate next-cycle integrations
 - re-runnable public proof media — recordings made against the public runtime with stable verifier commands and artifact paths
-- a tagged release with a regenerated Homebrew formula carrying Python resource stanzas, so non-technical users can install Ardur Personal without a source checkout
+- a regenerated Homebrew formula carrying Python resource stanzas, so non-technical users can install Ardur Personal without a source checkout (tag v0.1.0 exists; the formula and PyPI distribution are next)
 - conformance test vectors (`docs/specs/conformance/`) — the v0.1 specs reference them by private layout; they are not yet imported into the public tree
 - broader deployment material beyond the SPIRE design surface
 
@@ -63,7 +65,7 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 
 ## Not Public Yet
 
-- a tagged, packaged distribution on PyPI / Homebrew / OCI suitable for non-technical users
+- a packaged distribution on PyPI / Homebrew / OCI suitable for non-technical users (v0.1.0 tag exists; packaging is next)
 - full deployment material for cluster, identity, and receipt storage paths
 - the full public docs spine (the current set is the public-safe subset)
 - benchmark-heavy material

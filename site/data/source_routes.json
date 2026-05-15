@@ -82,8 +82,6 @@
     "plugins": "source/plugins/",
     "plugins/claude-code": "source/plugins/claude-code/",
     "python": "source/python/",
-    "python/tests": "source/python/tests/",
-    "python/tests/test-results": "source/python/tests/test-results/",
     "python/vibap": "source/python/vibap/",
     "python/vibap/_specs": "source/python/vibap/_specs/",
     "site": "source/site/"
@@ -160,8 +158,6 @@
     "go/pkg/kernelcapture/README.md": "source/go/pkg/kernelcapture/readme/",
     "plugins/claude-code/README.md": "source/plugins/claude-code/readme/",
     "python/README.md": "source/python/readme/",
-    "python/tests/test-results/README.md": "source/python/tests/test-results/readme/",
-    "python/tests/test-results/SUMMARY.md": "source/python/tests/test-results/summary/",
     "site/README.md": "source/site/readme/"
   }
 }

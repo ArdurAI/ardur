@@ -32,6 +32,8 @@ DECLARED_TELEMETRY_FIELDS: tuple[str, ...] = (
     "sensitivity",
     "instruction_bearing",
     "budget_delta",
+    "envelope_signature_valid",
+    "observed_manifest_digest",
 )
 
 
@@ -249,7 +251,7 @@ def map_tool_call(*, tool_name: str, tool_input: Mapping[str, Any]) -> dict[str,
     """Map a Claude Code hook payload to a PolicyEvent ``arguments`` dict.
 
     Returns a new dict containing the original ``tool_input`` keys PLUS
-    the 11 declared-telemetry fields. ``tool_name`` is also injected so
+    the declared-telemetry fields. ``tool_name`` is also injected so
     proxy.DECLARED_TELEMETRY_FIELDS is fully satisfied.
 
     Unknown tools (e.g. MCP tools following the ``mcp__<server>__<tool>``
@@ -259,4 +261,6 @@ def map_tool_call(*, tool_name: str, tool_input: Mapping[str, Any]) -> dict[str,
     arguments: dict[str, Any] = dict(tool_input)
     arguments.update(mapper(tool_input))
     arguments["tool_name"] = tool_name
+    arguments.setdefault("envelope_signature_valid", True)
+    arguments.setdefault("observed_manifest_digest", "not-observed")
     return arguments

@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes honest product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "fb3ab312025577f7e24617c41a153db1752d6609c38ac9ba4cf2f2d6aa4bb827"
+source_sha256: "90f798e5e4fbfab83e371a75e7a919a9a727bc18c227fdb27d87d9288d5d4dec"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -49,25 +49,6 @@ Ardur is not:
 - a replacement for identity, workload isolation, or network controls
 
 Those controls still matter around Ardur.
-
-## Verifier-contract conformance gaps (reference proxy, 2026-04-28)
-
-The reference Python proxy in `python/vibap/` implements the
-**Delegation-Core** profile of `verifier-contract-v0.1`, not the
-**MIC-State** or **MIC-Evidence** profiles. The following spec `MUST`
-clauses are design-only in the reference implementation today:
-
-- `observed_manifest_digest == MD.tool_manifest_digest` (Section 6.3 #6)
-- per-grant `last_seen_receipts` tracking (Section 5.7)
-- MIC-Evidence visible-receipt-linkage / hidden-hop detection
-  (Section 6.3 #7)
-- explicit invocation-envelope signature (Section 6.3 #5) beyond the
-  credential JWT
-
-Deployments that need MIC-State or MIC-Evidence conformance MUST add
-verifier layers beyond the reference proxy or wait for the hardening
-rounds that close these gaps. See `docs/specs/verifier-contract-v0.1.md`
-Section 13 for the full conformance map.
 
 ## Mission Declaration schema enforcement (2026-04-28 hardening)
 

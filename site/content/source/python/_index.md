@@ -19,5 +19,4 @@ This section lists hosted documentation and mirrored artifacts generated from `p
 
 ## Child Sections
 
-- [`tests/`](/__ardur_internal__/source/python/tests/)
 - [`vibap/`](/__ardur_internal__/source/python/vibap/)

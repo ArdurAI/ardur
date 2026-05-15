@@ -27,7 +27,8 @@ PUBLIC_MARKDOWN_EXCLUDED_PREFIXES = (
     "logs/",
     "site/content/",
     "site/public/",
-    "site/resources/"
+    "site/resources/",
+    "python/tests/test-results/",
 )
 
 PUBLIC_MARKDOWN_EXCLUDED_DIR_NAMES = {
