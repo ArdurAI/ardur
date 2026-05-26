@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/cedar-policy/cedar-go v1.5.2
-	github.com/cilium/ebpf v0.16.0
+	github.com/cilium/ebpf v0.21.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/sigstore/sigstore-go v1.1.4
 	github.com/spiffe/go-spiffe/v2 v2.6.0
