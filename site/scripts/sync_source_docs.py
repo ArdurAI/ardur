@@ -16,15 +16,19 @@ SITE_ROOT = REPO_ROOT / "site"
 CONTENT_SOURCE_ROOT = SITE_ROOT / "content" / "source"
 STATIC_ARTIFACT_ROOT = SITE_ROOT / "static" / "repo"
 CAPABILITIES_OUTPUT = SITE_ROOT / "data" / "capabilities.json"
-REPO_URL = "https://github.com/gnanirahulnutakki/ardur"
+SOURCE_ROUTES_OUTPUT = SITE_ROOT / "data" / "source_routes.json"
+REPO_URL = "https://github.com/ArdurAI/ardur"
 SOURCE_REF_PLACEHOLDER = "__ARDUR_SOURCE_REF__"
 INTERNAL_URL_PREFIX = "/__ardur_internal__/"
 
 PUBLIC_MARKDOWN_EXCLUDED_PREFIXES = (
     ".context/",
+    "_internal/",
+    "logs/",
     "site/content/",
     "site/public/",
-    "site/resources/"
+    "site/resources/",
+    "python/tests/test-results/",
 )
 
 PUBLIC_MARKDOWN_EXCLUDED_DIR_NAMES = {
@@ -247,8 +251,17 @@ def content_path_for(source: Path) -> Path:
     ])
 
 
-def source_page_path(source: Path) -> str:
-    return f"source/{site_route_for(source.with_suffix('')).as_posix()}/"
+def source_route_for(source: Path, documentation_directories: set[Path]) -> Path:
+    route = site_route_for(source.with_suffix(""))
+    directory_routes = {site_route_for(directory) for directory in documentation_directories}
+    if route in directory_routes:
+        suffix = "notes" if source.name.lower() == "media.md" else "file"
+        route = route.parent / f"{route.name}-{suffix}"
+    return route
+
+
+def source_page_path(source: Path, documentation_directories: set[Path]) -> str:
+    return f"source/{source_route_for(source, documentation_directories).as_posix()}/"
 
 
 def directory_page_path(directory: Path) -> str:
@@ -371,7 +384,11 @@ def rewrite_links(
     return "\n".join(lines)
 
 
-def output_path_for(source: Path) -> Path:
+def output_path_for(source: Path, documentation_directories: set[Path]) -> Path:
+    default_route = site_route_for(source.with_suffix(""))
+    actual_route = source_route_for(source, documentation_directories)
+    if actual_route != default_route:
+        return CONTENT_SOURCE_ROOT / actual_route.with_suffix(".md")
     return (CONTENT_SOURCE_ROOT / content_path_for(source)).with_suffix(".md")
 
 
@@ -507,8 +524,31 @@ def render_capabilities_data() -> str:
         "source_sha256": sha256_text(original),
         "asset_class": payload["asset_class"],
         "asset_class_note": payload["asset_class_note"],
-        "included_now": payload.get("included_now", []),
-        "next_candidates": payload.get("next_candidates", [])
+        "included_now": payload.get("included_now", [])
+    }
+    if payload.get("next_candidates"):
+        output["next_candidates"] = payload["next_candidates"]
+    return json.dumps(output, indent=2, sort_keys=True) + "\n"
+
+
+def render_source_routes(
+    markdown_pages: dict[Path, str],
+    artifacts: list[Path],
+    directory_pages: dict[Path, str]
+) -> str:
+    output = {
+        "markdown": {
+            source.as_posix(): route
+            for source, route in sorted(markdown_pages.items(), key=lambda item: item[0].as_posix())
+        },
+        "directories": {
+            directory.as_posix(): route
+            for directory, route in sorted(directory_pages.items(), key=lambda item: item[0].as_posix())
+        },
+        "artifacts": {
+            artifact.as_posix(): f"repo/{artifact.as_posix()}"
+            for artifact in sorted(artifacts, key=lambda path: path.as_posix())
+        }
     }
     return json.dumps(output, indent=2, sort_keys=True) + "\n"
 
@@ -575,7 +615,6 @@ def remove_stale_artifacts(expected_paths: set[Path], check: bool, failures: lis
 def sync(check: bool) -> int:
     sources = discover_markdown()
     artifacts = discover_artifacts()
-    markdown_pages = {source: source_page_path(source) for source in sources}
     artifact_paths = set(artifacts)
     documentation_directories = {
         parent
@@ -589,6 +628,7 @@ def sync(check: bool) -> int:
         for parent in artifact.parents
         if parent != Path(".")
     )
+    markdown_pages = {source: source_page_path(source, documentation_directories) for source in sources}
     directory_pages = {directory: directory_page_path(directory) for directory in documentation_directories}
     failures: list[str] = []
     expected_paths: set[Path] = {CONTENT_SOURCE_ROOT / "_index.md"}
@@ -596,7 +636,7 @@ def sync(check: bool) -> int:
         CONTENT_SOURCE_ROOT / content_path_for(directory) / "_index.md"
         for directory in documentation_directories
     )
-    expected_paths.update(output_path_for(source) for source in sources)
+    expected_paths.update(output_path_for(source, documentation_directories) for source in sources)
     expected_artifacts: set[Path] = {STATIC_ARTIFACT_ROOT / artifact for artifact in artifacts}
 
     if not check:
@@ -604,6 +644,7 @@ def sync(check: bool) -> int:
         remove_stale_artifacts(expected_artifacts, check, failures)
 
     write_or_check(CONTENT_SOURCE_ROOT / "_index.md", render_source_index(sources, artifacts), check, failures)
+    write_or_check(SOURCE_ROUTES_OUTPUT, render_source_routes(markdown_pages, artifacts, directory_pages), check, failures)
     for directory in sorted(documentation_directories, key=lambda p: p.as_posix()):
         output = CONTENT_SOURCE_ROOT / content_path_for(directory) / "_index.md"
         write_or_check(
@@ -614,7 +655,7 @@ def sync(check: bool) -> int:
         )
 
     for source in sources:
-        output = output_path_for(source)
+        output = output_path_for(source, documentation_directories)
         write_or_check(
             output,
             render_source_page(source, markdown_pages, artifact_paths, directory_pages),
@@ -644,6 +685,7 @@ def sync(check: bool) -> int:
         print(f"generated {len(sources)} source-backed Hugo pages")
         print(f"mirrored {len(artifacts)} documentation artifacts")
         print(f"generated {CAPABILITIES_OUTPUT.relative_to(REPO_ROOT)}")
+        print(f"generated {SOURCE_ROUTES_OUTPUT.relative_to(REPO_ROOT)}")
     return 0
 
 

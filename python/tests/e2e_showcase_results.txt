@@ -1,0 +1,236 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- /Users/gnutakki/.hermes/workspace/projects/ardur/repo/ardur-public/python/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/gnutakki/.hermes/workspace/projects/ardur/repo/ardur-public/python
+configfile: pyproject.toml
+plugins: cov-6.3.0, langsmith-0.8.4, anyio-4.13.0
+collecting ... collected 28 items
+
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_health_endpoint 
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║                               ＡＲ ＤＵＲ                             ║
+  ║         Runtime Governance & Evidence Layer for AI Agents        ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                   End-to-End Capability Showcase                 ║
+  ║       Real Ollama  ·  No Mocks  ·  Every Governance Feature      ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  Model     qwen3:8b                                                  ║
+  ║  Tests     28                                                        ║
+  ║  Layers    HTTP Security · Sessions · Delegation · Receipts · MIC · Backends · Advanced║
+  ╚══════════════════════════════════════════════════════════════════════╝
+
+
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 1  HTTP Security Layer                                            ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  Hardening the proxy surface: health checks, JWKS key distribution,║
+  ║  security headers, Prometheus metrics, bearer-auth enforcement,   ║
+  ║  token-bucket rate limiting, and the emergency kill switch.       ║
+  ║  No LLM needed — pure HTTP protocol verification.                 ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_jwks_endpoint PASSED
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_security_headers PASSED
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_metrics_endpoint PASSED
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_auth_required PASSED
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_rate_limiting PASSED
+tests/test_e2e_showcase.py::TestHTTPSecurityLayer::test_kill_switch PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_passport_issuance 
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 2  Session & Passport Layer                                       ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  The core governance loop: issue a MissionPassport ("who are you, ║
+  ║  what can you do?"), start a session, then have a real LLM request║
+  ║  tool calls. Ardur permits allowed tools, denies forbidden and    ║
+  ║  unknown tools, and enforces per-session call budgets.            ║
+  ║  Multi-turn LLM conversations flow through the proxy transparently.║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_session_start PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_allowed_tool_permit PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_forbidden_tool_deny PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_unknown_tool_deny PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_budget_exhaustion PASSED
+tests/test_e2e_showcase.py::TestSessionAndPassportLayer::test_multi_turn_conversation PASSED
+tests/test_e2e_showcase.py::TestDelegationLayer::test_delegate_passport 
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 3  Delegation Layer                                               ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  Parent agents can delegate to child sub-agents with narrowed     ║
+  ║  tool sets, reduced budgets, and inherited constraints. Ardur     ║
+  ║  enforces that children cannot widen scope, and parent sessions   ║
+  ║  remain independent — no budget leakage between sessions.         ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestDelegationLayer::test_child_session PASSED
+tests/test_e2e_showcase.py::TestDelegationLayer::test_child_scope_enforcement PASSED
+tests/test_e2e_showcase.py::TestDelegationLayer::test_parent_independent PASSED
+tests/test_e2e_showcase.py::TestReceiptLayer::test_receipt_generation 
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 4  Receipt Layer                                                  ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  Every tool evaluation produces a signed JWT execution receipt.   ║
+  ║  Receipts are hash-chained (each links to its predecessor via     ║
+  ║  SHA-256) forming an immutable, verifiable audit trail. All       ║
+  ║  receipts in a session share a single trace_id for end-to-end     ║
+  ║  correlation.                                                     ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestReceiptLayer::test_receipt_chain_verification PASSED
+tests/test_e2e_showcase.py::TestReceiptLayer::test_receipt_trace_id_continuity PASSED
+tests/test_e2e_showcase.py::TestMICConformanceLayer::test_mic_state_profile 
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 5  MIC Conformance Layer                                          ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  Manifest Integrity & Consistency profiles go beyond basic allow/deny.║
+  ║  MIC-State checks manifest digests, envelope signatures, and visibility.║
+  ║  MIC-Evidence adds hidden-hop detection — every delegation hop must║
+  ║  have produced a verifiable receipt. No phantom agents in the chain.║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestMICConformanceLayer::test_mic_evidence_profile PASSED
+tests/test_e2e_showcase.py::TestPolicyBackendLayer::test_multi_backend_composition 
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 6  Policy Backend Layer                                           ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  Ardur composes multiple policy backends: native (allow/deny lists),║
+  ║  Cedar DSL (attribute-based policies), and forbid_rules (pattern- ║
+  ║  based blocking). Composition follows SMT-verified deny-wins      ║
+  ║  semantics — a single Deny across any backend blocks the call.    ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestPolicyBackendLayer::test_deny_wins_semantics PASSED
+tests/test_e2e_showcase.py::TestAdvancedFeatures::test_declared_telemetry_fail_closed 
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║ LAYER 7  Advanced Features                                              ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  Production-hardening capabilities: declared telemetry with B.2   ║
+  ║  fail-closed enforcement (missing fields = INSUFFICIENT_EVIDENCE),║
+  ║  session-end lifecycle attestation (signed summary JWT), and      ║
+  ║  concurrent session isolation — many agents, zero interference.   ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+PASSED
+tests/test_e2e_showcase.py::TestAdvancedFeatures::test_session_end_attestation PASSED
+tests/test_e2e_showcase.py::TestAdvancedFeatures::test_concurrent_sessions PASSED
+
+============================= 28 passed in 55.13s ==============================
+
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║                          RESULTS  —  DETAIL                        ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+  ✅  [01/28] Health Endpoint
+      GET /health -> status=ok, version=0.1.0
+
+  ✅  [02/28] JWKS Endpoint
+      GET /.well-known/jwks.json -> 1 key(s), kty=EC, crv=P-256
+
+  ✅  [03/28] Security Headers
+      X-Content-Type-Options: nosniff ✓
+        X-Frame-Options: deny ✓
+        Referrer-Policy: no-referrer ✓
+        Cache-Control: no-store ✓
+
+  ✅  [04/28] Metrics Endpoint
+      GET /metrics -> 56 lines, ardur_ prefix present
+
+  ✅  [05/28] Auth Required
+      No token -> 401 + WWW-Authenticate ✓
+        Wrong token -> 401 ✓
+        Correct token -> 200 ✓
+
+  ✅  [06/28] Rate Limiting
+      RateLimiter(rate=1, burst=1): 10 rapid checks -> 1 allowed, 9 denied ✓
+
+  ✅  [07/28] Kill Switch
+      Activate -> evaluate 503 ✓
+        Health still 200 ✓
+        Deactivate -> evaluate works again ✓
+
+  ✅  [08/28] Passport Issuance
+      agent=showcase-agent, allowed=['read_file', 'write_file', 'analyze'], forbidden=['delete_file', 'execute_shell'], budget=8 calls
+
+  ✅  [09/28] Session Start
+      POST /session/start -> session_id=71da3824...
+
+  ✅  [10/28] Allowed Tool PERMIT
+      LLM requested: read_file({"path": "/tmp/report.csv"}) -> Proxy: PERMIT
+
+  ✅  [11/28] Forbidden Tool DENY
+      LLM requested: delete_file({"path": "/tmp/secret.txt"}) -> Proxy: DENY — tool is forbidden
+
+  ✅  [12/28] Unknown Tool DENY
+      POST /evaluate with 'nonexistent_tool_xyz' -> DENY — not in allowed list
+
+  ✅  [13/28] Budget Exhaustion
+      max_tool_calls=2: calls 1-2 PERMIT, call 3 -> DENY (budget exceeded: 2/2 tool calls used (0 reserved for delegated children from ceiling 2))
+
+  ✅  [14/28] Multi-Turn Conversation
+      LLM made 1 tool call(s) through proxy across multiple turns
+
+  ✅  [15/28] Delegate Passport
+      Parent(['read_file', 'write_file', 'analyze', 'search']) -> Child(['read_file']), budget=5, depth=1
+
+  ✅  [16/28] Child Session
+      Child tools=['read_file', 'search'] (subset of parent), session_id=7f5d4e22...
+
+  ✅  [17/28] Child Scope Enforcement
+      read_file (in child scope) -> PERMIT ✓
+        write_file (not in child scope) -> DENY ✓
+
+  ✅  [18/28] Parent Independent
+      Child budget exhausted, parent session still PERMITs — independent budgets ✓
+
+  ✅  [19/28] Receipt Generation
+      2 receipt(s) generated: 1 PERMIT, 1 DENY — each a signed JWT
+
+  ✅  [20/28] Receipt Chain Verification
+      verify_chain(3 receipts) -> all valid, hash-chained ✓
+
+  ✅  [21/28] Receipt trace_id Continuity
+      All 2 receipts share trace_id=5fec2f01...
+
+  ✅  [22/28] MIC-State Profile
+      Declared telemetry fields evaluated by proxy
+        (manifest digest, envelope signature, visibility all validated by Ardur's B.2 checks)
+
+  ✅  [23/28] MIC-Evidence Profile
+      Receipt tracking active — hidden-hop detection and delegation chain gaps enforced when conformance_profile=MIC-Evidence
+
+  ✅  [24/28] Multi-Backend Composition
+      Active backends: ['cedar', 'forbid_rules', 'native']
+        read_file (in allowed_tools) -> native: Allow -> PERMIT ✓
+        delete_file (not in allowed_tools) -> native: Deny -> DENY ✓
+
+  ✅  [25/28] Deny-Wins Semantics
+      send_email (allowed, not forbidden) -> PERMIT ✓
+        delete_file (allowed BUT also forbidden) -> DENY ✓
+        Any single Deny across checks overrides Allow ✓
+
+  ✅  [26/28] Declared Telemetry
+      Telemetry fields (action_class, visibility, etc.) are evaluated by proxy
+        B.2 fail-closed: when mission requires telemetry, missing fields -> INSUFFICIENT_EVIDENCE
+
+  ✅  [27/28] Session End + Attestation
+      POST /session/end -> attestation_token present, summary: {"permits": 2, "denials": 0, "scope_compliance": "full"}
+
+  ✅  [28/28] Concurrent Sessions
+      3 independent sessions evaluated concurrently -> all PERMIT ✓
+
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║                  AR DUR  ·  E2E  SHOWCASE  RESULTS                 ║
+  ╠════════════════════════════════════════════════════════════════════╣
+  ║  ██████████████████████████████████████████████████████████████████║
+  ║                                                                    ║
+  ✅   28 passed
+  ║                                                                    ║
+  ║  VERDICT:  ALL GOOD  ✨                                              ║
+  ╚════════════════════════════════════════════════════════════════════╝
+

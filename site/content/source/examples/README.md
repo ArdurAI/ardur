@@ -1,10 +1,10 @@
 ---
 title: "Ardur Examples"
-description: "Working examples of Ardur governing AI agents across the major frameworks. Some directories are runnable today; the rest are placeholders waiting on adapter code that's still being"
+description: "Working examples of Ardur governing AI agents across major frameworks and local"
 source_path: "examples/README.md"
-source_sha256: "4f17d1a56bf46d5a62e41159d0f1e190f3b54a5840829151dc2ae54c0b97b702"
+source_sha256: "106e989b7d5177474c262e19efa3fc4a39107f869fd2e2a474cdbebaaa582e40"
 weight: 100
-maturity: ["in-progress"]
+maturity: ["public-now"]
 claim_types: ["integration"]
 surfaces: ["examples"]
 frameworks: ["framework-agnostic"]
@@ -17,7 +17,9 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-Working examples of Ardur governing AI agents across the major frameworks. Some directories are runnable today; the rest are placeholders waiting on adapter code that's still being imported from the private research tree.
+Working examples of Ardur governing AI agents across major frameworks and local
+assistant surfaces. Some directories are runnable today; deferred directories
+are marked as adapter specs, not shipped capability.
 
 ## Status
 
@@ -27,14 +29,20 @@ Working examples of Ardur governing AI agents across the major frameworks. Some 
 | [langchain-quickstart/](/__ardur_internal__/source/examples/langchain-quickstart/readme/) | runnable | `python/` editable install + LangChain + an LLM provider |
 | [langgraph-quickstart/](/__ardur_internal__/source/examples/langgraph-quickstart/readme/) | runnable | `python/` editable install + LangGraph + an LLM provider |
 | [autogen-quickstart/](/__ardur_internal__/source/examples/autogen-quickstart/readme/) | runnable | `python/` editable install + AutoGen v0.4+ + an LLM provider |
+| [ardur-personal-extension/](/__ardur_internal__/source/examples/ardur-personal-extension/readme/) | runnable adapter | local `ardur hub` + Chrome-compatible browser |
+| [ardur-personal-desktop/](/__ardur_internal__/source/examples/ardur-personal-desktop/readme/) | runnable adapter | local `ardur hub` + macOS Accessibility permission for autodetect |
+| [ardur-personal-native-host/](/__ardur_internal__/source/examples/ardur-personal-native-host/readme/) | optional bridge | local `ardur hub` + browser Native Messaging |
 | [_shared/](/__ardur_internal__/source/examples/_shared/) | helpers | Imported by the three framework demos above |
-| [claude-code-hook/](/__ardur_internal__/source/examples/claude-code-hook/readme/) | placeholder | `python/` editable install + a frontier-LLM coding-agent CLI |
-| [openai-agents-sdk/](/__ardur_internal__/source/examples/openai-agents-sdk/readme/) | placeholder | `python/` editable install + OpenAI Agents SDK + OpenAI API key |
-| [google-adk/](/__ardur_internal__/source/examples/google-adk/readme/) | placeholder | `python/` editable install + Google ADK + Google AI API key |
+| [claude-code-hook/](/__ardur_internal__/source/examples/claude-code-hook/readme/) | pointer to runnable plugin | `python/` editable install + Claude Code |
+| [openai-agents-sdk/](/__ardur_internal__/source/examples/openai-agents-sdk/readme/) | deferred adapter spec | `python/` editable install + OpenAI Agents SDK + OpenAI API key |
+| [google-adk/](/__ardur_internal__/source/examples/google-adk/readme/) | deferred adapter spec | `python/` editable install + Google ADK + Google AI API key |
+| [../plugins/claude-code/](/__ardur_internal__/source/plugins/claude-code/readme/) | runnable plugin | `python/` editable install + Claude Code |
 
 The runnable framework directories (`langchain-quickstart/`, `langgraph-quickstart/`, `autogen-quickstart/`) ship a `demo.py` entrypoint and, where applicable, a `Dockerfile` that produces the published `rahulnutakki/ardur-demo:*` images. They share helpers under [`_shared/`](/__ardur_internal__/source/examples/_shared/) — provider selection, SVID fetch, Biscuit issuance, governed-session setup, receipt-chain verification, end-of-session attestation. No model identifiers are hard-coded in any of these files; provider config is sourced from environment variables at runtime (see [CONTRIBUTING.md](/__ardur_internal__/source/contributing/) "No specific LLM model names" rule).
 
-The remaining placeholder directories carry READMEs that describe the dependency footprint and file layout the next import wave will produce. Whoever picks up an adapter can finish the import in isolation without coordinating with the others.
+The deferred adapter directories carry READMEs that describe the dependency
+footprint and file layout the next import wave will produce. They are not
+advertised as runnable examples until code and tests land.
 
 ## Running the mission examples (today, no agent required)
 
@@ -42,17 +50,31 @@ The remaining placeholder directories carry READMEs that describe the dependency
 cd ../python
 pip install -e .
 
-# Issue and verify a passport using one of the example mission files
-ardur issue --from-file ../examples/missions/minimal-mission.json
-ardur verify <token-from-issue-output>
+# Issue and verify a passport. ardur issue takes mission claims via flags,
+# not a JSON file — the example mission files under missions/ are reference
+# documents for the spec layer. To exercise the protocol path:
+ardur issue \
+  --agent-id alice \
+  --mission "summarize sales from sales/q1.csv into reports/" \
+  --allowed-tools read_file write_report \
+  --resource-scope 'sales/*' 'reports/*'
+
+ardur verify --token <token-from-issue-output>
 ```
 
 That exercises the core protocol surface end-to-end — mission compilation, passport issuance, signature, verification — without an LLM or framework in the loop. It's the fastest way to confirm a local install actually works.
 
-## Why placeholders instead of one big drop
+## Why deferred adapters instead of one big drop
 
 Each framework has its own tool-call interface, its own session-state model, and its own integration point where Ardur's governance proxy attaches. LangChain tool callbacks look nothing like AutoGen's `FunctionTool` registration; LangGraph's state graph wants the verifier wrapped around node transitions; the coding-agent CLI integration wires in via a hook lifecycle, not a Python import. Lifting these as one monolithic commit would conflate unrelated breakage. Per-framework directories let each adapter land, get reviewed, and run CI on its own.
 
 ## CI for examples
 
-Once at least one quickstart has runnable code, an `examples-smoke.yml` workflow will exercise it end-to-end on every PR — `langchain-quickstart` is the likely first because it has the lightest dependency surface (no extra system packages, Ollama already in the image). CodeQL handles static analysis automatically once Python files appear under `examples/*/src/`.
+The current CI surface is the repo-wide Python and Go workflow in
+`.github/workflows/tests.yml`, plus CodeQL, link-check, secret-scan, format
+validation, and the Hugo site build. The Python job runs
+`python/tests/test_examples_smoke.py` as an offline, no-key examples smoke for
+the checked-in mission fixtures and this claim ledger. There is not a dedicated
+`.github/workflows/examples-smoke.yml` today, and the provider-backed framework
+quickstarts remain opt-in/manual unless a future workflow adds real CI evidence
+for those live-provider demos.

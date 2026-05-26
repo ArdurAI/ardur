@@ -2,7 +2,7 @@
 title: "Claude Agent Instructions"
 description: "Claude and Claude Code should follow the [Shared Agent Contract](shared.md),"
 source_path: "docs/agent-instructions/claude.md"
-source_sha256: "36926542de263adef569abbaad289787140cdaaa990c594893a99be2ae9419f9"
+source_sha256: "e674a89d2abb2b9c3a23ad2d016a060b30d218f5183d4af060a72565c822a3cb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]

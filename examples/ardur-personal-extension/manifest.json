@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Ardur Personal",
+  "description": "Thin browser adapter for the local Ardur Personal Hub.",
+  "version": "0.2.0",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_title": "Ardur Personal",
+    "default_popup": "src/popup.html"
+  },
+  "background": {
+    "service_worker": "src/service_worker.js"
+  }
+}

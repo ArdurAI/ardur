@@ -93,6 +93,7 @@ class TestJWKSEndpoint:
                 host="127.0.0.1",
                 port=unused_tcp_port,
                 require_auth=True,  # Prove JWKS works even with auth required
+                no_tls=True,
             )
 
         thread = threading.Thread(target=run, daemon=True)

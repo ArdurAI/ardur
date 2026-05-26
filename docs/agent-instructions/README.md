@@ -32,4 +32,3 @@ Private or machine-specific instructions belong only in ignored local paths:
 
 Do not force-add those local-only paths. `scripts/check-local.sh --quick` and
 the `secret-scan` workflow fail if they become tracked.
-

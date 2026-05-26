@@ -1,0 +1,30 @@
+{{ $site := .site }}
+{{ $path := .path }}
+{{ $sourceRef := $site.Params.sourceRef | default "dev" }}
+{{ $lowerPath := lower $path }}
+{{ $routes := hugo.Data.source_routes }}
+{{ $href := printf "%s/blob/%s/%s" $site.Params.repoURL $sourceRef $path }}
+{{ $markdownRoute := index $routes.markdown $path }}
+{{ if $markdownRoute }}
+  {{ $href = $markdownRoute | absURL }}
+{{ else if strings.HasSuffix $lowerPath ".md" }}
+  {{ $route := replaceRE "(^|/)\\." "$1" (strings.TrimSuffix ".md" $lowerPath) }}
+  {{ $href = printf "source/%s/" $route | absURL }}
+{{ else if strings.HasSuffix $lowerPath "/" }}
+  {{ $directoryPath := strings.TrimSuffix "/" $path }}
+  {{ $directoryRoute := index $routes.directories $directoryPath }}
+  {{ if $directoryRoute }}
+    {{ $href = $directoryRoute | absURL }}
+  {{ else }}
+    {{ $route := replaceRE "(^|/)\\." "$1" $lowerPath }}
+    {{ $href = printf "source/%s" $route | absURL }}
+  {{ end }}
+{{ else if or (strings.HasSuffix $lowerPath ".json") (strings.HasSuffix $lowerPath ".yaml") (strings.HasSuffix $lowerPath ".yml") (strings.HasSuffix $lowerPath ".cast") }}
+  {{ $artifactRoute := index $routes.artifacts $path }}
+  {{ if $artifactRoute }}
+    {{ $href = $artifactRoute | absURL }}
+  {{ else }}
+    {{ $href = printf "repo/%s" $path | absURL }}
+  {{ end }}
+{{ end }}
+{{ return $href }}

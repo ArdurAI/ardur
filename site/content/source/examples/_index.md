@@ -20,6 +20,9 @@ This section lists hosted documentation and mirrored artifacts generated from `e
 ## Child Sections
 
 - [`_shared/`](/__ardur_internal__/source/examples/_shared/)
+- [`ardur-personal-desktop/`](/__ardur_internal__/source/examples/ardur-personal-desktop/)
+- [`ardur-personal-extension/`](/__ardur_internal__/source/examples/ardur-personal-extension/)
+- [`ardur-personal-native-host/`](/__ardur_internal__/source/examples/ardur-personal-native-host/)
 - [`autogen-quickstart/`](/__ardur_internal__/source/examples/autogen-quickstart/)
 - [`claude-code-hook/`](/__ardur_internal__/source/examples/claude-code-hook/)
 - [`google-adk/`](/__ardur_internal__/source/examples/google-adk/)

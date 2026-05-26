@@ -1372,7 +1372,7 @@ def scene_14_closing(ctx: DemoContext):
             "to a cryptographic audit log — all in about four minutes.")
     print()
     print(f"      {CYAN}▸{RESET} Source + paper:  "
-          f"{BOLD}github.com/gnanirahulnutakki/radiantic{RESET}")
+          f"{BOLD}github.com/ArdurAI/ardur{RESET}")
     print(f"      {CYAN}▸{RESET} IETF draft:      "
           f"{BOLD}draft-niyikiza-oauth-attenuating-agent-tokens-00{RESET}")
     print(f"      {CYAN}▸{RESET} ADR-014:         "

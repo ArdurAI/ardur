@@ -22,8 +22,10 @@ broader walkthroughs are prepared later.
 - These files are sanitized copies of walkthrough recordings from the
   current Ardur implementation lineage.
 - They are starter media assets, not the whole proof story. The word
-  "proof" is reserved here for media that lands after the code lift and
-  carries a rerunnable verifier path — see the archival-status note below.
+  "proof" is reserved here for media that carries a rerunnable verifier path.
+  The current no-key Phase 1 verifier path is the JSON evidence bundle from
+  `scripts/run-rwt-phase1-fresh-user.py`; these casts remain archival until
+  they are re-recorded against that public path.
 - Historical live-governance-demo recordings should not be treated as current
   canonical proof.
 - Selected recordings should use Ardur public naming in terminal output,
@@ -39,14 +41,29 @@ and artifact paths (`docs/scripts/run_live_core_capability_proof.py`,
 imported into this public repo. Treat them as **archival recordings**, not
 as "run these yourself" reproducers.
 
-The re-runnable proof path lands after the public runtime imports have stable
-verifier commands and artifact paths. When the scripts and artifact paths
-referenced in these casts are public, the casts will be re-recorded against the
-renamed Ardur runtime and this caveat will be removed.
+The current re-runnable Phase 1 evidence path is the fresh-user harness and its
+redacted JSON bundle, described in
+`docs/guides/read-phase1-evidence-bundle.md`. When the scripts and artifact
+paths referenced in these casts are public, the casts will be re-recorded
+against the renamed Ardur runtime and this caveat will be removed.
 
 ## Suggested Next Media Drops
 
-- a rendered public-safe walkthrough for the live governance flow
-- a Claude Code hook walkthrough
-- an OpenAI Agents SDK example
-- a Google ADK example
+These are recordings to make against shipped public surfaces — the underlying
+examples or plugins already exist in the repo; what's missing is a re-runnable
+proof recording.
+
+- a rendered public-safe walkthrough for the live governance flow against the
+  imported `python/vibap/` runtime and stable verifier commands
+- a Claude Code hook walkthrough using `plugins/claude-code/` and
+  `ardur protect claude-code` (the plugin and CLI ship today; the recording
+  does not)
+- a LangChain quickstart walkthrough using `examples/langchain-quickstart/`
+- a LangGraph quickstart walkthrough using `examples/langgraph-quickstart/`
+- an AutoGen quickstart walkthrough using `examples/autogen-quickstart/`
+- an Ardur Personal Hub setup walkthrough covering `ardur setup`, `ardur hub`,
+  and the browser extension at `examples/ardur-personal-extension/`
+
+A recording for the OpenAI Agents SDK and Google ADK adapters lands once
+those `examples/` directories graduate from deferred adapter specs to runnable
+code.

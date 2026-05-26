@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "9fac5e51ac40dfbf0521d45229dc683c99b128e50618440f6a046c360b2f1ec0"
+source_sha256: "92402f56767ab65a9f02fb6c7e1c9b1b8c5387fc5cbade86a2cb6128286aa689"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -22,6 +22,8 @@ This directory carries the v0.1 specification documents for Ardur's protocol lay
 The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol" in earlier learn-MCEP teaching material; the formal v0.1 specs use "Mission-Controlled Execution Protocol" and that is the canonical expansion going forward. Articles and other public prose follow the spec form.
 
 **Public-surface import caveat.** The migrated specs were authored in a private context and may reference implementation source paths (e.g. `vibap-prototype/vibap/passport.py`), private session artifacts (e.g. `docs/session-2026-04-XX/...`), or internal review trails that have not yet landed in this public repo. Treat such references as pointers to future work — the underlying code lands alongside the Phase 1 import per the [public import plan](/__ardur_internal__/source/docs/public-import-plan/). Contributors cannot verify those referenced artifacts from the public tree today. Same caveat as the [decisions index](/__ardur_internal__/source/docs/decisions/readme/).
+
+**Runtime implementation caveat.** The v0.1 specs define intended protocol semantics for mission-declared `lineage_budgets`, but the current public runtime does not yet compile or verify those mission-level declarations. Today, delegation budget reservations use the file-backed `FileLineageBudgetLedger`, while non-empty mission-level `lineage_budgets` fail closed at compile/issue time instead of being silently accepted.
 
 ## Migration status
 

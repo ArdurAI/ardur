@@ -18,6 +18,7 @@ __pycache__/
 .agent-context/
 .codex/
 .local-skills/
+logs/
 agent-instructions.local/
 HANDOFF.md
 workdone-so-far.md
@@ -28,20 +29,18 @@ workdone-so-far.md
 .env.*
 !.env.example
 
-# Python packaging side-effects from `pip install -e .`
+# Python packaging side-effects from `pip install -e .` / `pip wheel .`
 *.egg-info/
+python/build/
+
+# Internal planning, engineering reports, and dev tooling — moved to _internal/
+# so the public tree stays clean for the open-source community.
+_internal/
+reports/
 
 # Go build artifacts when binaries land in the repo root rather than $GOBIN.
-go/authority
-go/governor
 go/operator
 go/webhook
-go/cli
-go/benchmark_live
-go/benchmark_sparse
-go/cedar-benchmark-wrapper
-go/specvalidate
-go/benchcheck
 
 # Hugo site build output.
 site/public/

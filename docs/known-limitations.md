@@ -1,6 +1,6 @@
 # Known Limitations
 
-This page distinguishes honest product boundaries from implementation bugs.
+This page distinguishes documented product boundaries from implementation bugs.
 
 ## Research and foundation surfaces not yet broad runtime claims
 
@@ -21,7 +21,9 @@ This page distinguishes honest product boundaries from implementation bugs.
 ## Evidence limits
 
 If a delegated tool or gateway can hide all relevant side effects and emits no
-evidence, Ardur must classify the result as `unknown` rather than safe.
+evidence, Ardur must classify the result as `insufficient_evidence` (resulting
+in an `unknown` verdict at the session/verifier level) rather than safe. See
+[`coverage-map.md`](coverage-map.md) for the receipt-level evidence taxonomy.
 
 ## Product limits
 
@@ -37,7 +39,9 @@ Those controls still matter around Ardur.
 
 The reference Python proxy in `python/vibap/` implements the
 **Delegation-Core** profile of `verifier-contract-v0.1`, not the
-**MIC-State** or **MIC-Evidence** profiles. The following spec `MUST`
+**MIC-State** or **MIC-Evidence** profiles. When closing these gaps,
+update both this document and [`security-model.md`](security-model.md)
+in the same PR to prevent drift. The following spec `MUST`
 clauses are design-only in the reference implementation today:
 
 - `observed_manifest_digest == MD.tool_manifest_digest` (Section 6.3 #6)
@@ -66,7 +70,7 @@ are intentional, not oversights:
   that don't use approvals to carry an `operator_id`.
 - **`probing_rate_limit`** — round-2 audit flagged validate-but-don't-
   enforce theater. The runtime currently has no rate-limiter consuming
-  the value, so requiring it without downstream effect is honesty debt.
+  the value, so requiring it without downstream effect is accuracy debt.
   It returns to the always-required list once a per-mission rate-limiter
   actually consumes it.
 

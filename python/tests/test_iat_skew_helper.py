@@ -184,3 +184,77 @@ class TestAssertIatInWindowNowFn:
         # Edge: if a caller passes now=0 (epoch), iat=0 should be
         # in-window (within the default ±300s future).
         assert_iat_in_window(0, now=0)
+
+
+# ---------------------------------------------------------------------------
+# Integration boundary tests — IAT skew enforced through proxy session start
+# ---------------------------------------------------------------------------
+
+
+def _issue_passport_with_iat(mission, private_key, *, iat):
+    """Issue a passport JWT with a specific iat for skew-boundary testing."""
+    import time as _time
+    import uuid as _uuid
+
+    import jwt as _jwt
+    from vibap.passport import ALGORITHM
+
+    _now = int(_time.time())
+    claims = {
+        "sub": mission.agent_id,
+        "aud": "vibap-proxy",
+        "jti": str(_uuid.uuid4()),
+        "iat": iat,
+        "nbf": _now,
+        "exp": _now + mission.max_duration_s,
+        "iss": "test-issuer",
+        "agent_id": mission.agent_id,
+        "mission": mission.mission,
+        "allowed_tools": mission.allowed_tools,
+        "forbidden_tools": mission.forbidden_tools,
+        "resource_scope": mission.resource_scope,
+        "max_tool_calls": mission.max_tool_calls,
+        "max_duration_s": mission.max_duration_s,
+    }
+    return _jwt.encode(claims, private_key, algorithm=ALGORITHM)
+
+
+class TestIatSkewAtSessionStart:
+    """Verify ±300s future / 30d past IAT skew enforced at session start."""
+
+    def test_future_skewed_passport_rejected(self, proxy, private_key, example_mission):
+        import time as _time
+        future_iat = int(_time.time()) + 301  # 1s past the 300s boundary
+        token = _issue_passport_with_iat(example_mission, private_key, iat=future_iat)
+        with pytest.raises((jwt.InvalidTokenError, PermissionError)):
+            proxy.start_session(token)
+
+    def test_past_skewed_passport_rejected(self, proxy, private_key, example_mission):
+        import time as _time
+        past_iat = int(_time.time()) - (31 * 86400)  # 31 days = 1 day past boundary
+        token = _issue_passport_with_iat(example_mission, private_key, iat=past_iat)
+        with pytest.raises((jwt.InvalidTokenError, PermissionError)):
+            proxy.start_session(token)
+
+    def test_edge_future_iat_accepted(self, proxy, private_key, example_mission):
+        import time as _time
+        edge_iat = int(_time.time()) + 300  # exactly at boundary
+        token = _issue_passport_with_iat(example_mission, private_key, iat=edge_iat)
+        session = proxy.start_session(token)
+        assert session is not None
+
+    def test_edge_past_iat_accepted(self, proxy, private_key, example_mission):
+        import time as _time
+        edge_iat = int(_time.time() - (30 * 86400)) + 2  # 2s buffer for test execution drift
+        token = _issue_passport_with_iat(example_mission, private_key, iat=edge_iat)
+        session = proxy.start_session(token)
+        assert session is not None
+
+    def test_now_iat_accepted(self, proxy, private_key, example_mission):
+        """Sanity: a token issued right now must be accepted."""
+        import time as _time
+        now = int(_time.time())
+        token = _issue_passport_with_iat(example_mission, private_key, iat=now)
+        session = proxy.start_session(token)
+        assert session is not None
+        assert session.passport_claims["iat"] == now

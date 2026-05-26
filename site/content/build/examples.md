@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Mission examples and framework stubs are public, while runnable adapters are still being verified."
+description: "JSON missions, runnable LangChain / LangGraph / AutoGen quickstarts, the Ardur Personal browser extension, desktop-observe, and native-host adapters are all public; OpenAI Agents SDK and Google ADK directories remain deferred adapter specs."
 weight: 42
 maturity: ["public-now", "in-progress"]
 claim_types: ["integration"]
@@ -9,7 +9,11 @@ frameworks: ["framework-live", "framework-agnostic"]
 evidence_levels: ["code-and-doc"]
 ---
 
-Framework example directories are present, but several are explicitly README-only
-stubs until the public adapter path is verified.
+Runnable today: JSON mission examples; LangChain, LangGraph, and AutoGen
+quickstarts; the Ardur Personal browser extension; the desktop-observe
+adapter; the native-messaging host; and the Claude Code plugin pointer.
+
+Deferred adapter specs (README-only, code lift in progress): OpenAI Agents
+SDK and Google ADK.
 
 Primary source: {{< repo-link "examples/README.md" >}}

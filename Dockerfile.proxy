@@ -1,0 +1,20 @@
+FROM python:3.13-slim
+
+LABEL org.opencontainers.image.title="Ardur Governance Proxy"
+LABEL org.opencontainers.image.description="Runtime governance proxy for AI agents"
+LABEL org.opencontainers.image.version="0.1.0"
+
+RUN groupadd -r ardur --gid 65532 && useradd -r -g ardur --uid 65532 ardur
+
+COPY python/ /home/ardur/python/
+WORKDIR /home/ardur/python
+RUN pip install --no-cache-dir . && \
+    mkdir -p /home/ardur/.ardur/tls /home/ardur/.ardur/sessions && \
+    chown -R ardur:ardur /home/ardur
+
+USER ardur
+EXPOSE 8443
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python3 -c "import urllib.request,ssl;c=ssl.create_default_context();c.check_hostname=False;c.verify_mode=ssl.CERT_NONE;urllib.request.urlopen('https://localhost:8443/health',context=c)" || exit 1
+
+ENTRYPOINT ["ardur", "start", "--host", "0.0.0.0", "--port", "8443"]

@@ -4,6 +4,10 @@ Optional backends remain importable only when their runtime dependencies are
 available. NativeBackend is always importable.
 """
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 from vibap.backends.forbid_rules import (
     ForbidRulesBackend,
     register as register_forbid_rules,
@@ -22,6 +26,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated import
     CedarBackend = None  # type: ignore[assignment]
 
     def register_cedar(_missing: ModuleNotFoundError = exc) -> None:
-        raise RuntimeError("cedar backend unavailable: missing optional dependency") from _missing
+        _logger.warning(
+            "Cedar backend unavailable: cedarpy not installed. "
+            "Install with: pip install ardur[cedar] or pip install cedarpy>=4.0"
+        )
+        raise RuntimeError(
+            "cedar backend unavailable: missing optional dependency cedarpy>=4.0. "
+            "Install with: pip install ardur[cedar]"
+        ) from _missing
 else:
     __all__.extend(["CedarBackend", "register_cedar"])

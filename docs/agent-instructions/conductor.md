@@ -31,4 +31,3 @@ Then read:
 - Normal work: PR to `dev`.
 - Release promotion: PR from `dev` to `main` only when explicitly requested and
   verified.
-

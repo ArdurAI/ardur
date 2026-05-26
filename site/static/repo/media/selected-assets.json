@@ -45,22 +45,5 @@
       "lineage_note": "Sanitized public recording using the Ardur capability namespace",
       "path": "media/casts/ARDUR-CAP-014-active-revocation.cast"
     }
-  ],
-  "next_candidates": [
-    {
-      "title": "Claude Code hook walkthrough",
-      "kind": "rendered_video",
-      "status": "coming_soon"
-    },
-    {
-      "title": "OpenAI Agents SDK example",
-      "kind": "rendered_video",
-      "status": "coming_soon"
-    },
-    {
-      "title": "Google ADK example",
-      "kind": "rendered_video",
-      "status": "coming_soon"
-    }
   ]
 }

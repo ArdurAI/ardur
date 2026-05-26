@@ -702,3 +702,209 @@ class TestAATPoPHappyPath:
         )
         assert "aat_cnf" not in material.extra_claims
         assert material.grant_id == grant_id
+
+
+# ---------------------------------------------------------------------------
+# End-to-end integration: AAT + PolicyStore composition
+# ---------------------------------------------------------------------------
+
+
+class TestAATAdapterEndToEnd:
+    """Full AAT flow: mission declaration → AAT grant → session start →
+    policy evaluation → receipt chain verification."""
+
+    def test_full_aat_flow_with_policy_store(
+        self, private_key, public_key, monkeypatch, tmp_path
+    ):
+        """AAT session backed by a PolicyStore with forbid_rules blocking /etc/ paths."""
+        import copy
+        import hashlib
+        import json
+
+        from vibap.aat_adapter import material_from_aat_grant
+        from vibap.mission import MissionCache
+        from vibap.passport import MissionPassport, issue_passport
+        from vibap.policy_store import InMemoryPolicyStore
+        from vibap.proxy import GovernanceProxy
+
+        mission_id = "urn:ardur:mission:aat-e2e-store"
+        md_url = "https://issuer.example/md/aat-e2e.jwt"
+
+        # Build mission declaration
+        mission = MissionPassport(
+            agent_id="aat-e2e-agent",
+            mission="AAT end-to-end with policy store",
+            mission_id=mission_id,
+            allowed_tools=["read_file", "write_file"],
+            forbidden_tools=[],
+            resource_scope=[],
+            max_tool_calls=10,
+            max_duration_s=600,
+            delegation_allowed=True,
+            max_delegation_depth=2,
+        )
+        md_token = issue_passport(
+            mission, private_key, ttl_s=600,
+            extra_claims=v01_required_md_extras(mission_id=mission_id),
+        )
+        md = load_mission_declaration(md_token, public_key)
+        _install_fetch_map(
+            monkeypatch, {md_url: md_token},
+            private_key=private_key, mission_ids=[mission_id],
+        )
+
+        # Build forbid_rules policy and PolicyStore
+        rules = [{"id": "no_system", "forbid_when": {"target_matches": "^/etc/"}}]
+        data_json = json.dumps(rules, sort_keys=True, separators=(",", ":"))
+        sha = hashlib.sha256(data_json.encode("utf-8")).hexdigest()
+        forbid_spec = {
+            "backend": "forbid_rules", "label": "compliance",
+            "policy_sha256": sha, "data_inline": copy.deepcopy(rules),
+        }
+        store = InMemoryPolicyStore()
+        store.put_policies(mission_id=mission_id, policies=[forbid_spec])
+
+        # Create proxy with PolicyStore
+        proxy = GovernanceProxy(
+            log_path=tmp_path / "log.jsonl",
+            state_dir=tmp_path / "state",
+            public_key=public_key,
+            policy_store=store,
+        )
+
+        # Issue AAT
+        aat_jti = str(uuid.uuid4())
+        now = int(time.time())
+        aat_claims = {
+            "iss": "https://tenuo.example/issuer",
+            "sub": "aat-e2e-agent",
+            "iat": now, "exp": now + 300,
+            "jti": aat_jti,
+            "aat_type": "delegation",
+            "del_depth": 0, "del_max_depth": 2,
+            "authorization_details": [{
+                "type": "attenuating_agent_token",
+                "tools": {"read_file": {}, "write_file": {}},
+                "max_tool_calls": 5,
+            }],
+            "mission_ref": {
+                "uri": md_url, "mission_id": mission_id,
+                "mission_digest": md.payload_digest,
+            },
+        }
+        aat_token = jwt.encode(aat_claims, private_key, algorithm=ALGORITHM)
+
+        # Start session — require_pop=False since we're not testing PoP here
+        session = proxy.start_session_from_aat(
+            aat_token, signing_key=private_key, require_pop=False,
+        )
+
+        # Allowed: no forbid_rules match
+        decision, reason = proxy.evaluate_tool_call(
+            session, "read_file", {"path": "/tmp/ok.txt"},
+        )
+        assert decision == Decision.PERMIT, f"Expected PERMIT, got {decision}: {reason}"
+
+        # Denied by forbid_rules: /etc/ path
+        decision, reason = proxy.evaluate_tool_call(
+            session, "read_file", {"path": "/etc/passwd"},
+        )
+        assert decision == Decision.DENY, f"Expected DENY, got {decision}: {reason}"
+        assert "no_system" in reason
+
+        # Verify receipt chain
+        entries = _receipt_entries(proxy.receipts_log_path)
+        assert len(entries) >= 2
+        claims_list = verify_chain(
+            [e["jwt"] for e in entries], proxy.receipt_public_key,
+        )
+        trace_ids = {c["trace_id"] for c in claims_list}
+        assert len(trace_ids) == 1
+
+    def test_aat_session_evaluates_multiple_tools(
+        self, private_key, public_key, monkeypatch, tmp_path
+    ):
+        """AAT session exercises multiple tool evaluations across the full pipeline,
+        including forbidden-tool denial and receipt chain verification."""
+        from vibap.passport import MissionPassport, issue_passport
+        from vibap.proxy import GovernanceProxy
+
+        mission_id = "urn:ardur:mission:aat-multi-tool"
+        md_url = "https://issuer.example/md/aat-multi.jwt"
+
+        mission = MissionPassport(
+            agent_id="aat-multi-agent",
+            mission="multi-tool AAT test",
+            mission_id=mission_id,
+            allowed_tools=["read_file", "write_file", "search_files"],
+            forbidden_tools=[],
+            resource_scope=[],
+            max_tool_calls=20,
+            max_duration_s=600,
+        )
+        md_token = issue_passport(
+            mission, private_key, ttl_s=600,
+            extra_claims=v01_required_md_extras(mission_id=mission_id),
+        )
+        md = load_mission_declaration(md_token, public_key)
+        _install_fetch_map(
+            monkeypatch, {md_url: md_token},
+            private_key=private_key, mission_ids=[mission_id],
+        )
+
+        proxy = GovernanceProxy(
+            log_path=tmp_path / "log.jsonl",
+            state_dir=tmp_path / "state",
+            public_key=public_key,
+        )
+
+        now = int(time.time())
+        aat_token = jwt.encode({
+            "iss": "https://tenuo.example/issuer",
+            "sub": "aat-multi-agent",
+            "iat": now, "exp": now + 300,
+            "jti": str(uuid.uuid4()),
+            "aat_type": "delegation",
+            "del_depth": 0, "del_max_depth": 2,
+            "authorization_details": [{
+                "type": "attenuating_agent_token",
+                "tools": {"read_file": {}, "write_file": {}, "search_files": {}},
+                "max_tool_calls": 10,
+            }],
+            "mission_ref": {
+                "uri": md_url, "mission_id": mission_id,
+                "mission_digest": md.payload_digest,
+            },
+        }, private_key, algorithm=ALGORITHM)
+
+        session = proxy.start_session_from_aat(
+            aat_token, signing_key=private_key, require_pop=False,
+        )
+
+        # All three tools permitted
+        for tool in ["read_file", "write_file", "search_files"]:
+            decision, reason = proxy.evaluate_tool_call(
+                session, tool, {"path": "/workspace/data.csv"},
+            )
+            assert decision == Decision.PERMIT, f"{tool} should be PERMIT: {reason}"
+
+        # Tool not in AAT denied
+        decision, reason = proxy.evaluate_tool_call(
+            session, "delete_file", {"path": "/workspace/data.csv"},
+        )
+        assert decision == Decision.DENY
+
+        # Multiple additional permitted calls — budget is NOT exhausted
+        for i in range(5):
+            decision, _ = proxy.evaluate_tool_call(
+                session, "read_file", {"path": f"/tmp/file{i}.txt"},
+            )
+            assert decision == Decision.PERMIT
+
+        # Receipt chain integrity — each PERMIT + the DENY produce a receipt
+        entries = _receipt_entries(proxy.receipts_log_path)
+        assert len(entries) >= 9
+        claims_list = verify_chain(
+            [e["jwt"] for e in entries], proxy.receipt_public_key,
+        )
+        assert all(c["verdict"] in ("compliant", "violation") for c in claims_list)

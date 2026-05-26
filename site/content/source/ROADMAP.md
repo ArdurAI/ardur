@@ -2,7 +2,7 @@
 title: "Roadmap"
 description: "Already present:"
 source_path: "ROADMAP.md"
-source_sha256: "a5de6d1ec6d920f3d582306f481d77af2c3344c9bdf37495465dab55cb3ff4a5"
+source_sha256: "480b234f0ebf6c1e0b260b6595d4a56c5c9a40eb4faeacd9955c89b0fdcd65a6"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["roadmap"]
@@ -24,39 +24,48 @@ Already present:
 - README and product intent
 - research-informed positioning
 - current status and known gaps
-- selected example recordings
-- `Ardur` as the public-facing product name
-- public v0.1 specs
+- public v0.1 specs (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation)
 - curated Python and Go runtime imports
-- mission examples and framework stubs
+- the Ardur Personal Hub service plus its CLI surface
+- the Claude Code plugin and hook with signed receipts
+- runnable LangChain, LangGraph, and AutoGen quickstart examples
+- the Ardur Personal browser extension, desktop-observe adapter, and native-messaging host
+- dedicated Python and Go CI plus CodeQL, link-check, secret-scan, and Hugo workflows
+- the Hugo public evidence-site source tree under `site/`
+- the journey-log article series (Articles 05 and 06)
+- a public CodeQL dismissal audit trail under `docs/audit/`
+- agent-instruction guides for Conductor, Codex, and Claude
+- technical reference pages for the CLI, Personal Hub HTTP API, and `ARDUR.md`
+- selected archival walkthrough recordings as starter media
+- `Ardur` as the public-facing product name with explicit naming boundaries for `VIBAP`, `MCEP`, and related protocol surfaces (see `docs/protocol-roots.md`)
+- complete Go AAT package — 13 constraint types, issuance, derivation, PoP binding, full §7 chain verification (49 tests)
+- cloud model governance tests proving real-world proxy enforcement with live LLMs
 
 ## Runtime Verification
 
 Next hardening work:
 
-- dedicated Python and Go CI
-- local quickstart that matches exported repo paths exactly
-- public-safe proof and verifier entry points with stable artifact paths
-- explicit naming boundaries for `Ardur`, `VIBAP`, `MCEP`, and related
-  protocol surfaces
+- runnable OpenAI Agents SDK and Google ADK adapter lifts
+- Codex hooks and Claude Desktop MCP packaging
+- public verifier and proof entry points with stable artifact paths so the archival walkthrough casts can be re-recorded against the public runtime
+- conformance test vectors imported under `docs/specs/conformance/` to retire the "private layout" notes in the v0.1 specs
 
 ## Proof Story
 
 Strengthen the public proof story:
 
-- clearer verifier commands
-- public artifact paths
-- broader proof-backed capability coverage
+- re-runnable proof media replacing the archival-only walkthrough casts
+- public artifact paths with stable schemas
+- broader proof-backed capability coverage across Mission Passport issuance, verification, attestation, and revocation
 
 ## Expansion
 
 Expand the repo carefully:
 
-- more framework examples
-- more deployment and operator material
-- tighter packaging and installation paths
-- planned cleanup path for public product namespaces while preserving protocol
-  names where they remain technically accurate
+- more framework examples beyond LangChain / LangGraph / AutoGen
+- more deployment and operator material beyond the current SPIRE design surface
+- a tagged release with a regenerated Homebrew formula carrying Python resource stanzas
+- planned cleanup path for any remaining legacy product naming while preserving protocol names where they remain technically accurate
 
 ## What Will Stay Out
 

@@ -54,10 +54,10 @@ spec:
         - -config
         - /run/spire/config/server.conf
         env:
-        # ardur.demo is a placeholder for a SPIRE bring-up demo. The
-        # canonical Ardur public trust domain is ardur.dev. Override
-        # this on real deployments to match the trust domain you bind
-        # mission credentials to.
+        # ardur.demo is a demo trust domain for SPIRE bring-up. The
+        # canonical Ardur public trust domain is ardur.dev. Override this
+        # on real deployments to match the trust domain you bind mission
+        # credentials to.
         - name: SPIRE_TRUST_DOMAIN
           value: "ardur.demo"
         - name: SPIRE_CLUSTER_NAME

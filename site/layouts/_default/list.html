@@ -11,7 +11,7 @@
     <div class="list-grid">
       {{ range .RegularPagesRecursive.ByTitle }}
         <article class="list-item">
-          <p class="list-kicker">{{ delimit .Params.maturity ", " }}</p>
+          {{ with .Params.maturity }}<p class="list-kicker">{{ delimit . ", " }}</p>{{ end }}
           <h2><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a></h2>
           {{ with .Description }}<p>{{ . }}</p>{{ else }}<p>{{ .Summary }}</p>{{ end }}
         </article>

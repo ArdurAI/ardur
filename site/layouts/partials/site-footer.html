@@ -1,13 +1,14 @@
 <footer class="site-footer">
   {{ $sourceRef := .Site.Params.sourceRef | default "dev" }}
-  <div>
-    <strong>Ardur evidence site</strong>
-    <p>Generated from repo-backed metadata and public-source links. The root repo remains the source of truth.</p>
+  <div class="footer-statement">
+    <strong>Ardur</strong>
+    <p>Runtime governance and verifier-backed evidence for AI agents. Generated from source-backed docs; the repo remains the source of truth.</p>
+    <p class="footer-ref">Source reference: {{ $sourceRef }}</p>
   </div>
   <div class="footer-links">
+    {{ range .Site.Menus.footer }}
+      <a href="{{ .URL | absURL }}">{{ .Name }}</a>
+    {{ end }}
     <a href="{{ .Site.Params.repoURL }}">GitHub</a>
-    <a href="{{ "source/status/" | absURL }}">Status</a>
-    <a href="{{ "source/docs/known-limitations/" | absURL }}">Known limitations</a>
-    <a href="{{ "source/" | absURL }}">Documentation</a>
   </div>
 </footer>

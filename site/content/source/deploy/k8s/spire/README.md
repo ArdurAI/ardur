@@ -2,7 +2,7 @@
 title: "Kubernetes SPIRE deployment design"
 description: "This directory replaces the Compose-era SPIRE topology with a Kubernetes design"
 source_path: "deploy/k8s/spire/README.md"
-source_sha256: "2403ad5fc336671375b5ebfcd9b35de3419b0bae7565d6b2e9e4c0c72bf5208e"
+source_sha256: "20d47a00d0c5b5a2e8da3e6c20af195ca31dc4ad551b7f6fd7f1b8c04a0d3406"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["deployment"]
@@ -158,10 +158,9 @@ If the deployment needs to be backed out:
 1. Keep the PostgreSQL snapshot and the PVCs until you decide whether you are
    rolling forward again or discarding the trust domain state permanently.
 
-## Operational TODOs before a real cluster rollout
+## Operational work before a real cluster rollout
 
-- Replace the placeholder `ardur.demo` trust domain and `ardur-demo`
-  cluster name.
+- Replace the demo `ardur.demo` trust domain and `ardur-demo` cluster name.
 - Back the upstream CA Secret with your real PKI rotation process.
 - Add PodDisruptionBudgets, NetworkPolicies, and secret delivery automation.
 - Decide whether controller-managed `ClusterSPIFFEID` reconciliation or

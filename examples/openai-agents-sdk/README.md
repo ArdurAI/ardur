@@ -1,6 +1,8 @@
 # OpenAI Agents SDK + Ardur quickstart
 
-Placeholder. The adapter code lives in the private research repo and is being imported with the public-name cleanup applied; this directory describes what lands when that import finishes.
+Deferred adapter spec. This directory is not a runnable example in the current
+release candidate; it records the dependency footprint and expected shape for
+the future OpenAI Agents SDK adapter.
 
 ## What this example will demonstrate
 
@@ -30,7 +32,7 @@ openai-agents-sdk/
 ├── run.sh                 # one-line runner
 ├── src/
 │   ├── agent.py           # Agent + Runner setup
-│   └── tools.py           # tool stubs (read, write, summarize)
+│   └── tools.py           # governed demo tools (read, write, summarize)
 ├── mission.json           # the Mission Declaration the agent runs under
 └── expected-receipt.json  # what a clean run produces, for diff-testing
 ```

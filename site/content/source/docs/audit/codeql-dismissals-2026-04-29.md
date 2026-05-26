@@ -2,7 +2,7 @@
 title: "CodeQL Alert Dismissals — 2026-04-29"
 description: "The 11-round audit cycle (S2) terminated cleanly on 2026-04-29 with"
 source_path: "docs/audit/codeql-dismissals-2026-04-29.md"
-source_sha256: "a6dd3fa01407b8da39a606dbd6b336feb34a057b2f2f23228dad456958187d9e"
+source_sha256: "a22d509669ed49772fb3cf95d041bf062c3e572ecaa825ce2b0c9afff9d88016"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["audit"]
@@ -23,7 +23,7 @@ This page is generated from the public repository source file. Edit the source f
 > code lift, and Article 06).
 >
 > GitHub stores the same content under
-> `gh api repos/gnanirahulnutakki/ardur/code-scanning/alerts/<n>`, but
+> `gh api repos/ArdurAI/ardur/code-scanning/alerts/<n>`, but
 > that surface is gated behind authenticated access to the repo's
 > security tab. This file mirrors the record into the public tree so
 > any reader (including someone reviewing the repo without GitHub
@@ -263,7 +263,7 @@ The dismissals above are visible via:
 
 ```bash
 # Each alert (replace <N> with 1, 2, 3, 4, 5, 13, 14, or 15):
-gh api repos/gnanirahulnutakki/ardur/code-scanning/alerts/<N> \
+gh api repos/ArdurAI/ardur/code-scanning/alerts/<N> \
   --jq '{state, dismissed_reason, dismissed_comment, dismissed_by, dismissed_at}'
 ```
 

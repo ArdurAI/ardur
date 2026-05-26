@@ -25,11 +25,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	vibapv1alpha1 "github.com/gnanirahulnutakki/ardur/go/pkg/api/v1alpha1"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/credential"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/issuer"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/transparency"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/trust"
+	vibapv1alpha1 "github.com/ArdurAI/ardur/go/pkg/api/v1alpha1"
+	"github.com/ArdurAI/ardur/go/pkg/credential"
+	"github.com/ArdurAI/ardur/go/pkg/issuer"
+	"github.com/ArdurAI/ardur/go/pkg/transparency"
+	"github.com/ArdurAI/ardur/go/pkg/trust"
 )
 
 const (

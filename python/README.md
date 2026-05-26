@@ -15,14 +15,43 @@ pip install -e .
 ardur issue \
   --agent-id alice \
   --mission "summarize sales from sales/q1.csv into reports/" \
-  --allowed-tools read_file,write_report \
-  --resource-scope 'sales/*,reports/*'
+  --allowed-tools read_file write_report \
+  --resource-scope 'sales/*' 'reports/*'
 
-# Verify a passport
-ardur verify <token-from-issue-output>
+# Verify a passport (the issue command prints a JSON object containing "token")
+ardur verify --token <token-from-issue-output>
 ```
 
 That walks through key generation, mission compilation, ES256-signed passport issuance, and verification — all local, no LLM calls.
+
+## Ardur Personal Hub
+
+The regular-user path uses the same package dependencies and CLI:
+
+```bash
+pip install -e .
+ardur profile init --template read-only --path ARDUR.md
+ardur protect claude-code --profile ARDUR.md
+ardur doctor-claude-code
+```
+
+The Hub is available when you want browser/desktop evidence and local receipt
+exports:
+
+```bash
+ardur setup
+ardur hub
+ardur status
+```
+
+Browser, desktop, and CLI adapters send observations to the Hub. The Hub uses
+the existing `GovernanceProxy` and Execution Receipt path, so adapters do not
+create their own policy authority.
+
+`ardur run -- <command>` remains available for simple non-interactive commands,
+but Claude Code is the first-class RC path. Interactive Codex and Claude
+Desktop packaging are intentionally not presented as complete in this release
+candidate.
 
 A heads-up on the CLI name: `ardur` is the canonical entrypoint going forward. `ardur-proxy` still works as a deprecated alias so existing scripts don't break, but new code should use `ardur`.
 
@@ -31,15 +60,18 @@ A heads-up on the CLI name: `ardur` is the canonical entrypoint going forward. `
 ```
 python/
 ├── vibap/                  # Core runtime package
-│   ├── attestation.py      # Per-session attestation issuance + verify
-│   ├── backends/           # Policy-engine adapters (Cedar, native, forbid-rules)
-│   ├── biscuit_passport.py # Biscuit AAT/DG implementation
-│   ├── cli.py              # ardur CLI entrypoint
-│   ├── mission.py          # Mission Declaration parsing + cache
-│   ├── passport.py         # Passport issuance + verify
-│   ├── policy_backend.py   # PolicyBackend protocol
-│   ├── proxy.py            # Governance proxy + session lifecycle
-│   ├── receipt.py          # Execution Receipt issuance + verify
+│   ├── attestation.py           # Per-session attestation issuance + verify
+│   ├── backends/                # Policy-engine adapters (Cedar, native, forbid-rules)
+│   ├── biscuit_passport.py      # Biscuit AAT/DG implementation
+│   ├── claude_code_hook.py      # Claude Code PreToolUse/PostToolUse adapter
+│   ├── claude_code_telemetry.py # Claude Code tool → declared-telemetry mapper
+│   ├── cli.py                   # ardur CLI entrypoint
+│   ├── mission.py               # Mission Declaration parsing + cache
+│   ├── passport.py              # Passport issuance + verify
+│   ├── personal_hub.py          # Local Ardur Personal Hub service + adapter API
+│   ├── policy_backend.py        # PolicyBackend protocol
+│   ├── proxy.py                 # Governance proxy + session lifecycle
+│   ├── receipt.py               # Execution Receipt issuance + verify
 │   └── ...
 └── tests/                  # Curated test set (~23 files)
 ```
@@ -54,13 +86,13 @@ Full reasoning is in [`docs/specs/README.md`](../docs/specs/README.md) under "Pr
 
 ## What's not here yet
 
-A few things are honest gaps right now rather than oversights:
+A few things are documented gaps right now rather than oversights:
 
-- **Live LLM tests** — the semantic-judge and behavioral-fingerprint test lanes need real API keys, so the default test run uses stubbed LLMs. To opt in, set `ARDUR_SEMANTIC_JUDGE=anthropic` and `ANTHROPIC_API_KEY`.
+- **Live LLM tests** — the semantic-judge and behavioral-fingerprint test lanes need real API keys, so the default test run uses local test doubles. To opt in, set `ARDUR_SEMANTIC_JUDGE=anthropic` and `ANTHROPIC_API_KEY`.
 - **Corpus-heavy benchmark tests** — AgentDojo, InjectAgent, R-Judge, STAC, and the telemetry-ablation harness stay in the private research tree. The cleaner subset that backs the public claims is what's curated here.
 - **Docker images** (`rahulnutakki/ardur-demo:lang`, `:autogen`) and re-recorded asciinema casts — these need a maintainer with Docker Hub credentials and an `asciinema record` session, neither of which an automated process can do.
 
-One more honest caveat: the package imports cleanly and the AST parses, but I haven't run the full pytest suite end-to-end since the rename landed. If something import-time looks off, that's the most likely culprit — file an issue.
+One more caveat: the package imports cleanly and the AST parses. If something import-time looks off, file an issue.
 
 ## License
 

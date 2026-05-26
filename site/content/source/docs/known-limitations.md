@@ -1,8 +1,8 @@
 ---
 title: "Known Limitations"
-description: "This page distinguishes honest product boundaries from implementation bugs."
+description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "fb3ab312025577f7e24617c41a153db1752d6609c38ac9ba4cf2f2d6aa4bb827"
+source_sha256: "79e3448b40acd2272398faca7e2bb0c7b8281ec7d413b5ec08fb6f5e9c6eadb0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -17,7 +17,7 @@ evidence_levels: ["limitation-backed"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-This page distinguishes honest product boundaries from implementation bugs.
+This page distinguishes documented product boundaries from implementation bugs.
 
 ## Research and foundation surfaces not yet broad runtime claims
 
@@ -38,7 +38,9 @@ This page distinguishes honest product boundaries from implementation bugs.
 ## Evidence limits
 
 If a delegated tool or gateway can hide all relevant side effects and emits no
-evidence, Ardur must classify the result as `unknown` rather than safe.
+evidence, Ardur must classify the result as `insufficient_evidence` (resulting
+in an `unknown` verdict at the session/verifier level) rather than safe. See
+[`coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the receipt-level evidence taxonomy.
 
 ## Product limits
 
@@ -54,7 +56,9 @@ Those controls still matter around Ardur.
 
 The reference Python proxy in `python/vibap/` implements the
 **Delegation-Core** profile of `verifier-contract-v0.1`, not the
-**MIC-State** or **MIC-Evidence** profiles. The following spec `MUST`
+**MIC-State** or **MIC-Evidence** profiles. When closing these gaps,
+update both this document and [`security-model.md`](/__ardur_internal__/source/docs/security-model/)
+in the same PR to prevent drift. The following spec `MUST`
 clauses are design-only in the reference implementation today:
 
 - `observed_manifest_digest == MD.tool_manifest_digest` (Section 6.3 #6)
@@ -83,7 +87,7 @@ are intentional, not oversights:
   that don't use approvals to carry an `operator_id`.
 - **`probing_rate_limit`** — round-2 audit flagged validate-but-don't-
   enforce theater. The runtime currently has no rate-limiter consuming
-  the value, so requiring it without downstream effect is honesty debt.
+  the value, so requiring it without downstream effect is accuracy debt.
   It returns to the always-required list once a per-mission rate-limiter
   actually consumes it.
 

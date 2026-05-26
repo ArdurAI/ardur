@@ -103,4 +103,4 @@ production-ready" future effort. That lane would:
    documenting chart design decisions — ADR-016 is already taken
    (delegation lineage hash index)
 5. Publish to a Helm repo (possibly GitHub Pages under
-   `https://gnanirahulnutakki.github.io/ardur-charts/`)
+   `https://ArdurAI.github.io/ardur-charts/`)

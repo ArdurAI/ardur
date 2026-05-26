@@ -1,0 +1,125 @@
+# Ardur — local development stack with SPIRE, TLS, and full governance.
+# Start:  docker compose up --build
+# Stop:   docker compose down -v
+
+services:
+  # ── SPIRE (SPIFFE workload identity) ──────────────────────────────────────
+
+  spire-server:
+    image: ghcr.io/spiffe/spire-server:1.14.4
+    command:
+      - -config
+      - /run/spire/config/server.conf
+    volumes:
+      - spire-server-data:/run/spire/data
+      - spire-shared:/tmp/spire-shared
+      - ./deploy/local/spire/server.conf:/run/spire/config/server.conf:ro
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck", "-serverAddr", "localhost:8081"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  spire-init:
+    image: ghcr.io/spiffe/spire-server:1.14.4
+    entrypoint: ["/bin/bash", "/tmp/setup.sh"]
+    volumes:
+      - spire-shared:/tmp/spire-shared
+      - ./deploy/local/spire/setup.sh:/tmp/setup.sh:ro
+    depends_on:
+      spire-server:
+        condition: service_healthy
+
+  spire-agent:
+    image: ghcr.io/spiffe/spire-agent:1.14.4
+    command:
+      - -config
+      - /run/spire/config/agent.conf
+      - -joinToken
+      - /tmp/spire-shared/join_token
+    volumes:
+      - spire-agent-data:/run/spire/data
+      - spire-shared:/tmp/spire-shared
+      - ./deploy/local/spire/agent.conf:/run/spire/config/agent.conf:ro
+    depends_on:
+      spire-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-agent", "healthcheck", "-socketPath", "/run/spire/sockets/agent.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── Ardur services ────────────────────────────────────────────────────────
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    ports:
+      - "8443:8443"
+    environment:
+      - ARDUR_NO_TLS=${ARDUR_NO_TLS:-}
+      - ARDUR_API_TOKEN=${ARDUR_API_TOKEN:-}
+      - ARDUR_RATE_LIMIT_RPS=${ARDUR_RATE_LIMIT_RPS:-100}
+      - ARDUR_RATE_LIMIT_BURST=${ARDUR_RATE_LIMIT_BURST:-200}
+      - SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/sockets/agent.sock
+    volumes:
+      - ardur-data:/home/ardur/.ardur
+      - spire-shared:/run/spire/sockets:ro
+    depends_on:
+      spire-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,ssl;c=ssl.create_default_context();c.check_hostname=False;c.verify_mode=ssl.CERT_NONE;urllib.request.urlopen('https://localhost:8443/health',context=c)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.hub
+    ports:
+      - "8765:8765"
+    environment:
+      - ARDUR_NO_TLS=${ARDUR_NO_TLS:-}
+      - ARDUR_RATE_LIMIT_RPS=${ARDUR_RATE_LIMIT_RPS:-100}
+      - ARDUR_RATE_LIMIT_BURST=${ARDUR_RATE_LIMIT_BURST:-200}
+      - ARDUR_PERSONAL_HUB_URL=${ARDUR_PERSONAL_HUB_URL:-https://proxy:8443}
+      - SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/sockets/agent.sock
+    volumes:
+      - ardur-data:/home/ardur/.ardur
+      - spire-shared:/run/spire/sockets:ro
+    depends_on:
+      proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,ssl;c=ssl.create_default_context();c.check_hostname=False;c.verify_mode=ssl.CERT_NONE;urllib.request.urlopen('https://localhost:8765/health',context=c)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  spire-server-data:
+  spire-agent-data:
+  spire-shared:
+  ardur-data:

@@ -1,0 +1,121 @@
+# Claude Code MVP Quickstart
+
+This is the shortest product-facing path through Ardur today from a source
+checkout. It is meant for the current pre-release `dev` branch and source
+installs; it is not a tagged package-manager release path yet.
+
+Use it in two modes:
+
+- **No-key confidence check:** no Anthropic/OpenAI token required. It verifies
+  source/local-wheel install, `ARDUR.md` profile creation, `ardur protect
+  claude-code`, `ardur doctor-claude-code`, a simulated Claude Code hook allow
+  and deny path, and `ardur claude-code-report` chain verification.
+- **Live Claude Code demo:** requires the local `claude` binary to already be
+  installed and authenticated. Ardur does not perform login, account changes, or
+  provider setup.
+
+## Claim boundary
+
+| Works now | Not claimed | Coming soon |
+|---|---|---|
+| Source checkout install with Python dependencies. | PyPI/Homebrew/OCI release readiness. | Tagged package-manager release after packaging gates. |
+| `ARDUR.md` profile -> Mission Passport -> Claude Code plugin setup. | Visibility into provider-hidden reasoning or server-side tool calls. | More host adapters and proof viewers. |
+| Signed Claude Code tool-call receipts with allow/deny/unknown reporting. | Capture of subprocess, kernel, or network side effects below the tool boundary. | Filesystem snapshot and Linux eBPF capture phases. |
+| Fresh-user/no-key harness for repeatable local evidence. | Universal support for Codex, Gemini, Kimi, or future CLIs. | Tool-agnostic CLI/kernel capture work. |
+
+## 1. Install from source
+
+From a fresh checkout of this branch:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e python/
+ardur --help
+```
+
+Keep the virtualenv active for the rest of the walkthrough so Claude Code hooks
+can find the same installed `ardur` package.
+
+## 2. Run the no-key evidence harness
+
+This does not call a live LLM provider. It uses temporary HOME, project, Ardur
+home, and evidence directories, then writes a redacted shareable bundle.
+
+```bash
+python3 scripts/run-rwt-phase1-fresh-user.py \
+  --expected-origin-dev "$(git rev-parse --short=12 origin/dev)" \
+  --output-dir /tmp/ardur-rwt-phase1
+
+python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
+```
+
+Expected result for a clean source checkout:
+
+- bundle `status` is `PASS`
+- `RWT-1` is `PASS` for install/profile/protect/doctor
+- `RWT-2` is `PASS` for actual hook CLI fixture allow/deny receipts
+- `RWT-3` is `SKIP_GATED` or `SKIP_UNSUPPORTED` in no-key/autonomous mode;
+  it can be `BLOCKED` when local Claude preflight fails. A skip is the explicit
+  no-key result, not a live-Claude pass or a hidden failure
+- `secret_scan_hits` is `0`
+- `raw_secret_values_copied` is `false`
+
+For field-by-field interpretation, including which public claims a no-key
+bundle can support, read
+[`docs/guides/read-phase1-evidence-bundle.md`](read-phase1-evidence-bundle.md).
+For a compact reviewer/demo handoff after the run, use
+[`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md).
+
+## 3. Run a live Claude Code session
+
+Only run this if `claude` is already installed and logged in. The demo creates a
+temporary project and a local `.vibap` home under that project.
+
+```bash
+ARDUR_REPO="$(pwd)"
+DEMO_PROJECT="$(mktemp -d "${TMPDIR:-/tmp}/ardur-claude-demo.XXXXXX")"
+cd "$DEMO_PROJECT"
+
+printf 'alpha\nbeta\ngamma\n' > notes.txt
+export VIBAP_HOME="$DEMO_PROJECT/.vibap"
+
+ardur profile init --template read-only --path ARDUR.md
+ardur protect claude-code \
+  --profile ARDUR.md \
+  --home "$VIBAP_HOME" \
+  --plugin-dir "$ARDUR_REPO/plugins/claude-code"
+ardur doctor-claude-code \
+  --home "$VIBAP_HOME" \
+  --plugin-dir "$ARDUR_REPO/plugins/claude-code"
+
+VIBAP_HOME="$VIBAP_HOME" claude \
+  --plugin-dir "$ARDUR_REPO/plugins/claude-code" \
+  -p "Use Read to summarize notes.txt. Do not edit files or run shell commands."
+
+ardur claude-code-report --home "$VIBAP_HOME"
+```
+
+The report should find the receipt chain under
+`$VIBAP_HOME/claude-code-hook/<trace_id>/receipts.jsonl`, verify signatures and
+chain links, and summarize compliant, violation, and unknown outcomes. If the
+model attempts `Bash`, `Edit`, or `Write`, the read-only profile should return a
+Claude Code deny decision and still preserve the signed violation receipt.
+
+## 4. Read the result correctly
+
+Ardur evidence is strongest at the local tool boundary. Treat the report as a
+verified statement about what Claude Code exposed to local hooks and what Ardur
+allowed, denied, or could not see. Do not use it to claim provider-internal
+reasoning visibility, complete shell side-effect capture, production eBPF
+coverage, or package-manager release readiness.
+
+Related references:
+
+- [`plugins/claude-code/README.md`](../../plugins/claude-code/README.md)
+- [`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md)
+- [`docs/guides/read-phase1-evidence-bundle.md`](read-phase1-evidence-bundle.md)
+- [`docs/reference/cli.md`](../reference/cli.md)
+- [`docs/reference/ardur-md-profile.md`](../reference/ardur-md-profile.md)
+- [`docs/coverage-map.md`](../coverage-map.md)

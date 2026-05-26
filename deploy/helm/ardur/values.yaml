@@ -13,7 +13,7 @@ global:
   # deployments (see the Go-side canonical: `ardur.dev`).
   trustDomain: "ardur.example.com"
   # Image registry + pull policy
-  registry: "ghcr.io/gnanirahulnutakki"
+  registry: "ghcr.io/ArdurAI"
   imagePullPolicy: "IfNotPresent"
 
 # -----------------------------------------------------------------

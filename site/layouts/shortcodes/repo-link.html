@@ -1,16 +1,5 @@
 {{ $path := .Get 0 }}
 {{ $label := .Get 1 | default $path }}
 {{ if not $path }}{{ errorf "repo-link shortcode requires a repo path" }}{{ end }}
-{{ $sourceRef := .Site.Params.sourceRef | default "dev" }}
-{{ $lowerPath := lower $path }}
-{{ $href := printf "%s/blob/%s/%s" .Site.Params.repoURL $sourceRef $path }}
-{{ if strings.HasSuffix $lowerPath ".md" }}
-  {{ $route := replaceRE "(^|/)\\." "$1" (strings.TrimSuffix ".md" $lowerPath) }}
-  {{ $href = printf "source/%s/" $route | absURL }}
-{{ else if strings.HasSuffix $lowerPath "/" }}
-  {{ $route := replaceRE "(^|/)\\." "$1" $lowerPath }}
-  {{ $href = printf "source/%s" $route | absURL }}
-{{ else if or (strings.HasSuffix $lowerPath ".json") (strings.HasSuffix $lowerPath ".yaml") (strings.HasSuffix $lowerPath ".yml") (strings.HasSuffix $lowerPath ".cast") }}
-  {{ $href = printf "repo/%s" $path | absURL }}
-{{ end }}
+{{ $href := partial "source-href.html" (dict "site" .Site "path" $path) }}
 <a class="repo-link" href="{{ $href }}">{{ $label }}</a>

@@ -1,9 +1,8 @@
 {{ $claim := .claim }}
 {{ $site := .site }}
-{{ $sourceRef := $site.Params.sourceRef | default "dev" }}
 <article class="claim-card">
   <div class="claim-card-top">
-    <span class="status-token">{{ $claim.maturity }}</span>
+    <span class="status-token status-{{ $claim.maturity }}">{{ $claim.maturity }}</span>
     <span class="status-token evidence">{{ $claim.evidence_level }}</span>
   </div>
   <h2>{{ $claim.title }}</h2>
@@ -21,14 +20,7 @@
   <div class="source-list">
     {{ range first 3 $claim.source_paths }}
       {{ $path := . }}
-      {{ $lowerPath := lower $path }}
-      {{ $href := printf "%s/blob/%s/%s" $site.Params.repoURL $sourceRef $path }}
-      {{ if strings.HasSuffix $lowerPath ".md" }}
-        {{ $route := replaceRE "(^|/)\\." "$1" (strings.TrimSuffix ".md" $lowerPath) }}
-        {{ $href = printf "source/%s/" $route | absURL }}
-      {{ else if or (strings.HasSuffix $lowerPath ".json") (strings.HasSuffix $lowerPath ".yaml") (strings.HasSuffix $lowerPath ".yml") (strings.HasSuffix $lowerPath ".cast") }}
-        {{ $href = printf "repo/%s" $path | absURL }}
-      {{ end }}
+      {{ $href := partial "source-href.html" (dict "site" $site "path" $path) }}
       <a href="{{ $href }}">{{ $path }}</a>
     {{ end }}
   </div>

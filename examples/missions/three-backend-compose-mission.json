@@ -1,6 +1,6 @@
 {
   "_comment": "A committed demo mission that attaches Cedar + forbid-rules alongside native checks. Exercises the full three-backend composition path end-to-end — what the paper's 'composed under a verified rule' claim actually runs on. See docs/plans/ardur-correctness-test-plan-2026-04-17.md A3.",
-  "_note_integrity": "Cedar uses policy_inline (Cedar DSL source); forbid-rules uses data_inline (a list of rule dicts). Both require policy_sha256 = SHA-256 of that field's canonical content. The demo script (demos/three-backend-compose-demo.py) computes both at runtime, so the placeholders in this file are fine for documentation but must be overwritten before the mission is handed to the proxy.",
+  "_note_integrity": "Cedar uses policy_inline (Cedar DSL source); forbid-rules uses data_inline (a list of rule dicts). Both require policy_sha256 = SHA-256 of that field's canonical content. The demo script (demos/three-backend-compose-demo.py) computes both at runtime, so the committed sentinel values are documentation-only and must be overwritten before the mission is handed to the proxy.",
   "agent_id": "sales-analyst-compose-demo",
   "mission": "Analyze Q1 sales; no PII; compliance-screened outbound.",
   "allowed_tools": ["read_file", "write_file", "send_email"],

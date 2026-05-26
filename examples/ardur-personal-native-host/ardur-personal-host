@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+exec python3 -m vibap.cli personal-native-host "$@"

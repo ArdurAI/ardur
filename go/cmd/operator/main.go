@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	vibapv1alpha1 "github.com/gnanirahulnutakki/ardur/go/pkg/api/v1alpha1"
+	vibapv1alpha1 "github.com/ArdurAI/ardur/go/pkg/api/v1alpha1"
 )
 
 var scheme = runtime.NewScheme()

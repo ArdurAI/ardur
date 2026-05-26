@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ardur Personal</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <h1>Ardur Personal</h1>
+      <span id="mode">Hub</span>
+    </header>
+
+    <main>
+      <section class="origin">
+        <div>
+          <p class="label">Current Site</p>
+          <p id="origin">-</p>
+        </div>
+        <button id="toggle-origin" type="button">Enable</button>
+      </section>
+
+      <section class="hub">
+        <div>
+          <p class="label">Local Hub</p>
+          <p id="hub-state">Checking</p>
+        </div>
+        <button id="hub" type="button">Status</button>
+      </section>
+
+      <section class="hub-token">
+        <label for="hub-token">
+          <span class="label">Hub Token</span>
+          <input id="hub-token" type="password" placeholder="Paste token from ardur setup">
+        </label>
+        <button id="save-hub-token" type="button">Save</button>
+      </section>
+
+      <section class="consent">
+        <label>
+          <input id="capture-snapshots" type="checkbox">
+          Capture visible text
+        </label>
+        <span id="capture-mode">Digest only</span>
+      </section>
+
+      <section class="toolbar">
+        <button id="collect" type="button">Observe</button>
+        <button id="export" type="button">Export</button>
+        <button id="dashboard" type="button">Dashboard</button>
+      </section>
+
+      <section class="review">
+        <div class="section-title">
+          <h2>Session Review</h2>
+          <span id="review-provider">-</span>
+        </div>
+        <p id="review-summary">No review yet.</p>
+        <div id="review-labels" class="labels"></div>
+        <ol id="actions"></ol>
+      </section>
+
+      <section>
+        <div class="section-title">
+          <h2>Receipts</h2>
+          <span id="count">0</span>
+        </div>
+        <ol id="timeline"></ol>
+      </section>
+
+      <p id="status" role="status"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

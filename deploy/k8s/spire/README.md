@@ -141,10 +141,9 @@ If the deployment needs to be backed out:
 1. Keep the PostgreSQL snapshot and the PVCs until you decide whether you are
    rolling forward again or discarding the trust domain state permanently.
 
-## Operational TODOs before a real cluster rollout
+## Operational work before a real cluster rollout
 
-- Replace the placeholder `ardur.demo` trust domain and `ardur-demo`
-  cluster name.
+- Replace the demo `ardur.demo` trust domain and `ardur-demo` cluster name.
 - Back the upstream CA Secret with your real PKI rotation process.
 - Add PodDisruptionBudgets, NetworkPolicies, and secret delivery automation.
 - Decide whether controller-managed `ClusterSPIFFEID` reconciliation or

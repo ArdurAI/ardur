@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Ardur PostToolUse hook - delegates to the Python adapter.
+set -eu
+
+hook_home="${VIBAP_HOME:-}"
+if [ -z "$hook_home" ]; then
+  if [ -d "$PWD/.vibap" ]; then
+    hook_home="$PWD/.vibap"
+  else
+    hook_home="$HOME/.vibap"
+  fi
+fi
+
+hook_python_file="$hook_home/claude-code-hook-python"
+if [ -n "${ARDUR_HOOK_PYTHON:-}" ]; then
+  exec "$ARDUR_HOOK_PYTHON" -m vibap.claude_code_hook post "$@"
+fi
+if [ -r "$hook_python_file" ]; then
+  hook_python="$(sed -n '1p' "$hook_python_file")"
+  if [ -n "$hook_python" ] && [ -x "$hook_python" ]; then
+    exec "$hook_python" -m vibap.claude_code_hook post "$@"
+  fi
+fi
+if command -v ardur >/dev/null 2>&1; then
+  exec ardur claude-code-hook post "$@"
+fi
+exec python3 -m vibap.claude_code_hook post "$@"

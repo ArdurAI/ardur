@@ -1,14 +1,16 @@
-# Ardur — Go Reference Implementation
+# Ardur — Go Runtime
 
-This is the Go side of Ardur: the runtime, the governance engine, and the Kubernetes operator. It mirrors the behaviour of the Python reference at the protocol layer, but the design intent is different — Go is where we want the work to land when throughput matters, where the governor sits inline as a sidecar or proxy, and where a controller has to reconcile CRs without burning a Python interpreter per pod.
+Go handles the parts of Ardur where Python falls short: Linux eBPF kernel
+capture, Kubernetes control-plane components (operator, admission webhook),
+and the AAT (Attenuating Authorization Token) credential-attenuation engine.
+The governance proxy, CLI, and Personal Hub live in the Python tree
+(`python/vibap/`), which is the primary runtime.
 
 ## Module
 
 ```
-module github.com/gnanirahulnutakki/ardur/go
+module github.com/ArdurAI/ardur/go
 ```
-
-The Go version is pinned in `go.mod`. You'll see `vibap.` everywhere in the source tree — that's the original protocol research name (VIBAP = Verifiable Identity-Bound Agent Passport) and it stays as the package prefix because it *is* the protocol's name. The user-facing project is **Ardur**; the CLI and operator binaries currently still print `vibap` in their identity strings (a follow-up commit will swap those to `ardur` once the CLI surface stabilises).
 
 ## Build
 
@@ -23,50 +25,87 @@ go test -race ./...
 
 | Path | What lives here |
 |---|---|
-| `pkg/aat` | **Skeleton only** — AAT chain verification is a fail-closed stub today. Returns `VerdictDeny` on every call. Real `AAT §7` enforcement is tracked at `docs/session-2026-04-14/06-briefs-issued/B5-go-aat-skeleton.md`. Do NOT use this package as a verifier in any deployment. |
+| `pkg/aat` | AAT credential-attenuation engine — constraint checks, subsumption, JWT issuance/derivation, PoP binding, and full chain verification per AAT §3-7 |
 | `pkg/api/v1alpha1` | CRD types for the Kubernetes operator (`AgentPassport`, etc.) |
-| `pkg/credential` | Mission credential issuance + verification |
-| `pkg/governance` | Core governance engine (verifier, composition) |
+| `pkg/credential` | Mission credential issuance + verification (SD-JWT-VC types for the K8s operator) |
 | `pkg/issuer` | Mission Declaration issuer + signing-key management |
-| `pkg/policy` | Policy evaluation surface (Cedar bridge, native checks) |
+| `pkg/kernelcapture` | Linux eBPF process-exec capture harness (cilium/ebpf) |
+| `pkg/policy` | Policy evaluation surface (Cedar bridge) |
 | `pkg/profiling` | Performance profiling helpers |
-| `pkg/provenance` | Tool-response provenance + receipt-chain verification |
+| `pkg/provenance` | Tool-response provenance + Sigstore verification |
 | `pkg/spiffe` | SPIFFE/SPIRE identity binding |
-| `pkg/transparency` | Transparency-log integration (sigstore Rekor) |
-| `pkg/trust` | Trust-bundle management |
-| `cmd/authority` | The credential-issuing authority service |
-| `cmd/governor` | The governance proxy server |
-| `cmd/cli` | Command-line tool (issue, verify, demo) |
+| `pkg/transparency` | Transparency-log integration (Rekor) |
+| `pkg/trust` | Trust-bundle management and scoring |
 | `cmd/operator` | Kubernetes operator (reconciles `AgentPassport` CRs) |
-| `cmd/benchmark*` | Benchmark harnesses (private fixtures stay in the internal research tree) |
-| `cmd/specvalidate` | Mission-declaration schema validator |
 | `cmd/webhook` | Admission webhook for K8s |
-| `spec/mission-governance/v0alpha1` | JSON schemas (declaration, decision, event, finding, session) |
+| `benchmark/` | Benchmark scenario types + live evaluation harness |
 
-A note on why there are so many `cmd/` entries: they're genuinely separate binaries with different deploy shapes. `authority` is a long-lived service that issues credentials. `governor` is the inline policy decision point and runs as close to the agent as you can get it. `operator` and `webhook` are Kubernetes control-plane components — the operator owns reconciliation, the webhook owns admission — and keeping them as separate `main` packages lets each one ship with only the imports it actually needs. `cli` is the human-facing tool. Splitting them this way keeps each binary's dependency graph honest and makes vulnerability triage tractable.
+## AAT Package
 
-## What's *not* in this tree
+The `pkg/aat` package implements the full Attenuating Authorization Token
+specification:
 
-- **Vendor-specific telemetry connectors.** The `cmd/edr_*` binaries and the `edr-connector` Go module stay private. They wrap third-party endpoint-detection vendor APIs under license terms that haven't been cleared for public release, so they're not something we can drop into an MIT repo.
-- **Live benchmark fixtures.** The heavy corpora — AgentDojo, InjecAgent, R-Judge, STAC — remain in the internal research tree. They're large, redistribution terms vary, and they don't belong here. A reproducible smoke-benchmark harness will land later in a separate commit.
+- **Constraint engine** — 13 constraint types (Exact, Pattern, Range, OneOf,
+  NotOneOf, Contains, Subset, Regex, Wildcard, All, Any, Not, CEL) with
+  full check and subsumption semantics per AAT §3.4-3.5.
+- **Issuance + derivation** — `IssueRoot` creates root AATs with
+  `del_depth=0` and `cnf.jwk` holder binding; `DeriveChild` increments
+  depth, computes `par_hash` via SHA-256 of the parent signing input, and
+  enforces invariants I1-I5 (signer linkage, depth monotonicity, TTL
+  monotonicity, capability monotonicity, cryptographic linkage).
+- **Proof of Possession** — `BuildPoPJWT` and `VerifyPoPJWT` with JCS-style
+  HTA canonicalization per AAT §5.2-5.3.
+- **Chain verification** — 8-step offline verification algorithm per AAT
+  §7: structural validation → root verification (3a-3n) → link
+  verification (4a-4s) → depth match → leaf constraint check → PoP
+  verification → verdict.
+- **49 tests** covering constraint checks, subsumption cross-types,
+  issuance, derivation, PoP round-trips, and full chain verification
+  scenarios.
 
-## Names that matter (don't drift these)
+```bash
+cd go && go test ./pkg/aat/... -v   # full AAT test suite
+```
 
-The public-facing identifiers are stable across the codebase:
+## Relationship to Python
 
-- Module path: `github.com/gnanirahulnutakki/ardur/go`
+The Python runtime (`python/vibap/`) is the primary governance surface:
+proxy, CLI, Personal Hub, and all HTTP-accessible endpoints live there.
+The Go packages here serve two roles:
+
+1. **K8s-native control plane** — `cmd/operator` and `cmd/webhook` reconcile
+   `AgentPassport` CRDs and enforce admission policy inside a cluster. The
+   operator depends on the full `pkg/` type chain (credential → issuer →
+   policy → provenance → spiffe → trust → transparency).
+
+2. **Kernel capture** — `pkg/kernelcapture` uses Linux eBPF (cilium/ebpf) to
+   capture process-exec events below the tool-call boundary. This cannot be
+   done in pure Python; it requires C eBPF programs and Go's ring-buffer
+   management.
+
+The governance proxy, session lifecycle, evaluate/attest endpoints, rate
+limiting, kill switch, and Prometheus metrics are all implemented in Python.
+No Go equivalent exists for those — Python is the canonical runtime for the
+governance HTTP API.
+
+## What's not in this tree
+
+- **Governance HTTP proxy** — lives in `python/vibap/proxy.py`.
+- **CLI** — lives in `python/vibap/cli.py`.
+- **Personal Hub** — lives in `python/vibap/personal_hub.py`.
+- **Benchmark harness binaries** — the `cmd/benchmark*` and `cmd/benchcheck`
+  binaries were removed; benchmark scenario types live in `benchmark/`.
+- **Vendor-specific telemetry connectors** — stay private.
+- **Live benchmark fixtures** — AgentDojo, InjecAgent, R-Judge, STAC remain
+  in the internal research tree.
+
+## Stable identifiers (don't drift these)
+
+- Module path: `github.com/ArdurAI/ardur/go`
 - Schema `$id` base: `https://ardur.dev/spec/...`
 - API GroupName: `vibap.ardur.dev`
 - SPIFFE trust domain: `ardur.dev`
 - Image refs in tests: `ghcr.io/ardur/...`
-
-If you're contributing and you find yourself typing one of those by hand, double-check it against this list. Drift here breaks federation and breaks signature verification, and neither failure mode is loud.
-
-## Verification status
-
-Honest caveat: `go mod tidy`, `go build ./...`, and `go test -race ./...` haven't been run from this commit. The maintainer's local `go mod tidy && go build ./...` from a clean checkout is the verification gate before any tag gets published. CodeQL runs in CI on push and will pick up the Go tree automatically — that's the second layer.
-
-If you're cloning this and the build is broken at HEAD, please open an issue; it means the gate caught nothing and we'd like to know.
 
 ## License
 

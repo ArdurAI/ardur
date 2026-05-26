@@ -1,0 +1,12 @@
+{{ $path := .Get "path" }}
+{{ $title := .Get "title" | default $path }}
+{{ $status := .Get "status" | default "public-now" }}
+{{ $meta := .Get "meta" }}
+{{ if not $path }}{{ errorf "resource-card shortcode requires path parameter" }}{{ end }}
+{{ $href := partial "source-href.html" (dict "site" .Site "path" $path) }}
+<a class="resource-card" href="{{ $href }}">
+  <span class="status-token status-{{ $status }}">{{ replace $status "-" " " }}</span>
+  <strong>{{ $title }}</strong>
+  {{ with $meta }}<small>{{ . }}</small>{{ end }}
+  <div class="resource-card-body">{{ .Inner | markdownify }}</div>
+</a>

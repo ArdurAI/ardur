@@ -1,0 +1,39 @@
+# Gitleaks configuration for local and CI secret scanning.
+#
+# The full local check runs tests before gitleaks. Tests can create local runtime
+# key material under ignored state directories; those files must never be tracked,
+# but they should not make the repository-level secret scan permanently fail.
+
+[allowlist]
+description = "Ignore local runtime state directories and test fixture artifacts"
+paths = [
+  '''(^|/)\.ardur/''',
+  '''(^|/)\.vibap/''',
+  '''(^|/)\.pytest_cache/''',
+  '''(^|/)__pycache__/''',
+  '''(^|/)python/tests/artifacts/''',
+  '''(^|/)python/vibap/_specs/''',
+]
+
+# Detect EC private key PEM blocks outside test artifacts.
+# Ardur generates P-256 keys via the passport module; any committed
+# private key PEM is a secret-leak incident.
+[[rules]]
+id = "ardur-ec-private-key"
+description = "EC private key PEM block"
+regex = '''-----BEGIN EC PRIVATE KEY-----'''
+paths = [
+  '''\.pem$''',
+  '''\.py$''',
+  '''\.md$''',
+  '''\.json$''',
+]
+[rules.allowlist]
+paths = [
+  '''(^|/)python/tests/artifacts/''',
+  '''(^|/)python/tests/test_real_world_harness_contract''',
+  '''(^|/)\.ardur/''',
+  '''(^|/)\.vibap/''',
+  '''(^|/)\.pytest_cache/''',
+  '''(^|/)__pycache__/''',
+]

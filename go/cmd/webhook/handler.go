@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	vibapv1alpha1 "github.com/gnanirahulnutakki/ardur/go/pkg/api/v1alpha1"
+	vibapv1alpha1 "github.com/ArdurAI/ardur/go/pkg/api/v1alpha1"
 )
 
 // PodValidator validates that agent pods have valid VIBAP credentials.

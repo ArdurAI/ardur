@@ -6,11 +6,12 @@ enforcement, and verifiable evidence.
 > **Conformance scope (2026-04-28 narrowing):** This page describes the
 > *design intent* of the protocol. The reference proxy in `python/vibap/`
 > implements the **Delegation-Core** profile of `verifier-contract-v0.1`,
-> not yet the **MIC-State** or **MIC-Evidence** profiles. See
-> `docs/specs/verifier-contract-v0.1.md` Section 13 ("Reference
-> Implementation Conformance Notes") for the precise gap. Deployments
-> needing the stronger profiles MUST add layers beyond the reference
-> proxy or wait for the hardening rounds that close 13.2.
+> not yet the **MIC-State** or **MIC-Evidence** profiles. When closing
+> these gaps, update both this document and [`known-limitations.md`](known-limitations.md)
+> in the same PR. See `docs/specs/verifier-contract-v0.1.md` Section 13
+> ("Reference Implementation Conformance Notes") for the precise gap.
+> Deployments needing the stronger profiles MUST add layers beyond the
+> reference proxy or wait for the hardening rounds that close 13.2.
 
 ## Core security gates (enforced by the reference proxy)
 
@@ -82,7 +83,7 @@ proven protections until their proof entries reach L5 for the claimed scope.
 When Ardur lacks evidence, it must deny or return `unknown` rather than
 claim safe success.
 
-## Honesty boundary
+## Enforcement boundary
 
 This document and the comparison docs under `docs/comparisons/` describe
 what the protocol guarantees and what the reference proxy enforces today.

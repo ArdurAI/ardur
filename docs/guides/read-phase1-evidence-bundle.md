@@ -1,0 +1,93 @@
+# Read The Phase 1 Evidence Bundle
+
+The Phase 1 fresh-user harness writes a local, redacted evidence bundle that is
+meant to answer one question: can a source-checkout user set up Ardur for Claude
+Code and get meaningful, verifier-backed evidence without sharing secrets?
+
+Use this guide after the [Claude Code MVP quickstart](claude-code-mvp-quickstart.md)
+or whenever you need to decide what a `bundle.redacted.json` proves.
+
+## Generate a fresh bundle
+
+Run from a clean source checkout on the current `dev` branch:
+
+```bash
+python3 scripts/run-rwt-phase1-fresh-user.py \
+  --expected-origin-dev "$(git rev-parse --short=12 origin/dev)" \
+  --output-dir /tmp/ardur-rwt-phase1
+
+python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
+```
+
+The script uses temporary HOME, project, Ardur home, evidence, and wheel-build
+state. It does not log in to Claude Code, mutate your real global Claude config,
+use an external API key, start a privileged daemon, or publish anything.
+
+## Read the top-level verdict first
+
+| Bundle field | What it means | How to read it |
+|---|---|---|
+| `status` | Overall harness result. | `PASS` means the required no-key gates passed. `FAIL`, `BLOCKED`, or `INSUFFICIENT_EVIDENCE` means do not use the bundle as readiness evidence until the listed issue is fixed and rerun. |
+| `repo` | The tested checkout and `origin/dev` preflight. | `clean_before` and `clean_after` should be `true` for release-gate evidence. `origin_dev` should match `expected_origin_dev`. |
+| `gates` | RWT gate outcomes. | Read each gate separately; a skipped live-Claude gate is not the same thing as a failed no-key harness. |
+| `redaction` | Secret-safety checks on the shareable bundle. | `raw_secret_values_copied` must be `false`; `secret_scan_hits` must be `0`. |
+| `claim_mapping` | The claims the bundle supports and does not support. | Treat this as the human-readable claim ledger for the run. |
+| `residual_risk` | Known caveats from this run. | If this is non-empty, quote it with any status claim. |
+
+## Understand the RWT gates
+
+| Gate | Required for a no-key confidence check? | What it exercises | Honest non-claim |
+|---|---:|---|---|
+| `RWT-1` | Yes | Source/local-wheel install, `ARDUR.md`, `ardur protect claude-code`, `ardur doctor-claude-code`. | It does not prove a live Claude Code model session ran. |
+| `RWT-2` | Yes | Actual `ardur claude-code-hook` fixture allow/deny receipts and `ardur claude-code-report` chain verification. | It proves the hook/report path with synthetic hook input, not provider-hidden behavior. |
+| `RWT-3` | No for no-key mode; yes for a live-Claude claim. | Local Claude Code preflight semantics. | `SKIP_GATED` or `SKIP_UNSUPPORTED` is acceptable for no-key evidence and must not be described as a live-Claude pass. |
+
+## Evidence you can quote
+
+A clean no-key bundle supports narrow statements like:
+
+- A source/local-wheel install worked on the tested host.
+- `ARDUR.md` profile creation, Claude Code protection setup, and doctor checks
+  ran in temporary state.
+- The Claude Code hook adapter can produce signed allow/deny receipts under
+  fixture hook inputs.
+- `ardur claude-code-report` can verify and summarize the local hook receipt
+  chain.
+- The shareable bundle passed its own redaction checks.
+
+A no-key bundle does **not** support claims that:
+
+- a real live Claude Code terminal session completed successfully;
+- Ardur can see provider-hidden reasoning or server-side tool calls;
+- subprocess, kernel, filesystem, or network side effects below the tool
+  boundary are captured;
+- Linux eBPF or cross-platform kernel capture is production-ready;
+- PyPI, Homebrew, OCI, or main-branch release installation is ready.
+
+## When live Claude Code evidence is separate
+
+If `claude` is installed and authenticated, run the live demo in the quickstart
+and inspect `ardur claude-code-report --home "$VIBAP_HOME"`. Keep that evidence
+separate from the no-key bundle. A live run can support a local tool-boundary
+Claude Code claim for the tested host/session, but it still cannot prove
+provider-hidden actions or side effects below the local tool boundary.
+
+## Share safely
+
+Share `bundle.redacted.json` only after checking:
+
+1. `status` is the status you intend to quote.
+2. `redaction.raw_secret_values_copied` is `false`.
+3. `redaction.secret_scan_hits` is `0`.
+4. Path fields use placeholders (for example `<REPO>`, `<RWT_TEMP>`, `<RWT_HOME>`, `<RWT_ARDUR_HOME>`, `<RWT_PROJECT>`, `<RWT_EVIDENCE>`, `<RWT_OUTPUT>`, `<PYTHON>`, `<ARDUR_BIN>`) rather than host absolute paths.
+5. Any retained temp path is intentional and not a private credential location.
+6. The claim you are making appears under `claim_mapping.supports_claims`, not
+   under `claim_mapping.does_not_support_claims`.
+
+Related references:
+
+- [`scripts/run-rwt-phase1-fresh-user.py`](../../scripts/run-rwt-phase1-fresh-user.py)
+- [`docs/guides/claude-code-mvp-quickstart.md`](claude-code-mvp-quickstart.md)
+- [`docs/reference/cli.md`](../reference/cli.md)
+- [`docs/coverage-map.md`](../coverage-map.md)
+- [`STATUS.md`](../../STATUS.md)

@@ -2,7 +2,7 @@
 title: "Ardur Agent Instructions"
 description: "These instructions are mandatory for coding agents working in this repository."
 source_path: "AGENTS.md"
-source_sha256: "0663c9f93e86ff98e2faa9e866c9fcc0c089806417825987c6071f39f3f30612"
+source_sha256: "0af09f7ce695fdbc95368bffa4e09aef0f5069014a67d0f08569d224ce1c9ad0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -78,6 +78,10 @@ workflow files are the authority for what currently runs.
   `VIBAP`, `MCEP`, `SPIFFE`, `SPIRE`, `Biscuit`, `Cedar`, `AAT`, and `EAT`
   where they describe real technical artifacts.
 - Do not hardcode secrets, local private paths, or generated credentials.
+- Live external-API tests are allowed only when they materially verify the task,
+  are explicit/opt-in, and use environment credentials approved for that local
+  run. Keep calls minimal and cost-aware; never print, log, persist, or commit
+  secret values. Public CI must not require private credentials.
 - Prefer small, reviewable changes with targeted tests.
 - For runtime changes, run the relevant Python and/or Go checks before claiming
   success.
@@ -87,6 +91,9 @@ workflow files are the authority for what currently runs.
 Public, repo-safe agent instructions live in this tracked `AGENTS.md` file.
 Everything else is local-only:
 
+- `.ardur/` and `.vibap/` for runtime state, generated receipts, sockets, and
+  local key material. These paths are allowlisted in `.gitleaks.toml` only so
+  tests can run before the local secret scan; they must stay untracked.
 - `.context/skills/` for Conductor/session skills and notes.
 - `.agents/` for local agent runtimes that expect that folder name.
 - `.local-skills/` for imported or experimental local skills.

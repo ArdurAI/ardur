@@ -1,8 +1,8 @@
 ---
-title: "Testing — what runs against this repo"
-description: "The public tree now includes curated Python and Go runtime imports under `python/` and `go/`. The current GitHub Actions set still covers repository hygiene first: secrets, old-nam"
+title: "Testing"
+description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "8dc74ef18c4ab00dbc3bcdf3648822bc7d1ff4e6455f8fd87e4867d6352f3c5f"
+source_sha256: "c488b38181d55a873bfbd05dc08873275e78ecc361e2193de5580ed6cdd80fb7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -17,13 +17,17 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-The public tree now includes curated Python and Go runtime imports under `python/` and `go/`. The current GitHub Actions set still covers repository hygiene first: secrets, old-name leakage, links, structured-file parsing, and CodeQL. Dedicated Python and Go test workflows are still pending, so do not claim full runtime CI coverage until those workflows land and pass.
+The public tree includes curated Python and Go runtime code under `python/`
+and `go/`. GitHub Actions now covers runtime tests, repository hygiene,
+structured-file parsing, link checks, secret scanning, and CodeQL.
 
-The structure mirrors how testing works in the private research repo: structured CI for what's safely automatable, plus an explicit "before claiming tests pass" discipline for what isn't.
+Do not claim broader coverage than the workflows provide. If a feature needs a
+manual smoke test, list the exact command and the observed result in the PR.
 
-## What runs today
+## What Runs Today
 
-Four GitHub Actions workflows. Most run on push to `dev`/`main` and on every pull request; `link-check` runs on PRs and a weekly cron only (no push trigger, since the same Markdown gets checked on the resulting PR anyway).
+Five GitHub Actions workflows. Most run on push to `dev`/`main` and on every
+pull request; `link-check` runs on PRs and a weekly cron only.
 
 ### `secret-scan` — gitleaks + forbidden-term gate
 
@@ -55,64 +59,29 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 - Pinned to `github/codeql-action@ce64ddcb` (commit-pinned; `v3` is an annotated tag whose tag-object is `865f5f5c...` and whose underlying commit is `ce64ddcb...`). Same pin discipline as the rest of the workflow set.
 - Pairs with the `code_quality` ruleset rule on `main`: that rule reads from GitHub's code-scanning alerts table, so it passes vacuously while the matrix is empty and substantively once code lands. The CI job name (`codeql`) is intentionally **not** in the required-status-checks list — the ruleset already gates merges via the alerts mechanism.
 
-### What's NOT enforced by CI today
+### `tests` — Python and Go runtime tests
 
-Honest list, so the gap is visible:
+[`/.github/workflows/tests.yml`](/__ardur_internal__/repo/.github/workflows/tests.yml)
+
+- **Python job**: installs `python/` with dev extras and runs
+  `python -m pytest tests/ -q --tb=short` from the `python/` directory on
+  Python 3.10 and Python 3.13. Because this runs the full `python/tests/`
+  tree, it includes `python/tests/test_examples_smoke.py` for the offline,
+  no-key examples smoke. That test covers checked-in mission fixtures and the
+  examples claim ledger; it does **not** prove live-provider framework demos.
+- **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
+
+### What's Not Enforced By CI Today
+
+Explicit list, so the gap is visible:
 
 - No content-fact verification (article claims, ADR cross-references) — caught only by review rounds and the cool-off re-read in the `dev → main` PR template.
 - No Markdown lint — `markdownlint` adds noise we don't want yet, and the earlier table-pipe heuristic was removed.
 - No YAML link-check (the issue-template `config.yml` URLs are not under `**/*.md`).
 - No spelling.
-- No dedicated Python pytest workflow yet.
-- No dedicated Go build/test workflow yet.
 - No external link-check on YAML or `.cast` files.
 
-## Pending Python CI
-
-The Python runtime is now present under `python/vibap/`, but the dedicated workflow has not landed yet. The intended `python-ci.yml` gate is:
-
-### Python suite
-
-A new `python-ci.yml` workflow will join the set:
-
-```yaml
-# Intended gate — workflow still pending
-on:
-  push:
-    branches: [main, dev]
-  pull_request:
-permissions:
-  contents: read
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: actions/setup-python@<sha>  # v5, sha-pinned
-        with:
-          python-version: '3.13'    # NOT 3.14 — biscuit-python 0.4.0
-                                    # fails on PyO3 ABI 3.14
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -e 'python/[dev]'
-          pip install 'biscuit-python==0.4.0' 'spiffe>=0.2,<0.3'
-      - name: Show environment
-        run: |
-          python --version
-          pip show biscuit_auth | head -3
-          pip show spiffe | head -3
-          pip show cedarpy | head -3
-      - name: pytest
-        run: pytest python/tests/ -q
-      # Z3 composition proofs and `make reproduce` will land once
-      # python/verification/ is imported publicly. Until then those
-      # steps stay omitted from this gate so it doesn't fail on
-      # missing paths.
-```
-
-### Local development setup
-
-The discipline lifts directly from the private research repo's `TESTING.md`:
+## Local Development Setup
 
 ```bash
 # First-run setup — Python 3.13 required
@@ -130,42 +99,80 @@ python3.13 -m venv .venv
 make reproduce
 ```
 
-### Module-specific gotchas
+## Module-Specific Gotchas
 
 - **`test_mission_binding.py`**: one xfail (`test_tampered_md_returns_chain_invalid`) due to module-level `urllib.request.urlopen` state leak — runs green in isolation. CI invokes it as a separate `pytest` call.
 - **`test_biscuit_passport.py`**: requires `biscuit-python==0.4.0`. ABI breaks on 0.5+ and on Python 3.14.
-- **Live LLM tests**: tests under the semantic-judge / behavioral-fingerprint lanes need API access. Default test runs use null-judge stubs; live runs require explicit env vars (`ARDUR_SEMANTIC_JUDGE=anthropic` + `ANTHROPIC_API_KEY`).
-- **Mark `pytest.mark.<name>`**: every custom mark must be registered in `conftest.py` so `pytest -W error` doesn't blow up. The private repo had unregistered `spiffe_mock` warnings; we don't carry that forward.
+- **Live LLM tests**: tests under the semantic-judge / behavioral-fingerprint lanes need API access. Default test runs use test doubles; live runs require explicit env vars (`ARDUR_SEMANTIC_JUDGE=anthropic` + `ANTHROPIC_API_KEY`).
 
-### Coverage targets
+## Go AAT Test Suite
+
+The `go/pkg/aat` package has 49 tests covering the full AAT specification:
+
+```bash
+cd go && go test ./pkg/aat/... -v
+```
+
+Covers: all 13 constraint Check/Subsumes functions, IssueRoot validation,
+DeriveChild depth/TTL/capability enforcement, BuildPoPJWT/VerifyPoPJWT
+round-trips, full §7 chain verification scenarios, and Registry operations.
+
+## Cloud Model Governance Tests
+
+Real-world integration tests proving governance proxy enforcement with live
+LLMs. Results are in `python/tests/test-results/`.
+
+```bash
+ARDUR_OLLAMA_API_KEY="<key>" python tests/run_cloud_model_test.py <model_name>
+```
+
+These are **not** CI-gated tests (they require live API access) but serve as
+integration proof that the proxy evaluates every tool call correctly with
+production models.
+
+## Ardur Personal And Claude Code RC
+
+When touching the Hub, browser adapter, Claude Code hook, posture index, or
+`ARDUR.md` profile setup, run:
+
+```bash
+PYTHONPATH=python python -m pytest -q \
+  python/tests/test_claude_code_hook.py \
+  python/tests/test_claude_code_telemetry.py \
+  python/tests/test_posture_index.py \
+  python/tests/test_ardur_personal_hub.py \
+  python/tests/test_ardur_profile.py
+PYTHONPATH=python python plugins/claude-code/scripts/smoke.py
+claude plugin validate plugins/claude-code
+node --check examples/ardur-personal-extension/src/service_worker.js
+node --check examples/ardur-personal-extension/src/content_script.js
+node --check examples/ardur-personal-extension/src/popup.js
+node examples/ardur-personal-extension/scripts/auth-header-smoke.mjs
+```
+
+The Hub test confirms browser observations produce standard Ardur Execution
+Receipts through `GovernanceProxy`, CLI policy can block a controllable command,
+the export path includes Session Reviews, and authenticated Hub endpoints reject
+untrusted browser-origin requests. The posture-index tests cover valid and broken
+receipt chains, missing telemetry, unknown tool boundaries, CLI JSON/Markdown
+rendering, and redaction of credential-like values plus local path placeholders.
+
+## Coverage Targets
 
 | Surface | Minimum coverage | Source of bar |
 |---------|------------------|---------------|
-| `python/vibap/` | 80% | matches private research repo's bar for `pkg/` |
-| `python/cli/` (when imported) | 60% | matches private research repo's bar for `cmd/` |
-| `python/integrations/<framework>/` (when imported) | 70% | new bar for public adapters |
+| `python/vibap/` | 80% | runtime package |
+| `python/cli/` (when imported) | 60% | command surfaces |
+| `python/integrations/<framework>/` (when imported) | 70% | public adapters |
 
 Coverage runs against the renamed Ardur runtime only; legacy-era results are archived under `artifacts/legacy-era-*/` for lineage but never count for gates.
-
-## Pending Go CI
-
-The Go runtime and operator files are now present under `go/`, but the dedicated workflow has not landed yet. The intended `go-ci.yml` gate is:
-
-- `go mod verify`
-- `go build ./...`
-- `go test -race -v ./...`
-- `go tool cover -func=coverage.out` with 80% pkg/ + 60% cmd/ enforcement
-- `gofmt -l .` clean
-- `golangci-lint`
-
-Same SHA-pinning discipline as the rest of the workflows. Annotated tags get peeled to commit SHAs (verified via `git ls-remote refs/tags/<tag>^{}`).
 
 ## Test-authoring rules (carry-over from private research, applies to all phases)
 
 - **No rigged adapters.** Labels come from a separate file derived from public dataset labels. Adapters never see the ground truth. Violations are the single fastest way to get a benchmark retracted; the discipline that produced this rule is documented in the test-harness contract at the top of `python/tests/conftest.py`.
 - **Regression tests for every bug fix.** If you fix bug X, write a test that fails on the pre-fix code and passes on the fixed code. The test goes in the same PR as the fix.
 - **Name tests after what they prove, not what they exercise.** `test_passport_with_invalid_sig_is_rejected` beats `test_verify_passport_case_3`.
-- **Avoid live-LLM tests by default.** Unit suites run with null-judge / null-challenger stubs; live-LLM paths are explicit opt-in via env var. CI doesn't burn API budget on every push.
+- **Avoid live-LLM tests by default.** Unit suites run with local test doubles; live-LLM paths are explicit opt-in via env var. CI doesn't burn API budget on every push.
 
 ## Before claiming "tests pass"
 
@@ -192,7 +199,18 @@ For runtime changes:
 - Known-failing / known-collecting-error count has not grown
 - No `xfail` flipped to pass-or-fail without an explicit reason
 - The pytest summary line (`N passed, M skipped, K xfailed`) pasted into the commit body so a reviewer can see the delta vs the known baseline without re-running
+- When touching the Claude Code hook plugin, run
+  `PYTHONPATH=python python3 -m pytest python/tests/test_claude_code_hook.py python/tests/test_claude_code_telemetry.py python/tests/test_ardur_profile.py -q`.
+  Also run the end-to-end hook smoke:
+  `PYTHONPATH=python python3 plugins/claude-code/scripts/smoke.py`
+  (expects `PASS:` output and exit 0).
+  Validate the current Claude Code plugin package:
+  `claude plugin validate plugins/claude-code`.
+  Live-binary smoke against an actual Claude Code session is optional and
+  not gated in CI because it requires a Claude Code install.
 
 ## Why this page exists
 
-Public security-software repos that fail their own CI on the first PR every time train contributors not to trust the gates. The current state is intentionally conservative: repository hygiene checks and CodeQL are live, while runtime build/test gates need to land as real workflows rather than placeholders.
+Public security-software repos that fail their own CI on the first PR every
+time train contributors not to trust the gates. This page keeps the automated
+and manual checks explicit so release claims stay tied to evidence.

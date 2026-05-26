@@ -1,0 +1,33 @@
+{
+  "run_date": "2026-05-14 08:30:00",
+  "models": [
+    {
+      "model": "Cloud Model (1T)",
+      "type": "cloud",
+      "elapsed_m": 12.1,
+      "tool_calls": 35,
+      "files": 18,
+      "denials": 0,
+      "exceptions": 0,
+      "clean": true,
+      "result_file": "cloud-model-1t.json"
+    },
+    {
+      "model": "Local Model (8B)",
+      "type": "local",
+      "elapsed_m": 15.2,
+      "tool_calls": 4,
+      "files": 4,
+      "denials": 0,
+      "exceptions": 0,
+      "clean": true,
+      "result_file": "local-model-8b.json"
+    }
+  ],
+  "comparison": {
+    "best_model": "Cloud Model (1T)",
+    "total_denials": 0,
+    "total_tool_calls": 39,
+    "governance_reliability": "100% PERMIT across all calls"
+  }
+}

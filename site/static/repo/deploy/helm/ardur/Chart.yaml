@@ -10,9 +10,9 @@ type: application
 version: 0.1.0-alpha
 appVersion: "0.1.0-alpha"
 
-home: https://github.com/gnanirahulnutakki/ardur
+home: https://github.com/ArdurAI/ardur
 sources:
-  - https://github.com/gnanirahulnutakki/ardur
+  - https://github.com/ArdurAI/ardur
 maintainers:
   - name: Gnani Rahul
     email: gnani.nutakki@gmail.com
@@ -27,7 +27,7 @@ keywords:
   - runtime-governance
 
 annotations:
-  artifacthub.io/license: "TBD"
+  artifacthub.io/license: "MIT"
   artifacthub.io/prerelease: "true"
 
 # Dependencies — SPIRE is pulled in as a dependency chart. Biscuit

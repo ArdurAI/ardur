@@ -2,7 +2,7 @@
 title: "Codex Agent Instructions"
 description: "Codex should follow the [Shared Agent Contract](shared.md), plus the"
 source_path: "docs/agent-instructions/codex.md"
-source_sha256: "8228278fb751ee5c65a75d1e6e61607ddc369e00b462711a8041c4654d2998a3"
+source_sha256: "9ad8d444ba6db07ef4f44d9de0fa82f268790c2095043ec50b69962b8322425e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]

@@ -21,8 +21,8 @@ against a stated claim. The difference is whether anyone can argue
 with what they just watched.
 
 This article is about the shape we picked for proof media in this
-repo, why each piece of the shape carries weight, and what we're
-being explicit about not yet shipping.
+repo, why each piece of the shape carries weight, and what's still in
+development.
 
 ## The shape: command → artifact → verifier → result
 
@@ -131,7 +131,7 @@ framework. Smaller numerator, smaller runtime, scope explicit.
 The metadata header tells you the scope. The article doesn't have
 to.
 
-## The honest gap: archival vs re-runnable
+## The gap: archival vs re-runnable
 
 Here's the part that has to be said clearly: **none of these casts
 are re-runnable by you, today, from this repo alone.**
@@ -189,7 +189,7 @@ Two practical points:
    future cast ships without that header — or with a header that
    doesn't match the recording inside — file an issue. That's a
    regression on the contract, not a stylistic glitch.
-2. **The honest gap is the discipline.** When the re-runnable proof
+2. **Naming the gap is the discipline.** When the re-runnable proof
    path lands, the casts will say so in their metadata
    (`asset_class: proof` instead of `archival_walkthrough`). Until
    that field flips, treat the casts as walkthroughs that show

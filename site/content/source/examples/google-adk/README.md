@@ -1,10 +1,10 @@
 ---
 title: "Google ADK + Ardur quickstart"
-description: "Placeholder. The adapter code lives in the private research repo and is being imported with the public-name cleanup applied; this directory describes what lands when that import fi"
+description: "Deferred adapter spec. This directory is not a runnable example in the current"
 source_path: "examples/google-adk/README.md"
-source_sha256: "7243db235283973467ba56d27e91fe1d87acbf4d97a08355ba44ac4c18f2febe"
+source_sha256: "7ee8ca988cab45822fe0666f59cffb11772b07d21f650bd8c65d6d6e66e81758"
 weight: 100
-maturity: ["in-progress"]
+maturity: ["public-now"]
 claim_types: ["integration"]
 surfaces: ["examples"]
 frameworks: ["google-adk"]
@@ -17,7 +17,9 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-Placeholder. The adapter code lives in the private research repo and is being imported with the public-name cleanup applied; this directory describes what lands when that import finishes.
+Deferred adapter spec. This directory is not a runnable example in the current
+release candidate; it records the dependency footprint and expected shape for
+the future Google ADK adapter.
 
 ## What this example will demonstrate
 
@@ -47,7 +49,7 @@ google-adk/
 ├── run.sh                 # one-line runner
 ├── src/
 │   ├── agent.py           # LlmAgent + tool registration
-│   └── tools.py           # tool stubs (read, write, summarize)
+│   └── tools.py           # governed demo tools (read, write, summarize)
 ├── mission.json           # the Mission Declaration the agent runs under
 └── expected-receipt.json  # what a clean run produces, for diff-testing
 ```

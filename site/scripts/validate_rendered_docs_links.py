@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_HOST = "github.com"
-REPO_PATH = "/gnanirahulnutakki/ardur"
+REPO_PATH = "/ArdurAI/ardur"
 
 ROOT_DOCS = {
     "CODE_OF_CONDUCT.md",
@@ -27,6 +27,9 @@ ROOT_DOCS = {
 
 DOC_EXTENSIONS = {".cast", ".json", ".md", ".yaml", ".yml"}
 DOC_PREFIXES = (".github/", "deploy/", "docs/", "examples/", "go/spec/", "media/")
+EXPECTED_SOURCE_ROUTES = {
+    "MEDIA.md": "/source/media-notes/"
+}
 
 
 class Anchor:
@@ -113,12 +116,24 @@ def display_path(path: Path) -> str:
         return path.as_posix()
 
 
+def rendered_href_path(href: str) -> str:
+    path = urlparse(href).path.rstrip("/")
+    return f"{path}/"
+
+
 def validate(rendered_root: Path) -> list[str]:
     failures: list[str] = []
     for html_path in sorted(rendered_root.rglob("*.html")):
         parser = AnchorParser(html_path)
         parser.feed(html_path.read_text(encoding="utf-8"))
         for anchor in parser.anchors:
+            if anchor.text in EXPECTED_SOURCE_ROUTES and not is_allowed_provenance_link(anchor):
+                expected = EXPECTED_SOURCE_ROUTES[anchor.text]
+                if not rendered_href_path(anchor.href).endswith(expected):
+                    failures.append(
+                        f"{display_path(html_path)} links {anchor.text!r} to "
+                        f"{anchor.href!r}; expected rendered source route ending {expected!r}"
+                    )
             target = repo_target_from_url(anchor.href)
             if not target or not is_documentation_target(target, rendered_root):
                 continue

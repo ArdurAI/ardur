@@ -39,23 +39,6 @@
       "title": "Active revocation"
     }
   ],
-  "next_candidates": [
-    {
-      "kind": "rendered_video",
-      "status": "coming_soon",
-      "title": "Claude Code hook walkthrough"
-    },
-    {
-      "kind": "rendered_video",
-      "status": "coming_soon",
-      "title": "OpenAI Agents SDK example"
-    },
-    {
-      "kind": "rendered_video",
-      "status": "coming_soon",
-      "title": "Google ADK example"
-    }
-  ],
   "source_path": "media/selected-assets.json",
-  "source_sha256": "99542d13a4457f1d37ddb9461b4206458af513db869377262a47130f8cf7d9c2"
+  "source_sha256": "9e7a8f2351f1f64a3cb4e91a1e6de1c31101db7a48a62abdf2d012e7aaf7ee37"
 }

@@ -174,7 +174,7 @@ Three things, in order of regret:
    move files according to it.
 3. **Treat the audit cycle as a planned phase, not an
    afterthought.** The 11-round hostile audit cycle that closed
-   2026-04-29 took us from "we think this is safe" to "an
+   2026-04-29 took us from "we believed this was safe" to "an
    adversarial reviewer agrees with us." It found 1 CRITICAL +
    16 HIGH + 37 MEDIUM + 47 LOW issues we hadn't seen
    ourselves. None of those would have been caught by the
@@ -192,7 +192,7 @@ If you're reading this as a potential user, two things matter:
 
 1. **What's in the public repo is real.** Every public claim
    maps to running code or an explicit limitation. The
-   `docs/known-limitations.md` page is the honest compliance
+   `docs/known-limitations.md` page is the documented compliance
    boundary; the
    [verifier-contract spec Section 13](../specs/verifier-contract-v0.1.md)
    names which `MUST` clauses the reference Python proxy

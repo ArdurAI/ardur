@@ -1,0 +1,50 @@
+{{- /*
+  Asciinema player shortcode.
+
+  Usage:
+    {{< asciinema src="/casts/ardur-claude-code.cast"
+                  poster="/casts/ardur-claude-code.gif"
+                  autoplay="false"
+                  cols="80" rows="24" >}}
+
+  Loads asciinema-player from a pinned CDN. The poster (a static GIF or PNG)
+  shows as a noscript fallback for browsers with JS disabled.
+*/ -}}
+{{- /* Strip a leading slash so relURL prepends Hugo's baseURL path
+       (e.g. "/casts/x.cast" → "casts/x.cast" → "/ardur/casts/x.cast"). */ -}}
+{{- $src := .Get "src" | strings.TrimPrefix "/" | relURL -}}
+{{- $posterRaw := .Get "poster" -}}
+{{- $poster := "" -}}
+{{- if $posterRaw }}{{ $poster = $posterRaw | strings.TrimPrefix "/" | relURL }}{{ end -}}
+{{- $rows := .Get "rows" | default "24" -}}
+{{- $cols := .Get "cols" | default "80" -}}
+{{- $autoplay := .Get "autoplay" | default "false" -}}
+{{- $loop := .Get "loop" | default "false" -}}
+{{- $idleTimeLimit := .Get "idle-time-limit" | default "1" -}}
+{{- $id := printf "asciinema-%d" now.UnixNano -}}
+
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.10.0/dist/bundle/asciinema-player.min.css">
+<div class="ardur-asciinema-wrapper">
+  <div id="{{ $id }}" class="ardur-asciinema"></div>
+  {{- if $poster }}
+  <noscript>
+    <img src="{{ $poster }}" alt="Terminal recording (JavaScript disabled)" style="max-width: 100%; height: auto;">
+  </noscript>
+  {{- end }}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.10.0/dist/bundle/asciinema-player.min.js"></script>
+<script>
+  AsciinemaPlayer.create(
+    {{ $src | safeJSStr | printf "%q" | safeJS }},
+    document.getElementById({{ $id | safeJSStr | printf "%q" | safeJS }}),
+    {
+      autoPlay: {{ $autoplay }},
+      loop: {{ $loop }},
+      rows: {{ $rows }},
+      cols: {{ $cols }},
+      idleTimeLimit: {{ $idleTimeLimit }},
+      fit: 'width',
+      theme: 'asciinema'
+    }
+  );
+</script>

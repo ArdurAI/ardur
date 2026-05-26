@@ -1,4 +1,4 @@
-baseURL: "https://gnanirahulnutakki.github.io/ardur/"
+baseURL: "https://ArdurAI.github.io/ardur/"
 title: "Ardur Evidence"
 locale: "en-us"
 enableRobotsTXT: true
@@ -7,9 +7,46 @@ disableKinds:
 summaryLength: 28
 
 params:
-  repoURL: "https://github.com/gnanirahulnutakki/ardur"
+  repoURL: "https://github.com/ArdurAI/ardur"
   sourceRef: "dev"
-  description: "Runtime governance and verifier-backed evidence for AI agents."
+  description: "Open-source runtime governance for AI agents — prove what your agents do, not just what they say."
+
+menus:
+  main:
+    - name: "Get Started"
+      pageRef: "/get-started"
+      weight: 5
+    - name: "How It Works"
+      pageRef: "/how-it-works"
+      weight: 10
+    - name: "Proof"
+      pageRef: "/proof"
+      weight: 15
+    - name: "Docs"
+      pageRef: "/docs"
+      weight: 40
+    - name: "Roadmap"
+      pageRef: "/roadmap"
+      weight: 70
+    - name: "GitHub"
+      url: "https://github.com/ArdurAI/ardur"
+      weight: 90
+  footer:
+    - name: "Get Started"
+      pageRef: "/get-started"
+      weight: 5
+    - name: "How It Works"
+      pageRef: "/how-it-works"
+      weight: 10
+    - name: "Proof"
+      pageRef: "/proof"
+      weight: 15
+    - name: "Contribute"
+      pageRef: "/contribute"
+      weight: 30
+    - name: "Source Mirror"
+      pageRef: "/source"
+      weight: 40
 
 taxonomies:
   maturity: maturity

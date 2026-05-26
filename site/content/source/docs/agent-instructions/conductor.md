@@ -2,7 +2,7 @@
 title: "Conductor Agent Instructions"
 description: "Conductor workspaces are parallel, branch-isolated working areas. Follow the"
 source_path: "docs/agent-instructions/conductor.md"
-source_sha256: "d24e5448f2dce533d456f1286ab3b6697fbb91780742b9c5bd394208e16bdbd0"
+source_sha256: "2c6c067edf6b67751c13ac36aaced944b5b626df277fedc2ec0275189f202420"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]

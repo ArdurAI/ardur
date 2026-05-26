@@ -10,11 +10,16 @@ evidence_levels: ["code-and-doc", "archival-media"]
 ---
 
 {{< status-pill state="public" label="public now" >}}
-Public specs, curated Python and Go runtime imports, mission examples, framework
-stubs, articles, and archival media are present.
+Public specs, curated Python and Go runtime imports, the Ardur Personal Hub
+service, the Claude Code plugin, runnable LangChain / LangGraph / AutoGen
+quickstarts, the browser extension, desktop-observe and native-host adapters,
+dedicated Python and Go CI, agent-instruction guides, technical reference
+pages, articles, and archival media are present.
 
 {{< status-pill state="progress" label="in progress" >}}
-Dedicated runtime CI, runnable framework quickstarts, stable proof commands, and
-re-recorded proof media are still being tightened.
+Runnable OpenAI Agents SDK and Google ADK adapter lifts, Codex and Claude
+Desktop integrations, re-runnable proof media against the public runtime,
+imported conformance test vectors, and a tagged packaged release are still
+being tightened.
 
 Primary source: {{< repo-link "STATUS.md" >}}

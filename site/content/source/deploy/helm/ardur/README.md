@@ -2,7 +2,7 @@
 title: "Ardur Helm chart — skeleton"
 description: "Status: **SKELETON**. `Chart.yaml` + `values.yaml` + `_helpers.tpl`"
 source_path: "deploy/helm/ardur/README.md"
-source_sha256: "0e6961c79c21b5f1e0148256eb06d9de031b86075d6b3ddaa472bf9bd22423f4"
+source_sha256: "53aef24980af634f660a23c50edd05791602e3583ccca549e70c4bbcfb8418f2"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["deployment"]
@@ -120,4 +120,4 @@ production-ready" future effort. That lane would:
    documenting chart design decisions — ADR-016 is already taken
    (delegation lineage hash index)
 5. Publish to a Helm repo (possibly GitHub Pages under
-   `https://gnanirahulnutakki.github.io/ardur-charts/`)
+   `https://ArdurAI.github.io/ardur-charts/`)

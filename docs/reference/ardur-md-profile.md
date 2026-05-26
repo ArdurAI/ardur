@@ -1,0 +1,130 @@
+# `ARDUR.md` Profile Format
+
+The `ARDUR.md` profile is a plain-Markdown guardrail file that compiles into
+the same Mission Passport the protocol path uses. It is the friendly layer
+for non-technical users; nothing about a Markdown profile is missing from
+the underlying capability set.
+
+Source: [`python/vibap/ardur_profile.py`](../../python/vibap/ardur_profile.py).
+
+## Why Markdown
+
+Mission Passports carry strict, signed claims. Most local users are not
+trying to author JWTs. The Markdown profile is a small, forgiving format
+that compiles deterministically into a Mission Passport at
+`ardur protect claude-code` time.
+
+## Minimal Example
+
+```markdown
+# Ardur Guardrails
+Mode: read only
+Mission: Review this project without changing files or running commands.
+Protect folder: .
+Max tool calls: 100
+Duration: 1d
+
+## Allow
+- Read files
+- Search files
+
+## Block
+- Run shell commands
+- Edit files
+- Write files
+```
+
+## Top-Level Keys
+
+Each appears as a `Key: value` line at the top of the file. Keys are
+case-insensitive and may contain spaces. Multiple aliases are accepted for
+the same key.
+
+| Key | Aliases | Compiles to | Notes |
+|---|---|---|---|
+| `Mode` | — | `mode` | Free-form label, e.g. `read only`, `safe coding` |
+| `Mission` | — | `mission` | The mission text the agent is bound to |
+| `Protect folder` | `Scope`, `Folder` | `scope` | Path the agent is allowed to operate inside |
+| `Max tool calls` | — | `max_tool_calls` | Integer |
+| `Duration` | `Duration seconds`, `Max duration seconds` | `max_duration_s` | Accepts `30s`, `5m`, `2h`, `1d`, or a bare integer (seconds) |
+| `Allowed tools` | `Allow tools` | `allowed_tools` | Comma- or semicolon-separated tool names. Adds to the `## Allow` section |
+| `Forbidden tools` | `Blocked tools`, `Block tools` | `forbidden_tools` | Comma- or semicolon-separated tool names |
+
+## Sections
+
+Sections start with a Markdown heading (`#`, `##`, `###`, etc.). The heading
+text is normalised (lowercased, whitespace collapsed) and matched
+case-insensitively. Bulleted list items (`-` or `*`) within a section
+contribute to the corresponding allow/block list.
+
+| Heading | Aliases | Adds entries to |
+|---|---|---|
+| `## Allow` | `Allowed`, `What AI can do`, `What the AI can do` | `allowed_tools` |
+| `## Block` | `Blocked`, `What AI cannot do`, `What the AI cannot do` | `forbidden_tools` |
+| `## Allowed tools` | `Advanced allowed tools` | `allowed_tools` (raw, no alias expansion) |
+| `## Forbidden tools` | `Blocked tools`, `Advanced forbidden tools` | `forbidden_tools` (raw) |
+
+Lines outside known sections are ignored. HTML comments (`<!-- ... -->`) are
+ignored.
+
+## Friendly Tool Aliases
+
+Items inside the `## Allow` and `## Block` sections are expanded through a
+small alias table so non-technical users can write what they mean:
+
+| Friendly phrase | Expands to |
+|---|---|
+| `Read files`, `Read` | `Read` |
+| `Search files`, `Search` | `Glob`, `Grep` |
+| `Edit files`, `Edit` | `Edit`, `MultiEdit` |
+| `Write files`, `Write` | `Write` |
+| `Run shell commands`, `Shell commands`, `Run commands`, `Bash` | `Bash` |
+
+Items that don't match an alias pass through verbatim — so an advanced user
+can still write `- WebFetch` and have it land as a Claude Code tool name in
+the compiled Mission Passport.
+
+The `## Allowed tools` and `## Forbidden tools` sections **do not** apply
+alias expansion. Use them when you want exact tool names.
+
+## Compilation Rules
+
+`load_ardur_profile()` returns an `ArdurProfile` with these effective
+values, which `ardur protect claude-code` then folds into the Mission
+Passport:
+
+- `mode`, `mission`, `scope`: trimmed strings, or `None` if absent.
+- `allowed_tools`: deduped union of (alias-expanded `## Allow` items) ∪
+  (`Allowed tools` key value) ∪ (`## Allowed tools` section items).
+- `forbidden_tools`: same union for the block side.
+- `max_tool_calls`: integer or `None`.
+- `max_duration_s`: integer seconds. `30s`/`5m`/`2h`/`1d` shorthand is
+  decoded against multipliers `{s:1, m:60, h:3600, d:86400}`.
+
+## Built-In Templates
+
+`ardur profile init --template TEMPLATE` writes one of:
+
+- `read-only` — allow Read + Search; block shell, edit, write. Default for
+  new users.
+- `safe-coding` — allow Read, Search, Edit, Write inside the protected
+  folder; block shell commands.
+
+Template source is in
+[`python/vibap/ardur_profile.py`](../../python/vibap/ardur_profile.py)
+under `PROFILE_TEMPLATES`.
+
+## Where the Compiled Passport Lives
+
+After `ardur protect claude-code --profile ARDUR.md`:
+
+- The compiled Mission Passport is written to `<home>/active_mission.jwt`.
+- The Claude Code plugin reads `VIBAP_HOME` from the launch environment to
+  find the active passport.
+- Receipts land under `$ARDUR_CC_HOOK_DIR/<trace_id>/receipts.jsonl` (default
+  `~/.vibap/claude-code-hook/<trace_id>/receipts.jsonl`).
+
+See [`../guides/ardur-personal-hub.md`](../guides/ardur-personal-hub.md) for
+the end-to-end walkthrough and
+[`../../plugins/claude-code/README.md`](../../plugins/claude-code/README.md)
+for receipt verification.

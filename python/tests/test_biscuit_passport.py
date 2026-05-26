@@ -614,6 +614,25 @@ def test_mission_passport_round_trips_holder_spiffe_id() -> None:
     assert mission.to_dict()["holder_spiffe_id"] == "spiffe://example.org/agent/root"
 
 
+def test_mission_passport_lineage_budgets_error_keeps_other_unknown_fields_visible() -> None:
+    payload = {
+        "agent_id": "agent-001",
+        "mission": "coordinate child work",
+        "allowed_tools": ["read_file"],
+        "lineage_budgets": [{"type": "max_child_tool_calls", "limit": 3}],
+        "resourc_scope": ["/data"],
+    }
+
+    with pytest.raises(ValueError) as excinfo:
+        MissionPassport.from_dict(payload)
+
+    message = str(excinfo.value)
+    assert "lineage_budgets" in message
+    assert "Phase 1" in message
+    assert "deferred" in message
+    assert "resourc_scope" in message
+
+
 # --- Round-4 audit (FIX-R4-1, 2026-04-28): the round-3 hostile audit
 # verified by PoC that ``verify_biscuit_passport`` accepted iat in the
 # far future — the same threat model FIX-R3-A closed for JWT but

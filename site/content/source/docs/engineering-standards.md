@@ -2,7 +2,7 @@
 title: "Engineering Standards"
 description: "These rules define the working standard for Ardur. They are inspired by public"
 source_path: "docs/engineering-standards.md"
-source_sha256: "bcd78e53a82bdbb7cf53c4e2546aa9c5ba8c61b3d88425ccf77f40f58e367ca4"
+source_sha256: "b06fe3b1a6fc38682e53997877c9906ffd14fb848e030206084ed8accb9953dd"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -108,7 +108,10 @@ specific company.
 - Regression tests are mandatory for bug fixes.
 - Tests must name the behavior they prove, not just the function they call.
 - Avoid live paid-provider tests by default. Make them explicit opt-in with
-  environment variables and cost notes.
+  environment variables and cost notes. If an operator explicitly approves a
+  local live-provider smoke test, load credentials from the environment, never
+  print, log, persist, or commit secret values, and skip/report the test if the
+  credential is absent.
 - Prefer deterministic fixtures over sleeps, random timing, or live network
   dependencies.
 - Add adversarial tests for parsers, auth, policy, revocation, delegation,
@@ -159,7 +162,7 @@ specific company.
 - `STATUS.md` owns maturity and readiness.
 - ADRs own architectural decisions and tradeoffs.
 - `docs/TESTING.md` owns validation expectations.
-- `docs/conductor-bootstrap.md` owns agent/session startup.
+- `scripts/` directory owns agent/session startup and local validation tooling.
 - Public docs must not depend on private paths, private artifacts, or local
   machine state.
 - If a document is aspirational, label it as design, roadmap, or intent.

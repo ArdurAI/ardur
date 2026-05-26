@@ -1,18 +1,14 @@
 <header class="site-header">
   <a class="brand" href="{{ "" | absURL }}" aria-label="Ardur evidence home">
-    <span class="brand-mark">A</span>
+    <span class="brand-mark" aria-hidden="true">A</span>
     <span>
       <strong>Ardur</strong>
-      <small>Public evidence site</small>
+      <small>Runtime governance for AI agents</small>
     </span>
   </a>
   <nav class="site-nav" aria-label="Primary navigation">
-    <a href="{{ "start-here/" | absURL }}">Start Here</a>
-    <a href="{{ "evidence/" | absURL }}">Evidence</a>
-    <a href="{{ "protocol/" | absURL }}">Protocol</a>
-    <a href="{{ "build/" | absURL }}">Build</a>
-    <a href="{{ "articles/" | absURL }}">Articles</a>
-    <a href="{{ "claims/" | absURL }}">Claims</a>
-    <a href="{{ "source/" | absURL }}">Docs</a>
+    {{ range .Site.Menus.main }}
+      <a href="{{ .URL | absURL }}">{{ .Name }}</a>
+    {{ end }}
   </nav>
 </header>

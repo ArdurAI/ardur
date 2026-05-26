@@ -1,9 +1,10 @@
-module github.com/gnanirahulnutakki/ardur/go
+module github.com/ArdurAI/ardur/go
 
 go 1.25.9
 
 require (
 	github.com/cedar-policy/cedar-go v1.5.2
+	github.com/cilium/ebpf v0.16.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/sigstore/sigstore-go v1.1.4
 	github.com/spiffe/go-spiffe/v2 v2.6.0
@@ -120,4 +121,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-

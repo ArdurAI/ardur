@@ -2,7 +2,7 @@
 title: "Agent Instructions"
 description: "This directory contains public-safe operating instructions for agents working"
 source_path: "docs/agent-instructions/README.md"
-source_sha256: "0f1222dfe628f6d096cba02220c1826d4dfb3868b4f66acfb16d2ac9de3cdefd"
+source_sha256: "bc176b6bdf439dbc4f2b2323894d262adfdfb7600dc27953c593a58732af8390"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]

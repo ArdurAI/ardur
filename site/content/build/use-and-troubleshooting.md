@@ -24,13 +24,28 @@ without using GitHub as the documentation browser.
 
 - {{< repo-link "python/README.md" "Python package" >}} — current Python surface and runtime boundary.
 - {{< repo-link "go/README.md" "Go module" >}} — current Go surface and protocol support.
+- {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "Claude Code MVP quickstart" >}} — current source-checkout path with the no-key fresh-user harness, evidence-bundle reader, and optional live-Claude path.
+- {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Phase 1 evidence-bundle guide" >}} — how to read `bundle.redacted.json` without overstating live-provider or kernel-capture claims.
+- {{< repo-link "docs/guides/ardur-personal-hub.md" "Ardur Personal Hub guide" >}} — local product walkthrough covering `ardur protect claude-code`, `ardur hub`, browser extension, and desktop observe.
+- {{< repo-link "plugins/claude-code/README.md" "Claude Code plugin" >}} — runnable plugin with signed receipts on every tool call. The [Claude Code recording](/build/claude-code-demo/) is archival context; use the MVP quickstart for fresh Phase 1 evidence.
 - {{< repo-link "examples/README.md" "Examples index" >}} — framework examples and their maturity labels.
 - {{< repo-link "examples/langchain-quickstart/README.md" "LangChain quickstart" >}}
 - {{< repo-link "examples/langgraph-quickstart/README.md" "LangGraph quickstart" >}}
 - {{< repo-link "examples/autogen-quickstart/README.md" "AutoGen quickstart" >}}
-- {{< repo-link "examples/google-adk/README.md" "Google ADK quickstart" >}}
-- {{< repo-link "examples/openai-agents-sdk/README.md" "OpenAI Agents SDK quickstart" >}}
+- {{< repo-link "examples/ardur-personal-extension/README.md" "Ardur Personal browser extension" >}}
+- {{< repo-link "examples/ardur-personal-desktop/README.md" "Ardur Personal desktop-observe adapter" >}}
+- {{< repo-link "examples/ardur-personal-native-host/README.md" "Ardur Personal native-messaging host" >}}
+- {{< repo-link "examples/google-adk/README.md" "Google ADK quickstart (deferred adapter spec)" >}}
+- {{< repo-link "examples/openai-agents-sdk/README.md" "OpenAI Agents SDK quickstart (deferred adapter spec)" >}}
 - {{< repo-link "examples/claude-code-hook/README.md" "Claude Code hook example" >}}
+
+## Reference
+
+- {{< repo-link "docs/reference/README.md" "Technical reference index" >}}
+- {{< repo-link "docs/reference/cli.md" "CLI reference" >}} — every `ardur` subcommand and its flags.
+- {{< repo-link "docs/reference/personal-hub-api.md" "Personal Hub HTTP API" >}} — endpoints, auth model, error codes.
+- {{< repo-link "docs/reference/ardur-md-profile.md" "ARDUR.md profile format" >}} — Markdown guardrail spec.
+- {{< repo-link "docs/agent-instructions/README.md" "Agent instructions" >}} — Conductor, Codex, and Claude guides.
 
 ## Troubleshoot
 
@@ -46,7 +61,7 @@ without using GitHub as the documentation browser.
 - {{< repo-link "deploy/helm/ardur/README.md" "Helm chart" >}}
 - {{< repo-link "deploy/k8s/spire/README.md" "SPIRE deployment notes" >}}
 
-## Protocol And Reference
+## Protocol
 
 - {{< repo-link "docs/specs/README.md" "Specs index" >}}
 - {{< repo-link "docs/decisions/README.md" "ADR index" >}}

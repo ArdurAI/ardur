@@ -1,10 +1,10 @@
 ---
 title: "OpenAI Agents SDK + Ardur quickstart"
-description: "Placeholder. The adapter code lives in the private research repo and is being imported with the public-name cleanup applied; this directory describes what lands when that import fi"
+description: "Deferred adapter spec. This directory is not a runnable example in the current"
 source_path: "examples/openai-agents-sdk/README.md"
-source_sha256: "e48eff7182e2c98b7cc5dce9708d29d10571bd4b852fb4d456b8f5d30a36b7cb"
+source_sha256: "127a016801ccc578f28801267e14c6aa2781bff12f997b63853a5bdda34f2574"
 weight: 100
-maturity: ["in-progress"]
+maturity: ["public-now"]
 claim_types: ["integration"]
 surfaces: ["examples"]
 frameworks: ["openai-agents-sdk"]
@@ -17,7 +17,9 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-Placeholder. The adapter code lives in the private research repo and is being imported with the public-name cleanup applied; this directory describes what lands when that import finishes.
+Deferred adapter spec. This directory is not a runnable example in the current
+release candidate; it records the dependency footprint and expected shape for
+the future OpenAI Agents SDK adapter.
 
 ## What this example will demonstrate
 
@@ -47,7 +49,7 @@ openai-agents-sdk/
 ├── run.sh                 # one-line runner
 ├── src/
 │   ├── agent.py           # Agent + Runner setup
-│   └── tools.py           # tool stubs (read, write, summarize)
+│   └── tools.py           # governed demo tools (read, write, summarize)
 ├── mission.json           # the Mission Declaration the agent runs under
 └── expected-receipt.json  # what a clean run produces, for diff-testing
 ```

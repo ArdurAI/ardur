@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gnanirahulnutakki/ardur/go/pkg/credential"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/policy"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/profiling"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/provenance"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/spiffe"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/transparency"
-	"github.com/gnanirahulnutakki/ardur/go/pkg/trust"
+	"github.com/ArdurAI/ardur/go/pkg/credential"
+	"github.com/ArdurAI/ardur/go/pkg/policy"
+	"github.com/ArdurAI/ardur/go/pkg/profiling"
+	"github.com/ArdurAI/ardur/go/pkg/provenance"
+	"github.com/ArdurAI/ardur/go/pkg/spiffe"
+	"github.com/ArdurAI/ardur/go/pkg/transparency"
+	"github.com/ArdurAI/ardur/go/pkg/trust"
 )
 
 func testSigningKey(t *testing.T) *credential.SigningKey {
