@@ -55,7 +55,9 @@ Each framework has its own tool-call interface, its own session-state model, and
 
 The current CI surface is the repo-wide Python and Go workflow in
 `.github/workflows/tests.yml`, plus CodeQL, link-check, secret-scan, format
-validation, and the Hugo site build. The framework quickstarts are runnable
-from the checked-in example directories, but there is not yet a dedicated
-`examples-smoke.yml` workflow for every adapter. Treat that as future hardening,
-not current gate coverage.
+validation, and the Hugo site build. The Python job runs
+`python/tests/test_examples_smoke.py` as an offline, no-key examples smoke for
+the checked-in mission fixtures and this claim ledger. There is not a dedicated
+`.github/workflows/examples-smoke.yml` today, and the provider-backed framework
+quickstarts remain opt-in/manual unless a future workflow adds real CI evidence
+for those live-provider demos.

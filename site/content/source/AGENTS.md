@@ -2,7 +2,7 @@
 title: "Ardur Agent Instructions"
 description: "These instructions are mandatory for coding agents working in this repository."
 source_path: "AGENTS.md"
-source_sha256: "a614df831ad348e4dfda97ab6be2ded6a23a9a0fdca02de7a00201da21cd8efb"
+source_sha256: "0af09f7ce695fdbc95368bffa4e09aef0f5069014a67d0f08569d224ce1c9ad0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -78,6 +78,10 @@ workflow files are the authority for what currently runs.
   `VIBAP`, `MCEP`, `SPIFFE`, `SPIRE`, `Biscuit`, `Cedar`, `AAT`, and `EAT`
   where they describe real technical artifacts.
 - Do not hardcode secrets, local private paths, or generated credentials.
+- Live external-API tests are allowed only when they materially verify the task,
+  are explicit/opt-in, and use environment credentials approved for that local
+  run. Keep calls minimal and cost-aware; never print, log, persist, or commit
+  secret values. Public CI must not require private credentials.
 - Prefer small, reviewable changes with targeted tests.
 - For runtime changes, run the relevant Python and/or Go checks before claiming
   success.

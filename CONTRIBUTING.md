@@ -19,12 +19,12 @@ We especially welcome contributions that improve:
 - public docs and positioning clarity
 - verifier and artifact quality
 - runtime governance correctness
-- framework adapters with honest support boundaries
+- framework adapters with documented support boundaries
 - documentation clarity
 - deployment and self-hosting guidance
 - security hardening that stays proofable
 
-## Proof and honesty rules
+## Proof and accuracy rules
 
 - Do not call a capability proven unless the verifier and public artifacts back
   that claim.
@@ -66,12 +66,12 @@ to name a model in a private context (e.g. an internal benchmark log
 that lives in a gitignored path), keep that material out of tracked
 files entirely.
 
-## Current public repo note
+## Current status
 
-This repo is opening in phases. Until the curated runtime code lands here, many
-contributions will be docs, media, packaging, or launch-surface changes rather
-than direct runtime edits. When code-bearing surfaces arrive, local check
-guidance should be updated to match the real public commands.
+v0.1.0 is tagged and the repo contains both documentation and runtime code
+under `python/` and `go/`. Contributions are welcome across docs, code, tests,
+packaging, and media. See `ROADMAP.md` for planned work and `STATUS.md` for
+what is public today.
 
 ## Pull request expectations
 

@@ -56,11 +56,17 @@ Expected result for a clean source checkout:
 - bundle `status` is `PASS`
 - `RWT-1` is `PASS` for install/profile/protect/doctor
 - `RWT-2` is `PASS` for actual hook CLI fixture allow/deny receipts
-- `RWT-3` is `PASS`, `SKIP_GATED`, or `SKIP_UNSUPPORTED` depending on whether
-  a logged-in `claude` binary is available; a skip is the honest no-key result,
-  not a hidden failure
+- `RWT-3` is `SKIP_GATED` or `SKIP_UNSUPPORTED` in no-key/autonomous mode;
+  it can be `BLOCKED` when local Claude preflight fails. A skip is the explicit
+  no-key result, not a live-Claude pass or a hidden failure
 - `secret_scan_hits` is `0`
 - `raw_secret_values_copied` is `false`
+
+For field-by-field interpretation, including which public claims a no-key
+bundle can support, read
+[`docs/guides/read-phase1-evidence-bundle.md`](read-phase1-evidence-bundle.md).
+For a compact reviewer/demo handoff after the run, use
+[`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md).
 
 ## 3. Run a live Claude Code session
 
@@ -108,6 +114,8 @@ coverage, or package-manager release readiness.
 Related references:
 
 - [`plugins/claude-code/README.md`](../../plugins/claude-code/README.md)
+- [`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md)
+- [`docs/guides/read-phase1-evidence-bundle.md`](read-phase1-evidence-bundle.md)
 - [`docs/reference/cli.md`](../reference/cli.md)
 - [`docs/reference/ardur-md-profile.md`](../reference/ardur-md-profile.md)
 - [`docs/coverage-map.md`](../coverage-map.md)

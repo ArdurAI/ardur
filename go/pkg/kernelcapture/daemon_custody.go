@@ -250,27 +250,27 @@ func validateDaemonCustodyConfig(cfg DaemonCustodyConfig) error {
 		if !filepath.IsAbs(item.path) {
 			return custodyConfigError(item.field, "path must be absolute")
 		}
-		if pathWithin(item.path, cfg.RepositoryRoot) {
+		if lexicalPathWithin(item.path, cfg.RepositoryRoot) {
 			return custodyConfigError(item.field, "privileged custody path is repository-controlled")
 		}
 	}
 
-	if !pathWithin(cfg.ConfigPath, "/etc/ardur") {
+	if !lexicalPathWithin(cfg.ConfigPath, "/etc/ardur") {
 		return custodyConfigError("config_path", "daemon-owned config must live under /etc/ardur")
 	}
-	if !pathWithin(cfg.StateDir, "/var/lib/ardur") {
+	if !lexicalPathWithin(cfg.StateDir, "/var/lib/ardur") {
 		return custodyConfigError("state_dir", "daemon state must live under /var/lib/ardur")
 	}
-	if !pathWithin(cfg.RunDir, "/run/ardur") && !pathWithin(cfg.RunDir, "/var/run/ardur") {
+	if !lexicalPathWithin(cfg.RunDir, "/run/ardur") && !lexicalPathWithin(cfg.RunDir, "/var/run/ardur") {
 		return custodyConfigError("run_dir", "runtime directory must live under /run/ardur or /var/run/ardur")
 	}
-	if !pathWithin(cfg.SocketPath, cfg.RunDir) {
+	if !lexicalPathWithin(cfg.SocketPath, cfg.RunDir) {
 		return custodyConfigError("socket_path", "socket must live under the daemon runtime directory")
 	}
-	if !pathWithin(cfg.BPFFSDir, "/sys/fs/bpf") {
+	if !lexicalPathWithin(cfg.BPFFSDir, "/sys/fs/bpf") {
 		return custodyConfigError("bpffs_dir", "bpffs directory must live under /sys/fs/bpf")
 	}
-	if !pathWithin(cfg.RingbufMapPath, cfg.BPFFSDir) {
+	if !lexicalPathWithin(cfg.RingbufMapPath, cfg.BPFFSDir) {
 		return custodyConfigError("ringbuf_map_path", "ringbuf map path must live under the daemon bpffs directory")
 	}
 
@@ -316,7 +316,10 @@ func cleanPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func pathWithin(child string, parent string) bool {
+// lexicalPathWithin performs lexical-only path containment without checking
+// symlinks or filesystem state. DO NOT USE for production path enforcement —
+// perform symlink-aware realpath resolution first.
+func lexicalPathWithin(child string, parent string) bool {
 	// This is lexical-only containment for a dry-run/no-IO scaffold. Any future
 	// privileged filesystem write must add symlink-aware realpath, ownership, and
 	// mode checks before trusting these paths on disk.

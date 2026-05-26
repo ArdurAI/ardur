@@ -610,11 +610,16 @@ def _native_pre_tool_use_stamp_matches(command_path: Path, expected_source_diges
     return observed_binary_digest == binary_digest
 
 
+_KNOWN_CC_BASENAMES = frozenset({"cc", "clang", "gcc", "clang++", "g++"})
+
+
 def _candidate_native_compilers() -> list[str]:
     candidates: list[str] = []
     explicit = os.environ.get("ARDUR_HOOK_CC", "").strip()
     if explicit:
-        candidates.append(explicit)
+        basename = os.path.basename(explicit.rstrip("/"))
+        if basename in _KNOWN_CC_BASENAMES:
+            candidates.append(explicit)
     candidates.extend(["cc", "clang", "gcc"])
 
     discovered: list[str] = []
@@ -961,7 +966,10 @@ def _handle_daemon_request(request: dict[str, Any], *, default_keys_dir: Path | 
     # to avoid JSON envelope construction overhead on the hot path.
     raw_phase = request.get("phase")
     if raw_phase is None:
-        output = handle_pre_tool_use(dict(request or {}), keys_dir=default_keys_dir)
+        hook_input = dict(request or {})
+        if not hook_input.get("tool_name") or not hook_input.get("tool_input"):
+            raise RuntimeError("passthrough request missing required hook fields (tool_name, tool_input)")
+        output = handle_pre_tool_use(hook_input, keys_dir=default_keys_dir)
         if not is_valid_pre_tool_use_output(output):
             raise RuntimeError("pre hook handler returned invalid passthrough output")
         return output

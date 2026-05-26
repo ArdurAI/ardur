@@ -3,13 +3,14 @@
 Ardur security is based on least privilege, explicit declaration, runtime
 enforcement, and verifiable evidence.
 
-> **Conformance scope (updated 2026-05-14):** This page describes the
-> *design intent* of the protocol. The reference proxy in `python/vibap/`
-> implements all three conformance profiles — **Delegation-Core**,
-> **MIC-State**, and **MIC-Evidence** — as of the 2026-05-14 hardening
-> round. All four design-only gaps identified in the 2026-04-28 audit
-> are closed. See `docs/specs/verifier-contract-v0.1.md` Section 13
-> ("Reference Implementation Conformance Notes") for the current map.
+> **Conformance scope (2026-05-19 update):** The reference proxy in
+> `python/vibap/` implements all three conformance profiles of
+> `verifier-contract-v0.1`: **Delegation-Core**, **MIC-State**, and
+> **MIC-Evidence**. The four design-only gaps identified in the 2026-04-28
+> hostile audit are closed. See `docs/specs/verifier-contract-v0.1.md`
+> Section 13 ("Reference Implementation Conformance Notes") for the
+> conformance map and `python/tests/test_mic_conformance.py` for the
+> 29-test validation suite.
 
 ## Core security gates (enforced by the reference proxy)
 
@@ -25,18 +26,19 @@ enforcement, and verifiable evidence.
 - approval-rate-limit when the Mission Declaration declares an approval
   policy
 
-## Additional conformance gates (enforced as of 2026-05-14)
+## Design-only gates (NOT yet enforced by the reference proxy)
 
-These checks are active under MIC-State and MIC-Evidence profiles:
+All `MUST` clauses from `verifier-contract-v0.1.md` that were previously
+design-only are now enforced as of the 2026-05-19 hardening round
+(t_dcbf560b). The reference proxy now implements:
 
-- visibility check (`visibility != "full"` → `insufficient_evidence`)
-- envelope-signature verification (fail-closed: absent or non-True → violation)
 - runtime-observed `observed_manifest_digest == MD.tool_manifest_digest`
-- per-grant `last_seen_receipts` tracking
-- MIC-Evidence hidden-hop detection and missing-parent-receipt detection
+- per-grant `last_seen_receipts` tracking with replay across proxy restarts
+- MIC-Evidence hidden-hop detection via visible receipt linkage
+- explicit invocation-envelope signature verification
 
-See `docs/specs/verifier-contract-v0.1.md` Section 13 for the full conformance
-map and `python/tests/test_mic_conformance.py` for the 29-test validation suite.
+No additional verifier layers are required for MIC-State or MIC-Evidence
+conformance.
 
 ## Threats in scope
 
@@ -83,7 +85,7 @@ proven protections until their proof entries reach L5 for the claimed scope.
 When Ardur lacks evidence, it must deny or return `unknown` rather than
 claim safe success.
 
-## Honesty boundary
+## Enforcement boundary
 
 This document and the comparison docs under `docs/comparisons/` describe
 what the protocol guarantees and what the reference proxy enforces today.

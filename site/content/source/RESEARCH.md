@@ -2,7 +2,7 @@
 title: "Research Notes"
 description: "This public repo shape is based on a scan of strong public AI infrastructure"
 source_path: "RESEARCH.md"
-source_sha256: "5644a2a302ee76624c8ba4976ab20888122ce53c7c3a21f244f6f2cf733abe97"
+source_sha256: "0045e34a6832565c51e01912569a71241d8c48043530c5e93de48825d0411833"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -63,13 +63,9 @@ the implementation lineage, evidence model, or protocol research roots. The
 public repo should preserve those names when they are technically meaningful
 and avoid obsolete product codenames in public-facing copy.
 
-## Why This Repo Opens In Phases
+## What Is Public Now
 
-This repo opens in phases so the public surface stays understandable and
-truthful while code, deployment material, proof artifacts, and examples are
-curated into the public layout.
-
-The repo now includes:
+The repo includes:
 
 - intent
 - status

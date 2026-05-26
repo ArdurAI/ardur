@@ -260,3 +260,325 @@ def test_rwt_phase1_harness_version_info_handles_missing_ardur_binary(tmp_path):
 
     assert versions["python"].startswith("Python ")
     assert versions["ardur"] == "missing"
+
+
+def test_rwt_phase1_bundle_redacts_local_absolute_paths(monkeypatch, tmp_path):
+    harness = _load_harness()
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").write_text("gitdir: ../.git/worktrees/fake\n", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    out_dir = output_dir / "out"
+    fixtures = output_dir / "fixtures"
+    output_dir.mkdir(parents=True)
+    out_dir.mkdir(parents=True)
+    fixtures.mkdir(parents=True)
+    temp_root = tmp_path / "temp-root"
+    home = temp_root / "home"
+    ardur_home = temp_root / "ardur-home"
+    project = temp_root / "project"
+    evidence = temp_root / "evidence"
+    for path in [temp_root, home, ardur_home, project, evidence]:
+        path.mkdir(parents=True, exist_ok=True)
+
+    ctx = SimpleNamespace(
+        repo=fake_repo,
+        output_dir=output_dir,
+        out_dir=out_dir,
+        fixtures=fixtures,
+        started_at="2026-05-12T00:00:00+00:00",
+        operator_profile="planner",
+        allow_dirty=False,
+        temp_root=temp_root,
+        home=home,
+        ardur_home=ardur_home,
+        project=project,
+        evidence=evidence,
+        python_bin="/Users/test-user/.local/bin/python3.13",
+        ardur_bin=temp_root / "venv" / "bin" / "ardur",
+        cleanup_temp_root_removed=False,
+        cleanup_retained_path=None,
+        gate_results=[
+            harness.GateResult("RWT-1", ["fresh-user", "integration", "matrix"], harness.STATUS_PASS, "ok"),
+            harness.GateResult("RWT-2", ["fixture", "integration"], harness.STATUS_PASS, "ok"),
+            harness.GateResult("RWT-3", ["real-host", "fresh-user", "integration"], harness.STATUS_SKIP_GATED, "ok"),
+        ],
+        commands=[
+            harness.CommandRecord(
+                id="example",
+                cwd=str(project),
+                argv_redacted=[
+                    "/Users/test-user/.local/bin/python3.13",
+                    str(temp_root / "venv" / "bin" / "ardur"),
+                    str(fake_repo / "plugins" / "claude-code"),
+                    str(ardur_home),
+                ],
+                exit_code=0,
+                stdout_redacted_path="out/example.stdout.txt",
+                stderr_redacted_path="out/example.stderr.txt",
+                elapsed_ms=1,
+            )
+        ],
+    )
+
+    monkeypatch.setattr(harness, "short_git", lambda _repo, *_args: "abc123def456")
+    monkeypatch.setattr(harness, "git_text", lambda _repo, *_args: "")
+    monkeypatch.setattr(harness, "collect_artifacts", lambda _ctx: {"reports": []})
+    monkeypatch.setattr(harness, "collect_receipts", lambda _ctx: {"verify_status": "pass", "receipt_count": 0})
+    monkeypatch.setattr(
+        harness,
+        "host_info",
+        lambda: {"os": "Darwin", "arch": "arm64", "kernel": "test", "container": "unknown", "wsl": "false"},
+    )
+    monkeypatch.setattr(
+        harness,
+        "version_info",
+        lambda _ctx: {"python": "Python 3.13.0", "ardur": "0.0.0", "git": "git version test"},
+    )
+
+    bundle = harness.bundle_for(
+        ctx,
+        repo_info={
+            "worktree": str(fake_repo),
+            "head": "abc123def456",
+            "origin_dev": "abc123def456",
+            "expected_origin_dev": "abc123def456",
+            "origin_dev_ancestor_of_head": True,
+            "clean_before": True,
+            "dirty_paths_before": [],
+        },
+        repo_blocker=None,
+    )
+    serialized = json.dumps(bundle, sort_keys=True)
+
+    assert "<REPO>" in serialized
+    assert "<RWT_HOME>" in serialized
+    assert "<RWT_ARDUR_HOME>" in serialized
+    assert "<RWT_PROJECT>" in serialized
+    assert "<RWT_EVIDENCE>" in serialized
+    assert "<RWT_OUTPUT>" in serialized
+    assert "<PYTHON>" in serialized
+    assert "<ARDUR_BIN>" in serialized
+    assert bundle["redaction"]["path_scan_hits"] == 0
+    assert "generic_local_absolute_paths" in bundle["redaction"]["path_patterns_applied"]
+    assert "file_uri_targets" in bundle["redaction"]["path_redaction_scope"]
+    assert str(fake_repo) not in serialized
+    assert str(temp_root) not in serialized
+    assert "/Users/" not in serialized
+
+
+def test_rwt_phase1_shareable_sanitizer_redacts_adversarial_local_paths(tmp_path):
+    harness = _load_harness()
+    repo = tmp_path / "repo"
+    output_dir = tmp_path / "output"
+    temp_root = tmp_path / "temp-root"
+    home = temp_root / "home"
+    ardur_home = temp_root / "ardur-home"
+    project = temp_root / "project"
+    evidence = temp_root / "evidence"
+    ardur_bin = temp_root / "venv" / "bin" / "ardur"
+    ctx = SimpleNamespace(
+        repo=repo,
+        output_dir=output_dir,
+        temp_root=temp_root,
+        home=home,
+        ardur_home=ardur_home,
+        project=project,
+        evidence=evidence,
+        python_bin="/Users/test-user/.local/bin/python3.13",
+        ardur_bin=ardur_bin,
+    )
+    payload = {
+        "json_string_values": [
+            "/Users/alice/.hermes/workspace/projects/ardur/private.txt",
+            "/home/alice/.config/ardur/private.txt",
+            "/tmp/ardur-rwt-phase1/private-output.txt",
+            "/private/var/folders/zz/ardur-rwt-phase1/private-output.txt",
+            "/var/folders/zz/ardur-rwt-phase1/private-output.txt",
+            "/private/tmp/ardur-symlink-like/../private-output.txt",
+            "/tmp/ユニコード/秘密-output.txt",
+            "file:///Users/alice/private/file-uri-output.txt",
+            "file:///tmp/ardur-rwt-phase1/file-uri-output.txt",
+        ],
+        "log_error_text": "error while opening /tmp/ardur-rwt-phase1/private-output.txt from file:///home/alice/private/file-uri-output.txt",
+        "secret_adjacent_path": f"OPENROUTER_API_KEY={_FAKE_OPENROUTER_KEY} path=/tmp/ardur-rwt-phase1/secret-adjacent.txt",
+        "project_file": str(project / "ARDUR.md"),
+        "ctx_roots": [str(repo), str(output_dir), str(temp_root), str(home), str(ardur_home), str(project), str(evidence), str(ardur_bin)],
+    }
+
+    sanitized = harness.sanitize_shareable_value(payload, ctx)
+    serialized = json.dumps(sanitized, sort_keys=True, ensure_ascii=False)
+
+    forbidden_fragments = [
+        "/Users/",
+        "/home/",
+        "/tmp/",
+        "/private/var/folders/",
+        "/var/folders/",
+        "/private/tmp/",
+        "ardur-rwt-phase1",
+        "file-uri-output.txt",
+        "private-output.txt",
+        "secret-adjacent.txt",
+        "秘密-output.txt",
+        _FAKE_OPENROUTER_KEY,
+        str(repo),
+        str(output_dir),
+        str(temp_root),
+        str(home),
+        str(ardur_home),
+        str(project),
+        str(evidence),
+        str(ardur_bin),
+    ]
+    for forbidden in forbidden_fragments:
+        assert forbidden not in serialized
+    assert "[REDACTED]" in serialized
+    assert "<REPO>" in serialized
+    assert "<RWT_TEMP>" in serialized
+    assert "<RWT_OUTPUT>" in serialized
+    assert "<RWT_PROJECT>/ARDUR.md" in serialized
+    assert "<ABSOLUTE_PATH:" in serialized or "<FILE_URI:" in serialized
+
+
+def test_rwt_phase1_path_leak_scan_flags_tmp_and_file_uri_paths(tmp_path):
+    harness = _load_harness()
+    ctx = SimpleNamespace(
+        repo=tmp_path / "repo",
+        output_dir=tmp_path / "output",
+        temp_root=tmp_path / "temp-root",
+        home=tmp_path / "temp-root" / "home",
+        ardur_home=tmp_path / "temp-root" / "ardur-home",
+        project=tmp_path / "temp-root" / "project",
+        evidence=tmp_path / "temp-root" / "evidence",
+        python_bin="/Users/test-user/.local/bin/python3.13",
+        ardur_bin=tmp_path / "temp-root" / "venv" / "bin" / "ardur",
+    )
+    text = "bundle leak: /tmp/ardur-rwt-phase1/private-output.txt and file:///tmp/ardur-rwt-phase1/file-uri-output.txt; public https://example.test/docs/path stays public"
+
+    hits = harness.path_leak_scan_hits(text, ctx)
+
+    assert any(hit.startswith("/tmp/") for hit in hits)
+    assert any(hit.startswith("file://") for hit in hits)
+    assert not any("example.test" in hit for hit in hits)
+
+
+def test_rwt_phase1_declared_shareable_artifacts_are_path_clean(tmp_path):
+    harness = _load_harness()
+    output_dir = tmp_path / "output"
+    out_dir = output_dir / "out"
+    fixtures = output_dir / "fixtures"
+    temp_root = tmp_path / "temp-root"
+    project = temp_root / "project"
+    ardur_home = temp_root / "ardur-home"
+    for path in [out_dir, fixtures, project, ardur_home]:
+        path.mkdir(parents=True, exist_ok=True)
+    ctx = SimpleNamespace(
+        repo=tmp_path / "repo",
+        output_dir=output_dir,
+        out_dir=out_dir,
+        fixtures=fixtures,
+        temp_root=temp_root,
+        home=temp_root / "home",
+        ardur_home=ardur_home,
+        project=project,
+        evidence=temp_root / "evidence",
+        python_bin=sys.executable,
+        ardur_bin=temp_root / "venv" / "bin" / "ardur",
+        env=os.environ.copy(),
+        commands=[],
+    )
+
+    harness.write_rwt2_fixtures(ctx)
+    result = harness.run_capture(
+        ctx,
+        "rwt2-claude-code-report",
+        [
+            sys.executable,
+            "-c",
+            "import json, os; print(json.dumps({'cwd': os.getcwd(), 'tmp': '/tmp/ardur-rwt-phase1/private-output.txt', 'uri': 'file:///tmp/ardur-rwt-phase1/file-uri-output.txt'}))",
+        ],
+        cwd=project,
+    )
+    assert str(project) in result.stdout
+    assert "/tmp/ardur-rwt-phase1/private-output.txt" in result.stdout
+
+    artifacts = harness.collect_artifacts(ctx)
+    declared = sorted(
+        set(artifacts["fixtures"])
+        | set(artifacts["reports"])
+        | set(artifacts["redacted_stdout_files"])
+    )
+    assert declared
+    for relative_path in declared:
+        artifact_text = (output_dir / relative_path).read_text(encoding="utf-8")
+        assert harness.path_leak_scan_hits(artifact_text, ctx) == []
+        assert harness.secret_scan_hits(artifact_text) == []
+
+
+def test_rwt_phase1_write_bundle_fails_when_post_write_path_leaks_detected(monkeypatch, tmp_path):
+    harness = _load_harness()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True)
+    temp_root = tmp_path / "temp-root"
+    temp_root.mkdir(parents=True)
+    ctx = SimpleNamespace(
+        output_dir=output_dir,
+        repo=tmp_path / "repo",
+        temp_root=temp_root,
+        home=temp_root / "home",
+        ardur_home=temp_root / "ardur-home",
+        project=temp_root / "project",
+        evidence=temp_root / "evidence",
+        python_bin="/Users/test-user/.local/bin/python3.13",
+        ardur_bin=temp_root / "venv" / "bin" / "ardur",
+    )
+
+    monkeypatch.setattr(
+        harness,
+        "bundle_for",
+        lambda _ctx, _repo_info, _repo_blocker: {
+            "status": harness.STATUS_PASS,
+            "redaction": {"secret_scan_hits": 0, "notes": []},
+            "repo": {"worktree": "/Users/test-user/private/repo"},
+            "tmp_log": "/tmp/ardur-rwt-phase1/private-output.txt",
+            "private_tmp_log": "/private/tmp/ardur-rwt-phase1/private-output.txt",
+            "file_uri_log": "file:///tmp/ardur-rwt-phase1/file-uri-output.txt",
+            "unicode_log": "/tmp/ユニコード/秘密-output.txt",
+            "secret_adjacent_path": f"OPENROUTER_API_KEY={_FAKE_OPENROUTER_KEY} path=/tmp/ardur-rwt-phase1/secret-adjacent.txt",
+        },
+    )
+
+    bundle_path = harness.write_bundle(ctx, repo_info={}, repo_blocker=None)
+    persisted_text = bundle_path.read_text(encoding="utf-8")
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+
+    assert bundle["status"] == harness.STATUS_FAIL
+    assert bundle["redaction"]["path_scan_hits"] > 0
+    assert "post_write_path_leak_scan" in bundle["redaction"]["path_patterns_applied"]
+    assert any("path leak" in note.lower() for note in bundle["redaction"]["notes"])
+    assert any("absolute_path_marker:/Users" in note for note in bundle["redaction"]["notes"])
+    forbidden_values = [
+        "/Users/",
+        "/home/",
+        "/private/var/folders/",
+        "/var/folders/",
+        "/tmp/",
+        "/private/tmp/",
+        "/Users/test-user/private/repo",
+        "ardur-rwt-phase1",
+        "file-uri-output.txt",
+        "private-output.txt",
+        "secret-adjacent.txt",
+        "秘密-output.txt",
+        _FAKE_OPENROUTER_KEY,
+        str(temp_root),
+        str(output_dir),
+        ctx.python_bin,
+        str(ctx.ardur_bin),
+    ]
+    for forbidden in forbidden_values:
+        assert forbidden not in persisted_text
+    notes_text = json.dumps(bundle["redaction"]["notes"], sort_keys=True)
+    for forbidden in forbidden_values:
+        assert forbidden not in notes_text

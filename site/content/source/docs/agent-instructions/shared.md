@@ -2,7 +2,7 @@
 title: "Shared Agent Contract"
 description: "These rules apply to every agent runtime: Conductor, Codex, Claude, and any"
 source_path: "docs/agent-instructions/shared.md"
-source_sha256: "b762bfd247cf49a7ab336719bf96db2d6261e042d62ecbd5a3834e7b89c58b33"
+source_sha256: "26fd3b26f61614859200cd57520fb7141e0932875296a0039125487f30012085"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -64,6 +64,10 @@ When sources conflict, state the conflict and verify from the current tree.
   explicit limitation.
 - Do not add secrets, machine-local private paths, generated credentials, or
   local session state.
+- Live external-API tests are allowed only when they materially verify the task,
+  are explicit/opt-in, and use environment credentials approved for that local
+  run. Keep calls minimal and cost-aware; never print, log, persist, or commit
+  secret values. Public CI must not require private credentials.
 - Update docs when behavior or workflow changes.
 
 ## Validation

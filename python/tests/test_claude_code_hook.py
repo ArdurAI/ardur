@@ -51,6 +51,94 @@ def _deny_reason(output: dict) -> str:
     return hook_output["permissionDecisionReason"]
 
 
+def _issue_wildcard_test_passport(
+    tmp_path: Path,
+    *,
+    extra_claims: dict[str, Any] | None = None,
+) -> str:
+    private_key, _public_key = generate_keypair(keys_dir=tmp_path)
+    mission = MissionPassport(
+        agent_id="alice",
+        mission="test Claude Code trace path containment",
+        allowed_tools=["*"],
+        forbidden_tools=[],
+        resource_scope=[],
+        max_tool_calls=20,
+        max_duration_s=600,
+    )
+    return issue_passport(mission, private_key, ttl_s=3600, extra_claims=extra_claims)
+
+
+def _exercise_receipt_lock_and_subagent_sinks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    token: str,
+) -> Path:
+    chain_dir = tmp_path / "chain"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(tmp_path))
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+
+    from vibap.claude_code_hook import handle_post_tool_use, handle_pre_tool_use, handle_subagent_start
+
+    pre_output = handle_pre_tool_use(
+        {
+            "session_id": "sess-1",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_use_id": "toolu_read_1",
+            "tool_input": {"file_path": str(tmp_path / "README.md")},
+        },
+        keys_dir=tmp_path,
+    )
+    assert pre_output["continue"] is True
+
+    post_output = handle_post_tool_use(
+        {
+            "session_id": "sess-1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Read",
+            "tool_use_id": "toolu_read_1",
+            "tool_input": {"file_path": str(tmp_path / "README.md")},
+            "tool_response": {"content": "hello"},
+        },
+        keys_dir=tmp_path,
+    )
+    assert post_output == {"continue": True}
+
+    start_output = handle_subagent_start(
+        {
+            "session_id": "sess-1",
+            "hook_event_name": "SubagentStart",
+            "agent_id": "agent-child-1",
+            "agent_type": "Explore",
+        },
+        keys_dir=tmp_path,
+    )
+    assert start_output["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
+    return chain_dir
+
+
+def _assert_chain_artifacts_are_single_nested_trace(chain_dir: Path) -> Path:
+    receipts = list(chain_dir.rglob("receipts.jsonl"))
+    locks = list(chain_dir.rglob(".lock"))
+    registries = list(chain_dir.rglob("subagents.jsonl"))
+    assert len(receipts) == 1
+    assert len(locks) == 1
+    assert len(registries) == 1
+
+    trace_dir = receipts[0].parent
+    assert trace_dir.resolve().parent == chain_dir.resolve()
+    assert locks[0].parent == trace_dir
+    assert registries[0].parent == trace_dir
+    assert (chain_dir / "receipts.jsonl").exists() is False
+    assert (chain_dir / ".lock").exists() is False
+    assert (chain_dir / "subagents.jsonl").exists() is False
+    assert len(receipts[0].read_text(encoding="utf-8").splitlines()) == 3
+    assert len(registries[0].read_text(encoding="utf-8").splitlines()) == 1
+    return trace_dir
+
+
 def test_loads_passport_from_env_var_path(tmp_path, monkeypatch):
     token, _ = _issue_test_passport(tmp_path)
     passport_file = tmp_path / "active.jwt"
@@ -162,6 +250,87 @@ def test_chain_per_trace_does_not_collide(tmp_path):
     append_receipt(state_b, "b-only.jwt")
     assert previous_receipt_hash(state_a) == "sha-256:" + hashlib.sha256("a-only.jwt".encode()).hexdigest()
     assert previous_receipt_hash(state_b) == "sha-256:" + hashlib.sha256("b-only.jwt".encode()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "bad_trace_id",
+    [".", "..", "bad/trace", r"bad\trace", "/tmp/absolute-out", "bad trace"],
+)
+def test_unsafe_env_trace_ids_do_not_escape_or_collapse_chain_paths_across_hook_sinks(
+    tmp_path,
+    monkeypatch,
+    bad_trace_id: str,
+):
+    token = _issue_wildcard_test_passport(tmp_path)
+    monkeypatch.setenv("ARDUR_TRACE_ID", bad_trace_id)
+
+    chain_dir = _exercise_receipt_lock_and_subagent_sinks(tmp_path, monkeypatch, token)
+
+    assert not (tmp_path / "receipts.jsonl").exists()
+    assert not (tmp_path / ".lock").exists()
+    assert not (tmp_path / "subagents.jsonl").exists()
+    trace_dir = _assert_chain_artifacts_are_single_nested_trace(chain_dir)
+    assert trace_dir.name != bad_trace_id
+    assert "/" not in trace_dir.name
+    assert "\\" not in trace_dir.name
+
+
+def test_unsafe_passport_jti_fallback_material_is_contained_and_single_segment(tmp_path, monkeypatch):
+    cases = {
+        "dotdot": "../passport-out",
+        "slash": "bad/trace",
+        "backslash": r"bad\trace",
+        "absolute": str(tmp_path / "absolute-out"),
+        "space": "bad trace",
+    }
+    for name, bad_jti in cases.items():
+        case_dir = tmp_path / name
+        case_dir.mkdir()
+        token = _issue_wildcard_test_passport(case_dir, extra_claims={"jti": bad_jti})
+        monkeypatch.delenv("ARDUR_TRACE_ID", raising=False)
+
+        chain_dir = _exercise_receipt_lock_and_subagent_sinks(case_dir, monkeypatch, token)
+
+        assert not (case_dir / "receipts.jsonl").exists()
+        assert not (case_dir / ".lock").exists()
+        assert not (case_dir / "subagents.jsonl").exists()
+        trace_dir = _assert_chain_artifacts_are_single_nested_trace(chain_dir)
+        assert trace_dir.name.startswith("trace-")
+        assert "/" not in trace_dir.name
+        assert "\\" not in trace_dir.name
+        assert trace_dir.name not in {".", "..", "bad", "trace", "passport-out", "absolute-out"}
+
+
+def test_safe_dot_containing_env_trace_id_is_preserved_as_single_segment(tmp_path, monkeypatch):
+    token = _issue_wildcard_test_passport(tmp_path)
+    monkeypatch.setenv("ARDUR_TRACE_ID", "trace.v1-alpha_2")
+
+    chain_dir = _exercise_receipt_lock_and_subagent_sinks(tmp_path, monkeypatch, token)
+
+    trace_dir = _assert_chain_artifacts_are_single_nested_trace(chain_dir)
+    assert trace_dir.name == "trace.v1-alpha_2"
+
+
+def test_resolve_chain_state_rejects_path_material_before_artifact_creation(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chain"))
+    from vibap.claude_code_hook import resolve_chain_state
+
+    unsafe_trace_ids = [
+        ".",
+        "..",
+        "bad/trace",
+        r"bad\trace",
+        str(tmp_path / "absolute-out"),
+        "bad trace",
+    ]
+    for trace_id in unsafe_trace_ids:
+        with pytest.raises(ValueError):
+            resolve_chain_state(trace_id=trace_id)
+
+    assert not (tmp_path / "receipts.jsonl").exists()
+    assert not (tmp_path / ".lock").exists()
+    assert not (tmp_path / "subagents.jsonl").exists()
+    assert not (tmp_path / "chain").exists()
 
 
 def test_allow_path_returns_continue_true_and_chains_receipt(tmp_path, monkeypatch):

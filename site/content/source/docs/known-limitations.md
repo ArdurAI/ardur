@@ -1,8 +1,8 @@
 ---
 title: "Known Limitations"
-description: "This page distinguishes honest product boundaries from implementation bugs."
+description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "90f798e5e4fbfab83e371a75e7a919a9a727bc18c227fdb27d87d9288d5d4dec"
+source_sha256: "2618c490d5a56821a2211831fd62079135e19fe7585a869547e097902e771a96"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -17,7 +17,7 @@ evidence_levels: ["limitation-backed"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-This page distinguishes honest product boundaries from implementation bugs.
+This page distinguishes documented product boundaries from implementation bugs.
 
 ## Research and foundation surfaces not yet broad runtime claims
 
@@ -38,7 +38,9 @@ This page distinguishes honest product boundaries from implementation bugs.
 ## Evidence limits
 
 If a delegated tool or gateway can hide all relevant side effects and emits no
-evidence, Ardur must classify the result as `unknown` rather than safe.
+evidence, Ardur must classify the result as `insufficient_evidence` (resulting
+in an `unknown` verdict at the session/verifier level) rather than safe. See
+[`coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the receipt-level evidence taxonomy.
 
 ## Product limits
 
@@ -49,6 +51,28 @@ Ardur is not:
 - a replacement for identity, workload isolation, or network controls
 
 Those controls still matter around Ardur.
+
+## Verifier-contract conformance (reference proxy, 2026-05-19)
+
+The reference Python proxy in `python/vibap/` implements all three
+conformance profiles of `verifier-contract-v0.1`: **Delegation-Core**,
+**MIC-State**, and **MIC-Evidence**. The four design-only gaps identified
+in the 2026-04-28 hostile audit are closed by task t_dcbf560b:
+
+- `observed_manifest_digest == MD.tool_manifest_digest` (Section 6.3 #6)
+  — enforced after mission policy resolution
+- per-grant `last_seen_receipts` tracking (Section 5.7) — replayed from
+  durable receipt log across proxy restarts
+- MIC-Evidence visible-receipt-linkage / hidden-hop detection
+  (Section 6.3 #7) — child receipts carry `parent_receipt_id` linking to
+  the parent grant's latest receipt
+- explicit invocation-envelope signature (Section 6.3 #5) — verified via
+  `envelope_signature_valid` telemetry field
+
+All 29 MIC conformance tests in `python/tests/test_mic_conformance.py`
+pass, validating all three profiles. See
+`docs/specs/verifier-contract-v0.1.md` Section 13 for the full conformance
+map.
 
 ## Mission Declaration schema enforcement (2026-04-28 hardening)
 
@@ -64,7 +88,7 @@ are intentional, not oversights:
   that don't use approvals to carry an `operator_id`.
 - **`probing_rate_limit`** — round-2 audit flagged validate-but-don't-
   enforce theater. The runtime currently has no rate-limiter consuming
-  the value, so requiring it without downstream effect is honesty debt.
+  the value, so requiring it without downstream effect is accuracy debt.
   It returns to the always-required list once a per-mission rate-limiter
   actually consumes it.
 

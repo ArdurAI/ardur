@@ -84,6 +84,7 @@
     "python": "source/python/",
     "python/vibap": "source/python/vibap/",
     "python/vibap/_specs": "source/python/vibap/_specs/",
+    "reports": "source/reports/",
     "site": "source/site/"
   },
   "markdown": {
@@ -126,6 +127,8 @@
     "docs/engineering-standards.md": "source/docs/engineering-standards/",
     "docs/guides/ardur-personal-hub.md": "source/docs/guides/ardur-personal-hub/",
     "docs/guides/claude-code-mvp-quickstart.md": "source/docs/guides/claude-code-mvp-quickstart/",
+    "docs/guides/phase1-demo-packet.md": "source/docs/guides/phase1-demo-packet/",
+    "docs/guides/read-phase1-evidence-bundle.md": "source/docs/guides/read-phase1-evidence-bundle/",
     "docs/known-limitations.md": "source/docs/known-limitations/",
     "docs/mvp-evaluator-guide.md": "source/docs/mvp-evaluator-guide/",
     "docs/protocol-roots.md": "source/docs/protocol-roots/",
@@ -158,6 +161,8 @@
     "go/pkg/kernelcapture/README.md": "source/go/pkg/kernelcapture/readme/",
     "plugins/claude-code/README.md": "source/plugins/claude-code/readme/",
     "python/README.md": "source/python/readme/",
+    "reports/LINEAGE_BUDGET_DELEGATION_PLAN_REVIEW_2026-05-13.md": "source/reports/lineage_budget_delegation_plan_review_2026-05-13/",
+    "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md": "source/reports/phase2_daemon_kernel_boundary_claim_ledger_2026-05-11/",
     "site/README.md": "source/site/readme/"
   }
 }

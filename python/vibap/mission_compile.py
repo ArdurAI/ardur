@@ -1,7 +1,7 @@
 """Lowering compiler: Mission Declaration typed policies -> Biscuit facts/checks.
 
 ``MissionDeclaration`` already carries typed ``resource_policies``,
-``effect_policies``, and ``flow_policies`` over the wire. Until now they
+``effect_policies``, ``flow_policies``, and ``lineage_budgets`` over the wire. Until now they
 were validated for shape but not enforced -- ``biscuit_passport`` only
 emitted facts from the flat ``MissionPassport`` (allowed/forbidden tools,
 resource_scope as bare strings).
@@ -46,7 +46,8 @@ class MissionPolicyNotImplementedError(NotImplementedError):
     yet wired up.
 
     This is *louder than silence*: before this guard existed, a mission
-    carrying non-empty ``effect_policies`` or ``flow_policies`` would serialize
+    carrying non-empty ``effect_policies``, ``flow_policies``, or
+    ``lineage_budgets`` would serialize
     over the wire without any corresponding Biscuit check — the mission
     author thought they were bounded, but the proxy enforced nothing. That
     silent no-op is more dangerous than failing loudly, because the author
@@ -162,17 +163,40 @@ def lower_flow_policies(
     return [], []
 
 
+def lower_lineage_budgets(
+    raw_budgets: Sequence[dict[str, Any]],
+) -> tuple[list[Fact], list[Check]]:
+    """Compile mission-declared lineage budgets to Biscuit primitives.
+
+    Phase 1 intentionally defers this category. Runtime delegation already uses
+    ``FileLineageBudgetLedger`` to reserve child budgets, but a non-empty
+    mission-level ``lineage_budgets`` declaration is not yet lowered into
+    verifier state. Raising here keeps unsupported budget policy from being
+    accepted as a silent no-op.
+    """
+    if raw_budgets:
+        raise MissionPolicyNotImplementedError(
+            "lineage_budgets lowering is Phase 1 deferred; mission-declared "
+            "lineage budgets are not enforced by the compiler yet. Remove "
+            "lineage_budgets from the mission until support lands, or "
+            "implement lower_lineage_budgets() and wire it into issuance."
+        )
+    return [], []
+
+
 def compile_mission(
     resource_policies: Sequence[dict[str, Any]] = (),
     effect_policies: Sequence[dict[str, Any]] = (),
     flow_policies: Sequence[dict[str, Any]] = (),
+    lineage_budgets: Sequence[dict[str, Any]] = (),
 ) -> tuple[list[Fact], list[Check]]:
     """Compile a mission's typed policies into Biscuit facts and checks.
 
     Aggregates :func:`lower_resource_policies`, :func:`lower_effect_policies`,
-    and :func:`lower_flow_policies`. Non-empty effect/flow policies currently
-    raise :class:`MissionPolicyNotImplementedError` — see that class for why
-    silence was the wrong default.
+    :func:`lower_flow_policies`, and :func:`lower_lineage_budgets`. Non-empty
+    effect/flow/lineage budget policies currently raise
+    :class:`MissionPolicyNotImplementedError` — see that class for why silence
+    was the wrong default.
     """
     facts: list[Fact] = []
     checks: list[Check] = []
@@ -180,6 +204,7 @@ def compile_mission(
         (lower_resource_policies, resource_policies),
         (lower_effect_policies, effect_policies),
         (lower_flow_policies, flow_policies),
+        (lower_lineage_budgets, lineage_budgets),
     ):
         sub_facts, sub_checks = lower_fn(input_policies)
         facts.extend(sub_facts)
@@ -188,7 +213,7 @@ def compile_mission(
 
 
 def lower_resource_policies(
-    raw_policies: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    raw_policies: Sequence[dict[str, Any]],
 ) -> tuple[list[Fact], list[Check]]:
     """Compile ``MissionDeclaration.resource_policies`` to Biscuit primitives.
 

@@ -2,7 +2,7 @@
 title: "Engineering Standards"
 description: "These rules define the working standard for Ardur. They are inspired by public"
 source_path: "docs/engineering-standards.md"
-source_sha256: "b22014bc0fa6f339988d965595b3fa7c9a09b0dd9ca768f65b1cd773cc3f00c4"
+source_sha256: "b06fe3b1a6fc38682e53997877c9906ffd14fb848e030206084ed8accb9953dd"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -108,7 +108,10 @@ specific company.
 - Regression tests are mandatory for bug fixes.
 - Tests must name the behavior they prove, not just the function they call.
 - Avoid live paid-provider tests by default. Make them explicit opt-in with
-  environment variables and cost notes.
+  environment variables and cost notes. If an operator explicitly approves a
+  local live-provider smoke test, load credentials from the environment, never
+  print, log, persist, or commit secret values, and skip/report the test if the
+  credential is absent.
 - Prefer deterministic fixtures over sleeps, random timing, or live network
   dependencies.
 - Add adversarial tests for parsers, auth, policy, revocation, delegation,

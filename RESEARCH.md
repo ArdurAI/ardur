@@ -46,13 +46,9 @@ the implementation lineage, evidence model, or protocol research roots. The
 public repo should preserve those names when they are technically meaningful
 and avoid obsolete product codenames in public-facing copy.
 
-## Why This Repo Opens In Phases
+## What Is Public Now
 
-This repo opens in phases so the public surface stays understandable and
-truthful while code, deployment material, proof artifacts, and examples are
-curated into the public layout.
-
-The repo now includes:
+The repo includes:
 
 - intent
 - status

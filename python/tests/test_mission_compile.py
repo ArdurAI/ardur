@@ -182,6 +182,15 @@ class TestCompileMissionAggregator:
         assert len(facts) == 2
         assert len(checks) == 1
 
+    def test_lineage_budgets_at_aggregator_raises_phase1_deferred(self) -> None:
+        with pytest.raises(
+            MissionPolicyNotImplementedError,
+            match=r"lineage_budgets.*Phase 1.*deferred",
+        ):
+            compile_mission(
+                lineage_budgets=[{"type": "max_child_tool_calls", "limit": 3}]
+            )
+
     def test_effect_policies_at_aggregator_raises(self) -> None:
         with pytest.raises(MissionPolicyNotImplementedError, match="effect_policies"):
             compile_mission(

@@ -2,7 +2,7 @@
 title: "Ardur Examples"
 description: "Working examples of Ardur governing AI agents across major frameworks and local"
 source_path: "examples/README.md"
-source_sha256: "d77bab01072e8a72722ce2ee1d2ff6c8dad85410914bf85cb65839444636f218"
+source_sha256: "106e989b7d5177474c262e19efa3fc4a39107f869fd2e2a474cdbebaaa582e40"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -72,7 +72,9 @@ Each framework has its own tool-call interface, its own session-state model, and
 
 The current CI surface is the repo-wide Python and Go workflow in
 `.github/workflows/tests.yml`, plus CodeQL, link-check, secret-scan, format
-validation, and the Hugo site build. The framework quickstarts are runnable
-from the checked-in example directories, but there is not yet a dedicated
-`examples-smoke.yml` workflow for every adapter. Treat that as future hardening,
-not current gate coverage.
+validation, and the Hugo site build. The Python job runs
+`python/tests/test_examples_smoke.py` as an offline, no-key examples smoke for
+the checked-in mission fixtures and this claim ledger. There is not a dedicated
+`.github/workflows/examples-smoke.yml` today, and the provider-backed framework
+quickstarts remain opt-in/manual unless a future workflow adds real CI evidence
+for those live-provider demos.

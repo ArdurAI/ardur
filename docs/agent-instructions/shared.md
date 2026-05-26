@@ -47,6 +47,10 @@ When sources conflict, state the conflict and verify from the current tree.
   explicit limitation.
 - Do not add secrets, machine-local private paths, generated credentials, or
   local session state.
+- Live external-API tests are allowed only when they materially verify the task,
+  are explicit/opt-in, and use environment credentials approved for that local
+  run. Keep calls minimal and cost-aware; never print, log, persist, or commit
+  secret values. Public CI must not require private credentials.
 - Update docs when behavior or workflow changes.
 
 ## Validation

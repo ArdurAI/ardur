@@ -138,7 +138,7 @@ func daemonPreflightRepositoryFindings(cfg DaemonCustodyConfig) []DaemonPrefligh
 	}
 	var findings []DaemonPreflightFinding
 	for _, check := range daemonPreflightChecks(cfg) {
-		if !pathWithin(check.path, cfg.RepositoryRoot) {
+		if !lexicalPathWithin(check.path, cfg.RepositoryRoot) {
 			continue
 		}
 		findings = append(findings, DaemonPreflightFinding{
@@ -244,7 +244,7 @@ func inspectDaemonPreflightPath(fsys daemonPreflightFS, check daemonPreflightChe
 		return finding
 	}
 	finding.ResolvedPath = cleanPath(resolved)
-	if !pathWithin(finding.ResolvedPath, check.boundary) {
+	if !lexicalPathWithin(finding.ResolvedPath, check.boundary) {
 		finding.Verdict = DaemonPreflightVerdictFail
 		finding.Details = fmt.Sprintf("resolved path escapes %s", check.boundaryLabel)
 		return finding

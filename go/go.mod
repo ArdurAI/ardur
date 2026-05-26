@@ -3,15 +3,16 @@ module github.com/ArdurAI/ardur/go
 go 1.26.0
 
 require (
-	github.com/cedar-policy/cedar-go v1.5.2
-	github.com/cilium/ebpf v0.21.0
+	github.com/cedar-policy/cedar-go v1.6.0
+	github.com/cilium/ebpf v0.16.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/sigstore/sigstore-go v1.1.4
 	github.com/spiffe/go-spiffe/v2 v2.6.0
-	k8s.io/api v0.36.1
-	k8s.io/apimachinery v0.36.1
-	k8s.io/client-go v0.36.1
-	sigs.k8s.io/controller-runtime v0.24.1
+	golang.org/x/sys v0.43.0
+	k8s.io/api v0.36.0
+	k8s.io/apimachinery v0.36.0
+	k8s.io/client-go v0.36.0
+	sigs.k8s.io/controller-runtime v0.24.0
 )
 
 require (
@@ -99,7 +100,6 @@ require (
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/term v0.42.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

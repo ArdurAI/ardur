@@ -40,14 +40,15 @@ type DaemonProtocolRequest struct {
 type DaemonHealthRequest struct{}
 
 type DaemonRegisterSessionRequest struct {
-	SessionID      string   `json:"session_id"`
-	MissionID      string   `json:"mission_id,omitempty"`
-	TraceID        string   `json:"trace_id,omitempty"`
-	RootPID        uint32   `json:"root_pid,omitempty"`
-	PIDNamespaceID uint32   `json:"pid_namespace_id,omitempty"`
-	CgroupID       uint64   `json:"cgroup_id,omitempty"`
-	EventClasses   []string `json:"event_classes"`
-	TTLSeconds     int64    `json:"ttl_seconds"`
+	SessionID       string         `json:"session_id"`
+	MissionID       string         `json:"mission_id,omitempty"`
+	TraceID         string         `json:"trace_id,omitempty"`
+	RootPID         uint32         `json:"root_pid,omitempty"`
+	PIDNamespaceID  uint32         `json:"pid_namespace_id,omitempty"`
+	CgroupID        uint64         `json:"cgroup_id,omitempty"`
+	EventClasses    []string       `json:"event_classes"`
+	TTLSeconds      int64          `json:"ttl_seconds"`
+	HandoffMetadata map[string]any `json:"handoff_metadata,omitempty"`
 }
 
 type DaemonEndSessionRequest struct {
@@ -157,6 +158,9 @@ func validateDaemonRegisterSession(req DaemonRegisterSessionRequest) error {
 	if strings.TrimSpace(req.SessionID) == "" {
 		return fmt.Errorf("%w: register_session session_id is required", ErrDaemonProtocol)
 	}
+	if req.RootPID == 0 {
+		return fmt.Errorf("%w: register_session root_pid is required", ErrDaemonProtocol)
+	}
 	if req.TTLSeconds <= 0 || req.TTLSeconds > MaxDaemonProtocolTTLSeconds {
 		return fmt.Errorf("%w: ttl_seconds must be between 1 and %d", ErrDaemonProtocol, MaxDaemonProtocolTTLSeconds)
 	}
@@ -175,7 +179,29 @@ func validateDaemonRegisterSession(req DaemonRegisterSessionRequest) error {
 	if len(seen) != len(req.EventClasses) {
 		return fmt.Errorf("%w: duplicate event classes are not allowed", ErrDaemonProtocol)
 	}
+	normalizedHandoff, err := normalizeDaemonProtocolHandoffMetadata(req.HandoffMetadata)
+	if err != nil {
+		return err
+	}
+	if containsForbiddenClientHandoffMetadataField(normalizedHandoff) {
+		return fmt.Errorf("%w: register_session handoff metadata contains raw command, path, environment, secret-like, daemon-owned path, or peer identity fields", ErrDaemonProtocol)
+	}
 	return nil
+}
+
+func normalizeDaemonProtocolHandoffMetadata(metadata map[string]any) (map[string]any, error) {
+	if len(metadata) == 0 {
+		return map[string]any{}, nil
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("%w: register_session handoff metadata must be JSON-encodable: %v", ErrDaemonProtocol, err)
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return nil, fmt.Errorf("%w: register_session handoff metadata must be JSON object metadata: %v", ErrDaemonProtocol, err)
+	}
+	return normalized, nil
 }
 
 func ValidateCgroupFilterSequence(seq CgroupFilterSequence) error {
@@ -199,7 +225,7 @@ func rejectPrivilegedDaemonProtocolFields(data []byte) error {
 		return fmt.Errorf("%w: decode raw request: %v", ErrDaemonProtocol, err)
 	}
 	if containsPrivilegedDaemonProtocolField(raw) {
-		return fmt.Errorf("%w: client-supplied privileged daemon path fields are forbidden", ErrDaemonProtocol)
+		return fmt.Errorf("%w: client-supplied daemon-controlled path or peer identity fields are forbidden", ErrDaemonProtocol)
 	}
 	return nil
 }
@@ -219,14 +245,22 @@ func containsPrivilegedDaemonProtocolField(value any) bool {
 		return false
 	}
 	for key, nested := range obj {
-		switch strings.ToLower(key) {
-		case "config_path", "state_dir", "run_dir", "socket_path", "bpffs_dir", "ringbuf_map_path", "pinned_map_path", "map_path":
+		if isPrivilegedDaemonProtocolMetadataKey(normalizedLaunchWrapperMetadataKey(key)) {
 			return true
-		default:
-			if containsPrivilegedDaemonProtocolField(nested) {
-				return true
-			}
+		}
+		if containsPrivilegedDaemonProtocolField(nested) {
+			return true
 		}
 	}
 	return false
+}
+
+func isPrivilegedDaemonProtocolMetadataKey(normalizedKey string) bool {
+	switch normalizedKey {
+	case "configpath", "statedir", "rundir", "socketpath", "bpffsdir", "ringbufmappath", "pinnedmappath", "mappath",
+		"peeruid", "peergid", "peerpid", "peercredentials", "sopeercred", "linuxsopeercred", "ucred", "credentialsource":
+		return true
+	default:
+		return false
+	}
 }

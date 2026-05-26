@@ -30,30 +30,34 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 - the main repo wedge is narrowed to runtime governance plus verifiable evidence
 - the public-facing brand has moved to `Ardur`
 - public v0.1 specs are present under `docs/specs/` (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation)
-- curated Python runtime files and tests are present under `python/`, including the Ardur Personal Hub service (`personal_hub.py`), Claude Code hook (`claude_code_hook.py`), telemetry (`claude_code_telemetry.py`), reporting (`claude_code_report.py`), native-messaging host (`ardur_personal_native_host.py`), and `ARDUR.md` profile compiler (`ardur_profile.py`)
-- the `ardur` CLI ships subcommands for the protocol path (`issue`, `verify`, `attest`, `start`) and the Personal path (`hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `uninstall`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `profile init`, `protect claude-code`, `claude-code-hook`, `claude-code-report`)
+- curated Python runtime files and tests are present under `python/`, including the Ardur Personal Hub service (`personal_hub.py`), Claude Code hook (`claude_code_hook.py`), Claude telemetry/reporting (`claude_code_telemetry.py`, `claude_code_report.py`), Gemini CLI local-only hook fixture/reporting (`gemini_cli_hook.py`), Codex app-server local host-event fixture/reporting (`codex_app_server_fixture.py`), native-messaging host (`ardur_personal_native_host.py`), and `ARDUR.md` profile compiler (`ardur_profile.py`)
+- the `ardur` CLI ships subcommands for the protocol path (`issue`, `verify`, `attest`, `start`) and the Personal path (`hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `uninstall`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `profile init`, `protect claude-code`, `claude-code-hook`, `claude-code-report`, `gemini-cli-fixture`, `gemini-cli-hook`, `gemini-cli-report`, `codex-app-server-fixture`, `codex-app-server-event`, `codex-app-server-report`)
 - the Claude Code plugin is present under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks plus a smoke script
-- curated Go runtime, governance, and operator files are present under `go/`, including a complete AAT credential-attenuation engine with constraint checks, subsumption, JWT issuance/derivation, PoP binding, and full §7 chain verification (49 tests)
+- curated Go runtime, governance, and operator files are present under `go/` (the AAT package remains a fail-closed skeleton by design and is documented as such in `go/README.md`)
 - runnable framework examples are present under `examples/`: LangChain, LangGraph, and AutoGen quickstarts; the Ardur Personal browser extension; the Ardur Personal desktop-observe adapter; the Ardur Personal native-messaging host; and the Claude Code plugin pointer. JSON mission examples remain in `examples/missions/`. OpenAI Agents SDK and Google ADK directories are deferred adapter specs
-- dedicated Python (3.10 + 3.13) and Go CI workflows run on every push and PR (`.github/workflows/tests.yml`), alongside CodeQL, link-check, secret-scan, format validation, and the Hugo site build
+- dedicated Python (3.10 + 3.13) and Go CI workflows run on every push and PR (`.github/workflows/tests.yml`), including the offline examples-smoke regression in `python/tests/test_examples_smoke.py`, alongside CodeQL, link-check, secret-scan, format validation, and the Hugo site build
 - the Hugo public evidence-site source tree is present under `site/`, with start-here / build / evidence sections that link each public claim back to the source file backing it
 - bootstrap and local-validation scripts ship under `scripts/` (`conductor-bootstrap.sh`, `setup-dev.sh`, `check-local.sh`)
 - agent-specific public guides live under `docs/agent-instructions/` (Conductor, Codex, Claude, plus a shared contract)
 - new technical reference pages live under `docs/reference/` (CLI, Personal Hub HTTP API, `ARDUR.md` profile format)
-- selected archival walkthrough recordings are public starter media; a re-runnable proof path lands with the next media drop — see `MEDIA.md`
+- runtime delegation uses the file-backed `FileLineageBudgetLedger` for sibling child-budget reservations; mission-declared `lineage_budgets` from the v0.1 spec are not enforced yet and now fail closed at compile/issue time instead of being silently accepted
+- selected archival walkthrough recordings are public starter media; the Claude
+  Code MVP path also has a re-runnable no-key evidence harness and
+  `bundle.redacted.json` reader guide. Re-runnable proof media remains in
+  progress — see `MEDIA.md` and `docs/guides/read-phase1-evidence-bundle.md`
 - a public audit trail is maintained under `docs/audit/`, mirroring the GitHub Code Scanning dismissal record
-- cloud model governance tests (`python/tests/test-results/`) prove real-world proxy enforcement with live LLMs across 5 cloud models — 143 tool calls evaluated, 106 adversarial denials, **zero bypasses** (Phase 1) plus 22 programmatic enforcement checks (Phase 2)
-- the reference proxy implements all three conformance profiles: Delegation-Core, MIC-State, and MIC-Evidence — all 4 verifier-contract gaps closed (visibility, envelope signature, manifest digest, hidden-hop detection, last_seen_receipts tracking)
-- the first tagged release (`v0.1.0`) is published
 - the journey-log article series (`docs/articles/`) ships Article 05 (Proof Media That Actually Means Something) and Article 06 (Public Import Discipline) as first-wave entries
 
 ## In Progress
 
 - runnable OpenAI Agents SDK and Google ADK adapter lifts to replace the current deferred-spec READMEs
-- Codex hooks and Claude Desktop MCP packaging as separate next-cycle integrations
-- re-runnable public proof media — recordings made against the public runtime with stable verifier commands and artifact paths
-- a regenerated Homebrew formula carrying Python resource stanzas, so non-technical users can install Ardur Personal without a source checkout (tag v0.1.0 exists; the formula and PyPI distribution are next)
+- live Codex hooks/cloud integration, Claude Desktop MCP packaging, and other non-fixture host integrations as separate next-cycle work
+- re-runnable public proof media — recordings made against the public runtime
+  with stable verifier commands and artifact paths; this is separate from the
+  current no-key JSON evidence harness
+- a tagged release with a regenerated Homebrew formula carrying Python resource stanzas, so non-technical users can install Ardur Personal without a source checkout
 - conformance test vectors (`docs/specs/conformance/`) — the v0.1 specs reference them by private layout; they are not yet imported into the public tree
+- mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
 
 ## What We Still Need To Resolve
@@ -65,16 +69,16 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 
 ## Not Public Yet
 
-- a packaged distribution on PyPI / Homebrew / OCI suitable for non-technical users (v0.1.0 tag exists; packaging is next)
+- a tagged, packaged distribution on PyPI / Homebrew / OCI suitable for non-technical users
 - full deployment material for cluster, identity, and receipt storage paths
 - the full public docs spine (the current set is the public-safe subset)
 - benchmark-heavy material
 - internal planning, lane, and session artifacts
 - Trusted Execution Environment (TEE) attestation as a general hardware-rooted production claim — see `docs/known-limitations.md`
 
-## Honest Launch Rule
+## Current Posture
 
-Until every imported v0.1 spec has its companion fixtures and the Personal
-release candidate has a tagged, packaged installer, the repo continues to say
-"opening in phases" rather than implying a complete production distribution is
-already present.
+The repo is published progressively: v0.1.0 is tagged with runnable code and
+tests, while packaging (PyPI, Homebrew) and companion fixtures remain in active
+development. Each surface declares its readiness level rather than implying a
+complete production distribution is already present.

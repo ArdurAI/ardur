@@ -17,3 +17,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 - [`ardur-personal-hub.md`](/__ardur_internal__/source/docs/guides/ardur-personal-hub/)
 - [`claude-code-mvp-quickstart.md`](/__ardur_internal__/source/docs/guides/claude-code-mvp-quickstart/)
+- [`phase1-demo-packet.md`](/__ardur_internal__/source/docs/guides/phase1-demo-packet/)
+- [`read-phase1-evidence-bundle.md`](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/)

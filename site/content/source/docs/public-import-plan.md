@@ -1,8 +1,8 @@
 ---
 title: "Public Import Plan"
-description: "This plan converts the private source tree into the public Ardur repo without"
+description: "This plan converted the private source tree into the public Ardur repo without"
 source_path: "docs/public-import-plan.md"
-source_sha256: "f0e2d071dcaf65b3032c575285bafb2aebd4180138dafc336b4374f1acf46aa7"
+source_sha256: "dbac39872b84dcda2adda3365c4fea05108abaa09ce3db78d31d0366fe20f134"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -17,7 +17,12 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-This plan converts the private source tree into the public Ardur repo without
+> **Historical record.** This plan guided the migration of the private source
+> tree into the public Ardur repo. The migration completed with the v0.1.0 tag
+> (2026-05-14). The document is preserved as a reference for the naming history,
+> source mapping, and graduation gates that shaped the current repo layout.
+
+This plan converted the private source tree into the public Ardur repo without
 turning Ardur into a monorepo dump.
 
 ## Goals
@@ -114,7 +119,7 @@ ardur/
 
 6. **Deployment material — partly done.**
    SPIRE/Kubernetes material is present under `deploy/k8s/spire/` with an
-   honest README about privileges and unverified cluster surfaces. Helm
+   clear README about privileges and unverified cluster surfaces. Helm
    templates remain stubs by design (`deploy/helm/ardur/README.md`).
 
 7. **Docs and article spine — partly done.**

@@ -14,6 +14,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -39,6 +40,48 @@ DEFAULT_CHAIN_DIR = DEFAULT_HOME / "claude-code-hook"
 CHAIN_FILENAME = "receipts.jsonl"
 SUBAGENT_REGISTRY_FILENAME = "subagents.jsonl"
 CLAUDE_CODE_VISIBILITY_FULL = "full"
+_SAFE_TRACE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+
+
+def _normalize_trace_id(value: Any) -> str | None:
+    trace_id = str(value if value is not None else "").strip()
+    if not trace_id:
+        return None
+    if trace_id in {".", ".."}:
+        return None
+    if "/" in trace_id or "\\" in trace_id:
+        return None
+    if _SAFE_TRACE_ID_RE.fullmatch(trace_id) is None:
+        return None
+    return trace_id
+
+
+def _trace_id_or_stable_fallback(value: Any) -> str:
+    normalized = _normalize_trace_id(value)
+    if normalized is not None:
+        return normalized
+    raw = str(value if value is not None else "").strip()
+    if not raw:
+        return "trace-unknown"
+    return "trace-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _contained_trace_dir(*, chain_dir: Path, trace_id: str) -> Path:
+    safe_trace_id = _normalize_trace_id(trace_id)
+    if safe_trace_id is None:
+        raise ValueError(f"unsafe Claude Code trace id: {trace_id!r}")
+
+    base = chain_dir.expanduser()
+    candidate = base / safe_trace_id
+    resolved_base = base.resolve(strict=False)
+    resolved_candidate = candidate.resolve(strict=False)
+    if resolved_candidate == resolved_base:
+        raise ValueError(f"Claude Code trace id resolves to chain root: {trace_id!r}")
+    try:
+        resolved_candidate.relative_to(resolved_base)
+    except ValueError as exc:
+        raise ValueError(f"Claude Code trace id escapes chain dir: {trace_id!r}") from exc
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -47,22 +90,30 @@ class ChainState:
     trace_id: str
 
     @property
+    def trace_dir(self) -> Path:
+        return _contained_trace_dir(chain_dir=self.chain_dir, trace_id=self.trace_id)
+
+    @property
     def file(self) -> Path:
-        return self.chain_dir / self.trace_id / CHAIN_FILENAME
+        return self.trace_dir / CHAIN_FILENAME
 
     @property
     def lock_file(self) -> Path:
-        return self.chain_dir / self.trace_id / ".lock"
+        return self.trace_dir / ".lock"
 
     @property
     def subagents_file(self) -> Path:
-        return self.chain_dir / self.trace_id / SUBAGENT_REGISTRY_FILENAME
+        return self.trace_dir / SUBAGENT_REGISTRY_FILENAME
 
 
 def resolve_chain_state(*, trace_id: str) -> ChainState:
     base = Path(os.environ.get(CHAIN_DIR_ENV_VAR, str(DEFAULT_CHAIN_DIR))).expanduser()
-    state = ChainState(chain_dir=base, trace_id=trace_id)
-    state.file.parent.mkdir(parents=True, exist_ok=True)
+    safe_trace_id = _normalize_trace_id(trace_id)
+    if safe_trace_id is None:
+        raise ValueError(f"unsafe Claude Code trace id: {trace_id!r}")
+    state = ChainState(chain_dir=base, trace_id=safe_trace_id)
+    state.trace_dir.mkdir(parents=True, exist_ok=True)
+    _contained_trace_dir(chain_dir=state.chain_dir, trace_id=state.trace_id)
     return state
 
 
@@ -244,10 +295,10 @@ def _pre_tool_use_deny_output(reason: str) -> dict[str, Any]:
 
 
 def _trace_id_from_claims(claims: dict[str, Any]) -> str:
-    override = os.environ.get("ARDUR_TRACE_ID", "").strip()
-    if override:
+    override = _normalize_trace_id(os.environ.get("ARDUR_TRACE_ID", ""))
+    if override is not None:
         return override
-    return str(claims.get("jti", "trace-unknown"))
+    return _trace_id_or_stable_fallback(claims.get("jti", "trace-unknown"))
 
 
 def _stable_child_id(*, trace_id: str, session_id: str, agent_id: str) -> str:
@@ -868,7 +919,10 @@ def _subagent_lifecycle_metadata(
                 ),
                 "lifecycle": lifecycle_payload,
                 "inherited_policy": _policy_inheritance_summary(claims),
-                "child_receipt_summary": dict(child_receipt_summary or {}),
+                "child_receipt_summary": {
+                    **dict(child_receipt_summary or {}),
+                    "integrity": "unverified",
+                },
                 "attribution": {
                     "mode": "exact" if agent_id else "trace_only",
                     "source": "Subagent lifecycle hook agent_id" if agent_id else "missing lifecycle agent_id",

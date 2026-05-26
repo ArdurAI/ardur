@@ -22,6 +22,7 @@ Last updated: 2026-05-14. Current shipping version: v0.1 (tool-call boundary).
 | Claude Code MCP tool calls (`mcp__server__tool`) | Full at the call boundary — name, args, response digest. Downstream effects of the MCP server are out of scope. | `tool=mcp__<server>__<name>` |
 | Mission Passport | Full — issued JWT with allowed/forbidden tools, resource scope, budgets, biscuit attenuation chain | Signed by issuer; verified at session start |
 | Receipt chain integrity | Full — every receipt's `parent_receipt_hash` is SHA-256 of prior receipt's full JWT; ES256-signed | `receipt_id`, `parent_receipt_hash`, `parent_receipt_id`, `trace_id` |
+| Posture index | Derived local evidence only — summarizes local receipts/profile/redacted bundle without mutating them | `schema_version=ardur.posture_index.v0`, `positioning=derived_local_evidence`, chain status, verdict/boundary counts, coverage gaps |
 
 ## What is *not* captured today (v0.1)
 
@@ -34,6 +35,21 @@ Last updated: 2026-05-14. Current shipping version: v0.1 (tool-call boundary).
 | **Provider-side reasoning, hidden state, server-side tool calls** | The LLM runs on Anthropic/OpenAI/etc. infrastructure. No local tool can see what happens inside the model or on the provider's servers. | **Out of scope by definition.** Labeled `insufficient_evidence` on receipts when relevant. |
 | **Anything outside the active session** — actions in another terminal, after `claude` exits, or before `ardur start` runs | We instrument a specific process tree. | Cross-session correlation is a separate research question. |
 | **Out-of-scope filesystem** — paths outside the Mission Passport's `resource_scope` | Intentional — scope is the user's protected boundary | A user can widen scope in `instructions.md`; not captured by default |
+| **Posture index as asset inventory** — `ardur posture scan` does not discover unmanaged apps, credentials, cloud assets, or provider-side state. | It is a report over local Ardur evidence artifacts, not a scanner with new sensors. | Future adapters can feed more evidence; the posture index must continue to label unsupported boundaries as gaps. |
+
+## Posture index positioning
+
+`ardur posture scan` is a read-only derived-evidence report. It can verify local
+receipt-chain integrity when `passport_public.pem` is supplied, count allow/deny
+policy outcomes, identify unknown boundaries such as Bash subprocess effects,
+and attach profile / redacted-bundle digests. It must not be described as live
+endpoint monitoring, enterprise discovery, kernel capture, provider-side
+visibility, or proof that uncaptured side effects did or did not happen. The
+machine-readable marker is `positioning=derived_local_evidence`.
+
+The posture index is safe to share by default: credential-like values are
+emitted as `[REDACTED]`, and local absolute paths are replaced with hashed
+`<PATH:...>` placeholders.
 
 ## Boundary classes
 
@@ -78,9 +94,9 @@ Each receipt carries an `evidence_level` field. The values:
 | `attested` | Ardur signed an observation; the action's intent is captured |
 | `observed` | A local adapter saw browser/desktop/CLI state |
 | `self_signed` | Ardur signed its own observation (default for tool calls) |
-| `insufficient_evidence` | The relevant provider-side or kernel-level activity was not locally visible — labeled honestly rather than implied |
+| `insufficient_evidence` | The relevant provider-side or kernel-level activity was not locally visible — labeled explicitly rather than implied |
 
-The `insufficient_evidence` label is how we keep claims honest at the receipt level. If something happened that Ardur couldn't verify, the receipt says so.
+The `insufficient_evidence` label is how we keep claims precise at the receipt level. If something happened that Ardur couldn't verify, the receipt says so.
 
 ## What v0.5 / v1.0 will add
 

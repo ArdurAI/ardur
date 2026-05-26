@@ -91,7 +91,10 @@ specific company.
 - Regression tests are mandatory for bug fixes.
 - Tests must name the behavior they prove, not just the function they call.
 - Avoid live paid-provider tests by default. Make them explicit opt-in with
-  environment variables and cost notes.
+  environment variables and cost notes. If an operator explicitly approves a
+  local live-provider smoke test, load credentials from the environment, never
+  print, log, persist, or commit secret values, and skip/report the test if the
+  credential is absent.
 - Prefer deterministic fixtures over sleeps, random timing, or live network
   dependencies.
 - Add adversarial tests for parsers, auth, policy, revocation, delegation,

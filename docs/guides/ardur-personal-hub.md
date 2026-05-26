@@ -2,7 +2,7 @@
 
 Ardur Personal is the local product shape for regular users. It protects local
 AI-agent actions where Ardur owns the tool boundary, and it labels everything
-else honestly as observed or unknown.
+else as observed or unknown.
 
 The first release-candidate path is Claude Code.
 

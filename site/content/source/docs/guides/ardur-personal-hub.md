@@ -2,7 +2,7 @@
 title: "Ardur Personal Hub"
 description: "Ardur Personal is the local product shape for regular users. It protects local"
 source_path: "docs/guides/ardur-personal-hub.md"
-source_sha256: "4a7c5fc592e4604c64c666c7b979691921ac7acbf7fb4d568f05670523532910"
+source_sha256: "3b2e2e86b548d4ecac9cab002aadae908d1b1a32a967e7db0872e784abc607e5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -19,7 +19,7 @@ This page is generated from the public repository source file. Edit the source f
 
 Ardur Personal is the local product shape for regular users. It protects local
 AI-agent actions where Ardur owns the tool boundary, and it labels everything
-else honestly as observed or unknown.
+else as observed or unknown.
 
 The first release-candidate path is Claude Code.
 

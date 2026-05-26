@@ -1,8 +1,8 @@
 ---
 title: "Docs"
-description: "This repo is opening in phases."
+description: "These docs describe the public product direction and the engineering boundaries"
 source_path: "docs/README.md"
-source_sha256: "da3ebadd6698845e8ca62a1dd2738e010270d997b1c2f6c3391e59d31e124559"
+source_sha256: "b4699a6b8b46584489686c16854273eb022cec813b85f0f0f35c368c45c94e6c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -17,18 +17,22 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-This repo is opening in phases.
-
 These docs describe the public product direction and the engineering boundaries
-that are already stable enough to say out loud. Runnable code and proof paths
-are present for the current Claude Code MVP path; package-manager release
-readiness and broader host coverage remain in follow-on phases.
+that are stable enough to document. Runnable code and proof paths are present
+for the Claude Code MVP path; package-manager release readiness and broader host
+coverage are in active development.
 
 ## Available now
 
 - [Claude Code MVP Quickstart](/__ardur_internal__/source/docs/guides/claude-code-mvp-quickstart/) — source
   checkout setup, no-key fresh-user evidence harness, live-Claude demo path, and
   claim boundary
+- [Read The Phase 1 Evidence Bundle](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) —
+  how to interpret `bundle.redacted.json`, RWT gate semantics, redaction checks,
+  and the claims a no-key run does and does not support
+- [Phase 1 Demo Packet](/__ardur_internal__/source/docs/guides/phase1-demo-packet/) — a compact handoff for
+  the current source-checkout Claude Code MVP proof path, including artifacts to
+  attach and claims to avoid
 - [Security Model](/__ardur_internal__/source/docs/security-model/)
 - [Known Limitations](/__ardur_internal__/source/docs/known-limitations/)
 - [Protocol Roots](/__ardur_internal__/source/docs/protocol-roots/)
@@ -48,5 +52,10 @@ readiness and broader host coverage remain in follow-on phases.
 
 1. Read the root [README](/__ardur_internal__/source/readme/).
 2. Check [STATUS](/__ardur_internal__/source/status/) for what is public now versus still in flight.
-3. Use [MEDIA](/__ardur_internal__/source/media-notes/) for example recordings and context on the current
+3. Run the quickstart harness, then use the
+   [evidence-bundle guide](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) to read the
+   resulting `bundle.redacted.json` honestly.
+4. Use the [Phase 1 Demo Packet](/__ardur_internal__/source/docs/guides/phase1-demo-packet/) when you need a
+   concise demo or reviewer handoff from that run.
+5. Use [MEDIA](/__ardur_internal__/source/media-notes/) for example recordings and context on the current
    implementation lineage.

@@ -3,8 +3,8 @@ title: "Try It"
 description: "The shortest source-backed local path through Ardur today."
 weight: 30
 maturity: ["public-now"]
-claim_types: ["orientation", "runtime-boundary"]
-surfaces: ["python", "examples", "docs"]
+claim_types: ["orientation", "runtime-boundary", "evidence-semantics"]
+surfaces: ["python", "examples", "docs", "scripts"]
 frameworks: ["framework-agnostic", "claude-code"]
 evidence_levels: ["code-and-doc"]
 ---
@@ -22,6 +22,8 @@ The fastest current path has two tracks:
 Start with the one-screen source-backed walkthrough:
 
 - {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "Claude Code MVP quickstart" >}}
+- {{< repo-link "docs/guides/phase1-demo-packet.md" "Phase 1 demo packet" >}}
+- {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Evidence-bundle reader" >}}
 
 The protocol-only path below remains useful when you just want to check mission
 issuance and verification without the Claude Code plugin.
@@ -29,7 +31,11 @@ issuance and verification without the Claude Code plugin.
 ```bash
 cd python
 pip install -e .
-ardur issue --from-file ../examples/missions/minimal-mission.json
+ardur issue \
+  --agent-id alice \
+  --mission "summarize sales from sales/q1.csv into reports/" \
+  --allowed-tools read_file write_report \
+  --resource-scope 'sales/*' 'reports/*'
 ardur verify --token '<token-from-issue-output>'
 ```
 

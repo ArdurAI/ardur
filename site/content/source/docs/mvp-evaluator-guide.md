@@ -2,7 +2,7 @@
 title: "Ardur MVP Evaluator Guide"
 description: "Quickstart guide for evaluating Ardur — the runtime governance and evidence"
 source_path: "docs/mvp-evaluator-guide.md"
-source_sha256: "d7a44becba6552c1359583e6bde850cdc9169cec0ed1a0439f191ea3f6a40e18"
+source_sha256: "06dabc3705346ff27a6ac029f610e4ccbd4802ac65ed2ce785bdc265595a6ae1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -194,7 +194,7 @@ docker compose logs proxy | head -5
 # → {"timestamp":"2026-...","remote_addr":"...","method":"GET","path":"/health",...}
 ```
 
-## Known Gaps (honest disclosure)
+## Known Gaps
 
 - **Capture boundary**: Ardur governs at the tool-call level. Side effects below
   the tool boundary (subprocess trees, kernel events, network connections from

@@ -2,7 +2,7 @@
 title: "Comparisons and engineering responses"
 description: "A reader doing due diligence on Ardur ends up with the same set of questions every time. This directory is where those questions get serious technical answers — not marketing compa"
 source_path: "docs/comparisons/README.md"
-source_sha256: "37031519a3bd0638de6fc32408ceac673afd95981ae37a747df25d6f44d76489"
+source_sha256: "7c6faf78ee26526950d256f0164ca4f06de315ed1e3292dbb62e5c89d3c20bd8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["comparison"]
@@ -17,7 +17,7 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-A reader doing due diligence on Ardur ends up with the same set of questions every time. This directory is where those questions get serious technical answers — not marketing comparisons, but engineering documents that describe trade-offs honestly.
+A reader doing due diligence on Ardur ends up with the same set of questions every time. This directory is where those questions get serious technical answers — not marketing comparisons, but engineering documents that describe trade-offs directly.
 
 ## In this directory
 

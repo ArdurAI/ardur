@@ -2,7 +2,7 @@
 
 A reviewer asked the right question: **"How much does Ardur inflate the protocol in payload size, latency, and audit volume? Published numbers would help."** The answer is "we have internal numbers; we don't have publishable numbers yet; here's the methodology so the eventual publication is verifiable."
 
-This document is the methodology side of the answer. The numbers land alongside Phase 7 of the public-import work (the benchmark suites). Until then, this page exists so a reader can see what we'll measure and decide whether the methodology is honest.
+This document is the methodology side of the answer. The numbers land alongside Phase 7 of the public-import work (the benchmark suites). Until then, this page exists so a reader can see what we'll measure and decide whether the methodology is sound.
 
 ## Three dimensions, three measurement strategies
 
@@ -22,7 +22,7 @@ Methodology:
 
 What we expect from internal measurements: **mission declaration ~800-1500 bytes signed**; **execution receipt ~600-1200 bytes signed**. Per-call overhead in the hundreds of bytes range, not the kilobyte range. Worst case is the post-action attestation path (mission with many post-conditions): an extra ~500-1500 bytes.
 
-The honest caveat: receipt size scales with the policy-decisions array. If a deployment runs five policy backends voting on every call, receipts grow. This is a deployment-quality knob, not a protocol-overhead floor. We'll publish numbers for the `native + cedar + forbid-rules` three-backend default.
+The caveat: receipt size scales with the policy-decisions array. If a deployment runs five policy backends voting on every call, receipts grow. This is a deployment-quality knob, not a protocol-overhead floor. We'll publish numbers for the `native + cedar + forbid-rules` three-backend default.
 
 ### Latency
 
@@ -40,7 +40,7 @@ Methodology:
 
 What internal numbers showed: **median verifier overhead ~3-8ms, p95 ~12ms, p99 ~25ms** when the policy backends are warm and the credential cache is hot. Cold-start adds ~30ms one-time for key derivation. These numbers are dwarfed by the LLM inference time (~1-3 seconds per call), so the relative overhead in an LLM-driven session is small.
 
-The honest caveat: latency depends on policy-engine choice. Cedar evaluation is fast (sub-millisecond for typical policies); a custom Datalog backend can be slower. Numbers will be reported per-backend.
+The caveat: latency depends on policy-engine choice. Cedar evaluation is fast (sub-millisecond for typical policies); a custom Datalog backend can be slower. Numbers will be reported per-backend.
 
 ### Audit volume
 
@@ -57,7 +57,7 @@ Methodology:
 
 What we expect: Ardur's per-receipt size is comparable to a typical structured audit log entry. The signature adds ~400 bytes vs an unsigned log line. The chain-hash adds ~64 bytes per receipt. Total: signing+chain overhead is ~10-15% of the receipt size, not 100%.
 
-The honest caveat: the receipt is *more useful* than a log line — it's tamper-evident, offline-verifiable, replayable. Comparing byte counts without acknowledging the difference in security guarantees is like comparing the bandwidth cost of HTTPS to HTTP and concluding HTTPS is wasteful. The right comparison is "is the protocol's audit volume justified by its evidence guarantee?" That's a deployment-context question; the numbers are an input to the conversation, not the conclusion.
+The caveat: the receipt is *more useful* than a log line — it's tamper-evident, offline-verifiable, replayable. Comparing byte counts without acknowledging the difference in security guarantees is like comparing the bandwidth cost of HTTPS to HTTP and concluding HTTPS is wasteful. The right comparison is "is the protocol's audit volume justified by its evidence guarantee?" That's a deployment-context question; the numbers are an input to the conversation, not the conclusion.
 
 ## What we'll publish
 
@@ -82,7 +82,7 @@ Two reasons we're not pulling internal numbers into the public docs today:
 1. **The internal numbers were measured under the pre-Ardur runtime name.** Re-running them under the renamed Ardur runtime is part of Phase 2 of the lift. Until that re-run lands, citing the old numbers in public would be the same overclaim trap that we've been avoiding everywhere else: "Ardur block rate: X" with results from a runtime that wasn't called Ardur. Phase 2 closes that gap.
 2. **The internal numbers haven't passed adversarial review.** The external-review-X review rounds we've been running on doc/spec changes work for prose. The benchmark numbers need a different review discipline — at minimum a re-run by an independent reviewer who didn't author the test harness. That review process happens alongside the public re-run.
 
-So the trade-off is: published-now-with-caveats vs published-when-honest. We're choosing honest.
+So the trade-off is: published-now-with-caveats vs published-when-verified. We're choosing verified.
 
 ## What this means for the OAuth comparison
 

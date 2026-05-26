@@ -1,6 +1,11 @@
 # Public Import Plan
 
-This plan converts the private source tree into the public Ardur repo without
+> **Historical record.** This plan guided the migration of the private source
+> tree into the public Ardur repo. The migration completed with the v0.1.0 tag
+> (2026-05-14). The document is preserved as a reference for the naming history,
+> source mapping, and graduation gates that shaped the current repo layout.
+
+This plan converted the private source tree into the public Ardur repo without
 turning Ardur into a monorepo dump.
 
 ## Goals
@@ -97,7 +102,7 @@ ardur/
 
 6. **Deployment material — partly done.**
    SPIRE/Kubernetes material is present under `deploy/k8s/spire/` with an
-   honest README about privileges and unverified cluster surfaces. Helm
+   clear README about privileges and unverified cluster surfaces. Helm
    templates remain stubs by design (`deploy/helm/ardur/README.md`).
 
 7. **Docs and article spine — partly done.**

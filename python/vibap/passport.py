@@ -273,9 +273,19 @@ class MissionPassport:
         # closed and let the caller decide.
         unknown = set(data.keys()) - cls._KNOWN_FIELDS
         if unknown:
+            unknown_fields = sorted(unknown)
+            known_fields = sorted(cls._KNOWN_FIELDS)
+            if "lineage_budgets" in unknown:
+                raise ValueError(
+                    "lineage_budgets is Phase 1 deferred and is not enforced "
+                    "by MissionPassport issuance yet; remove lineage_budgets "
+                    "from this mission until compiler/runtime support lands. "
+                    f"Unknown fields in mission: {unknown_fields} "
+                    f"(known: {known_fields})"
+                )
             raise ValueError(
-                f"unknown fields in mission: {sorted(unknown)} "
-                f"(known: {sorted(cls._KNOWN_FIELDS)})"
+                f"unknown fields in mission: {unknown_fields} "
+                f"(known: {known_fields})"
             )
         budget = data.get("budget") or {}
         return cls(
@@ -319,6 +329,14 @@ def _write_bytes(path: Path, data: bytes, mode: int) -> None:
         os.chmod(path, mode)
     except OSError:
         pass
+    actual_mode = path.stat().st_mode & 0o777
+    if actual_mode != mode:
+        import sys
+        print(
+            f"WARNING: {path} permissions are {actual_mode:o}, expected {mode:o}; "
+            f"private key may be readable by other users on this filesystem",
+            file=sys.stderr,
+        )
 
 
 def generate_keypair(

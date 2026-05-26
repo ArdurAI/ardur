@@ -8,7 +8,9 @@ signal handling, which we don't exercise."""
 from __future__ import annotations
 
 import json
+import os
 import socket
+import stat
 import threading
 import time
 import urllib.error
@@ -289,9 +291,70 @@ class TestHTTPDelegate:
         assert status2 == 200
         assert body1["child_claims"]["max_tool_calls"] == 1
         assert body2["child_claims"]["max_tool_calls"] == 1
+        assert body2["child_token"] == body1["child_token"]
+        assert body2["child_claims"]["jti"] == body1["child_claims"]["jti"]
         snapshot = proxy.lineage_budget_ledger.snapshot(start["session_id"])
         assert snapshot["reserved_total"] == 1
         assert len(snapshot["reservations"]) == 1
+        reservation = snapshot["reservations"]["retry-1"]
+        assert reservation["child_jti"] == body1["child_claims"]["jti"]
+        parent_session = proxy.get_session(start["session_id"])
+        matching_children = [
+            child
+            for child in parent_session.delegated_children
+            if child["delegation_request_id"] == "retry-1"
+        ]
+        assert len(matching_children) == 1
+        assert matching_children[0]["child_jti"] == body1["child_claims"]["jti"]
+        delegation_events = [
+            event
+            for event in parent_session.events
+            if event.tool_name == "delegate_passport"
+            and event.arguments.get("delegation_request_id") == "retry-1"
+        ]
+        assert len(delegation_events) == 1
+
+    def test_duplicate_delegation_request_id_normalized_retry_is_idempotent(
+        self, http_proxy, private_key
+    ):
+        base, _ = http_proxy
+        parent_mission = MissionPassport(
+            agent_id="parent",
+            mission="coord",
+            allowed_tools=["read", "write"],
+            resource_scope=["/data/*", "/logs/*"],
+            max_tool_calls=3,
+            delegation_allowed=True,
+            max_delegation_depth=2,
+        )
+        parent_token = issue_passport(parent_mission, private_key, ttl_s=300)
+        _post(base + "/session/start", {"token": parent_token})
+
+        first = {
+            "parent_token": parent_token,
+            "child_agent_id": "child",
+            "child_mission": "sub",
+            "child_allowed_tools": ["write", "read"],
+            "child_resource_scope": ["/logs/*", "/data/*"],
+            "child_max_tool_calls": 2,
+            "child_ttl_s": 120,
+            "delegation_request_id": "retry-normalized",
+        }
+        second = dict(
+            first,
+            child_allowed_tools=["read", "write"],
+            child_resource_scope=["/data/*", "/logs/*"],
+        )
+
+        status1, body1 = _post(base + "/delegate", first)
+        status2, body2 = _post(base + "/delegate", second)
+
+        assert status1 == 200
+        assert status2 == 200
+        assert body2["child_token"] == body1["child_token"]
+        assert body2["child_claims"]["jti"] == body1["child_claims"]["jti"]
+        assert body2["child_claims"]["allowed_tools"] == ["read", "write"]
+        assert body2["child_claims"]["resource_scope"] == ["/data/*", "/logs/*"]
 
     def test_conflicting_delegation_request_id_returns_409(
         self, http_proxy, private_key
@@ -324,6 +387,109 @@ class TestHTTPDelegate:
         assert status1 == 200
         assert status2 == 409
         assert "different reservation" in body2.get("error", "")
+
+    @pytest.mark.parametrize(
+        ("field", "replacement"),
+        [
+            ("child_mission", "narrow-request"),
+            ("child_allowed_tools", ["read"]),
+            ("child_resource_scope", ["/data/*"]),
+            ("child_max_tool_calls", 1),
+            ("child_ttl_s", 60),
+        ],
+    )
+    def test_duplicate_delegation_request_id_changed_request_fields_return_409(
+        self, http_proxy, private_key, field, replacement
+    ):
+        base, _ = http_proxy
+        parent_mission = MissionPassport(
+            agent_id="parent",
+            mission="coord",
+            allowed_tools=["read", "write"],
+            resource_scope=["/data/*", "/logs/*"],
+            max_tool_calls=5,
+            delegation_allowed=True,
+            max_delegation_depth=2,
+        )
+        parent_token = issue_passport(parent_mission, private_key, ttl_s=300)
+        _post(base + "/session/start", {"token": parent_token})
+
+        first = {
+            "parent_token": parent_token,
+            "child_agent_id": "child",
+            "child_mission": "broad",
+            "child_allowed_tools": ["read", "write"],
+            "child_resource_scope": ["/data/*", "/logs/*"],
+            "child_max_tool_calls": 2,
+            "child_ttl_s": 120,
+            "delegation_request_id": "dup-same-child",
+        }
+        second = dict(first, **{field: replacement})
+
+        status1, body1 = _post(base + "/delegate", first)
+        status2, body2 = _post(base + "/delegate", second)
+
+        assert status1 == 200
+        assert body1["child_claims"]["mission"] == "broad"
+        assert body1["child_claims"]["allowed_tools"] == ["read", "write"]
+        assert body1["child_claims"]["resource_scope"] == ["/data/*", "/logs/*"]
+        assert body1["child_claims"]["max_tool_calls"] == 2
+        assert status2 == 409
+        assert "different reservation" in body2.get("error", "")
+        assert "child_token" not in body2
+
+    def test_persisted_delegation_session_files_are_private_under_permissive_umask(
+        self, tmp_path, public_key, private_key, session_keys_dir
+    ):
+        state_dir = tmp_path / "caller-state"
+        state_dir.mkdir(mode=0o755)
+        original_umask = os.umask(0o022)
+        shutdown = None
+        try:
+            proxy = GovernanceProxy(
+                log_path=tmp_path / "governance_log.jsonl",
+                state_dir=state_dir,
+                public_key=public_key,
+                keys_dir=session_keys_dir,
+            )
+            _, base, shutdown = _build_server_thread(proxy, private_key, _free_port())
+            parent_mission = MissionPassport(
+                agent_id="parent",
+                mission="coord",
+                allowed_tools=["read"],
+                max_tool_calls=2,
+                delegation_allowed=True,
+                max_delegation_depth=2,
+            )
+            parent_token = issue_passport(parent_mission, private_key, ttl_s=300)
+            _, start = _post(base + "/session/start", {"token": parent_token})
+            status, _body = _post(
+                base + "/delegate",
+                {
+                    "parent_token": parent_token,
+                    "child_agent_id": "child",
+                    "child_mission": "sub",
+                    "child_allowed_tools": ["read"],
+                    "child_max_tool_calls": 1,
+                    "delegation_request_id": "secret-replay",
+                },
+            )
+
+            assert status == 200
+            session_path = proxy._session_path(start["session_id"])
+            payload = json.loads(session_path.read_text(encoding="utf-8"))
+            assert any(
+                isinstance(child.get("child_token"), str) and child["child_token"]
+                for child in payload["delegated_children"]
+            )
+            assert stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+            assert stat.S_IMODE((state_dir / "sessions").stat().st_mode) == 0o700
+            assert stat.S_IMODE(session_path.stat().st_mode) == 0o600
+            assert stat.S_IMODE(session_path.stat().st_mode) & 0o077 == 0
+        finally:
+            os.umask(original_umask)
+            if shutdown is not None:
+                shutdown()
 
     def test_two_http_proxies_shared_state_concurrent_sibling_budget(
         self, tmp_path, public_key, private_key, session_keys_dir
@@ -421,6 +587,29 @@ class TestHTTPAuthAndValidation:
         status, body = _post(base + "/issue", {"mission": None})
         assert status == 400
         assert body == {"error": "mission must be a JSON object"}
+
+    def test_issue_with_lineage_budgets_fails_phase1_deferred(self, http_proxy):
+        base, _ = http_proxy
+        status, body = _post(
+            base + "/issue",
+            {
+                "mission": {
+                    "agent_id": "parent",
+                    "mission": "coordinate child work",
+                    "allowed_tools": ["read"],
+                    "delegation_allowed": True,
+                    "max_delegation_depth": 1,
+                    "lineage_budgets": [
+                        {"type": "max_child_tool_calls", "limit": 3}
+                    ],
+                }
+            },
+        )
+        assert status == 400
+        assert "token" not in body
+        assert "lineage_budgets" in body.get("error", "")
+        assert "Phase 1" in body.get("error", "")
+        assert "deferred" in body.get("error", "")
 
     def test_delegate_rejects_string_child_tools_before_char_splitting(
         self, http_proxy, private_key

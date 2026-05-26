@@ -36,6 +36,19 @@ from .personal_hub import (
 )
 from .claude_code_report import build_claude_code_report
 from .claude_code_hook import main as claude_code_hook_main
+from .gemini_cli_hook import (
+    build_local_fixture as build_gemini_local_fixture,
+    build_shareable_context as build_gemini_shareable_context,
+    build_shareable_report as build_gemini_shareable_report,
+    main as gemini_cli_hook_main,
+)
+from .codex_app_server_fixture import (
+    build_local_fixture as build_codex_local_fixture,
+    build_shareable_context as build_codex_shareable_context,
+    build_shareable_report as build_codex_shareable_report,
+    handle_host_event as handle_codex_host_event,
+)
+from .posture_index import build_posture_index, format_posture_report
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
 from .proxy import GovernanceProxy, serve_proxy
 
@@ -159,6 +172,104 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     )
     print(f"Per-child attribution: {report['coverage']['per_child_attribution']}")
     print(f"Attribution: {report['coverage']['attribution']}")
+    return 0
+
+
+def cmd_gemini_cli_hook(args: argparse.Namespace) -> int:
+    phase = args.phase or args.phase_pos or "pre"
+    argv = ["--phase", phase]
+    if args.keys_dir:
+        argv.extend(["--keys-dir", str(args.keys_dir)])
+    return gemini_cli_hook_main(argv)
+
+
+def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
+    fixture = build_gemini_local_fixture(
+        home=args.home,
+        project_dir=args.project_dir,
+        chain_dir=args.chain_dir,
+        keys_dir=args.keys_dir,
+    )
+    _print_json(build_gemini_shareable_context(fixture))
+    return 0
+
+
+def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
+    report = build_gemini_shareable_report(
+        home=args.home,
+        chain_dir=args.chain_dir,
+        keys_dir=args.keys_dir,
+        verify_expiry=args.verify_expiry,
+    )
+    if args.json:
+        _print_json(report)
+        return 0
+    print(f"Ardur Gemini CLI receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains")
+    print(f"Chains: {report['chain_dir']}")
+    print(f"Verdicts: {report['policy_verdict_counts']}")
+    print(f"Coverage gaps: {report['coverage_gaps']}")
+    return 0
+
+
+def cmd_codex_app_server_event(args: argparse.Namespace) -> int:
+    raw = sys.stdin.read()
+    payload = json.loads(raw) if raw.strip() else {}
+    if not isinstance(payload, dict):
+        raise ValueError("Codex app-server host-event payload must be a JSON object")
+    output = handle_codex_host_event(payload, keys_dir=args.keys_dir)
+    _print_json(output)
+    return 2 if output.get("block") else 0
+
+
+def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
+    fixture = build_codex_local_fixture(
+        home=args.home,
+        project_dir=args.project_dir,
+        chain_dir=args.chain_dir,
+        keys_dir=args.keys_dir,
+    )
+    _print_json(build_codex_shareable_context(fixture))
+    return 0
+
+
+def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
+    report = build_codex_shareable_report(
+        home=args.home,
+        chain_dir=args.chain_dir,
+        keys_dir=args.keys_dir,
+        verify_expiry=args.verify_expiry,
+    )
+    if args.json:
+        _print_json(report)
+        return 0
+    print(f"Ardur Codex app-server receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains")
+    print(f"Chains: {report['chain_dir']}")
+    print(f"Verdicts: {report['policy_verdict_counts']}")
+    print(f"Coverage gaps: {report['coverage_gaps']}")
+    return 0
+
+
+def cmd_posture_scan(args: argparse.Namespace) -> int:
+    posture = build_posture_index(
+        receipts=args.receipts,
+        keys_dir=args.keys_dir,
+        profile=args.profile,
+        evidence_bundle=args.evidence_bundle,
+        verify_expiry=args.verify_expiry,
+    )
+    if args.format == "json":
+        _print_json(posture)
+        return 0
+    print(format_posture_report(posture))
+    return 0
+
+
+def cmd_posture_report(args: argparse.Namespace) -> int:
+    posture = json.loads(args.input.read_text(encoding="utf-8"))
+    if args.format == "json":
+        _print_json(posture)
+        return 0
+    print(format_posture_report(posture))
     return 0
 
 
@@ -651,6 +762,119 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cc_report.add_argument("--json", action="store_true", help="print machine-readable report")
     cc_report.set_defaults(func=cmd_claude_code_report)
+
+    gemini_hook = subparsers.add_parser(
+        "gemini-cli-hook",
+        help="run the local-only Gemini CLI hook adapter",
+    )
+    gemini_hook.add_argument("phase_pos", nargs="?", choices=["pre"], help="hook lifecycle phase")
+    gemini_hook.add_argument("--phase", choices=["pre"], help="hook lifecycle phase")
+    gemini_hook.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    gemini_hook.set_defaults(func=cmd_gemini_cli_hook)
+
+    gemini_fixture = subparsers.add_parser(
+        "gemini-cli-fixture",
+        help="write a local Gemini CLI settings/context fixture and print redacted context",
+    )
+    gemini_fixture.add_argument(
+        "--home",
+        type=Path,
+        help="explicit Gemini home/settings directory to populate; defaults to isolated Ardur local fixture state",
+    )
+    gemini_fixture.add_argument("--project-dir", type=Path, help="project directory that receives GEMINI.md")
+    gemini_fixture.add_argument("--chain-dir", type=Path, help="Ardur Gemini receipt chain directory")
+    gemini_fixture.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    gemini_fixture.set_defaults(func=cmd_gemini_cli_fixture)
+
+    gemini_report = subparsers.add_parser(
+        "gemini-cli-report",
+        help="verify Gemini CLI hook receipt chains and summarize local-only observability",
+    )
+    gemini_report.add_argument("--home", type=Path, help="Gemini/Ardur home used for redaction context")
+    gemini_report.add_argument("--chain-dir", type=Path, help="explicit Gemini CLI receipt chain directory")
+    gemini_report.add_argument("--keys-dir", type=Path, help="signing public-key directory")
+    gemini_report.add_argument(
+        "--verify-expiry",
+        action="store_true",
+        help="also enforce short receipt expiry windows while verifying",
+    )
+    gemini_report.add_argument("--json", action="store_true", help="print machine-readable report")
+    gemini_report.set_defaults(func=cmd_gemini_cli_report)
+
+    codex_event = subparsers.add_parser(
+        "codex-app-server-event",
+        help="ingest a local Codex app-server/host-event JSON payload and emit an Ardur receipt",
+    )
+    codex_event.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    codex_event.set_defaults(func=cmd_codex_app_server_event)
+
+    codex_fixture = subparsers.add_parser(
+        "codex-app-server-fixture",
+        help="write a local Codex app-server config/schema fixture and print redacted context",
+    )
+    codex_fixture.add_argument(
+        "--home",
+        type=Path,
+        help="explicit Codex home/config directory to populate; defaults to isolated Ardur local fixture state",
+    )
+    codex_fixture.add_argument("--project-dir", type=Path, help="project directory that receives CODEX.md")
+    codex_fixture.add_argument("--chain-dir", type=Path, help="Ardur Codex receipt chain directory")
+    codex_fixture.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    codex_fixture.set_defaults(func=cmd_codex_app_server_fixture)
+
+    codex_report = subparsers.add_parser(
+        "codex-app-server-report",
+        help="verify Codex app-server receipt chains and summarize local-only observability",
+    )
+    codex_report.add_argument("--home", type=Path, help="Codex/Ardur home used for redaction context")
+    codex_report.add_argument("--chain-dir", type=Path, help="explicit Codex app-server receipt chain directory")
+    codex_report.add_argument("--keys-dir", type=Path, help="signing public-key directory")
+    codex_report.add_argument(
+        "--verify-expiry",
+        action="store_true",
+        help="also enforce short receipt expiry windows while verifying",
+    )
+    codex_report.add_argument("--json", action="store_true", help="print machine-readable report")
+    codex_report.set_defaults(func=cmd_codex_app_server_report)
+
+    posture = subparsers.add_parser(
+        "posture",
+        help="derive a local evidence posture index from Ardur artifacts",
+    )
+    posture_subparsers = posture.add_subparsers(dest="posture_command", required=True)
+    posture_scan = posture_subparsers.add_parser(
+        "scan",
+        help="scan receipt/profile/evidence artifacts into a posture JSON document",
+    )
+    posture_scan.add_argument("--receipts", type=Path, required=True, help="receipt chain directory or receipts.jsonl file")
+    posture_scan.add_argument("--keys-dir", type=Path, help="directory containing passport_public.pem for read-only verification")
+    posture_scan.add_argument("--profile", type=Path, help="optional ARDUR.md profile to digest")
+    posture_scan.add_argument("--evidence-bundle", type=Path, help="optional redacted no-key evidence bundle to summarize")
+    posture_scan.add_argument(
+        "--verify-expiry",
+        action="store_true",
+        help="also enforce short receipt expiry windows while verifying",
+    )
+    posture_scan.add_argument(
+        "--format",
+        choices=["json", "markdown"],
+        default="json",
+        help="output format (default: json)",
+    )
+    posture_scan.set_defaults(func=cmd_posture_scan)
+
+    posture_report = posture_subparsers.add_parser(
+        "report",
+        help="render a posture JSON document as a concise report",
+    )
+    posture_report.add_argument("--input", type=Path, required=True, help="posture JSON produced by ardur posture scan")
+    posture_report.add_argument(
+        "--format",
+        choices=["markdown", "json"],
+        default="markdown",
+        help="output format (default: markdown)",
+    )
+    posture_report.set_defaults(func=cmd_posture_report)
 
     hub = subparsers.add_parser("hub", help="start the local Ardur Personal Hub")
     hub.add_argument("--host", default=DEFAULT_HUB_HOST, help="bind address")

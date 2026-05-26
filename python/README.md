@@ -86,13 +86,13 @@ Full reasoning is in [`docs/specs/README.md`](../docs/specs/README.md) under "Pr
 
 ## What's not here yet
 
-A few things are honest gaps right now rather than oversights:
+A few things are documented gaps right now rather than oversights:
 
 - **Live LLM tests** — the semantic-judge and behavioral-fingerprint test lanes need real API keys, so the default test run uses local test doubles. To opt in, set `ARDUR_SEMANTIC_JUDGE=anthropic` and `ANTHROPIC_API_KEY`.
 - **Corpus-heavy benchmark tests** — AgentDojo, InjectAgent, R-Judge, STAC, and the telemetry-ablation harness stay in the private research tree. The cleaner subset that backs the public claims is what's curated here.
 - **Docker images** (`rahulnutakki/ardur-demo:lang`, `:autogen`) and re-recorded asciinema casts — these need a maintainer with Docker Hub credentials and an `asciinema record` session, neither of which an automated process can do.
 
-One more honest caveat: the package imports cleanly and the AST parses, but I haven't run the full pytest suite end-to-end since the rename landed. If something import-time looks off, that's the most likely culprit — file an issue.
+One more caveat: the package imports cleanly and the AST parses. If something import-time looks off, file an issue.
 
 ## License
 

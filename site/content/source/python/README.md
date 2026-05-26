@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "3737f09ff018eb69074fd6850ff2c7c9466a8691f06ca6eb3666b6c1a3f830a9"
+source_sha256: "ed91e54fda89849befe3213362e2340063fd6ebd37b67453baef246c10cdff19"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -103,13 +103,13 @@ Full reasoning is in [`docs/specs/README.md`](/__ardur_internal__/source/docs/sp
 
 ## What's not here yet
 
-A few things are honest gaps right now rather than oversights:
+A few things are documented gaps right now rather than oversights:
 
 - **Live LLM tests** — the semantic-judge and behavioral-fingerprint test lanes need real API keys, so the default test run uses local test doubles. To opt in, set `ARDUR_SEMANTIC_JUDGE=anthropic` and `ANTHROPIC_API_KEY`.
 - **Corpus-heavy benchmark tests** — AgentDojo, InjectAgent, R-Judge, STAC, and the telemetry-ablation harness stay in the private research tree. The cleaner subset that backs the public claims is what's curated here.
 - **Docker images** (`rahulnutakki/ardur-demo:lang`, `:autogen`) and re-recorded asciinema casts — these need a maintainer with Docker Hub credentials and an `asciinema record` session, neither of which an automated process can do.
 
-One more honest caveat: the package imports cleanly and the AST parses, but I haven't run the full pytest suite end-to-end since the rename landed. If something import-time looks off, that's the most likely culprit — file an issue.
+One more caveat: the package imports cleanly and the AST parses. If something import-time looks off, file an issue.
 
 ## License
 

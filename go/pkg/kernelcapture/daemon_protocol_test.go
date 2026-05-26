@@ -92,6 +92,7 @@ func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 		Method:          DaemonProtocolMethodRegisterSession,
 		RegisterSession: &DaemonRegisterSessionRequest{
 			SessionID:    "session-1",
+			RootPID:      123,
 			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
 			TTLSeconds:   60,
 		},
@@ -104,6 +105,7 @@ func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 		{name: "unknown version", mut: func(req *DaemonProtocolRequest) { req.ProtocolVersion = "kernelcapture.daemon.v0" }},
 		{name: "unknown event class", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.EventClasses = []string{"file_io"} }},
 		{name: "missing session id", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.SessionID = "" }},
+		{name: "missing root pid", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.RootPID = 0 }},
 		{name: "zero ttl", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.TTLSeconds = 0 }},
 		{name: "unbounded ttl", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.TTLSeconds = MaxDaemonProtocolTTLSeconds + 1 }},
 	} {
@@ -116,6 +118,71 @@ func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 			err := ValidateDaemonProtocolRequest(req)
 			if err == nil {
 				t.Fatalf("expected validation error")
+			}
+			if !errors.Is(err, ErrDaemonProtocol) {
+				t.Fatalf("expected ErrDaemonProtocol, got %v", err)
+			}
+		})
+	}
+}
+
+func TestDaemonProtocolDecodeRejectsRegisterSessionWithoutRootPID(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60}}` + "\n")
+	_, err := DecodeDaemonProtocolRequest(raw)
+	if err == nil {
+		t.Fatalf("expected missing root_pid to be rejected")
+	}
+	if !errors.Is(err, ErrDaemonProtocol) {
+		t.Fatalf("expected ErrDaemonProtocol, got %v", err)
+	}
+}
+
+func TestDaemonProtocolValidationRejectsForbiddenHandoffMetadata(t *testing.T) {
+	t.Parallel()
+
+	validRegister := DaemonProtocolRequest{
+		ProtocolVersion: DaemonProtocolVersion,
+		Method:          DaemonProtocolMethodRegisterSession,
+		RegisterSession: &DaemonRegisterSessionRequest{
+			SessionID:    "session-1",
+			RootPID:      123,
+			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   60,
+		},
+	}
+
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]any
+	}{
+		{name: "raw command", metadata: map[string]any{"command": "/bin/echo raw"}},
+		{name: "secret-like key", metadata: map[string]any{"api_token": "[REDACTED]"}},
+		{name: "nested client secret", metadata: map[string]any{"nested": map[string]any{"client-secret": "[REDACTED]"}}},
+		{name: "list private key", metadata: map[string]any{"items": []any{map[string]any{"private key": "[REDACTED]"}}}},
+		{name: "authorization", metadata: map[string]any{"Authorization": "[REDACTED]"}},
+		{name: "auth header", metadata: map[string]any{"nested": map[string]any{"auth header": "[REDACTED]"}}},
+		{name: "bearer", metadata: map[string]any{"items": []any{map[string]any{"BEARER": "[REDACTED]"}}}},
+		{name: "jwt", metadata: map[string]any{"nested": map[string]any{"j_w-t": "[REDACTED]"}}},
+		{name: "key", metadata: map[string]any{"k e_y-": "[REDACTED]"}},
+		{name: "typed nested map[string]string", metadata: map[string]any{"nested": map[string]string{"client-secret": "[REDACTED]"}}},
+		{name: "typed list []map[string]any", metadata: map[string]any{"items": []map[string]any{{"private key": "[REDACTED]"}}}},
+		{name: "typed list []map[string]string", metadata: map[string]any{"items": []map[string]string{{"so-peercred": "[REDACTED]"}}}},
+		{name: "socket path separator variant", metadata: map[string]any{"socket-path": "/run/ardur/kernelcapture/control.sock"}},
+		{name: "peer uid space variant", metadata: map[string]any{"nested": map[string]any{"peer uid": 501}}},
+		{name: "so peercred hyphen variant", metadata: map[string]any{"items": []any{map[string]any{"so-peercred": map[string]any{"uid": 501}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := validRegister
+			copyPayload := *validRegister.RegisterSession
+			copyPayload.HandoffMetadata = tc.metadata
+			req.RegisterSession = &copyPayload
+			err := ValidateDaemonProtocolRequest(req)
+			if err == nil {
+				t.Fatalf("expected forbidden handoff metadata to be rejected")
 			}
 			if !errors.Is(err, ErrDaemonProtocol) {
 				t.Fatalf("expected ErrDaemonProtocol, got %v", err)
@@ -138,6 +205,50 @@ func TestDaemonProtocolRejectsRawPrivilegedPathFields(t *testing.T) {
 		{
 			name: "mixed case map path",
 			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"BpFfS_DiR":"/sys/fs/bpf/ardur"}}` + "\n"),
+		},
+		{
+			name: "nested peer identity",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"peer_credentials":{"uid":501,"gid":20,"pid":1234}}}` + "\n"),
+		},
+		{
+			name: "explicit peer uid",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"peer_uid":501}}` + "\n"),
+		},
+		{
+			name: "socket path separator variant",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"socket-path":"/run/ardur/kernelcapture/control.sock"}}` + "\n"),
+		},
+		{
+			name: "peer uid space variant",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"peer uid":501}}` + "\n"),
+		},
+		{
+			name: "so peercred hyphen variant",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"health","health":{},"so-peercred":{"uid":501}}` + "\n"),
+		},
+		{
+			name: "explicit peer gid",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"peer_gid":20}}` + "\n"),
+		},
+		{
+			name: "explicit peer pid",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"peer_pid":1234}}` + "\n"),
+		},
+		{
+			name: "ucred wrapper",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"health","health":{},"ucred":{"uid":501}}` + "\n"),
+		},
+		{
+			name: "mixed case so peercred",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"health","health":{},"So_PeerCred":{"uid":501}}` + "\n"),
+		},
+		{
+			name: "credential source",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"credential_source":"linux_so_peercred"}}` + "\n"),
+		},
+		{
+			name: "mixed case credential source",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"health","health":{},"Credential_Source":"linux_so_peercred"}` + "\n"),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

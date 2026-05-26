@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "01e8f0c3cc2e4f631f20d0b4241848cb0cbe833c5c1e57d078ba36414c2beca2"
+source_sha256: "c488b38181d55a873bfbd05dc08873275e78ecc361e2193de5580ed6cdd80fb7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -65,12 +65,15 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 
 - **Python job**: installs `python/` with dev extras and runs
   `python -m pytest tests/ -q --tb=short` from the `python/` directory on
-  Python 3.10 and Python 3.13.
+  Python 3.10 and Python 3.13. Because this runs the full `python/tests/`
+  tree, it includes `python/tests/test_examples_smoke.py` for the offline,
+  no-key examples smoke. That test covers checked-in mission fixtures and the
+  examples claim ledger; it does **not** prove live-provider framework demos.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
 
 ### What's Not Enforced By CI Today
 
-Honest list, so the gap is visible:
+Explicit list, so the gap is visible:
 
 - No content-fact verification (article claims, ADR cross-references) — caught only by review rounds and the cool-off re-read in the `dev → main` PR template.
 - No Markdown lint — `markdownlint` adds noise we don't want yet, and the earlier table-pipe heuristic was removed.
@@ -129,13 +132,14 @@ production models.
 
 ## Ardur Personal And Claude Code RC
 
-When touching the Hub, browser adapter, Claude Code hook, or `ARDUR.md`
-profile setup, run:
+When touching the Hub, browser adapter, Claude Code hook, posture index, or
+`ARDUR.md` profile setup, run:
 
 ```bash
 PYTHONPATH=python python -m pytest -q \
   python/tests/test_claude_code_hook.py \
   python/tests/test_claude_code_telemetry.py \
+  python/tests/test_posture_index.py \
   python/tests/test_ardur_personal_hub.py \
   python/tests/test_ardur_profile.py
 PYTHONPATH=python python plugins/claude-code/scripts/smoke.py
@@ -149,7 +153,9 @@ node examples/ardur-personal-extension/scripts/auth-header-smoke.mjs
 The Hub test confirms browser observations produce standard Ardur Execution
 Receipts through `GovernanceProxy`, CLI policy can block a controllable command,
 the export path includes Session Reviews, and authenticated Hub endpoints reject
-untrusted browser-origin requests.
+untrusted browser-origin requests. The posture-index tests cover valid and broken
+receipt chains, missing telemetry, unknown tool boundaries, CLI JSON/Markdown
+rendering, and redaction of credential-like values plus local path placeholders.
 
 ## Coverage Targets
 

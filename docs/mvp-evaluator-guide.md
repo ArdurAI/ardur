@@ -177,7 +177,7 @@ docker compose logs proxy | head -5
 # → {"timestamp":"2026-...","remote_addr":"...","method":"GET","path":"/health",...}
 ```
 
-## Known Gaps (honest disclosure)
+## Known Gaps
 
 - **Capture boundary**: Ardur governs at the tool-call level. Side effects below
   the tool boundary (subprocess trees, kernel events, network connections from
