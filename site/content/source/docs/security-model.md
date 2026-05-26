@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "2524eda0f4ce52811c0a39500cc42d2a3405c18f041887e68a3e7b029eebec27"
+source_sha256: "6ef6717035d891b9953e2a90c404e9be0938da3dba75435618eef3f527a3c716"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -20,15 +20,14 @@ This page is generated from the public repository source file. Edit the source f
 Ardur security is based on least privilege, explicit declaration, runtime
 enforcement, and verifiable evidence.
 
-> **Conformance scope (2026-04-28 narrowing):** This page describes the
-> *design intent* of the protocol. The reference proxy in `python/vibap/`
-> implements the **Delegation-Core** profile of `verifier-contract-v0.1`,
-> not yet the **MIC-State** or **MIC-Evidence** profiles. When closing
-> these gaps, update both this document and [`known-limitations.md`](/__ardur_internal__/source/docs/known-limitations/)
-> in the same PR. See `docs/specs/verifier-contract-v0.1.md` Section 13
-> ("Reference Implementation Conformance Notes") for the precise gap.
-> Deployments needing the stronger profiles MUST add layers beyond the
-> reference proxy or wait for the hardening rounds that close 13.2.
+> **Conformance scope (2026-05-19 update):** The reference proxy in
+> `python/vibap/` implements all three conformance profiles of
+> `verifier-contract-v0.1`: **Delegation-Core**, **MIC-State**, and
+> **MIC-Evidence**. The four design-only gaps identified in the 2026-04-28
+> hostile audit are closed. See `docs/specs/verifier-contract-v0.1.md`
+> Section 13 ("Reference Implementation Conformance Notes") for the
+> conformance map and `python/tests/test_mic_conformance.py` for the
+> 29-test validation suite.
 
 ## Core security gates (enforced by the reference proxy)
 
@@ -46,14 +45,17 @@ enforcement, and verifiable evidence.
 
 ## Design-only gates (NOT yet enforced by the reference proxy)
 
-These appear in `verifier-contract-v0.1.md` as `MUST` clauses but the
-reference Python proxy does not yet enforce them. Deployments that need
-them MUST layer additional verifiers:
+All `MUST` clauses from `verifier-contract-v0.1.md` that were previously
+design-only are now enforced as of the 2026-05-19 hardening round
+(t_dcbf560b). The reference proxy now implements:
 
 - runtime-observed `observed_manifest_digest == MD.tool_manifest_digest`
-- per-grant `last_seen_receipts` tracking and MIC-Evidence hidden-hop
-  detection
-- explicit invocation-envelope signature beyond the credential JWT
+- per-grant `last_seen_receipts` tracking with replay across proxy restarts
+- MIC-Evidence hidden-hop detection via visible receipt linkage
+- explicit invocation-envelope signature verification
+
+No additional verifier layers are required for MIC-State or MIC-Evidence
+conformance.
 
 ## Threats in scope
 

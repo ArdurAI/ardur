@@ -35,26 +35,27 @@ Ardur is not:
 
 Those controls still matter around Ardur.
 
-## Verifier-contract conformance gaps (reference proxy, 2026-04-28)
+## Verifier-contract conformance (reference proxy, 2026-05-19)
 
-The reference Python proxy in `python/vibap/` implements the
-**Delegation-Core** profile of `verifier-contract-v0.1`, not the
-**MIC-State** or **MIC-Evidence** profiles. When closing these gaps,
-update both this document and [`security-model.md`](security-model.md)
-in the same PR to prevent drift. The following spec `MUST`
-clauses are design-only in the reference implementation today:
+The reference Python proxy in `python/vibap/` implements all three
+conformance profiles of `verifier-contract-v0.1`: **Delegation-Core**,
+**MIC-State**, and **MIC-Evidence**. The four design-only gaps identified
+in the 2026-04-28 hostile audit are closed by task t_dcbf560b:
 
 - `observed_manifest_digest == MD.tool_manifest_digest` (Section 6.3 #6)
-- per-grant `last_seen_receipts` tracking (Section 5.7)
+  — enforced after mission policy resolution
+- per-grant `last_seen_receipts` tracking (Section 5.7) — replayed from
+  durable receipt log across proxy restarts
 - MIC-Evidence visible-receipt-linkage / hidden-hop detection
-  (Section 6.3 #7)
-- explicit invocation-envelope signature (Section 6.3 #5) beyond the
-  credential JWT
+  (Section 6.3 #7) — child receipts carry `parent_receipt_id` linking to
+  the parent grant's latest receipt
+- explicit invocation-envelope signature (Section 6.3 #5) — verified via
+  `envelope_signature_valid` telemetry field
 
-Deployments that need MIC-State or MIC-Evidence conformance MUST add
-verifier layers beyond the reference proxy or wait for the hardening
-rounds that close these gaps. See `docs/specs/verifier-contract-v0.1.md`
-Section 13 for the full conformance map.
+All 29 MIC conformance tests in `python/tests/test_mic_conformance.py`
+pass, validating all three profiles. See
+`docs/specs/verifier-contract-v0.1.md` Section 13 for the full conformance
+map.
 
 ## Mission Declaration schema enforcement (2026-04-28 hardening)
 

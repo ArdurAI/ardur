@@ -163,7 +163,6 @@
     "python/README.md": "source/python/readme/",
     "reports/LINEAGE_BUDGET_DELEGATION_PLAN_REVIEW_2026-05-13.md": "source/reports/lineage_budget_delegation_plan_review_2026-05-13/",
     "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md": "source/reports/phase2_daemon_kernel_boundary_claim_ledger_2026-05-11/",
-    "reports/PHASE2_DAEMON_SOCKET_SERVER_2026-05-15.md": "source/reports/phase2_daemon_socket_server_2026-05-15/",
     "site/README.md": "source/site/readme/"
   }
 }
