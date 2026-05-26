@@ -29,7 +29,7 @@
 # Stage 1: pull the real spire-agent binary from the official image.
 FROM ghcr.io/spiffe/spire-agent:1.14.2 AS spire
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
