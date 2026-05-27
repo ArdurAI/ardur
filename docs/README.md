@@ -29,6 +29,11 @@ coverage are in active development.
 - [Comparisons and engineering responses](comparisons/README.md)
 - [Technical Reference](reference/README.md) — CLI, Personal Hub HTTP API, and `ARDUR.md` profile format
 - [Articles](articles/README.md)
+- [Content Safety Plugin](guides/content-safety.md) — PII/credential detection with configurable deny/redact/warn modes
+- [MCP Gateway](guides/mcp-gateway.md) — JSON-RPC 2.0 stdio transport with policy evaluation and content safety
+- [eBPF Kernel Capture](guides/kernel-capture.md) — Go daemon + Python client for process-lifecycle observability
+- [OPA/Rego Backend](reference/opa-backend.md) — Rego policy evaluation composing with the native backend
+- [NIST AI RMF Mapping](compliance/nist-ai-rmf-mapping.md) — Self-assessment against all 4 RMF functions
 - [CodeQL dismissal audit trail](audit/)
 
 ## Start here

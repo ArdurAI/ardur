@@ -23,6 +23,11 @@ Already present:
 - `Ardur` as the public-facing product name with explicit naming boundaries for `VIBAP`, `MCEP`, and related protocol surfaces (see `docs/protocol-roots.md`)
 - complete Go AAT package — 13 constraint types, issuance, derivation, PoP binding, full §7 chain verification (49 tests)
 - cloud model governance tests proving real-world proxy enforcement with live LLMs
+- content safety plugin — regex-based PII/credential detection (credit cards, SSNs, emails, API keys) with deny/redact/warn modes
+- OPA/Rego policy backend — subprocess-based Rego evaluation composing with native, Cedar, and ForbidRules backends
+- MCP gateway — JSON-RPC 2.0 stdio transport intercepting `tools/call` for policy evaluation and content safety scanning
+- eBPF kernel capture daemon protocol handler and session registry (Go) plus Python Unix-socket client with proxy lifecycle hooks
+- NIST AI RMF self-assessment mapping Ardur components to all 4 RMF functions
 
 ## Runtime Verification
 
@@ -32,6 +37,7 @@ Next hardening work:
 - Codex hooks and Claude Desktop MCP packaging
 - public verifier and proof entry points with stable artifact paths so the archival walkthrough casts can be re-recorded against the public runtime
 - conformance test vectors imported under `docs/specs/conformance/` to retire the "private layout" notes in the v0.1 specs
+- end-to-end kernel-event-to-receipt correlation — the daemon protocol handler, session registry, and proxy hooks are in place; the remaining work connects the eBPF ringbuf consumer and correlator into a unified pipeline that produces signed kernel-event receipts chain-linked to tool-call receipts
 
 ## Proof Story
 

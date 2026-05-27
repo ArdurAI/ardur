@@ -5,7 +5,7 @@ The `ardur` console entry point ships with the Python package. After
 
 The CLI splits into two groups:
 
-- **Protocol path** — `start`, `issue`, `verify`, `attest`. Used by builders
+- **Protocol path** — `start`, `issue`, `verify`, `attest`, `mcp-gateway`. Used by builders
   who want to issue Mission Passports and run a governance proxy directly.
 - **Personal path** — `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`,
   `uninstall`, `run`, `desktop-observe`, `personal-native-host`,
@@ -71,6 +71,28 @@ chain.
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
 ```
+
+### `ardur mcp-gateway`
+
+Run the MCP gateway — a JSON-RPC 2.0 stdio proxy that sits between an MCP
+client and an upstream MCP server, intercepting `tools/call` for policy
+evaluation and optional content safety scanning.
+
+```text
+ardur mcp-gateway [--upstream-command CMD ...]
+                  [--mission MISSION] [--keys-dir DIR]
+                  [--state-dir DIR] [--log-path FILE]
+                  [--content-safety] [--content-safety-mode MODE]
+```
+
+`--upstream-command` specifies the MCP server process to spawn (e.g.
+`npx -- -y @modelcontextprotocol/server-filesystem /tmp`). `--mission`
+loads a JSON mission file to start a governed session at gateway startup.
+`--content-safety` enables pre/post scanning of tool arguments and output
+(optional; default mode is `warn`).
+
+See [`docs/guides/mcp-gateway.md`](../guides/mcp-gateway.md) for the full
+architecture, protocol contract, and integration guide.
 
 ## Personal Path
 
