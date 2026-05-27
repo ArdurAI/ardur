@@ -11,19 +11,20 @@ a local daemon fast path first, then fall back to the in-process handler.
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import re
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 import jwt
 
+from ._fixture_core import utc_timestamp, without_empty_values
+from ._hashing import sha256_hex
 from .passport import (
     DEFAULT_HOME,
     generate_keypair,
@@ -63,7 +64,7 @@ def _trace_id_or_stable_fallback(value: Any) -> str:
     raw = str(value if value is not None else "").strip()
     if not raw:
         return "trace-unknown"
-    return "trace-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    return "trace-" + sha256_hex(raw)[:32]
 
 
 def _contained_trace_dir(*, chain_dir: Path, trace_id: str) -> Path:
@@ -180,7 +181,7 @@ def _previous_receipt_hash_unlocked(state: ChainState) -> str | None:
     if not lines:
         return None
     last_jwt = lines[-1]
-    return "sha-256:" + hashlib.sha256(last_jwt.encode("utf-8")).hexdigest()
+    return "sha-256:" + sha256_hex(last_jwt)
 
 
 class MissionLoadError(RuntimeError):
@@ -311,29 +312,13 @@ def _stable_child_id(*, trace_id: str, session_id: str, agent_id: str) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
-    return "child:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return "child:" + sha256_hex(payload)[:32]
 
-
-def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _hash_text(value: str) -> dict[str, str]:
-    return {"alg": "sha-256", "value": hashlib.sha256(value.encode("utf-8")).hexdigest()}
+    return {"alg": "sha-256", "value": sha256_hex(value)}
 
-
-def _without_empty_values(payload: Mapping[str, Any]) -> dict[str, Any]:
-    clean: dict[str, Any] = {}
-    for key, value in payload.items():
-        if value is None or value == "":
-            continue
-        if isinstance(value, Mapping):
-            nested = _without_empty_values(value)
-            if nested:
-                clean[key] = nested
-            continue
-        clean[key] = value
-    return clean
 
 
 def _common_claude_code_metadata(
@@ -342,7 +327,7 @@ def _common_claude_code_metadata(
     trace_id: str,
     tool_name: str,
 ) -> dict[str, Any]:
-    return _without_empty_values(
+    return without_empty_values(
         {
             "schema_version": "ardur.claude_code.measurements.v0.1",
             "trace_id": trace_id,
@@ -457,7 +442,7 @@ def _build_policy_event(
     """
     from .proxy import Decision, PolicyEvent, _receipt_step_id
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = utc_timestamp()
     base_step_id = _receipt_step_id(
         str(claims.get("jti", "")),
         timestamp,
@@ -749,7 +734,7 @@ def _result_hash(tool_response: dict[str, Any]) -> dict[str, str]:
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    digest = sha256_hex(canonical)
     return {"alg": "sha-256", "value": digest}
 
 
@@ -864,7 +849,7 @@ def _lifecycle_arguments(
 
 
 def _policy_inheritance_summary(claims: Mapping[str, Any]) -> dict[str, Any]:
-    return _without_empty_values(
+    return without_empty_values(
         {
             "grant_id": str(claims.get("jti", "") or ""),
             "agent_id": str(claims.get("sub", "") or ""),
@@ -990,7 +975,7 @@ def _subagent_registry_record(
     observed_at: str,
 ) -> dict[str, Any]:
     lifecycle_meta = dict(metadata.get("lifecycle", {}) or {})
-    return _without_empty_values(
+    return without_empty_values(
         {
             "schema_version": "ardur.claude_code.subagents.v0.1",
             "event": lifecycle,
@@ -1024,7 +1009,7 @@ def _handle_subagent_lifecycle(
         return {"continue": True}
 
     trace_id = _trace_id_from_claims(claims)
-    observed_at = _utc_timestamp()
+    observed_at = utc_timestamp()
     event_name = str(hook_input.get("hook_event_name", "") or ("SubagentStart" if lifecycle == "start" else "SubagentStop"))
     state = resolve_chain_state(trace_id=trace_id)
     agent_id = str(hook_input.get("agent_id", "") or "")

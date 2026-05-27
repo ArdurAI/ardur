@@ -158,7 +158,7 @@ func IssuePassport(passport MissionPassport, key *SigningKey, opts *IssuePasspor
 		NotBefore:          now.Unix(),
 		ExpiresAt:          now.Add(ttl).Unix(),
 		JWTID:              jti,
-		MissionID:          jti,
+		MissionID:          deriveMissionID(passport.AgentID, passport.Mission),
 		Mission:            passport.Mission,
 		AllowedTools:       append([]string(nil), passport.AllowedTools...),
 		ForbiddenTools:     append([]string(nil), passport.ForbiddenTools...),
@@ -588,6 +588,16 @@ func cwdIsSubpath(child, parent string) bool {
 		return strings.HasPrefix(child, "/")
 	}
 	return strings.HasPrefix(child, parent+"/")
+}
+
+// deriveMissionID derives a deterministic, content-based MissionID from the
+// agent ID and mission text. This matches the Python-side fix (April 2026)
+// that binds MissionID to semantic content rather than a random per-issuance
+// JTI. Format: "mission:<agent_id>:<sha256(mission_text)[:12]>".
+func deriveMissionID(agentID, missionText string) string {
+	h := sha256.Sum256([]byte(missionText))
+	digest := hex.EncodeToString(h[:])
+	return fmt.Sprintf("mission:%s:%s", agentID, digest[:12])
 }
 
 func minInt(values ...int) int {

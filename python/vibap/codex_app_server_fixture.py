@@ -12,17 +12,17 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import re
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from ._fixture_core import utc_timestamp, without_empty_values
+from ._hashing import canonical_json as _canonical_json, sha256_hex
 from .claude_code_hook import MissionLoadError, load_active_passport
 from .denial import DenialReason
 from .passport import DEFAULT_HOME, load_private_key, load_public_key, resolve_keys_dir
@@ -63,24 +63,18 @@ class ChainState:
         return self.chain_dir / self.trace_dir_id / ".lock"
 
 
-def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _canonical_json(payload: Any) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _digest_payload(payload: Any) -> dict[str, str]:
     return {
         "alg": "sha-256",
         "canonicalization": "jcs-rfc8785",
-        "value": hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest(),
+        "value": sha256_hex(_canonical_json(payload)),
     }
 
 
 def _digest_file(path: Path) -> dict[str, str]:
-    return {"alg": "sha-256", "value": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"alg": "sha-256", "value": sha256_hex(path.read_bytes())}
 
 
 def _default_codex_fixture_home() -> Path:
@@ -96,24 +90,6 @@ def _default_codex_fixture_home() -> Path:
     return ardur_home / "codex-app-server-fixture" / ".codex"
 
 
-def _without_empty_values(payload: Mapping[str, Any]) -> dict[str, Any]:
-    clean: dict[str, Any] = {}
-    for key, value in payload.items():
-        if value is None or value == "":
-            continue
-        if isinstance(value, Mapping):
-            nested = _without_empty_values(value)
-            if nested:
-                clean[key] = nested
-            continue
-        if isinstance(value, list):
-            nested_list = [item for item in value if item not in (None, "")]
-            if nested_list:
-                clean[key] = nested_list
-            continue
-        clean[key] = value
-    return clean
-
 
 def _external_trace_id(raw: str) -> str:
     value = str(raw or "").strip()
@@ -122,7 +98,7 @@ def _external_trace_id(raw: str) -> str:
 
 def _trace_dir_id(trace_id: str) -> str:
     """Map untrusted external trace material to a single safe path segment."""
-    digest = hashlib.sha256(_external_trace_id(trace_id).encode("utf-8")).hexdigest()[:32]
+    digest = sha256_hex(_external_trace_id(trace_id))[:32]
     value = f"codex-{digest}"
     if not _SAFE_TRACE_DIR_ID_RE.fullmatch(value):  # pragma: no cover - defensive invariant
         raise ValueError("internal trace directory id is not path-safe")
@@ -183,7 +159,7 @@ def _previous_receipt_hash_unlocked(state: ChainState) -> str | None:
     lines = [line.strip() for line in tail.splitlines() if line.strip()]
     if not lines:
         return None
-    return hashlib.sha256(lines[-1].encode("utf-8")).hexdigest()
+    return sha256_hex(lines[-1])
 
 
 def _redact_sensitive_values(value: Any) -> Any:
@@ -502,7 +478,7 @@ def _codex_measurements(
     unknown_boundaries: list[str] = list(UNKNOWN_BOUNDARIES)
     if mapping_confidence == "unknown":
         unknown_boundaries.append("unmapped_codex_host_event_schema")
-    return _without_empty_values(
+    return without_empty_values(
         {
             "schema_version": "ardur.codex_app_server.measurements.v0.1",
             "trace_id": trace_id,
@@ -534,7 +510,7 @@ def _build_policy_event(
 ):
     from .proxy import Decision, PolicyEvent, _receipt_step_id
 
-    timestamp = _utc_timestamp()
+    timestamp = utc_timestamp()
     step_id = _receipt_step_id(str(claims.get("jti", "")), timestamp, tool_name, arguments)
     return PolicyEvent(
         timestamp=timestamp,
@@ -789,7 +765,7 @@ def _status_from_verdict(verdict: str) -> str:
 def _digest_text(value: str) -> dict[str, str]:
     return {
         "alg": "sha-256",
-        "value": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+        "value": sha256_hex(value),
     }
 
 
@@ -919,7 +895,7 @@ def build_shareable_report(
             if isinstance(session_context, Mapping):
                 cwd = session_context.get("cwd")
                 if isinstance(cwd, str) and cwd:
-                    digest = hashlib.sha256(cwd.encode("utf-8")).hexdigest()[:8]
+                    digest = sha256_hex(cwd)[:8]
                     roots[f"CODEX_CWD_{digest}"] = cwd
 
     payload = {

@@ -144,6 +144,16 @@ def _bootstrap_builtin_backend(name: str) -> bool:
         except RuntimeError:
             return False
         return True
+    if name == "opa":
+        try:
+            from vibap.backends import register_opa
+        except Exception:
+            return False
+        try:
+            register_opa()
+        except RuntimeError:
+            return False
+        return True
     return False
 
 
