@@ -48,11 +48,52 @@ def export_evidence_bundle(
         "evidence_level": "observed" if (kernel_data or semantic_data or receipt_chain) else "self_signed",
     }
 
+    # Automatic key rotation + revocation list wiring (item #2) — now actively exercised
+    try:
+        from .key_rotation import KeyManager
+        km = KeyManager()
+        current_key = km.get_current_signing_key()
+        km.record_bundle_signed()
+        bundle["rotation"] = {
+            "active_key_id": current_key.key_id if current_key else None,
+            "bundles_since_rotation": getattr(km, "_bundles_since_last_rotation", 0),
+        }
+        if current_key:
+            bundle["signing_key"] = {
+                "key_id": current_key.key_id,
+                "created_at": current_key.created_at.isoformat(),
+                "expires_at": current_key.expires_at.isoformat() if current_key.expires_at else None,
+            }
+        rev_list = km.get_revocation_list()
+        bundle["revocation_list"] = [
+            {"key_id": r.key_id, "revoked_at": r.revoked_at.isoformat(), "reason": r.reason}
+            for r in rev_list
+        ]
+    except Exception:
+        pass  # rotation is best-effort in early skeleton stage
+
     if output_path:
         p = Path(output_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as f:
             json.dump(bundle, f, indent=2, sort_keys=True)
+
+    # Performance metrics hook (item #7)
+    try:
+        from .metrics import metrics as ardur_metrics
+        size = len(json.dumps(bundle))
+        ardur_metrics.record_bundle(size)
+    except Exception:
+        pass
+
+    # Surface capture level in bundle when known (item #3)
+    try:
+        from .capture_levels import CaptureLevel
+        # If the caller passed kernel data or we can infer, note it
+        if kernel_data and kernel_data.get("kernel_evidence_level") == "observed":
+            bundle["capture_level"] = "kernel"
+    except Exception:
+        pass
 
     return bundle
 

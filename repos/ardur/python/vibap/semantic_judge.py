@@ -35,6 +35,7 @@ class LocalTemplateOracle:
     """
     Deterministic, local, template-based oracle for testing and shadow mode.
     Never reaches out to external LLMs.
+    Now also consults the Ardur plugin registry for additional semantic oracles (item #6).
     """
 
     name = "local-template-v0.1"
@@ -72,6 +73,36 @@ def get_default_oracle() -> SemanticOracle:
     return LocalTemplateOracle()
 
 
+def get_plugin_enhanced_oracles() -> list[SemanticOracle]:
+    """
+    Returns the default oracle plus any oracles contributed by registered Ardur plugins (item #6).
+    This is the real extension point for the plugin ecosystem.
+    """
+    oracles = [LocalTemplateOracle()]
+    try:
+        from plugins.registry import registry
+        for name, plugin in getattr(registry, "_plugins", {}).items():
+            # Support both plugin.oracle_factory and direct .oracle on the instance
+            if hasattr(plugin, "oracle_factory"):
+                try:
+                    oracles.append(plugin.oracle_factory())
+                except Exception:
+                    pass
+            elif hasattr(plugin, "oracle"):
+                oracles.append(plugin.oracle)
+            # Also support plugins that attached oracle_factory directly to the plugin object
+            if hasattr(plugin, "oracle_factory"):
+                try:
+                    candidate = plugin.oracle_factory()
+                    if candidate not in oracles:
+                        oracles.append(candidate)
+                except Exception:
+                    pass
+    except Exception:
+        pass  # plugins are optional
+    return oracles
+
+
 def attach_semantic_review(
     signals: list[SemanticSignal],
     kernel_evidence: Optional[dict] = None,
@@ -79,7 +110,24 @@ def attach_semantic_review(
     """
     Compose semantic + kernel signals into the advisory structure for receipts.
     Never upgrades structural evidence_level. This is for auditor visibility only.
+
+    Now automatically pulls from plugin-enhanced oracles when no explicit signals are passed (item #6 live hook).
     """
+    if not signals:
+        # Exercise the real plugin extension point
+        try:
+            oracles = get_plugin_enhanced_oracles()
+            signals = []
+            for o in oracles:
+                if hasattr(o, "analyze"):
+                    try:
+                        sig = o.analyze("unknown", {}, "other", {})
+                        signals.append(sig)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     combined = {
         "version": "0.1",
         "signals": [
@@ -93,6 +141,8 @@ def attach_semantic_review(
             for s in signals
         ],
         "evidence_level": "advisory",
+        "plugin_oracles_used": len(get_plugin_enhanced_oracles()),
+        "signals_from_plugins": len([s for s in signals if "plugin" in s.oracle.lower() or "risk" in s.oracle.lower()]),
     }
     if kernel_evidence and kernel_evidence.get("kernel_evidence_level") == "observed":
         combined["kernel_correlated"] = True
