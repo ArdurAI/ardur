@@ -2,7 +2,7 @@
 title: "Ardur Coverage Map"
 description: "**The single source of truth for what Ardur captures and what it does not.**"
 source_path: "docs/coverage-map.md"
-source_sha256: "8b7a121049b8c42dbf0d45392bf5ca45f1115d8fb50f58a893a04892e98c9bd7"
+source_sha256: "bb733bc06723887bc8e5582b59121f391ded0526e670f2595e15dbe84acb81d8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -119,9 +119,22 @@ The `insufficient_evidence` label is how we keep claims precise at the receipt l
 
 ### v0.5 — Linux eBPF (kernel-capture)
 
-Adds receipts for kernel events: `execve`, `clone`, `openat`, `write`, `unlinkat`, `renameat2`, `connect`, etc. Each kernel-event receipt is correlated to the tool-call receipt that caused it (via process-tree ancestry). Same chain. Same signing. Same disputability.
+**Progress as of 2026-05-27:** The daemon protocol handler, session registry
+(Go), Unix-socket client (Python), and proxy session-lifecycle hooks are
+implemented and tested. The eBPF loading, ring buffer consumption, and
+correlator infrastructure is present in the Go package. Full end-to-end
+kernel-event-to-receipt correlation is in active development.
 
-After v0.5: the gap between "what Claude said it would do" (tool call) and "what actually happened on the system" (kernel events) is closed on Linux.
+When complete, v0.5 adds receipts for kernel events: `execve`, `clone`,
+`openat`, `write`, `unlinkat`, `renameat2`, `connect`, etc. Each
+kernel-event receipt is correlated to the tool-call receipt that caused it
+(via process-tree ancestry). Same chain. Same signing. Same disputability.
+
+After v0.5: the gap between "what Claude said it would do" (tool call) and
+"what actually happened on the system" (kernel events) is closed on Linux.
+
+See [`docs/guides/kernel-capture.md`](/__ardur_internal__/source/docs/guides/kernel-capture/) for current
+architecture and integration details.
 
 ### v1.0 — macOS Endpoint Security Framework
 

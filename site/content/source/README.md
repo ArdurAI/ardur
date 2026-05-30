@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur is the runtime governance and evidence layer for AI agents."
 source_path: "README.md"
-source_sha256: "16b38390f0fcebfa04c40d07d92ebda829e30b869e70d31e9dfe9cbe9d0f6007"
+source_sha256: "33aab2a97cdf27a411916ea168779f2e10b6239cdca265a6c6d65e0ad20b8159"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -230,6 +230,11 @@ This repo currently includes:
   [evidence-bundle guide](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/)
 - a journey-log [article series](/__ardur_internal__/source/docs/articles/readme/) — Article 06 (Public Import Discipline) and Article 05 (Proof Media That Actually Means Something) are the first-wave shippers
 - a public audit trail at [`docs/audit/`](/__ardur_internal__/source/docs/audit/) mirroring the GitHub Code Scanning dismissal record so triage decisions are auditable from the repo tree without GitHub credentials
+- the content safety plugin — deterministic regex-based PII and credential detection (credit cards, SSNs, emails, API keys) with deny/redact/warn modes; see [`docs/guides/content-safety.md`](/__ardur_internal__/source/docs/guides/content-safety/)
+- the OPA/Rego policy backend — subprocess-based Rego evaluation composing with native, Cedar, and ForbidRules backends under DENY-wins semantics; see [`docs/reference/opa-backend.md`](/__ardur_internal__/source/docs/reference/opa-backend/)
+- the MCP gateway — JSON-RPC 2.0 stdio transport intercepting `tools/call` for policy evaluation and content safety scanning; see [`docs/guides/mcp-gateway.md`](/__ardur_internal__/source/docs/guides/mcp-gateway/)
+- the eBPF kernel capture integration — Go daemon protocol handler and session registry with a Python Unix-socket client wired into the proxy session lifecycle; see [`docs/guides/kernel-capture.md`](/__ardur_internal__/source/docs/guides/kernel-capture/)
+- the NIST AI RMF self-assessment mapping Ardur components to all 4 RMF functions with an OWASP Agentic Top 10 crosswalk; see [`docs/compliance/nist-ai-rmf-mapping.md`](/__ardur_internal__/source/docs/compliance/nist-ai-rmf-mapping/)
 
 ## What Is Coming Next
 
@@ -249,7 +254,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 |----------------------|-------------|---------------------------------|
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, and native-host examples; deferred README-only OpenAI Agents SDK and Google ADK directories | more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
-| **Policy engine**    | native checks, forbid-rules, Cedar bridge, AAT constraint engine (13 types) | OPA and broader Biscuit datalog examples |
+| **Policy engine**    | native checks, forbid-rules, Cedar bridge, OPA/Rego backend, AAT constraint engine (13 types) | broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |
 | **Receipts sink**    | local JSON / stdout-oriented receipt surfaces | OTel emitters and durable storage examples |
 

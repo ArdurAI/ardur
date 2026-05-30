@@ -76,7 +76,7 @@
     {
       "id": "gemini-cli-local-proof",
       "title": "Gemini CLI support is a local-only hook fixture, not a live-provider enforcement claim",
-      "body": "The Gemini CLI adapter writes a local settings/context fixture, records visible pre-tool-call hook payloads as signed Ardur receipts, preserves allow/deny/unknown evidence semantics, and emits redacted shareable reports. This supports a local tool-boundary proof path only: it does not claim provider-hidden reasoning visibility, server-side tool-call capture, sandbox isolation, or live Gemini enforcement.",
+      "body": "The Gemini CLI adapter writes a local settings/context fixture, records visible BeforeTool hook payloads as signed Ardur receipts, preserves allow/deny/ask-user/unknown evidence semantics, and emits redacted shareable reports. This supports a local tool-boundary proof path only: it does not claim provider-hidden reasoning visibility, server-side tool-call capture, sandbox isolation, or live Gemini enforcement.",
       "evidence_level": "code-and-doc",
       "maturity": "in-progress",
       "claim_type": "evidence-semantics",

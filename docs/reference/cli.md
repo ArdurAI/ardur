@@ -270,13 +270,14 @@ ardur gemini-cli-fixture [--home DIR] [--project-dir DIR]
 ```
 
 The fixture writes `settings.json`, `extensions/ardur-local/gemini-extension.json`,
-and `GEMINI.md` under the selected local directories. It is a proof harness for
-visible Gemini CLI hook/tool-boundary events; it is not a live-provider or
-server-side enforcement claim.
+and `GEMINI.md` under the selected local directories. The generated hook config
+targets Gemini CLI `0.44.1` `BeforeTool` HookDefinition semantics. It is a proof
+harness for visible Gemini CLI hook/tool-boundary events; it is not a
+live-provider or server-side enforcement claim.
 
 ### `ardur gemini-cli-hook`
 
-Run the local-only Gemini CLI pre-tool-call hook adapter. The hook reads one
+Run the local-only Gemini CLI `BeforeTool` hook adapter. The hook reads one
 JSON object from stdin, evaluates the active Mission Passport from
 `ARDUR_MISSION_PASSPORT`, appends a signed receipt under
 `ARDUR_GEMINI_HOOK_DIR` (or the default Ardur home), and prints a JSON result.
@@ -285,11 +286,12 @@ JSON object from stdin, evaluates the active Mission Passport from
 ardur gemini-cli-hook [pre|--phase pre] [--keys-dir DIR]
 ```
 
-`status=allow` means Ardur recorded evidence and left Gemini/user permission
-flow authoritative. `status=deny` and `status=unknown` return a blocking result
-for wrappers that fail closed. Unknown results are used for unmapped Gemini tool
-schemas or other coverage gaps instead of silently treating insufficient
-evidence as safe success.
+`status=allow` emits a Gemini `decision=allow`, records evidence, and leaves
+Gemini/user permission flow authoritative. `status=deny` emits top-level
+`decision=deny` plus a `reason`. `status=unknown` emits Gemini's top-level
+`decision=ask` (recorded by Ardur as `host_decision=ask_user`), forcing user
+confirmation for unmapped Gemini tool schemas or other coverage gaps instead of
+silently treating insufficient evidence as safe success.
 
 ### `ardur gemini-cli-report`
 

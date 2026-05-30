@@ -1,10 +1,10 @@
 """Local-only Ardur adapter for Gemini CLI hook/context proof fixtures.
 
 This module intentionally implements a narrow no-provider proof surface: it can
-write a local Gemini settings/context fixture, consume local hook-shaped JSON,
-append signed Ardur receipts, and render redacted shareable reports. It does not
-claim live Gemini enforcement, provider-side hidden action visibility, or
-server-side tool-call capture.
+write a local Gemini settings/context fixture, consume local BeforeTool-shaped
+JSON, append signed Ardur receipts, and render redacted shareable reports. It
+does not claim live Gemini enforcement, provider-side hidden action visibility,
+or server-side tool-call capture.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ DEFAULT_GEMINI_FIXTURE_HOME = DEFAULT_HOME / "gemini-cli-fixture" / ".gemini"
 DEFAULT_CHAIN_DIR = DEFAULT_HOME / "gemini-cli-hook"
 CHAIN_FILENAME = "receipts.jsonl"
 HOOK_VERIFIER_ID = "ardur-gemini-cli-hook"
+TARGET_GEMINI_CLI_VERSION = "0.44.1"
 UNKNOWN_BOUNDARIES = (
     "provider_hidden_actions",
     "provider_server_side_tool_calls",
@@ -205,6 +206,30 @@ def _write_private_text(path: Path, content: str) -> None:
         pass
 
 
+def _before_tool_hook_definitions(hook_command: str) -> list[dict[str, Any]]:
+    """Return Gemini CLI 0.44.1 ``BeforeTool`` HookDefinition config.
+
+    Gemini CLI 0.44.x uses an event key (``BeforeTool``) containing
+    HookDefinition objects with a matcher and nested command hook configs,
+    not the older ``preToolCall`` command-list shape.
+    """
+    return [
+        {
+            "matcher": ".*",
+            "sequential": True,
+            "hooks": [
+                {
+                    "name": HOOK_VERIFIER_ID,
+                    "type": "command",
+                    "command": hook_command,
+                    "timeout": 60000,
+                    "description": "Record Ardur local evidence and return Gemini CLI 0.44.1 hook decisions.",
+                }
+            ],
+        }
+    ]
+
+
 def build_local_fixture(
     *,
     home: Path | None = None,
@@ -229,14 +254,17 @@ def build_local_fixture(
     project_context_path = project / "GEMINI.md"
 
     hook_command = "ardur gemini-cli-hook --phase pre --keys-dir " + str(signing_keys)
+    before_tool_hooks = _before_tool_hook_definitions(hook_command)
     settings = {
         "schemaVersion": "ardur.gemini_cli.settings_fixture.v0.1",
         "mcpServers": {},
         "hooks": {
-            "preToolCall": [hook_command],
+            "BeforeTool": before_tool_hooks,
         },
         "ardur": {
             "mode": "local-proof-only",
+            "targetGeminiCliVersion": TARGET_GEMINI_CLI_VERSION,
+            "hookContract": "BeforeTool HookDefinition",
             "chainDir": str(ardur_chain),
             "missionPassportEnv": PASSPORT_ENV_VAR,
             "unknownBoundaries": list(UNKNOWN_BOUNDARIES),
@@ -246,13 +274,15 @@ def build_local_fixture(
         "name": "ardur-local-proof",
         "version": "0.1.0",
         "description": "Local-only Ardur receipt hook fixture for Gemini CLI.",
-        "hooks": {"preToolCall": hook_command},
+        "targetGeminiCliVersion": TARGET_GEMINI_CLI_VERSION,
+        "hooks": {"BeforeTool": before_tool_hooks},
     }
     context_text = "\n".join(
         [
             "# Gemini local Ardur context fixture",
             "",
             "This project is configured for a local-only Ardur proof harness.",
+            f"The fixture targets Gemini CLI {TARGET_GEMINI_CLI_VERSION} BeforeTool HookDefinition semantics.",
             "The hook emits signed local receipts for visible tool-boundary events.",
             "It does not claim provider-hidden reasoning or server-side tool-call visibility.",
             "",
@@ -291,6 +321,7 @@ def build_shareable_context(fixture: Mapping[str, Any]) -> dict[str, Any]:
     }
     payload = {
         "schema_version": "ardur.gemini_cli.local_context.v0.1",
+        "target_gemini_cli_version": TARGET_GEMINI_CLI_VERSION,
         "claim_boundary": {
             "scope": "local_fixture_only",
             "verified": [
@@ -307,6 +338,8 @@ def build_shareable_context(fixture: Mapping[str, Any]) -> dict[str, Any]:
         },
         "unknown_boundaries": list(UNKNOWN_BOUNDARIES),
         "host_context": {
+            "hook_contract": "BeforeTool HookDefinition",
+            "target_gemini_cli_version": TARGET_GEMINI_CLI_VERSION,
             "settings_digest": _digest_file(settings_path),
             "extension_digest": _digest_file(extension_path),
             "project_context_digest": _digest_file(project_context_path),
@@ -324,19 +357,28 @@ def build_shareable_context(fixture: Mapping[str, Any]) -> dict[str, Any]:
 _MAPPED_TOOLS: dict[str, dict[str, str]] = {
     "read_file": {"action_class": "read", "resource_family": "filesystem", "side_effect_class": "none"},
     "readfile": {"action_class": "read", "resource_family": "filesystem", "side_effect_class": "none"},
+    "read_many_files": {"action_class": "read", "resource_family": "filesystem", "side_effect_class": "none"},
     "list_directory": {"action_class": "read", "resource_family": "filesystem", "side_effect_class": "none"},
     "list_files": {"action_class": "read", "resource_family": "filesystem", "side_effect_class": "none"},
+    "glob": {"action_class": "read", "resource_family": "filesystem", "side_effect_class": "none"},
+    "grep_search": {"action_class": "search", "resource_family": "filesystem", "side_effect_class": "none"},
     "write_file": {"action_class": "write", "resource_family": "filesystem", "side_effect_class": "internal_write"},
     "edit_file": {"action_class": "write", "resource_family": "filesystem", "side_effect_class": "internal_write"},
+    "replace": {"action_class": "write", "resource_family": "filesystem", "side_effect_class": "internal_write"},
     "delete_file": {"action_class": "write", "resource_family": "filesystem", "side_effect_class": "internal_write"},
     "run_shell_command": {"action_class": "execute", "resource_family": "process", "side_effect_class": "state_change"},
     "shell": {"action_class": "execute", "resource_family": "process", "side_effect_class": "state_change"},
     "web_fetch": {"action_class": "read", "resource_family": "network_resource", "side_effect_class": "none"},
     "web_search": {"action_class": "search", "resource_family": "network_resource", "side_effect_class": "none"},
+    "google_web_search": {"action_class": "search", "resource_family": "network_resource", "side_effect_class": "none"},
+    "ask_user": {"action_class": "query", "resource_family": "human_operator", "side_effect_class": "none"},
+    "invoke_agent": {"action_class": "dispatch", "resource_family": "agent", "side_effect_class": "subagent_launch"},
 }
 _TARGET_KEYS = (
     "path",
+    "paths",
     "file_path",
+    "file_paths",
     "filename",
     "directory",
     "url",
@@ -348,6 +390,8 @@ _TARGET_KEYS = (
     "to",
     "command",
     "query",
+    "pattern",
+    "prompt",
     "opaque_target",
 )
 
@@ -365,6 +409,8 @@ def _target_from_args(tool_name: str, args: Mapping[str, Any]) -> str:
         value = args.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+        if isinstance(value, list) and value:
+            return ",".join(str(item) for item in value[:8])
     return tool_name
 
 
@@ -401,6 +447,12 @@ def _map_tool_call(tool_name: str, tool_args: Mapping[str, Any]) -> tuple[dict[s
     elif mapping["resource_family"] == "filesystem":
         visibility = "full"
         content_class = "filesystem_path"
+    elif mapping["resource_family"] == "human_operator":
+        visibility = "tool_boundary_only"
+        content_class = "human_input"
+    elif mapping["resource_family"] == "agent":
+        visibility = "tool_boundary_only"
+        content_class = "agent_invocation"
     else:
         visibility = "tool_boundary_only"
         content_class = mapping["resource_family"]
@@ -435,6 +487,30 @@ def _host_context_summary(host_context: Mapping[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _contains_sensitive_key(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if SENSITIVE_KEY_RE.search(str(key)) or _contains_sensitive_key(item):
+                return True
+    if isinstance(value, (list, tuple)):
+        return any(_contains_sensitive_key(item) for item in value)
+    return False
+
+
+def _mcp_context_summary(mcp_context: Any) -> dict[str, Any]:
+    if not isinstance(mcp_context, Mapping):
+        return {}
+    clean = _redact_sensitive_values(dict(mcp_context))
+    summary: dict[str, Any] = {"payload_digest": _digest_payload(clean)}
+    for key in ("server_name", "tool_name", "serverName", "toolName"):
+        value = clean.get(key)
+        if isinstance(value, str) and value.strip():
+            summary[key] = value.strip()
+    if _contains_sensitive_key(mcp_context):
+        summary["sensitive_fields"] = "redacted_before_digest"
+    return summary
+
+
 def _gemini_measurements(
     hook_input: Mapping[str, Any],
     *,
@@ -451,17 +527,21 @@ def _gemini_measurements(
     unknown_boundaries: list[str] = list(UNKNOWN_BOUNDARIES)
     if mapping_confidence == "unknown":
         unknown_boundaries.append("unmapped_gemini_tool_schema")
+    mcp_context = _mcp_context_summary(hook_input.get("mcp_context"))
+    if mcp_context:
+        unknown_boundaries.append("gemini_mcp_oauth_context_redacted")
     return without_empty_values(
         {
             "schema_version": "ardur.gemini_cli.measurements.v0.1",
             "trace_id": trace_id,
             "gemini_session_id": str(hook_input.get("session_id", "") or ""),
-            "event_name": str(hook_input.get("event_name", "") or ""),
+            "event_name": str(hook_input.get("hook_event_name") or hook_input.get("event_name", "") or ""),
             "cwd": str(hook_input.get("cwd", "") or ""),
             "tool_name": tool_name,
             "mapped_policy_tool": mapped_tool_name,
             "mapping_confidence": mapping_confidence,
             "host_context": _host_context_summary(host_context),
+            "mcp_context": mcp_context,
             "unknown_boundaries": unknown_boundaries,
             "claim_boundary": "visible Gemini CLI hook/tool-boundary evidence only",
             "verdict": verdict,
@@ -580,25 +660,65 @@ def _emit_chained_receipt(
     return receipt_obj
 
 
+def _gemini_hook_output(
+    *,
+    status: str,
+    decision: str,
+    block: bool,
+    message: str,
+    claim_boundary: str,
+    reason: str | None = None,
+    receipt_id: str | None = None,
+    unknown_boundaries: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a Gemini CLI 0.44.1 top-level decision output plus Ardur fields."""
+    payload: dict[str, Any] = {
+        "status": status,
+        "block": block,
+        "decision": decision,
+        "message": message,
+        "claim_boundary": claim_boundary,
+    }
+    if reason:
+        payload["reason"] = reason
+    if receipt_id:
+        payload["receipt_id"] = receipt_id
+    if unknown_boundaries:
+        payload["unknown_boundaries"] = unknown_boundaries
+    if decision == "ask":
+        # Gemini's hook vocabulary uses ``ask`` to force user confirmation.
+        # The scheduler translates that to PolicyDecision.ASK_USER / forced
+        # confirmation. Keep the explicit Ardur label so tests/reports can tie
+        # this to the scout's ask-user fail-closed boundary without emitting the
+        # non-Gemini ``decision=ask_user`` token.
+        payload["host_decision"] = "ask_user"
+        payload["systemMessage"] = reason or message
+    return payload
+
+
 def handle_pre_tool_call(hook_input: dict[str, Any], *, keys_dir: Path | None = None) -> dict[str, Any]:
-    """Handle a visible Gemini CLI pre-tool-call payload.
+    """Handle a visible Gemini CLI BeforeTool payload.
 
     Return values use an Ardur-local shape: ``status=allow`` records evidence
     without claiming provider enforcement; ``status=deny`` and
-    ``status=unknown`` are blocking outputs for local wrappers that choose to
-    fail closed.
+    ``status=unknown`` include Gemini top-level ``decision`` fields for local
+    hosts that choose to fail closed. Older pre-tool-call field names remain
+    accepted only as compatibility input aliases.
     """
     from .proxy import Decision, PolicyEvent
 
     try:
         claims = load_active_passport(keys_dir=keys_dir)
     except MissionLoadError as exc:
-        return {
-            "status": "deny",
-            "block": True,
-            "message": f"ardur: blocked - {exc}",
-            "claim_boundary": "no receipt emitted because no valid mission passport was available",
-        }
+        message = f"ardur: blocked - {exc}"
+        return _gemini_hook_output(
+            status="deny",
+            decision="deny",
+            block=True,
+            message=message,
+            reason=message,
+            claim_boundary="no receipt emitted because no valid mission passport was available",
+        )
 
     tool_name = str(hook_input.get("tool_name", "") or "").strip() or "unknown_gemini_tool"
     tool_args = _normalize_tool_args(hook_input)
@@ -647,14 +767,17 @@ def handle_pre_tool_call(hook_input: dict[str, Any], *, keys_dir: Path | None = 
             arguments=arguments,
             measurements=measurements,
         )
-        return {
-            "status": "unknown",
-            "block": True,
-            "message": f"ardur: insufficient evidence (receipt {receipt_obj.receipt_id})",
-            "receipt_id": receipt_obj.receipt_id,
-            "claim_boundary": "visible Gemini CLI hook/tool-boundary evidence only",
-            "unknown_boundaries": list(UNKNOWN_BOUNDARIES) + ["unmapped_gemini_tool_schema"],
-        }
+        reason = f"ardur: insufficient evidence for Gemini tool schema (receipt {receipt_obj.receipt_id}); ask user before proceeding"
+        return _gemini_hook_output(
+            status="unknown",
+            decision="ask",
+            block=True,
+            message=reason,
+            reason=reason,
+            receipt_id=receipt_obj.receipt_id,
+            claim_boundary="visible Gemini CLI hook/tool-boundary evidence only",
+            unknown_boundaries=list(UNKNOWN_BOUNDARIES) + ["unmapped_gemini_tool_schema"],
+        )
 
     final, decisions = _evaluate_native_policy(event, claims)
     if final == "Deny":
@@ -689,13 +812,16 @@ def handle_pre_tool_call(hook_input: dict[str, Any], *, keys_dir: Path | None = 
             arguments=arguments,
             measurements=measurements,
         )
-        return {
-            "status": "deny",
-            "block": True,
-            "message": f"ardur: blocked - {reason_text}",
-            "receipt_id": receipt_obj.receipt_id,
-            "claim_boundary": "visible Gemini CLI hook/tool-boundary evidence only",
-        }
+        message = f"ardur: blocked - {reason_text}"
+        return _gemini_hook_output(
+            status="deny",
+            decision="deny",
+            block=True,
+            message=message,
+            reason=message,
+            receipt_id=receipt_obj.receipt_id,
+            claim_boundary="visible Gemini CLI hook/tool-boundary evidence only",
+        )
 
     event.policy_decisions = _policy_decision_dicts(decisions)
     receipt_obj = _emit_chained_receipt(
@@ -707,14 +833,15 @@ def handle_pre_tool_call(hook_input: dict[str, Any], *, keys_dir: Path | None = 
         arguments=arguments,
         measurements=measurements,
     )
-    return {
-        "status": "allow",
-        "block": False,
-        "message": f"ardur: allowed/evidence recorded (receipt {receipt_obj.receipt_id})",
-        "receipt_id": receipt_obj.receipt_id,
-        "claim_boundary": "evidence-only allow; Gemini/user permission flow remains authoritative",
-        "unknown_boundaries": list(UNKNOWN_BOUNDARIES),
-    }
+    return _gemini_hook_output(
+        status="allow",
+        decision="allow",
+        block=False,
+        message=f"ardur: allowed/evidence recorded (receipt {receipt_obj.receipt_id})",
+        receipt_id=receipt_obj.receipt_id,
+        claim_boundary="evidence-only allow; Gemini/user permission flow remains authoritative",
+        unknown_boundaries=list(UNKNOWN_BOUNDARIES),
+    )
 
 
 def _iter_chain_files(chain_dir: Path) -> list[Path]:
@@ -847,6 +974,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if phase == "pre":
         output = handle_pre_tool_call(_load_json_stdin(), keys_dir=args.keys_dir)
         _print_json(output)
+        if output.get("decision") in {"allow", "ask", "deny", "block"}:
+            return 0
         return 2 if output.get("block") else 0
     if phase == "fixture":
         fixture = build_local_fixture(

@@ -18,4 +18,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`README.md`](/__ardur_internal__/source/docs/reference/readme/)
 - [`ardur-md-profile.md`](/__ardur_internal__/source/docs/reference/ardur-md-profile/)
 - [`cli.md`](/__ardur_internal__/source/docs/reference/cli/)
+- [`opa-backend.md`](/__ardur_internal__/source/docs/reference/opa-backend/)
 - [`personal-hub-api.md`](/__ardur_internal__/source/docs/reference/personal-hub-api/)

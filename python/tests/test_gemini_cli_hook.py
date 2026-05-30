@@ -62,14 +62,35 @@ def test_gemini_fixture_writes_local_settings_and_redacted_shareable_context(tmp
     settings_text = json.dumps(settings, sort_keys=True)
     assert "ardur gemini-cli-hook --phase pre" in settings_text
     assert str(Path.home() / ".gemini") not in settings_text
+    assert settings["ardur"]["targetGeminiCliVersion"] == "0.44.1"
+    assert settings["ardur"]["hookContract"] == "BeforeTool HookDefinition"
+    assert "preToolCall" not in settings["hooks"]
+    before_tool = settings["hooks"]["BeforeTool"]
+    assert isinstance(before_tool, list)
+    assert len(before_tool) == 1
+    assert before_tool[0]["matcher"] == ".*"
+    assert before_tool[0]["sequential"] is True
+    assert len(before_tool[0]["hooks"]) == 1
+    command_hook = before_tool[0]["hooks"][0]
+    assert command_hook["name"] == "ardur-gemini-cli-hook"
+    assert command_hook["type"] == "command"
+    assert command_hook["command"].startswith("ardur gemini-cli-hook --phase pre")
+    assert command_hook["timeout"] == 60000
+
+    extension = json.loads(extension_path.read_text(encoding="utf-8"))
+    assert extension["targetGeminiCliVersion"] == "0.44.1"
+    assert extension["hooks"]["BeforeTool"] == before_tool
 
     shareable = build_shareable_context(fixture)
     shareable_text = json.dumps(shareable, sort_keys=True)
 
     assert shareable["schema_version"] == "ardur.gemini_cli.local_context.v0.1"
+    assert shareable["target_gemini_cli_version"] == "0.44.1"
     assert shareable["claim_boundary"]["scope"] == "local_fixture_only"
     assert "live Gemini enforcement" in shareable["claim_boundary"]["not_claimed"]
     assert "provider_hidden_actions" in shareable["unknown_boundaries"]
+    assert shareable["host_context"]["hook_contract"] == "BeforeTool HookDefinition"
+    assert shareable["host_context"]["target_gemini_cli_version"] == "0.44.1"
     assert shareable["host_context"]["settings_digest"]["alg"] == "sha-256"
     assert shareable["host_context"]["extension_digest"]["alg"] == "sha-256"
     assert str(tmp_path) not in shareable_text
@@ -146,8 +167,82 @@ def test_gemini_shell_denied_by_read_only_side_effect_policy(tmp_path, monkeypat
 
     assert output["status"] == "deny"
     assert output["block"] is True
+    assert output["decision"] == "deny"
+    assert output["reason"].startswith("ardur: blocked -")
+    assert "host_decision" not in output
     assert "side_effect_class" in output["message"]
     assert "state_change" in output["message"]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input", "expected"),
+    [
+        (
+            "read_many_files",
+            {"paths": ["README.md", "docs/reference/cli.md"]},
+            {
+                "action_class": "read",
+                "resource_family": "filesystem",
+                "side_effect_class": "none",
+                "content_class": "filesystem_path",
+                "target": "README.md,docs/reference/cli.md",
+            },
+        ),
+        (
+            "grep_search",
+            {"pattern": "BeforeTool"},
+            {
+                "action_class": "search",
+                "resource_family": "filesystem",
+                "side_effect_class": "none",
+                "content_class": "filesystem_path",
+                "target": "BeforeTool",
+            },
+        ),
+        (
+            "google_web_search",
+            {"query": "Gemini CLI HookDecision"},
+            {
+                "action_class": "search",
+                "resource_family": "network_resource",
+                "side_effect_class": "none",
+                "content_class": "network_resource",
+                "target": "Gemini CLI HookDecision",
+            },
+        ),
+        (
+            "ask_user",
+            {"prompt": "approve shell command?"},
+            {
+                "action_class": "query",
+                "resource_family": "human_operator",
+                "side_effect_class": "none",
+                "content_class": "human_input",
+                "target": "approve shell command?",
+            },
+        ),
+        (
+            "invoke_agent",
+            {"prompt": "inspect this file"},
+            {
+                "action_class": "dispatch",
+                "resource_family": "agent",
+                "side_effect_class": "subagent_launch",
+                "content_class": "agent_invocation",
+                "target": "inspect this file",
+            },
+        ),
+    ],
+)
+def test_gemini_cli_0_44_1_visible_tool_aliases_are_mapped(tool_name, tool_input, expected):
+    from vibap.gemini_cli_hook import _map_tool_call
+
+    arguments, confidence = _map_tool_call(tool_name, tool_input)
+
+    assert confidence == "mapped"
+    assert arguments["tool_name"] == tool_name
+    for key, value in expected.items():
+        assert arguments[key] == value
 
 
 def test_gemini_hook_allow_deny_unknown_receipts_and_redacted_report(tmp_path, monkeypatch):
@@ -181,12 +276,17 @@ def test_gemini_hook_allow_deny_unknown_receipts_and_redacted_report(tmp_path, m
 
     allow_output = handle_pre_tool_call(
         {
-            "event_name": "pre_tool_call",
+            "hook_event_name": "BeforeTool",
             "session_id": "gemini-session-1",
             "cwd": str(project),
             "tool_name": "read_file",
-            "tool_args": {"path": str(project / "README.md")},
+            "tool_input": {"path": str(project / "README.md")},
             "host_context": host_context,
+            "mcp_context": {
+                "serverName": "local-filesystem",
+                "toolName": "read_file",
+                "oauth": {"access_token": "mcp-token-that-must-not-appear"},
+            },
         },
         keys_dir=keys_dir,
     )
@@ -217,6 +317,12 @@ def test_gemini_hook_allow_deny_unknown_receipts_and_redacted_report(tmp_path, m
     assert deny_output["status"] == "deny"
     assert unknown_output["status"] == "unknown"
     assert unknown_output["block"] is True
+    assert allow_output["decision"] == "allow"
+    assert deny_output["decision"] == "deny"
+    assert unknown_output["decision"] == "ask"
+    assert unknown_output["host_decision"] == "ask_user"
+    assert unknown_output["systemMessage"] == unknown_output["reason"]
+    assert "ask user" in unknown_output["reason"]
 
     receipt_files = list(chain_dir.rglob("receipts.jsonl"))
     assert len(receipt_files) == 1
@@ -231,10 +337,17 @@ def test_gemini_hook_allow_deny_unknown_receipts_and_redacted_report(tmp_path, m
         "insufficient_evidence",
     ]
     assert claims[0]["measurements"]["gemini_cli"]["host_context"]["settings_digest"]["alg"] == "sha-256"
+    assert claims[0]["measurements"]["gemini_cli"]["event_name"] == "BeforeTool"
+    assert claims[0]["measurements"]["gemini_cli"]["mcp_context"]["serverName"] == "local-filesystem"
+    assert claims[0]["measurements"]["gemini_cli"]["mcp_context"]["toolName"] == "read_file"
+    assert claims[0]["measurements"]["gemini_cli"]["mcp_context"]["payload_digest"]["alg"] == "sha-256"
+    assert claims[0]["measurements"]["gemini_cli"]["mcp_context"]["sensitive_fields"] == "redacted_before_digest"
     assert "provider_hidden_actions" in claims[0]["measurements"]["gemini_cli"]["unknown_boundaries"]
+    assert "gemini_mcp_oauth_context_redacted" in claims[0]["measurements"]["gemini_cli"]["unknown_boundaries"]
     assert claims[2]["public_denial_reason"] == "insufficient_evidence"
     assert claims[2]["measurements"]["gemini_cli"]["mapping_confidence"] == "unknown"
     assert "raw-secret-value-that-must-not-be-copied" not in json.dumps(claims, sort_keys=True)
+    assert "mcp-token-that-must-not-appear" not in json.dumps(claims, sort_keys=True)
 
     report = build_shareable_report(
         home=home,
@@ -251,8 +364,10 @@ def test_gemini_hook_allow_deny_unknown_receipts_and_redacted_report(tmp_path, m
     assert report["policy_verdict_counts"] == {"allow": 1, "deny": 1, "unknown": 1}
     assert report["unknown_boundary_count"] >= 1
     assert "provider_hidden_actions" in report["coverage_gaps"]
+    assert "gemini_mcp_oauth_context_redacted" in report["coverage_gaps"]
     assert str(tmp_path) not in report_text
     assert "raw-secret-value-that-must-not-be-copied" not in report_text
+    assert "mcp-token-that-must-not-appear" not in report_text
 
 
 @pytest.mark.parametrize(
@@ -356,7 +471,7 @@ def test_gemini_report_excludes_invalid_jwt_claims_from_trusted_counts(tmp_path)
     assert report["invalid_chains"][0]["token_count"] == 1
 
 
-def test_gemini_hook_cli_uses_exit_code_two_for_blocking_unknown(tmp_path):
+def test_gemini_hook_cli_emits_gemini_ask_decision_for_blocking_unknown(tmp_path):
     keys_dir = tmp_path / "keys"
     home = tmp_path / "home"
     project = tmp_path / "project"
@@ -376,11 +491,11 @@ def test_gemini_hook_cli_uses_exit_code_two_for_blocking_unknown(tmp_path):
         "PYTHONPATH": str(repo_root / "python"),
     }
     payload = {
-        "event_name": "pre_tool_call",
+        "hook_event_name": "BeforeTool",
         "session_id": "gemini-session-2",
         "cwd": str(project),
         "tool_name": "gemini_unmapped_tool",
-        "tool_args": {"opaque_target": str(project / "opaque")},
+        "tool_input": {"opaque_target": str(project / "opaque")},
         "host_context": {"settings": {"trustedFolders": [str(project)]}},
     }
 
@@ -395,8 +510,11 @@ def test_gemini_hook_cli_uses_exit_code_two_for_blocking_unknown(tmp_path):
         timeout=20,
     )
 
-    assert completed.returncode == 2
+    assert completed.returncode == 0
     output = json.loads(completed.stdout)
     assert output["status"] == "unknown"
     assert output["block"] is True
+    assert output["decision"] == "ask"
+    assert output["host_decision"] == "ask_user"
+    assert output["systemMessage"] == output["reason"]
     assert "insufficient evidence" in output["message"].lower()
