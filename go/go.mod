@@ -3,7 +3,7 @@ module github.com/ArdurAI/ardur/go
 go 1.26.0
 
 require (
-	github.com/cedar-policy/cedar-go v1.6.0
+	github.com/cedar-policy/cedar-go v1.7.0
 	github.com/cilium/ebpf v0.16.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/sigstore/sigstore-go v1.1.4
