@@ -15,6 +15,7 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,7 +25,7 @@ from typing import Any, Mapping
 import jwt
 
 from ._fixture_core import utc_timestamp, without_empty_values
-from ._hashing import sha256_hex
+from ._hashing import canonical_json, sha256_hex
 from .passport import (
     DEFAULT_HOME,
     generate_keypair,
@@ -410,7 +411,7 @@ def _attach_claude_code_measurements(
     )
     claude_code["verdict"] = receipt_obj.verdict
     claude_code["receipt_id"] = receipt_obj.receipt_id
-    measurements["claude_code"] = _without_empty_values(claude_code)
+    measurements["claude_code"] = without_empty_values(claude_code)
     receipt_obj.measurements = measurements
 
 
@@ -738,6 +739,73 @@ def _result_hash(tool_response: dict[str, Any]) -> dict[str, str]:
     return {"alg": "sha-256", "value": digest}
 
 
+def _count_user_choice_items(value: Any) -> int:
+    if isinstance(value, Mapping):
+        return len(value)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return len(value)
+    return 0
+
+
+def _hash_canonical_measurement(value: Any) -> dict[str, str]:
+    return {"alg": "sha-256", "value": sha256_hex(canonical_json(value))}
+
+
+def _ask_user_question_context(
+    *,
+    tool_input: Mapping[str, Any],
+    tool_response: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Summarise host-visible AskUserQuestion answers without signing raw text.
+
+    Claude Code 2.1.158 added ``AskUserQuestionOutput.response?: string`` for a
+    freeform user reply. Ardur already signs ``result_hash`` over the complete
+    ``tool_response``; this measurement adds only mode/count/hash fields so
+    auditors can distinguish structured answers from freeform responses without
+    embedding the raw user text or answer map in the receipt payload.
+    """
+    observed_fields = {"answers", "response", "annotations"} & set(tool_response)
+    if not observed_fields:
+        return None
+
+    response_present = "response" in tool_response and tool_response.get("response") is not None
+    answer_count = _count_user_choice_items(tool_response.get("answers"))
+    annotation_count = _count_user_choice_items(tool_response.get("annotations"))
+
+    if response_present and answer_count:
+        mode = "mixed"
+    elif response_present:
+        mode = "freeform_response"
+    elif answer_count:
+        mode = "structured_answers"
+    else:
+        mode = "unknown"
+
+    response_value = tool_response.get("response")
+    return without_empty_values(
+        {
+            "schema_version": "ardur.claude_code.user_choice_context.v0.1",
+            "source": "claude_code_post_tool_use.tool_response",
+            "mode": mode,
+            "question_count": _count_user_choice_items(tool_input.get("questions")),
+            "answer_count": answer_count,
+            "annotation_count": annotation_count,
+            "response_present": response_present,
+            "response_sha256": _hash_text(str(response_value)) if response_present else None,
+            "answers_hash": (
+                _hash_canonical_measurement(tool_response.get("answers"))
+                if "answers" in tool_response and tool_response.get("answers") is not None
+                else None
+            ),
+            "annotations_hash": (
+                _hash_canonical_measurement(tool_response.get("annotations"))
+                if "annotations" in tool_response and tool_response.get("annotations") is not None
+                else None
+            ),
+        }
+    )
+
+
 def handle_post_tool_use(
     hook_input: dict[str, Any],
     *,
@@ -806,11 +874,21 @@ def handle_post_tool_use(
         # Backfill the four content-class telemetry fields and the result digest
         # before signing, so all five fields land in the canonical signed payload.
         _backfill_telemetry_fields(receipt_obj, event.arguments)
+        metadata = None
+        if tool_name == "AskUserQuestion":
+            user_choice_context = _ask_user_question_context(
+                tool_input=tool_input_dict,
+                tool_response=tool_response,
+            )
+            if user_choice_context is not None:
+                metadata = _tool_actor_metadata(hook_input, trace_id=trace_id, tool_name=tool_name)
+                metadata["user_choice_context"] = user_choice_context
         _attach_claude_code_measurements(
             receipt_obj,
             hook_input,
             trace_id=trace_id,
             tool_name=tool_name,
+            metadata=metadata,
         )
         receipt_obj.result_hash = _result_hash(tool_response)
         signed = sign_receipt(receipt_obj, private_key)
@@ -890,7 +968,7 @@ def _subagent_lifecycle_metadata(
         tool_name=str(hook_input.get("hook_event_name", "") or f"Subagent{lifecycle.title()}"),
     )
     metadata.update(
-        _without_empty_values(
+        without_empty_values(
             {
                 "actor_kind": "subagent",
                 "claude_agent_id": agent_id,
