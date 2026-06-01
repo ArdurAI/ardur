@@ -28,7 +28,7 @@ classifiers = [
 ]
 dependencies = [
     "PyJWT>=2.12.0,<3",
-    "cryptography>=41.0,<45",
+    "cryptography>=41.0,<49",
     # jsonschema moved out of [dev] on 2026-04-28: the Mission Declaration
     # loader now validates fetched MDs against the v0.1 spec at the network
     # boundary (FIX-3 from S2 hostile audit). Validation is a security
