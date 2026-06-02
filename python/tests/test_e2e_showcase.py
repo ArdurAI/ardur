@@ -36,10 +36,10 @@ from tests.conftest import v01_required_md_extras
 # constants
 # ---------------------------------------------------------------------------
 
-CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "qwen3:8b")
+CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "llama3.2")
 API_KEY = os.environ.get(
     "ARDUR_OLLAMA_API_KEY",
-    "84119f860f45465895b7d0db2e4cae45.Opk8Y2vwi4KTbpP_15p82THA",
+    "",
 )
 
 # ---------------------------------------------------------------------------
