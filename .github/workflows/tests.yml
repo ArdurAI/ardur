@@ -60,9 +60,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
-          # Must match the `go` directive in go/go.mod (currently 1.25.9).
-          # If you bump go.mod, bump this string in the same PR.
-          go-version: '1.25.9'
+          # Keep CI synchronized with the Go module directive.
+          go-version-file: go/go.mod
           cache: true
           cache-dependency-path: go/go.sum
 
