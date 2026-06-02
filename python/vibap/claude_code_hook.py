@@ -11,21 +11,19 @@ a local daemon fast path first, then fall back to the in-process handler.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
 import uuid
-from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 import jwt
 
-from ._fixture_core import utc_timestamp, without_empty_values
-from ._hashing import canonical_json, sha256_hex
 from .passport import (
     DEFAULT_HOME,
     generate_keypair,
@@ -65,7 +63,7 @@ def _trace_id_or_stable_fallback(value: Any) -> str:
     raw = str(value if value is not None else "").strip()
     if not raw:
         return "trace-unknown"
-    return "trace-" + sha256_hex(raw)[:32]
+    return "trace-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 def _contained_trace_dir(*, chain_dir: Path, trace_id: str) -> Path:
@@ -182,7 +180,7 @@ def _previous_receipt_hash_unlocked(state: ChainState) -> str | None:
     if not lines:
         return None
     last_jwt = lines[-1]
-    return "sha-256:" + sha256_hex(last_jwt)
+    return "sha-256:" + hashlib.sha256(last_jwt.encode("utf-8")).hexdigest()
 
 
 class MissionLoadError(RuntimeError):
@@ -313,13 +311,29 @@ def _stable_child_id(*, trace_id: str, session_id: str, agent_id: str) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
-    return "child:" + sha256_hex(payload)[:32]
+    return "child:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _hash_text(value: str) -> dict[str, str]:
-    return {"alg": "sha-256", "value": sha256_hex(value)}
+    return {"alg": "sha-256", "value": hashlib.sha256(value.encode("utf-8")).hexdigest()}
 
+
+def _without_empty_values(payload: Mapping[str, Any]) -> dict[str, Any]:
+    clean: dict[str, Any] = {}
+    for key, value in payload.items():
+        if value is None or value == "":
+            continue
+        if isinstance(value, Mapping):
+            nested = _without_empty_values(value)
+            if nested:
+                clean[key] = nested
+            continue
+        clean[key] = value
+    return clean
 
 
 def _common_claude_code_metadata(
@@ -328,7 +342,7 @@ def _common_claude_code_metadata(
     trace_id: str,
     tool_name: str,
 ) -> dict[str, Any]:
-    return without_empty_values(
+    return _without_empty_values(
         {
             "schema_version": "ardur.claude_code.measurements.v0.1",
             "trace_id": trace_id,
@@ -411,7 +425,7 @@ def _attach_claude_code_measurements(
     )
     claude_code["verdict"] = receipt_obj.verdict
     claude_code["receipt_id"] = receipt_obj.receipt_id
-    measurements["claude_code"] = without_empty_values(claude_code)
+    measurements["claude_code"] = _without_empty_values(claude_code)
     receipt_obj.measurements = measurements
 
 
@@ -443,7 +457,7 @@ def _build_policy_event(
     """
     from .proxy import Decision, PolicyEvent, _receipt_step_id
 
-    timestamp = utc_timestamp()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     base_step_id = _receipt_step_id(
         str(claims.get("jti", "")),
         timestamp,
@@ -735,75 +749,8 @@ def _result_hash(tool_response: dict[str, Any]) -> dict[str, str]:
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    digest = sha256_hex(canonical)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return {"alg": "sha-256", "value": digest}
-
-
-def _count_user_choice_items(value: Any) -> int:
-    if isinstance(value, Mapping):
-        return len(value)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return len(value)
-    return 0
-
-
-def _hash_canonical_measurement(value: Any) -> dict[str, str]:
-    return {"alg": "sha-256", "value": sha256_hex(canonical_json(value))}
-
-
-def _ask_user_question_context(
-    *,
-    tool_input: Mapping[str, Any],
-    tool_response: Mapping[str, Any],
-) -> dict[str, Any] | None:
-    """Summarise host-visible AskUserQuestion answers without signing raw text.
-
-    Claude Code 2.1.158 added ``AskUserQuestionOutput.response?: string`` for a
-    freeform user reply. Ardur already signs ``result_hash`` over the complete
-    ``tool_response``; this measurement adds only mode/count/hash fields so
-    auditors can distinguish structured answers from freeform responses without
-    embedding the raw user text or answer map in the receipt payload.
-    """
-    observed_fields = {"answers", "response", "annotations"} & set(tool_response)
-    if not observed_fields:
-        return None
-
-    response_present = "response" in tool_response and tool_response.get("response") is not None
-    answer_count = _count_user_choice_items(tool_response.get("answers"))
-    annotation_count = _count_user_choice_items(tool_response.get("annotations"))
-
-    if response_present and answer_count:
-        mode = "mixed"
-    elif response_present:
-        mode = "freeform_response"
-    elif answer_count:
-        mode = "structured_answers"
-    else:
-        mode = "unknown"
-
-    response_value = tool_response.get("response")
-    return without_empty_values(
-        {
-            "schema_version": "ardur.claude_code.user_choice_context.v0.1",
-            "source": "claude_code_post_tool_use.tool_response",
-            "mode": mode,
-            "question_count": _count_user_choice_items(tool_input.get("questions")),
-            "answer_count": answer_count,
-            "annotation_count": annotation_count,
-            "response_present": response_present,
-            "response_sha256": _hash_text(str(response_value)) if response_present else None,
-            "answers_hash": (
-                _hash_canonical_measurement(tool_response.get("answers"))
-                if "answers" in tool_response and tool_response.get("answers") is not None
-                else None
-            ),
-            "annotations_hash": (
-                _hash_canonical_measurement(tool_response.get("annotations"))
-                if "annotations" in tool_response and tool_response.get("annotations") is not None
-                else None
-            ),
-        }
-    )
 
 
 def handle_post_tool_use(
@@ -874,21 +821,11 @@ def handle_post_tool_use(
         # Backfill the four content-class telemetry fields and the result digest
         # before signing, so all five fields land in the canonical signed payload.
         _backfill_telemetry_fields(receipt_obj, event.arguments)
-        metadata = None
-        if tool_name == "AskUserQuestion":
-            user_choice_context = _ask_user_question_context(
-                tool_input=tool_input_dict,
-                tool_response=tool_response,
-            )
-            if user_choice_context is not None:
-                metadata = _tool_actor_metadata(hook_input, trace_id=trace_id, tool_name=tool_name)
-                metadata["user_choice_context"] = user_choice_context
         _attach_claude_code_measurements(
             receipt_obj,
             hook_input,
             trace_id=trace_id,
             tool_name=tool_name,
-            metadata=metadata,
         )
         receipt_obj.result_hash = _result_hash(tool_response)
         signed = sign_receipt(receipt_obj, private_key)
@@ -927,7 +864,7 @@ def _lifecycle_arguments(
 
 
 def _policy_inheritance_summary(claims: Mapping[str, Any]) -> dict[str, Any]:
-    return without_empty_values(
+    return _without_empty_values(
         {
             "grant_id": str(claims.get("jti", "") or ""),
             "agent_id": str(claims.get("sub", "") or ""),
@@ -968,7 +905,7 @@ def _subagent_lifecycle_metadata(
         tool_name=str(hook_input.get("hook_event_name", "") or f"Subagent{lifecycle.title()}"),
     )
     metadata.update(
-        without_empty_values(
+        _without_empty_values(
             {
                 "actor_kind": "subagent",
                 "claude_agent_id": agent_id,
@@ -1053,7 +990,7 @@ def _subagent_registry_record(
     observed_at: str,
 ) -> dict[str, Any]:
     lifecycle_meta = dict(metadata.get("lifecycle", {}) or {})
-    return without_empty_values(
+    return _without_empty_values(
         {
             "schema_version": "ardur.claude_code.subagents.v0.1",
             "event": lifecycle,
@@ -1087,7 +1024,7 @@ def _handle_subagent_lifecycle(
         return {"continue": True}
 
     trace_id = _trace_id_from_claims(claims)
-    observed_at = utc_timestamp()
+    observed_at = _utc_timestamp()
     event_name = str(hook_input.get("hook_event_name", "") or ("SubagentStart" if lifecycle == "start" else "SubagentStop"))
     state = resolve_chain_state(trace_id=trace_id)
     agent_id = str(hook_input.get("agent_id", "") or "")

@@ -217,42 +217,6 @@ def test_task_tool_truncates_description_to_64_chars() -> None:
 
 
 # ---------------------------------------------------------------------------
-# AskUserQuestion
-# ---------------------------------------------------------------------------
-
-def test_ask_user_question_maps_to_count_only_user_interaction_target() -> None:
-    arguments = map_tool_call(
-        tool_name="AskUserQuestion",
-        tool_input={
-            "questions": [
-                {
-                    "id": "q1",
-                    "question": "Which private deployment should I use?",
-                }
-            ]
-        },
-    )
-    assert arguments["action_class"] == "query"
-    assert arguments["target"] == "AskUserQuestion:1 question"
-    assert "private deployment" not in arguments["target"]
-    assert arguments["resource_family"] == "user_interaction"
-    assert arguments["content_class"] == "user_instruction"
-    assert arguments["content_provenance"] == "claude_code_tool_input"
-    assert arguments["side_effect_class"] == "none"
-    assert arguments["visibility"] == "full"
-    assert arguments["sensitivity"] == "medium"
-    assert arguments["instruction_bearing"] is True
-    assert arguments["budget_delta"] == 1
-    assert arguments["questions"][0]["id"] == "q1"  # original input preserved
-
-
-def test_ask_user_question_counts_missing_questions_as_unknown_zero() -> None:
-    arguments = map_tool_call(tool_name="AskUserQuestion", tool_input={})
-    assert arguments["target"] == "AskUserQuestion:0 questions"
-    assert arguments["resource_family"] == "user_interaction"
-
-
-# ---------------------------------------------------------------------------
 # WebFetch
 # ---------------------------------------------------------------------------
 
@@ -385,7 +349,6 @@ def test_mcp_fallback_uses_mcp_placeholder_when_no_uri_or_name() -> None:
         ("Grep", {"path": "/src", "pattern": "foo"}),
         ("Bash", {"command": "ls"}),
         ("Task", {"subagent_type": "general-purpose", "description": "do x"}),
-        ("AskUserQuestion", {"questions": [{"id": "q1", "question": "Continue?"}]}),
         ("WebFetch", {"url": "https://example.com"}),
         ("WebSearch", {"query": "x"}),
         ("NotebookEdit", {"notebook_path": "/n.ipynb", "cell_id": "c1"}),

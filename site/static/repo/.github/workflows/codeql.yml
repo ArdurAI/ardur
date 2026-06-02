@@ -30,7 +30,7 @@ jobs:
     outputs:
       languages: ${{ steps.detect.outputs.languages }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - id: detect
         name: Detect supported languages present in the tree
@@ -62,13 +62,13 @@ jobs:
       matrix:
         language: ${{ fromJSON(needs.detect-languages.outputs.languages) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       # v3 is an annotated tag (tag-object 865f5f5c... → commit ce64ddcb...).
       # Pin to the commit SHA per the same discipline as the other
       # workflows; comment shows the human-readable version.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v3 (commit)
+        uses: github/codeql-action/init@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a  # v3 (commit)
         with:
           languages: ${{ matrix.language }}
           # `security-and-quality` is the broadest pack — covers
@@ -79,9 +79,9 @@ jobs:
           queries: security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v3 (commit)
+        uses: github/codeql-action/autobuild@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a  # v3 (commit)
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v3 (commit)
+        uses: github/codeql-action/analyze@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a  # v3 (commit)
         with:
           category: "/language:${{ matrix.language }}"

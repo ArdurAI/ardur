@@ -11,12 +11,12 @@ from typing import Any
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from ._hashing import canonical_json, sha256_hex
 from .passport import ALGORITHM
 
 
 def compute_log_digest(events: list[dict[str, Any]]) -> str:
-    return sha256_hex(canonical_json(events))
+    canonical = json.dumps(events, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 ATTESTATION_TTL_S = 90 * 24 * 3600  # 90 days; archive separately for long-term retention

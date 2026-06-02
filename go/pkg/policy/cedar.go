@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ArdurAI/ardur/go/pkg/util"
 	cedar "github.com/cedar-policy/cedar-go"
 )
 
@@ -15,7 +14,8 @@ import (
 // It parses Cedar policy text, builds entity stores, and evaluates
 // authorization requests per the Cedar language specification.
 type CedarEngine struct {
-	guard       util.CloseGuard
+	mu          sync.RWMutex
+	closed      bool
 	entities    cedar.EntityMap
 	policyCache sync.Map // map[string]*cedar.PolicySet, keyed by policy hash
 }
@@ -33,9 +33,9 @@ var _ PolicyEngine = (*CedarEngine)(nil)
 // Compile parses Cedar policy text and returns a compiled policy with
 // a deterministic hash suitable for credential binding.
 func (e *CedarEngine) Compile(_ context.Context, policyText string) (*CompiledPolicy, error) {
-	e.guard.RLock()
-	defer e.guard.RUnlock()
-	if e.guard.CheckClosed() {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
 		return nil, ErrEngineClosed
 	}
 
@@ -72,9 +72,9 @@ func (e *CedarEngine) Compile(_ context.Context, policyText string) (*CompiledPo
 
 // Evaluate runs an authorization request against a compiled policy set.
 func (e *CedarEngine) Evaluate(_ context.Context, compiled *CompiledPolicy, entities []Entity, request AuthzRequest) (*AuthzResult, error) {
-	e.guard.RLock()
-	defer e.guard.RUnlock()
-	if e.guard.CheckClosed() {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
 		return nil, ErrEngineClosed
 	}
 
@@ -130,9 +130,9 @@ func (e *CedarEngine) Evaluate(_ context.Context, compiled *CompiledPolicy, enti
 // SetEntities loads entities into the engine's persistent entity store.
 // These entities are available for all subsequent evaluations.
 func (e *CedarEngine) SetEntities(entities []Entity) error {
-	e.guard.Lock()
-	defer e.guard.Unlock()
-	if e.guard.CheckClosed() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
 		return ErrEngineClosed
 	}
 
@@ -147,12 +147,12 @@ func (e *CedarEngine) EngineName() string {
 
 // Close releases resources held by the engine.
 func (e *CedarEngine) Close() error {
-	e.guard.Lock()
-	defer e.guard.Unlock()
-	if e.guard.CheckClosed() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
 		return nil
 	}
-	e.guard.MarkClosed()
+	e.closed = true
 	e.entities = nil
 	e.policyCache = sync.Map{}
 	return nil

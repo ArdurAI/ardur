@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "bc15720473b40ffbf69cbcf7b30797088a3aa6ca959673415372a2b05d861e87"
+source_sha256: "394592e723b217e4709cedf3c9c38744f35ecb237a6681f53fef9ebd2c50ea5c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,7 +22,7 @@ The `ardur` console entry point ships with the Python package. After
 
 The CLI splits into two groups:
 
-- **Protocol path** — `start`, `issue`, `verify`, `attest`, `mcp-gateway`. Used by builders
+- **Protocol path** — `start`, `issue`, `verify`, `attest`. Used by builders
   who want to issue Mission Passports and run a governance proxy directly.
 - **Personal path** — `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`,
   `uninstall`, `run`, `desktop-observe`, `personal-native-host`,
@@ -88,28 +88,6 @@ chain.
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
 ```
-
-### `ardur mcp-gateway`
-
-Run the MCP gateway — a JSON-RPC 2.0 stdio proxy that sits between an MCP
-client and an upstream MCP server, intercepting `tools/call` for policy
-evaluation and optional content safety scanning.
-
-```text
-ardur mcp-gateway [--upstream-command CMD ...]
-                  [--mission MISSION] [--keys-dir DIR]
-                  [--state-dir DIR] [--log-path FILE]
-                  [--content-safety] [--content-safety-mode MODE]
-```
-
-`--upstream-command` specifies the MCP server process to spawn (e.g.
-`npx -- -y @modelcontextprotocol/server-filesystem /tmp`). `--mission`
-loads a JSON mission file to start a governed session at gateway startup.
-`--content-safety` enables pre/post scanning of tool arguments and output
-(optional; default mode is `warn`).
-
-See [`docs/guides/mcp-gateway.md`](/__ardur_internal__/source/docs/guides/mcp-gateway/) for the full
-architecture, protocol contract, and integration guide.
 
 ## Personal Path
 
@@ -287,14 +265,13 @@ ardur gemini-cli-fixture [--home DIR] [--project-dir DIR]
 ```
 
 The fixture writes `settings.json`, `extensions/ardur-local/gemini-extension.json`,
-and `GEMINI.md` under the selected local directories. The generated hook config
-targets Gemini CLI `0.44.1` `BeforeTool` HookDefinition semantics. It is a proof
-harness for visible Gemini CLI hook/tool-boundary events; it is not a
-live-provider or server-side enforcement claim.
+and `GEMINI.md` under the selected local directories. It is a proof harness for
+visible Gemini CLI hook/tool-boundary events; it is not a live-provider or
+server-side enforcement claim.
 
 ### `ardur gemini-cli-hook`
 
-Run the local-only Gemini CLI `BeforeTool` hook adapter. The hook reads one
+Run the local-only Gemini CLI pre-tool-call hook adapter. The hook reads one
 JSON object from stdin, evaluates the active Mission Passport from
 `ARDUR_MISSION_PASSPORT`, appends a signed receipt under
 `ARDUR_GEMINI_HOOK_DIR` (or the default Ardur home), and prints a JSON result.
@@ -303,12 +280,11 @@ JSON object from stdin, evaluates the active Mission Passport from
 ardur gemini-cli-hook [pre|--phase pre] [--keys-dir DIR]
 ```
 
-`status=allow` emits a Gemini `decision=allow`, records evidence, and leaves
-Gemini/user permission flow authoritative. `status=deny` emits top-level
-`decision=deny` plus a `reason`. `status=unknown` emits Gemini's top-level
-`decision=ask` (recorded by Ardur as `host_decision=ask_user`), forcing user
-confirmation for unmapped Gemini tool schemas or other coverage gaps instead of
-silently treating insufficient evidence as safe success.
+`status=allow` means Ardur recorded evidence and left Gemini/user permission
+flow authoritative. `status=deny` and `status=unknown` return a blocking result
+for wrappers that fail closed. Unknown results are used for unmapped Gemini tool
+schemas or other coverage gaps instead of silently treating insufficient
+evidence as safe success.
 
 ### `ardur gemini-cli-report`
 

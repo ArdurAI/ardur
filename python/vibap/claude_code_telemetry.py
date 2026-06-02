@@ -12,7 +12,6 @@ the gate (proxy._missing_declared_telemetry) reads them from
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any, Callable, Mapping
 
 ToolMapper = Callable[[Mapping[str, Any]], dict[str, Any]]
@@ -130,14 +129,6 @@ def _bash_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _count_items(value: Any) -> int:
-    if isinstance(value, Mapping):
-        return len(value)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return len(value)
-    return 0
-
-
 def _agent_dispatch_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
     """Map Claude Code subagent dispatch tools.
 
@@ -169,29 +160,6 @@ def _agent_dispatch_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
         "sensitivity": "medium",
         "instruction_bearing": True,
         "budget_delta": 10,
-    }
-
-
-def _ask_user_question_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
-    """Map Claude Code's user-clarification tool as host-visible choice context.
-
-    The target intentionally records only the question count. Question text and
-    answer content can be user-authored; PostToolUse adds hash-only answer
-    context when the host-visible response payload exists.
-    """
-    question_count = _count_items(tool_input.get("questions"))
-    question_label = "question" if question_count == 1 else "questions"
-    return {
-        "action_class": "query",
-        "target": f"AskUserQuestion:{question_count} {question_label}",
-        "resource_family": "user_interaction",
-        "content_class": "user_instruction",
-        "content_provenance": _PROVENANCE,
-        "side_effect_class": "none",
-        "visibility": _VISIBILITY_FULL,
-        "sensitivity": "medium",
-        "instruction_bearing": True,
-        "budget_delta": 1,
     }
 
 
@@ -273,7 +241,6 @@ _TOOL_MAPPERS: dict[str, ToolMapper] = {
     "Bash": _bash_mapping,
     "Task": _agent_dispatch_mapping,
     "Agent": _agent_dispatch_mapping,
-    "AskUserQuestion": _ask_user_question_mapping,
     "WebFetch": _webfetch_mapping,
     "WebSearch": _websearch_mapping,
     "NotebookEdit": _notebook_edit_mapping,

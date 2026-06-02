@@ -47,11 +47,6 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
   progress — see `MEDIA.md` and `docs/guides/read-phase1-evidence-bundle.md`
 - a public audit trail is maintained under `docs/audit/`, mirroring the GitHub Code Scanning dismissal record
 - the journey-log article series (`docs/articles/`) ships Article 05 (Proof Media That Actually Means Something) and Article 06 (Public Import Discipline) as first-wave entries
-- the content safety plugin (`python/vibap/content_safety.py`) detects credit cards, SSNs, emails, and API keys with configurable deny/redact/warn modes — deterministic, regex-based, no LLM dependency
-- the OPA/Rego policy backend (`python/vibap/backends/opa.py`) evaluates Rego policies via `opa eval` as a subprocess, composing with native, Cedar, and ForbidRules backends under DENY-wins semantics with graceful degradation when OPA is not on PATH
-- the MCP gateway (`python/vibap/mcp_gateway.py`) sits between an MCP client and upstream server on stdio/JSON-RPC 2.0, intercepting `tools/call` for policy evaluation and optional content safety pre/post-scanning
-- the eBPF kernel capture integration ships a Go daemon protocol handler and session registry (`go/pkg/kernelcapture/`) plus a Python Unix-socket client (`python/vibap/kernel_capture_client.py`) wired into the proxy session lifecycle — the daemon-side eBPF loading and ringbuf consumption infrastructure is present; full end-to-end kernel-event-to-receipt correlation is in active development
-- the NIST AI RMF self-assessment (`docs/compliance/nist-ai-rmf-mapping.md`) maps Ardur components against all 4 RMF functions with an OWASP Agentic Top 10 crosswalk
 
 ## In Progress
 
@@ -64,7 +59,6 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 - conformance test vectors (`docs/specs/conformance/`) — the v0.1 specs reference them by private layout; they are not yet imported into the public tree
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
-- end-to-end kernel-event-to-receipt correlation — the daemon protocol handler, session registry, and proxy lifecycle hooks are in place; the remaining work connects the eBPF ringbuf consumer and correlator into a unified pipeline producing signed kernel-event receipts chain-linked to tool-call receipts
 
 ## What We Still Need To Resolve
 

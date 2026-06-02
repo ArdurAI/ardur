@@ -36,16 +36,3 @@ except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated import
         ) from _missing
 else:
     __all__.extend(["CedarBackend", "register_cedar"])
-
-try:
-    from vibap.backends.opa import OPABackend, register as register_opa
-except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated import
-    OPABackend = None  # type: ignore[assignment]
-
-    def register_opa(_missing: ModuleNotFoundError = exc) -> None:
-        _logger.warning("OPA backend unavailable: backends/opa.py not found")
-        raise RuntimeError(
-            "opa backend unavailable"
-        ) from _missing
-else:
-    __all__.extend(["OPABackend", "register_opa"])

@@ -99,12 +99,6 @@ class ArdurMetrics:
         self.kill_switch_active = _Gauge("ardur_kill_switch_active", "1 if kill switch is active")
         self.request_duration_seconds = _Histogram("ardur_request_duration_seconds", "Request duration in seconds")
         self.evaluation_duration_seconds = _Histogram("ardur_evaluation_duration_seconds", "Evaluation duration in seconds")
-        self.content_safety_alerts_total = _Counter("ardur_content_safety_alerts_total", "Content safety alerts by category and mode", ("category", "mode"))
-        self.mcp_connections_total = _Counter("ardur_mcp_connections_total", "MCP gateway connections", ("transport",))
-        self.mcp_tools_evaluated_total = _Counter("ardur_mcp_tools_evaluated_total", "MCP tools evaluated by decision", ("decision",))
-        self.mcp_messages_total = _Counter("ardur_mcp_messages_total", "MCP messages by method", ("method",))
-        self.kernel_capture_events_total = _Counter("ardur_kernel_capture_events_total", "Kernel capture events by type", ("event_type",))
-        self.kernel_capture_sessions = _Gauge("ardur_kernel_capture_sessions", "Active kernel-capture sessions")
         self._startup_time = time.time()
 
     def render(self) -> str:
@@ -116,12 +110,6 @@ class ArdurMetrics:
             self.kill_switch_active.render(),
             self.request_duration_seconds.render(),
             self.evaluation_duration_seconds.render(),
-            self.content_safety_alerts_total.render(),
-            self.mcp_connections_total.render(),
-            self.mcp_tools_evaluated_total.render(),
-            self.mcp_messages_total.render(),
-            self.kernel_capture_events_total.render(),
-            self.kernel_capture_sessions.render(),
         ]
         uptime = time.time() - self._startup_time
         parts.append(f"# HELP ardur_uptime_seconds Proxy uptime in seconds\n# TYPE ardur_uptime_seconds gauge\nardur_uptime_seconds {uptime:.3f}\n")

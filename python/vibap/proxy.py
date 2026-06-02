@@ -35,7 +35,6 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from .kernel_capture_client import KernelCaptureClient
 from .metrics import metrics as ardur_metrics
 from .rate_limiter import RateLimiter
 from .tls import create_ssl_context, resolve_tls_paths
@@ -624,8 +623,6 @@ def _extract_path_tokens(
     value: Any,
     key: str | None = None,
     exhausted: dict[str, bool] | None = None,
-    path_hints: frozenset[str] | None = None,
-    prose_hints: frozenset[str] | None = None,
 ) -> list[str]:
     """Extract path/URL tokens from a raw argument value.
 
@@ -664,8 +661,7 @@ def _extract_path_tokens(
     if not isinstance(value, str) or not value:
         return []
 
-    if path_hints is None or prose_hints is None:
-        path_hints, prose_hints = _resolve_hint_sets()
+    path_hints, prose_hints = _resolve_hint_sets()
     key_lower = key.lower() if isinstance(key, str) else None
 
     if len(value) > _RESOURCE_TOKEN_MAX_LEN:
@@ -771,8 +767,6 @@ def _iter_resource_values(
     depth: int = 0,
     budget: list[int] | None = None,
     exhausted: dict | None = None,
-    path_hints: frozenset[str] | None = None,
-    prose_hints: frozenset[str] | None = None,
 ):
     """Yield ``(key, value)`` tuples for every string in ``arguments`` that
     looks like a resource reference.
@@ -836,10 +830,8 @@ def _iter_resource_values(
             yield (key, arguments)
             return
         if key is not None and arguments:
-            _path_hints = path_hints
-            if _path_hints is None:
-                _path_hints, _ = _resolve_hint_sets()
-            if key.lower() in _path_hints:
+            path_hints, _prose_hints = _resolve_hint_sets()
+            if key.lower() in path_hints:
                 budget[0] -= 1
                 yield (key, arguments)
         return
@@ -851,7 +843,6 @@ def _iter_resource_values(
                 return
             yield from _iter_resource_values(
                 val, key=str(k), depth=depth + 1, budget=budget, exhausted=exhausted,
-                path_hints=path_hints, prose_hints=prose_hints,
             )
         return
     if isinstance(arguments, (list, tuple)):
@@ -864,7 +855,6 @@ def _iter_resource_values(
             # a list member is unkeyed from the scope-matcher's viewpoint.
             yield from _iter_resource_values(
                 item, key=None, depth=depth + 1, budget=budget, exhausted=exhausted,
-                path_hints=path_hints, prose_hints=prose_hints,
             )
         return
     # Non-string scalars (int/float/bool/None) are never resources.
@@ -977,12 +967,6 @@ def _check_resource_scope(
         if cwd_err is None and cwd_normalized.startswith("/"):
             cwd_anchor = cwd_normalized
 
-    # Resolve hint sets once per-scope-check instead of per-token/per-value.
-    # Each call to _iter_resource_values (recursive) and _extract_path_tokens
-    # was resolving the same env-backed frozensets independently, burning
-    # CPU on a hot path. Thread the pre-computed sets through the call chain.
-    path_hints, prose_hints = _resolve_hint_sets()
-
     # Phase-3.1a C-2 (cursor F2/F3 + external-review-X F1/F2 + SF-P3-02/03): pass an
     # out-parameter to the iterator so we can detect DoS-bound exhaustion
     # (depth > MAX_DEPTH or budget <= 0) and FAIL CLOSED. Pre-3.1a, the
@@ -991,13 +975,8 @@ def _check_resource_scope(
     # orchestrator returned (True, "") — a governance bypass dressed up
     # as "no candidates found".
     exhausted: dict[str, bool] = {"v": False}
-    for key, raw_value in _iter_resource_values(
-        arguments, exhausted=exhausted, path_hints=path_hints, prose_hints=prose_hints,
-    ):
-        tokens = _extract_path_tokens(
-            raw_value, key, exhausted=exhausted,
-            path_hints=path_hints, prose_hints=prose_hints,
-        )
+    for key, raw_value in _iter_resource_values(arguments, exhausted=exhausted):
+        tokens = _extract_path_tokens(raw_value, key, exhausted=exhausted)
         # Empty token list = this value produced nothing path-shaped worth
         # checking (e.g. prose with grammatical 'and/or'). Skip without
         # denying. The tokenizer is the single point that decides what
@@ -1790,8 +1769,6 @@ class GovernanceProxy:
         policy_store: Any | None = None,
         lineage_budget_ledger: LineageBudgetLedger | None = None,
         biscuit_issuer_public_key: Any | None = None,
-        kernel_capture_enabled: bool = False,
-        kernel_capture_socket_path: str = "",
     ) -> None:
         # policy_store: optional PolicyStore (see vibap.policy_store).
         # When provided, the proxy resolves additional_policies from
@@ -1869,9 +1846,6 @@ class GovernanceProxy:
         except KeyError:
             register_backend(NativeBackend())
         self._initialize_passport_state_files()
-        self._kernel_capture_enabled = kernel_capture_enabled
-        self._kernel_capture_socket_path = kernel_capture_socket_path
-        self._kernel_capture_client: KernelCaptureClient | None = None
 
     @property
     def kill_switch_active(self) -> bool:
@@ -1889,41 +1863,6 @@ class GovernanceProxy:
             self._kill_switch_active = False
         ardur_metrics.kill_switch_active.set(0)
         self._log_event("kill_switch_deactivate", {"timestamp": int(time.time())})
-
-    def _get_kernel_capture_client(self) -> KernelCaptureClient | None:
-        """Return the kernel-capture client if enabled, lazily initializing it."""
-        if not self._kernel_capture_enabled:
-            return None
-        if self._kernel_capture_client is None:
-            self._kernel_capture_client = KernelCaptureClient(
-                socket_path=self._kernel_capture_socket_path,
-            )
-        return self._kernel_capture_client
-
-    def _register_kernel_capture_session(self, session: GovernanceSession) -> None:
-        """Register a session with the kernel-capture daemon if enabled."""
-        client = self._get_kernel_capture_client()
-        if client is None:
-            return
-        try:
-            client.register_session(
-                session_id=session.jti,
-                mission_id=str(session.passport_claims.get("mission", "")),
-                root_pid=0,
-                ttl_seconds=int(session.passport_claims.get("ttl", 86400)),
-            )
-        except Exception:
-            pass
-
-    def _end_kernel_capture_session(self, session_id: str) -> None:
-        """End a kernel-capture session if the client is enabled."""
-        client = self._get_kernel_capture_client()
-        if client is None:
-            return
-        try:
-            client.end_session(session_id)
-        except Exception:
-            pass
 
     def _log_event(
         self,
@@ -2731,8 +2670,6 @@ class GovernanceProxy:
                 "mission": claims["mission"],
             }
         )
-        self._register_kernel_capture_session(session)
-        ardur_metrics.kernel_capture_sessions.inc()
         return session
 
     def start_session_from_aat(
@@ -3325,7 +3262,6 @@ class GovernanceProxy:
 
     def end_session(self, session: GovernanceSession | str) -> dict[str, Any]:
         created_summary = False
-        session_jti = session.jti if isinstance(session, GovernanceSession) else session
         with self._locked_persisted_session(session) as target:
             with target._lock:
                 summary, created_summary = self._finalize_session_locked(target)
@@ -3333,8 +3269,6 @@ class GovernanceProxy:
                     self._persist_session(target)
         if created_summary:
             self._log(summary)
-            self._end_kernel_capture_session(session_jti)
-            ardur_metrics.kernel_capture_sessions.dec()
         return dict(summary)
 
     def issue_attestation_for_session(

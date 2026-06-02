@@ -211,7 +211,7 @@ class TestDemoScenesGovernance:
     """demo_scenes.py functions that don't need any framework imports."""
 
     def test_provider_label_ollama_default(self, monkeypatch):
-        monkeypatch.setenv("OLLAMA_MODEL", "local-fixture-model")
+        monkeypatch.setenv("OLLAMA_MODEL", "llama3")
         examples_dir = (
             Path(__file__).resolve().parents[2] / "examples" / "_shared"
         )
@@ -222,7 +222,7 @@ class TestDemoScenesGovernance:
             sys.path.remove(str(examples_dir))
         label = demo_scenes.provider_label()
         assert "Ollama" in label
-        assert "local-fixture-model" in label
+        assert "llama3" in label
 
     def test_provider_label_missing_raises(self, monkeypatch):
         monkeypatch.delenv("OLLAMA_MODEL", raising=False)

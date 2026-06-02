@@ -2,7 +2,7 @@
 title: "Technical Reference"
 description: "Flat technical reference pages for the public Ardur surface. These describe"
 source_path: "docs/reference/README.md"
-source_sha256: "c8ae53afdd30fd4f153883b40428dc1da98513e956dc5726791b0b72e4416623"
+source_sha256: "e010d7229bfbe9b437e591aa88dc69432bbfae351e6cb991756583c3ca0374d6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,13 +30,10 @@ walkthroughs see [`../guides/`](/__ardur_internal__/source/docs/guides/); for pr
   `ardur hub`, auth model, request and response shapes, error codes
 - [`ARDUR.md` Profile Format](/__ardur_internal__/source/docs/reference/ardur-md-profile/) — the plain-Markdown
   guardrail format that compiles into a Mission Passport
-- [OPA/Rego Policy Backend](/__ardur_internal__/source/docs/reference/opa-backend/) — Rego evaluation via `opa eval`
-  subprocess, input contract, integrity enforcement, and composition semantics
 
 ## When To Update These Pages
 
 These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
-`python/vibap/ardur_profile.py`, `python/vibap/backends/opa.py`), update the
-matching page in the same change. They are deliberately mechanical so the
-diff is easy to review.
+`python/vibap/ardur_profile.py`), update the matching page in the same change.
+They are deliberately mechanical so the diff is easy to review.
