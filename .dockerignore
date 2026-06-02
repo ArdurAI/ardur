@@ -1,17 +1,52 @@
-.git
-__pycache__
-*.pyc
-*.pyo
-.pytest_cache
-.ruff_cache
-.mypy_cache
-site/
-media/
-reports/
-tooling/
-*.egg-info
-.venv
+# Dockerignore for Ardur builds
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+
+# Go
+go/bin/
+go/pkg/mod/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Agent state (local-only)
+.ardur/
+.vibap/
+.context/
+.agents/
+.ai-context/
+.agent-context/
+.codex/
+.claude/
+.local-skills/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+python/tests/test-results/
+
+# Misc
+node_modules/
 *.log
-*.jsonl
-*.jsonl.gz
 .env
+.env.*

@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to Ardur will be documented in this file.
+
+## [Unreleased]
+
+### Security
+- Redact kernel-capture daemon, MCP gateway, OPA backend, content safety scanner
+- Strip hardcoded provider version pins from Gemini/Claude hooks
+- Remove internal fixture/hashing helpers in favor of stdlib
+
+### Added
+- Comprehensive E2E showcase test suite (28 tests, 7 layers)
+- Live adversarial scoreboard and continuous harness
+- Multi-backend policy evaluation (Native, Cedar, OPA)
+- Deny-wins semantics with tri-state verifier
+- Session end with attestation token issuance
+- Concurrent session evaluation proof
+- Phase 2 daemon custody scaffold
+- Claude Code and Gemini CLI hook integrations
+- Posture detector for agent behavioral profiling
+
+### Changed
+- Claude Code hook rewired to stdlib hashlib/datetime
+- Gemini CLI hook generalized beyond hardcoded version contracts
+- Proxy kernel capture integration removed
+- check-local.sh made resilient to missing knowledge-graph script
+- Removed stale adversarial test-results directory from tracking
+
+### Fixed
+- CI baseline repair after AskUserQuestion landing
+- Claude AskUserQuestion hash handling
+- Gemini hook contract aligned with CLI 0.44.1
+
+## [0.1.0] — 2026-05-01
+
+### Initial Public Release
+- Tri-state verifier: Allow, Deny, InsufficientEvidence
+- Signed receipt-chain evidence (JWT-based)
+- Claim-bounded evidence bundles for observed AI-agent action boundaries
+- Policy evaluation with mission declarations and delegation grants
+- Execution receipts with verifiable audit trail
+- Lineage budget enforcement
+- Rate limiting and kill-switch
+- SPIRE/SPIFFE-based workload identity
+- Biscuit-based capability tokens
+- Cedar policy language backend
+- Native policy backend
+- Prometheus metrics
+- Helm chart skeleton
