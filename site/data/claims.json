@@ -19,7 +19,7 @@
         "python/tests/test_lineage_budget.py",
         "python/tests/test_mission_compile.py",
         "python/tests/test_http.py",
-        "go/pkg/governance/engine.go"
+        "go/pkg/policy/engine.go"
       ]
     },
     {
@@ -37,7 +37,7 @@
         "python/tests/test_lineage_budget.py",
         "python/tests/test_mission_compile.py",
         "python/tests/test_http.py",
-        "go/pkg/governance/chain_audit_test.go"
+        "go/pkg/aat/verify_chain_test.go"
       ]
     },
     {
@@ -100,8 +100,8 @@
       "framework": ["framework-agnostic", "foundation"],
       "source_paths": [
         "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md",
+        "reports/LINEAGE_BUDGET_DELEGATION_PLAN_REVIEW_2026-05-13.md",
         "go/pkg/kernelcapture/README.md",
-        "reports/PHASE2_EBPF_MVP_VERIFICATION_2026-05-10.md",
         "go/pkg/kernelcapture/linux_ebpf_smoke_linux.go",
         "go/pkg/kernelcapture/daemon_custody.go",
         "go/pkg/kernelcapture/daemon_preflight.go",
