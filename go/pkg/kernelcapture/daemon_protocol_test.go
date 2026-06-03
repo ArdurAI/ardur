@@ -84,6 +84,39 @@ func TestDaemonProtocolDeterministicEncoding(t *testing.T) {
 	}
 }
 
+func TestDaemonProtocolResponseDecodeRejectsInternalExpansion(t *testing.T) {
+	t.Parallel()
+
+	valid := DaemonProtocolResponse{
+		ProtocolVersion: DaemonProtocolVersion,
+		OK:              true,
+		Method:          DaemonProtocolMethodSessionStatus,
+		SessionID:       "session-1",
+		Status:          DaemonSessionStatusActive,
+	}
+	encoded, err := EncodeDaemonProtocolResponse(valid)
+	if err != nil {
+		t.Fatalf("EncodeDaemonProtocolResponse returned error: %v", err)
+	}
+	decoded, err := DecodeDaemonProtocolResponse(encoded)
+	if err != nil {
+		t.Fatalf("DecodeDaemonProtocolResponse returned error: %v", err)
+	}
+	if decoded != valid {
+		t.Fatalf("decoded response = %#v, want %#v", decoded, valid)
+	}
+
+	for _, raw := range [][]byte{
+		[]byte(`{"protocol_version":"kernelcapture.daemon.v1","ok":true,"method":"session_status","session_id":"session-1","status":"active","handoff":{"session_id":"session-1"}}` + "\n"),
+		[]byte(`{"protocol_version":"kernelcapture.daemon.v1","ok":true,"method":"session_status","session_id":"session-1","status":"active","root_pid":123}` + "\n"),
+		[]byte(`{"protocol_version":"kernelcapture.daemon.v1","ok":true,"method":"session_status","session_id":"session-1","status":"active"}` + "\n" + `{"protocol_version":"kernelcapture.daemon.v1","ok":true}` + "\n"),
+	} {
+		if _, err := DecodeDaemonProtocolResponse(raw); err == nil || !errors.Is(err, ErrDaemonProtocol) {
+			t.Fatalf("DecodeDaemonProtocolResponse(%q) error = %v, want ErrDaemonProtocol", string(raw), err)
+		}
+	}
+}
+
 func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 	t.Parallel()
 

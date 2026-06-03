@@ -120,6 +120,30 @@ func EncodeDaemonProtocolResponse(resp DaemonProtocolResponse) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
+func DecodeDaemonProtocolResponse(data []byte) (DaemonProtocolResponse, error) {
+	var resp DaemonProtocolResponse
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&resp); err != nil {
+		return DaemonProtocolResponse{}, fmt.Errorf("%w: decode response: %v", ErrDaemonProtocol, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err == nil {
+		return DaemonProtocolResponse{}, fmt.Errorf("%w: multiple JSON values are not allowed in response", ErrDaemonProtocol)
+	} else if !errors.Is(err, io.EOF) {
+		return DaemonProtocolResponse{}, fmt.Errorf("%w: trailing data after response: %v", ErrDaemonProtocol, err)
+	}
+	if resp.ProtocolVersion != DaemonProtocolVersion {
+		return DaemonProtocolResponse{}, fmt.Errorf("%w: unsupported response protocol version %q", ErrDaemonProtocol, resp.ProtocolVersion)
+	}
+	switch resp.Method {
+	case "", DaemonProtocolMethodHealth, DaemonProtocolMethodRegisterSession, DaemonProtocolMethodEndSession, DaemonProtocolMethodSessionStatus:
+	default:
+		return DaemonProtocolResponse{}, fmt.Errorf("%w: unknown response method %q", ErrDaemonProtocol, resp.Method)
+	}
+	return resp, nil
+}
+
 func ValidateDaemonProtocolRequest(req DaemonProtocolRequest) error {
 	if req.ProtocolVersion != DaemonProtocolVersion {
 		return fmt.Errorf("%w: unsupported protocol version %q", ErrDaemonProtocol, req.ProtocolVersion)
