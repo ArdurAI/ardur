@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "e82872f2910f8b3345b9c9f65aa86106ea734893c033d95da92370de63c56983"
+source_sha256: "c14db70ec5f2d1849d7b73496e5dd9f03ca8fa7856c5aab36b074cb20c28b784"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -54,9 +54,10 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   expires sessions by TTL, enforces a maximum active-session cap, rejects
   duplicate active session ids, prunes/reuses inactive ids when admitting new
   sessions, fails closed for unknown, ended, or expired sessions, and exposes a
-  safe active-session lookup plus no-mutation handoff-plan builder for internal
-  daemon status/handoff code. It is not persistent storage, not a production
-  daemon session manager, and not live kernel enforcement.
+  safe active-session lookup, no-mutation handoff-plan builder, and
+  daemon-internal status snapshot wrapper for internal daemon status/handoff
+  code. It is not persistent storage, not a production daemon session manager,
+  and not live kernel enforcement.
 - Adds a no-mutation `BuildDaemonSessionHandoffPlan` seam that projects active
   registered session metadata into daemon-owned hashed state/runtime paths and a
   cgroup allowlist precondition sequence. It validates custody roots and a
@@ -133,7 +134,8 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
    - Handles authorized `register_session`, `session_status`, and `end_session` requests after `DaemonUnixSocketServer` or another caller has joined the request to daemon-observed peer credentials.
    - Stores bounded metadata in memory: session/mission/trace ids, root PID, PID namespace, cgroup id, event classes, sanitized handoff metadata, registration/expiry/end timestamps, and peer-observation evidence.
    - Fails closed for duplicate active sessions, active-session capacity exhaustion, missing sessions, expired sessions, ended sessions, invalid protocol payloads, and canceled request contexts.
-   - Exposes `ActiveSession` and `BuildActiveSessionHandoffPlan` so internal daemon status/handoff code can reuse the same active-session lookup before projecting a no-mutation handoff plan from daemon-owned custody paths.
+   - Exposes `ActiveSession`, `BuildActiveSessionHandoffPlan`, and `HandleAuthorizedSessionStatusSnapshot` so internal daemon status/handoff code can reuse the same active-session lookup before projecting a no-mutation handoff plan from daemon-owned custody paths.
+   - Keeps daemon-internal status snapshots out of the client-visible JSON-line protocol response: `session_status` still returns only the narrow status envelope.
    - Does not persist state across daemon restarts, install/start a service, create/assign cgroups, pin maps, execute commands, or perform live kernel enforcement.
 
 12. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
@@ -226,13 +228,14 @@ It rejects repository-controlled privileged paths when repository-root validatio
 
 Allowed claim after the gated smoke passes:
 
-Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup and no-mutation handoff-plan builder ergonomics for internal daemon status/handoff code, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
+Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup, no-mutation handoff-plan builder ergonomics, and daemon-internal status snapshots for internal daemon status/handoff code, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
 
 Not claimed yet:
 
 - production daemon readiness
 - daemon installation, startup, service management, or system startup integration
 - persistent/production daemon session-state management or live enforcement wiring
+- client-visible protocol expansion from daemon-internal status snapshots
 - daemon-created/assigned per-session cgroups
 - universal CLI capture
 - file/network/privilege side-effect capture
