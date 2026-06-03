@@ -2,6 +2,7 @@ package kernelcapture
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -181,6 +182,101 @@ func TestDaemonSessionRegistryExpiresAndRejectsUnknownSessions(t *testing.T) {
 	endedExpired := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-expire"), handshake)
 	if endedExpired.OK || endedExpired.Status != DaemonSessionStatusExpired || !strings.Contains(endedExpired.Error, "expired") {
 		t.Fatalf("end expired response = %#v", endedExpired)
+	}
+}
+
+func TestDaemonSessionRegistryBuildsHandoffPlanForActiveStatusSession(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 13, 30, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	handshake := daemonSessionRegistryTestHandshake("session-plan")
+	register := daemonRegisterSessionRequest("session-plan", 555, 60)
+	register.RegisterSession.MissionID = "mission-plan"
+	register.RegisterSession.TraceID = "trace-plan"
+	register.RegisterSession.PIDNamespaceID = 4026531836
+	register.RegisterSession.CgroupID = 12345
+	register.RegisterSession.HandoffMetadata = map[string]any{"handoff_source": "launch_wrapper"}
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, handshake); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+	status := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-plan"), handshake)
+	if !status.OK || status.Method != DaemonProtocolMethodSessionStatus || status.Status != DaemonSessionStatusActive {
+		t.Fatalf("active status response = %#v", status)
+	}
+
+	record, err := registry.ActiveSession(" session-plan ")
+	if err != nil {
+		t.Fatalf("ActiveSession returned error: %v", err)
+	}
+	if record.SessionID != "session-plan" || record.CgroupID != 12345 || record.RootPID != 555 {
+		t.Fatalf("active session record = %#v", record)
+	}
+	record.CgroupID = 0 // returned records must be copies, not mutable registry state.
+
+	custody, err := BuildDaemonCustodyPlan(DefaultDaemonCustodyConfig())
+	if err != nil {
+		t.Fatalf("BuildDaemonCustodyPlan returned error: %v", err)
+	}
+	plan, err := registry.BuildActiveSessionHandoffPlan(" session-plan ", custody)
+	if err != nil {
+		t.Fatalf("BuildActiveSessionHandoffPlan returned error: %v", err)
+	}
+	if plan.SessionID != "session-plan" || plan.MissionID != "mission-plan" || plan.TraceID != "trace-plan" {
+		t.Fatalf("plan identity = %#v", plan)
+	}
+	if plan.RootPID != 555 || plan.PIDNamespaceID != 4026531836 || plan.CgroupID != 12345 {
+		t.Fatalf("plan process identity = %#v", plan)
+	}
+	if !lexicalPathWithin(plan.SessionStatePath, custody.StateDir) || !lexicalPathWithin(plan.SessionRuntimeDir, custody.RunDir) {
+		t.Fatalf("planned session paths escaped daemon custody roots: %#v", plan)
+	}
+	if plan.CgroupFilterSequence.Enable != true || len(plan.CgroupFilterSequence.AllowlistCgroupIDs) != 1 || plan.CgroupFilterSequence.AllowlistCgroupIDs[0] != 12345 {
+		t.Fatalf("cgroup filter sequence = %#v", plan.CgroupFilterSequence)
+	}
+	for _, step := range plan.Steps {
+		if step.Executed {
+			t.Fatalf("step %q executed; registry handoff plan must remain no-mutation", step.Name)
+		}
+	}
+}
+
+func TestDaemonSessionRegistryHandoffPlanFailsClosedForInactiveMissingAndInvalidCustody(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 13, 45, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	handshake := daemonSessionRegistryTestHandshake("session-fail-closed")
+	register := daemonRegisterSessionRequest("session-fail-closed", 777, 60)
+	register.RegisterSession.CgroupID = 7007
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, handshake); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+	custody, err := BuildDaemonCustodyPlan(DefaultDaemonCustodyConfig())
+	if err != nil {
+		t.Fatalf("BuildDaemonCustodyPlan returned error: %v", err)
+	}
+
+	if _, err := registry.ActiveSession("missing-session"); !errors.Is(err, ErrDaemonSessionRegistry) || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing ActiveSession error = %v", err)
+	}
+	if _, err := registry.BuildActiveSessionHandoffPlan("missing-session", custody); !errors.Is(err, ErrDaemonSessionRegistry) || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing BuildActiveSessionHandoffPlan error = %v", err)
+	}
+
+	invalidCustody := custody
+	invalidCustody.StateDir = ""
+	if _, err := registry.BuildActiveSessionHandoffPlan("session-fail-closed", invalidCustody); !errors.Is(err, ErrDaemonSessionHandoffPlan) {
+		t.Fatalf("invalid custody handoff error = %v", err)
+	}
+
+	now = now.Add(61 * time.Second)
+	if _, err := registry.ActiveSession("session-fail-closed"); !errors.Is(err, ErrDaemonSessionRegistry) || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired ActiveSession error = %v", err)
+	}
+	if _, err := registry.BuildActiveSessionHandoffPlan("session-fail-closed", custody); !errors.Is(err, ErrDaemonSessionRegistry) || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired BuildActiveSessionHandoffPlan error = %v", err)
 	}
 }
 

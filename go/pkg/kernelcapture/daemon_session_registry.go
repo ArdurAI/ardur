@@ -98,6 +98,33 @@ func (r *DaemonSessionRegistry) Session(sessionID string) (DaemonSessionRecord, 
 	return copyDaemonSessionRecord(record), true
 }
 
+// ActiveSession returns a copy of a currently active daemon-owned session record.
+// It is the safe internal lookup seam for daemon status/handoff code: callers get
+// metadata-only state and cannot mutate the registry's in-memory record.
+func (r *DaemonSessionRegistry) ActiveSession(sessionID string) (DaemonSessionRecord, error) {
+	record, _, err := r.lookupActiveSession(sessionID, r.currentTime())
+	if err != nil {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: %v", ErrDaemonSessionRegistry, err)
+	}
+	return record, nil
+}
+
+// BuildActiveSessionHandoffPlan projects an active registered session into the
+// existing no-mutation handoff plan using daemon-owned custody paths. It performs
+// no filesystem writes, cgroup assignment, BPF map mutation, or live enforcement.
+func (r *DaemonSessionRegistry) BuildActiveSessionHandoffPlan(sessionID string, custodyPlan DaemonCustodyPlan) (DaemonSessionHandoffPlan, error) {
+	asOf := r.currentTime()
+	record, _, err := r.lookupActiveSession(sessionID, asOf)
+	if err != nil {
+		return DaemonSessionHandoffPlan{}, fmt.Errorf("%w: %v", ErrDaemonSessionRegistry, err)
+	}
+	return BuildDaemonSessionHandoffPlan(DaemonSessionHandoffConfig{
+		CustodyPlan: custodyPlan,
+		Session:     record,
+		AsOf:        asOf,
+	})
+}
+
 func (r *DaemonSessionRegistry) HandleAuthorizedRequest(ctx context.Context, req DaemonProtocolRequest, handshake DaemonProtocolPeerHandshake) DaemonProtocolResponse {
 	if r == nil {
 		return daemonSessionRegistryErrorResponse(req, "", "registry is required")
@@ -184,22 +211,15 @@ func (r *DaemonSessionRegistry) handleRegisterSession(req DaemonProtocolRequest,
 
 func (r *DaemonSessionRegistry) handleSessionStatus(req DaemonProtocolRequest) DaemonProtocolResponse {
 	sessionID := daemonProtocolRequestSessionID(req)
-	now := r.currentTime()
-	r.mu.RLock()
-	record, ok := r.sessions[strings.TrimSpace(sessionID)]
-	r.mu.RUnlock()
-	if !ok {
-		return daemonSessionRegistryErrorResponse(req, DaemonSessionStatusNotFound, "session %q not found", sessionID)
-	}
-	status := record.Status(now)
-	if status != DaemonSessionStatusActive {
-		return daemonSessionRegistryErrorResponse(req, status, "session %q is not active: %s", sessionID, status)
+	record, status, err := r.lookupActiveSession(sessionID, r.currentTime())
+	if err != nil {
+		return daemonSessionRegistryErrorResponse(req, status, "%v", err)
 	}
 	return DaemonProtocolResponse{
 		ProtocolVersion: DaemonProtocolVersion,
 		OK:              true,
 		Method:          req.Method,
-		SessionID:       strings.TrimSpace(sessionID),
+		SessionID:       record.SessionID,
 		Status:          status,
 	}
 }
@@ -248,6 +268,27 @@ func (r *DaemonSessionRegistry) pruneInactiveSessionsLocked(now time.Time) {
 			delete(r.sessions, sessionID)
 		}
 	}
+}
+
+func (r *DaemonSessionRegistry) lookupActiveSession(sessionID string, now time.Time) (DaemonSessionRecord, string, error) {
+	if r == nil {
+		return DaemonSessionRecord{}, "", fmt.Errorf("registry is required")
+	}
+	normalizedSessionID := strings.TrimSpace(sessionID)
+	if normalizedSessionID == "" {
+		return DaemonSessionRecord{}, "", fmt.Errorf("session_id is required")
+	}
+	r.mu.RLock()
+	record, ok := r.sessions[normalizedSessionID]
+	r.mu.RUnlock()
+	if !ok {
+		return DaemonSessionRecord{}, DaemonSessionStatusNotFound, fmt.Errorf("session %q not found", normalizedSessionID)
+	}
+	status := record.Status(now)
+	if status != DaemonSessionStatusActive {
+		return DaemonSessionRecord{}, status, fmt.Errorf("session %q is not active: %s", normalizedSessionID, status)
+	}
+	return copyDaemonSessionRecord(record), status, nil
 }
 
 func validateDaemonSessionRegistryHandshake(handshake DaemonProtocolPeerHandshake) error {

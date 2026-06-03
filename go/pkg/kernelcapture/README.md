@@ -36,9 +36,10 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   session metadata only after protocol validation and peer authorization,
   expires sessions by TTL, enforces a maximum active-session cap, rejects
   duplicate active session ids, prunes/reuses inactive ids when admitting new
-  sessions, and fails closed for unknown, ended, or expired sessions. It is not
-  persistent storage, not a production daemon session manager, and not live
-  kernel enforcement.
+  sessions, fails closed for unknown, ended, or expired sessions, and exposes a
+  safe active-session lookup plus no-mutation handoff-plan builder for internal
+  daemon status/handoff code. It is not persistent storage, not a production
+  daemon session manager, and not live kernel enforcement.
 - Adds a no-mutation `BuildDaemonSessionHandoffPlan` seam that projects active
   registered session metadata into daemon-owned hashed state/runtime paths and a
   cgroup allowlist precondition sequence. It validates custody roots and a
@@ -115,6 +116,7 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
    - Handles authorized `register_session`, `session_status`, and `end_session` requests after `DaemonUnixSocketServer` or another caller has joined the request to daemon-observed peer credentials.
    - Stores bounded metadata in memory: session/mission/trace ids, root PID, PID namespace, cgroup id, event classes, sanitized handoff metadata, registration/expiry/end timestamps, and peer-observation evidence.
    - Fails closed for duplicate active sessions, active-session capacity exhaustion, missing sessions, expired sessions, ended sessions, invalid protocol payloads, and canceled request contexts.
+   - Exposes `ActiveSession` and `BuildActiveSessionHandoffPlan` so internal daemon status/handoff code can reuse the same active-session lookup before projecting a no-mutation handoff plan from daemon-owned custody paths.
    - Does not persist state across daemon restarts, install/start a service, create/assign cgroups, pin maps, execute commands, or perform live kernel enforcement.
 
 12. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
@@ -207,7 +209,7 @@ It rejects repository-controlled privileged paths when repository-root validatio
 
 Allowed claim after the gated smoke passes:
 
-Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session`, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
+Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup and no-mutation handoff-plan builder ergonomics for internal daemon status/handoff code, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
 
 Not claimed yet:
 
