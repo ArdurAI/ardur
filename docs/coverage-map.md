@@ -6,7 +6,7 @@ This page is the canonical reference linked from the README, `STATUS.md`,
 plugin documentation, and every example. When the capture surface changes,
 this page changes; everywhere else just links to it.
 
-Last updated: 2026-05-14. Current shipping version: v0.1 (tool-call boundary).
+Last updated: 2026-06-02. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness; it is not part of the shipping v0.1 capture claim.
 
 ## What Ardur captures today (v0.1)
 
@@ -55,6 +55,8 @@ emitted as `[REDACTED]`, and local absolute paths are replaced with hashed
 
 Three layers exist; we currently capture layer 1.
 
+Development note: `go/pkg/kernelcapture` contains a gated Linux process-lifecycle proof harness that can load/attach `sched/sched_process_exec` and `sched/sched_process_exit` eBPF tracepoint programs in a privileged Linux test environment, read exec/exit samples from a ringbuf, and project them through Ardur's correlation/evidence semantics. It also contains a bounded local Unix-domain daemon-control socket proof seam with fail-closed peer authorization. This is useful development evidence for the v0.5 direction, but it is not a production daemon, not a service installer, not live universal CLI capture, and not file/network/syscall coverage beyond process lifecycle metadata.
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │ Layer 3 — Filesystem boundary                       │
@@ -101,6 +103,8 @@ The `insufficient_evidence` label is how we keep claims precise at the receipt l
 ## What v0.5 / v1.0 will add
 
 ### v0.5 — Linux eBPF (kernel-capture)
+
+Current dev proof already covers the first process-lifecycle slice: gated Linux load/attach of exec/exit tracepoints, ringbuf sample reading, cgroup allowlist smoke behavior, and local daemon-control authorization seams. The remaining v0.5 claim is larger than that proof: production daemon lifecycle, daemon-owned session/cgroup management, broader syscall/file/network capture, and deployable Linux hardening are still future work.
 
 Adds receipts for kernel events: `execve`, `clone`, `openat`, `write`, `unlinkat`, `renameat2`, `connect`, etc. Each kernel-event receipt is correlated to the tool-call receipt that caused it (via process-tree ancestry). Same chain. Same signing. Same disputability.
 

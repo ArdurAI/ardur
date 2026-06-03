@@ -69,8 +69,8 @@ func TestBuildDaemonAcceptLoopPlanRecordsNoMutationContract(t *testing.T) {
 	if !containsText(plan.ClaimBoundary, "OS-observed peer credentials") {
 		t.Fatalf("claim boundary missing peer-credential join guardrail: %#v", plan.ClaimBoundary)
 	}
-	if !containsText(plan.NotClaimed, "daemon accept-loop wiring around SO_PEERCRED observations") {
-		t.Fatalf("not-claimed list missing accept-loop boundary: %#v", plan.NotClaimed)
+	if !containsText(plan.NotClaimed, "socket execution by this dry-run plan") {
+		t.Fatalf("not-claimed list missing dry-run socket-execution boundary: %#v", plan.NotClaimed)
 	}
 	if !containsText(plan.NotClaimed, "service exposure") {
 		t.Fatalf("not-claimed list missing service-exposure boundary: %#v", plan.NotClaimed)

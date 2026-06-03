@@ -17,10 +17,10 @@ const (
 
 var ErrDaemonAcceptLoopPlan = errors.New("kernelcapture: invalid daemon accept-loop plan")
 
-// DaemonAcceptLoopConfig is the dry-run contract input for a future daemon
-// accept loop. It deliberately contains no listener or handler callbacks: this
-// slice validates the invariants a later privileged daemon must satisfy before
-// it binds a socket or handles traffic.
+// DaemonAcceptLoopConfig is the dry-run contract input for daemon accept-loop
+// invariants. It deliberately contains no listener or handler callbacks: this
+// value-producing slice validates the invariants that live socket code must
+// satisfy before it binds a socket or handles traffic.
 type DaemonAcceptLoopConfig struct {
 	CustodyPlan              DaemonCustodyPlan
 	PeerAuthorizationPolicy  DaemonPeerAuthorizationPolicy
@@ -29,9 +29,10 @@ type DaemonAcceptLoopConfig struct {
 	MaxConcurrentConnections int
 }
 
-// DaemonAcceptLoopPlan is a structured no-mutation plan for the future local
-// daemon accept loop. Every step is descriptive and must remain Executed=false in
-// this scaffold; executing these steps belongs to a later reviewed daemon slice.
+// DaemonAcceptLoopPlan is a structured no-mutation plan for local daemon
+// accept-loop invariants. Every step is descriptive and must remain
+// Executed=false in this dry-run plan; live execution is represented separately
+// by DaemonUnixSocketServer.
 type DaemonAcceptLoopPlan struct {
 	Mode                     string
 	SocketPath               string
@@ -70,7 +71,8 @@ func DefaultDaemonAcceptLoopConfig(custodyPlan DaemonCustodyPlan, policy DaemonP
 // BuildDaemonAcceptLoopPlan validates the accept-loop contract and returns a
 // dry-run plan only. It does not bind/listen/accept sockets, install/start a
 // daemon, perform SO_PEERCRED itself, create directories, pin eBPF maps, or
-// expose any service.
+// expose any service. DaemonUnixSocketServer is the separate live local socket
+// proof seam that consumes the same validation invariants.
 func BuildDaemonAcceptLoopPlan(cfg DaemonAcceptLoopConfig) (DaemonAcceptLoopPlan, error) {
 	if err := validateDaemonAcceptLoopConfig(cfg); err != nil {
 		return DaemonAcceptLoopPlan{}, err
@@ -124,9 +126,8 @@ func BuildDaemonAcceptLoopPlan(cfg DaemonAcceptLoopConfig) (DaemonAcceptLoopPlan
 			"request size, read timeout, and concurrency are bounded before runtime implementation",
 		},
 		NotClaimed: []string{
-			"socket server/listener implementation",
-			"daemon accept-loop wiring around SO_PEERCRED observations",
-			"daemon install/start or service exposure",
+			"socket execution by this dry-run plan",
+			"production daemon lifecycle or service exposure",
 			"production daemon readiness",
 			"live enforcement or session state management",
 		},
