@@ -21,7 +21,7 @@ Ardur is pre-release, but the public repo is code-bearing today.
 | Claude Code | Plugin and hooks for `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`; source-checkout MVP quickstart with no-key harness, demo packet, evidence-bundle reader, and live-Claude path | {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "MVP quickstart" >}}, {{< repo-link "docs/guides/phase1-demo-packet.md" "Demo packet" >}}, {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Evidence bundle guide" >}}, {{< repo-link "plugins/claude-code/README.md" "Plugin README" >}} |
 | Runnable examples | Mission JSON, LangChain, LangGraph, AutoGen, browser extension, desktop observe, native host | {{< repo-link "examples/README.md" "Examples index" >}} |
 | Protocol docs | Mission Declaration, Delegation Grant, Execution Receipt, EAT profile, Verifier Contract, conformance profiles, IDM extension, revocation | {{< repo-link "docs/specs/README.md" "Specs index" >}} |
-| Cloud model tests | Real-world governance proof: live LLM tool calls through Ardur proxy with zero denials | {{< repo-link "python/tests/test-results/SUMMARY.md" "Test results" >}} |
+| Cloud model tests | Real-world governance harnesses for live LLM tool calls through the Ardur proxy; raw per-model fixtures are not shipped in the redacted public tree | {{< repo-link "python/tests/run_cloud_model_test.py" "Run harness" >}}, {{< repo-link "python/tests/comprehensive_test_report.json" "Aggregate report" >}} |
 | CI and public hygiene | Python 3.10 and 3.13, Go, CodeQL, link-check, secret-scan, format validation, Hugo build | {{< repo-link ".github/workflows/tests.yml" "Tests workflow" >}} |
 
 ## Bounded Or In Progress

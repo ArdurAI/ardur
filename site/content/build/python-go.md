@@ -31,12 +31,13 @@ Authorization Token specification:
 
 ## Cloud Model Governance Tests
 
-`python/tests/test-results/` contains real-world governance test results
-proving the Ardur proxy enforces policy correctly with live cloud LLMs:
+`python/tests/run_cloud_model_test.py` contains the live-provider governance
+harness. The redacted public tree keeps aggregate reports but does not ship raw
+per-model fixture artifacts:
 
 - **Cloud Model (1T params):** 18/20 files created, 35 tool calls, zero denials
 - **Local Model (8B):** 4/20 files, 4 tool calls, zero denials
 - Every tool call flows through evaluate → attest → receipt
 - Average proxy overhead: ~4ms per call
 
-Sources: {{< repo-link "python/README.md" >}}, {{< repo-link "go/README.md" >}}, {{< repo-link "python/tests/test-results/SUMMARY.md" "Cloud model test results" >}}, and {{< repo-link ".github/workflows/tests.yml" "tests workflow" >}}.
+Sources: {{< repo-link "python/README.md" >}}, {{< repo-link "go/README.md" >}}, {{< repo-link "python/tests/run_cloud_model_test.py" "Cloud model harness" >}}, {{< repo-link "python/tests/comprehensive_test_report.json" "Aggregate report" >}}, and {{< repo-link ".github/workflows/tests.yml" "tests workflow" >}}.

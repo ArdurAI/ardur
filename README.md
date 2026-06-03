@@ -68,7 +68,7 @@ Single end-to-end test exercising all protocol layers over real TLS with SPIFFE 
 
 ### Phase 1 — Adversarial Boundary Testing
 
-10 hostile scenarios across 5 cloud models spanning multiple providers. Every scenario is designed to trigger a DENY — models attempt direct forbidden-tool use, mid-execution prompt injection, DAN-style jailbreaking, resource-scope violations, social engineering with false urgency, path traversal, budget exhaustion, obfuscated command injection, multi-turn gradual steering toward forbidden actions, and chained tool attacks (write script → execute). See [test-results](python/tests/test-results/) for per-model breakdowns.
+10 hostile scenarios across 5 cloud models spanning multiple providers. Every scenario is designed to trigger a DENY — models attempt direct forbidden-tool use, mid-execution prompt injection, DAN-style jailbreaking, social engineering, resource-scope violations, path traversal, budget exhaustion, obfuscated command injection, multi-turn gradual steering toward forbidden actions, and chained tool attacks (write script → execute). The public redaction keeps the aggregate result here and omits raw per-model fixture artifacts from the repository.
 
 | Metric | Value |
 |--------|-------|
@@ -119,7 +119,7 @@ The Go `pkg/aat` package implements 13 constraint types, token serialization, de
 | Go AAT | full suite | All passing |
 | MIC conformance (new) | 29 | All passing |
 
-[Full test results →](python/tests/test-results/) · [Proof & evidence site →](site/)
+[Python test suite →](python/tests/) · [Comprehensive report →](python/tests/comprehensive_test_report.json) · [Proof & evidence site →](site/)
 
 ## Evaluator Quickstart
 

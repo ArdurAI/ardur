@@ -97,9 +97,10 @@ else
   worktree_diff_names="$(printf '%s\n%s\n' "$worktree_diff_names" "$untracked_names" | sed '/^$/d')"
 fi
 
-"$PYTHON_BIN" scripts/build-knowledge-graph.py --output-dir "$CONTEXT_DIR"
+if [ -f scripts/build-knowledge-graph.py ]; then
+  "$PYTHON_BIN" scripts/build-knowledge-graph.py --output-dir "$CONTEXT_DIR"
 
-graph_summary="$("$PYTHON_BIN" - "$CONTEXT_DIR/ardur-graph.json" <<'PY'
+  graph_summary="$("$PYTHON_BIN" - "$CONTEXT_DIR/ardur-graph.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -116,6 +117,9 @@ for kind, count in counts["nodes_by_type"].items():
         print(f"- {kind}: `{count}`")
 PY
 )"
+else
+  graph_summary="- Graph build skipped: scripts/build-knowledge-graph.py is not tracked in this checkout. Use live source files and workflow files directly."
+fi
 
 workflow_list="$(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml' | sed 's/^/- `/; s/$/`/')"
 if [ -z "$workflow_list" ]; then

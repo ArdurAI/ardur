@@ -36,7 +36,7 @@ from tests.conftest import v01_required_md_extras
 # constants
 # ---------------------------------------------------------------------------
 
-CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "llama3.2")
+CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
 API_KEY = os.environ.get(
     "ARDUR_OLLAMA_API_KEY",
     "",
@@ -185,7 +185,7 @@ def _print_header():
 
 
 def _ollama_available() -> bool:
-    if not API_KEY:
+    if not API_KEY or not CLOUD_MODEL:
         return False
     try:
         import ollama  # noqa: F811
@@ -196,7 +196,10 @@ def _ollama_available() -> bool:
 
 ollama_required = pytest.mark.skipif(
     not _ollama_available(),
-    reason="Ollama cloud model not available (set ARDUR_OLLAMA_API_KEY)",
+    reason=(
+        "Ollama cloud model not available "
+        "(set ARDUR_OLLAMA_API_KEY and ARDUR_OLLAMA_CLOUD_MODEL)"
+    ),
 )
 
 

@@ -237,7 +237,7 @@ go_version_ok() {
     echo "go not found; go/go.mod requires $required" >&2
     return 1
   fi
-  actual="$(go version | awk '{print $3}' | sed 's/^go//')"
+  actual="$(cd go && go env GOVERSION | sed 's/^go//')"
   python3 - "$actual" "$required" <<'PY'
 import sys
 
