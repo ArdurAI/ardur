@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur is the runtime governance and evidence layer for AI agents."
 source_path: "README.md"
-source_sha256: "ef7c695c5b9610ca49f442cdbd19ab2875ab9f25f73bc0538b0b86be56ccc519"
+source_sha256: "b983b2eb38b6fdfd4a0740e73b10429cc7775565d2b862c38bf66ec99e3beaf8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -136,7 +136,7 @@ The Go `pkg/aat` package implements 13 constraint types, token serialization, de
 | Go AAT | full suite | All passing |
 | MIC conformance (new) | 29 | All passing |
 
-[Python test suite →](https://github.com/ArdurAI/ardur/tree/__ARDUR_SOURCE_REF__/python/tests) · [Comprehensive report →](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/python/tests/comprehensive_test_report.json) · [Proof & evidence site →](/__ardur_internal__/source/site/readme/)
+[Python test suite →](https://github.com/ArdurAI/ardur/tree/__ARDUR_SOURCE_REF__/python/tests) · Aggregate report: `python/tests/comprehensive_test_report.json` · [Proof & evidence site →](/__ardur_internal__/source/site/readme/)
 
 ## Evaluator Quickstart
 

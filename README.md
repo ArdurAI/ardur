@@ -119,7 +119,7 @@ The Go `pkg/aat` package implements 13 constraint types, token serialization, de
 | Go AAT | full suite | All passing |
 | MIC conformance (new) | 29 | All passing |
 
-[Python test suite →](python/tests/) · [Comprehensive report →](python/tests/comprehensive_test_report.json) · [Proof & evidence site →](site/)
+[Python test suite →](python/tests/) · Aggregate report: `python/tests/comprehensive_test_report.json` · [Proof & evidence site →](site/)
 
 ## Evaluator Quickstart
 

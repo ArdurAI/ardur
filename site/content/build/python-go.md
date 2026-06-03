@@ -40,4 +40,4 @@ per-model fixture artifacts:
 - Every tool call flows through evaluate → attest → receipt
 - Average proxy overhead: ~4ms per call
 
-Sources: {{< repo-link "python/README.md" >}}, {{< repo-link "go/README.md" >}}, {{< repo-link "python/tests/run_cloud_model_test.py" "Cloud model harness" >}}, {{< repo-link "python/tests/comprehensive_test_report.json" "Aggregate report" >}}, and {{< repo-link ".github/workflows/tests.yml" "tests workflow" >}}.
+Sources: {{< repo-link "python/README.md" >}}, {{< repo-link "go/README.md" >}}, {{< repo-link "python/tests/run_cloud_model_test.py" "Cloud model harness" >}}, aggregate report path `python/tests/comprehensive_test_report.json`, and {{< repo-link ".github/workflows/tests.yml" "tests workflow" >}}.
