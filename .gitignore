@@ -36,7 +36,7 @@ python/build/
 # Internal planning, engineering reports, and dev tooling — moved to _internal/
 # so the public tree stays clean for the open-source community.
 _internal/
-reports/
+/reports/
 
 # Go build artifacts when binaries land in the repo root rather than $GOBIN.
 go/operator
