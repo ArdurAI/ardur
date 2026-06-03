@@ -2,7 +2,7 @@
 title: "Phase 2 Daemon/Kernel Boundary Claim Ledger"
 description: "Date: 2026-05-12"
 source_path: "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md"
-source_sha256: "7bf2e05a3984f32d714bf778610c26b6f84fc195a2168e7c82d1a692b28f8161"
+source_sha256: "1f82339f835224f1d7a7dab17dd3a2d989a1f27e034c55b0b126d4e149e953fb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -25,7 +25,7 @@ Scope: public-site claim ledger source for the current Phase 2 development bound
 
 The current `dev` branch supports a bounded development claim:
 
-> Ardur has a gated local Linux eBPF process-lifecycle proof harness that can load and attach exec/exit tracepoints in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, Linux `SO_PEERCRED` retrieval seam, accepted-connection protocol seam, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for register/status/end requests, and a no-privilege/no-execution launch-wrapper session-proof seam with deterministic argv/cwd digest evidence.
+> Ardur has a gated local Linux eBPF process-lifecycle proof harness that can load and attach exec/exit tracepoints in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, Linux `SO_PEERCRED` retrieval seam, accepted-connection protocol seam, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for register/status/end requests, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, and a no-privilege/no-execution launch-wrapper session-proof seam with deterministic argv/cwd digest evidence.
 
 This is an experimental development boundary, not release or production readiness.
 
@@ -40,6 +40,7 @@ This is an experimental development boundary, not release or production readines
 - `go/pkg/kernelcapture/daemon_socket_peer_contract.go` joins decoded protocol requests, daemon-observed peer credentials, and validated custody context for accepted Unix connections.
 - `go/pkg/kernelcapture/daemon_socket_server.go` implements the bounded local Unix-domain socket proof seam: bind validated local socket path, cap request bytes/read timeout/concurrency, observe peer credentials, authorize request+peer, and dispatch only authorized requests to an injected handler.
 - `go/pkg/kernelcapture/daemon_session_registry.go` implements the capped in-memory authorized handler seam for `register_session`, `session_status`, and `end_session`, including TTL expiry, duplicate-active-session rejection, active-session capacity exhaustion, inactive-session pruning, and fail-closed unknown/ended/expired status behavior.
+- `go/pkg/kernelcapture/daemon_session_handoff_plan.go` implements the no-mutation daemon session handoff plan seam for active registry records, including hashed daemon-owned state/runtime paths and a non-zero cgroup allowlist precondition sequence without filesystem writes, cgroup assignment, BPF map mutation, or live enforcement.
 - `go/pkg/kernelcapture/daemon_accept_loop_plan.go` validates a dry-run accept-loop plan with custody validation, explicit UID/GID allowlists, bounded request bytes, read timeout, bounded concurrency, and non-executed preflight/bind/accept/peer-observation/decode/authorization/dispatch steps.
 - `go/pkg/kernelcapture/launch_wrapper_session.go` defines the launch-wrapper no-execution contract seam and deterministic evidence envelope.
 - `go/pkg/kernelcapture/launch_wrapper_session_test.go` verifies launch-wrapper digest integrity and boundary behavior.
@@ -52,6 +53,7 @@ This evidence does **not** support claims of:
 - production daemon install/start/service-management readiness
 - production live enforcement or persistent session-state management
 - daemon-created/assigned per-session cgroups
+- filesystem writes, cgroup writes, or BPF map mutation from the handoff plan seam
 - file/network side-effect capture
 - universal CLI capture across Codex, Gemini, Kimi, or future CLIs
 - cross-platform kernel capture (macOS Endpoint Security or Windows ETW)
