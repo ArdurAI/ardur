@@ -79,8 +79,8 @@ if [ "$SKIP_GO" -eq 0 ]; then
     echo "ERROR: go not found; go/go.mod requires $required_go." >&2
     failures=$((failures + 1))
   else
-    actual_go="$(go version | awk '{print $3}' | sed 's/^go//')"
-    echo "==> Go local version: $actual_go; go/go.mod requires: $required_go"
+    actual_go="$(cd go && go env GOVERSION | sed 's/^go//')"
+    echo "==> Go module toolchain version: $actual_go; go/go.mod requires: $required_go"
     if version_lt "$actual_go" "$required_go"; then
       if [ "$ALLOW_GO_MISMATCH" -eq 1 ]; then
         echo "WARN: local Go $actual_go is below go/go.mod requirement $required_go; continuing because --allow-go-mismatch was set." >&2

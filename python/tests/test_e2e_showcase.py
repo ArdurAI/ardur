@@ -37,7 +37,10 @@ from tests.conftest import v01_required_md_extras
 # ---------------------------------------------------------------------------
 
 CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
-API_KEY = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
+API_KEY = os.environ.get(
+    "ARDUR_OLLAMA_API_KEY",
+    "",
+)
 
 # ---------------------------------------------------------------------------
 # showcase output singleton

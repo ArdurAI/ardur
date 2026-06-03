@@ -2,7 +2,7 @@
 title: "Docs"
 description: "These docs describe the public product direction and the engineering boundaries"
 source_path: "docs/README.md"
-source_sha256: "559388fe5866fac9d4d102ab3a87c4838848d31a8aa86bd27382ccf6c870b745"
+source_sha256: "b4699a6b8b46584489686c16854273eb022cec813b85f0f0f35c368c45c94e6c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -46,11 +46,6 @@ coverage are in active development.
 - [Comparisons and engineering responses](/__ardur_internal__/source/docs/comparisons/readme/)
 - [Technical Reference](/__ardur_internal__/source/docs/reference/readme/) — CLI, Personal Hub HTTP API, and `ARDUR.md` profile format
 - [Articles](/__ardur_internal__/source/docs/articles/readme/)
-- [Content Safety Plugin](/__ardur_internal__/source/docs/guides/content-safety/) — PII/credential detection with configurable deny/redact/warn modes
-- [MCP Gateway](/__ardur_internal__/source/docs/guides/mcp-gateway/) — JSON-RPC 2.0 stdio transport with policy evaluation and content safety
-- [eBPF Kernel Capture](/__ardur_internal__/source/docs/guides/kernel-capture/) — Go daemon + Python client for process-lifecycle observability
-- [OPA/Rego Backend](/__ardur_internal__/source/docs/reference/opa-backend/) — Rego policy evaluation composing with the native backend
-- [NIST AI RMF Mapping](/__ardur_internal__/source/docs/compliance/nist-ai-rmf-mapping/) — Self-assessment against all 4 RMF functions
 - [CodeQL dismissal audit trail](/__ardur_internal__/source/docs/audit/)
 
 ## Start here

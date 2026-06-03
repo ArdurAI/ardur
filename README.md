@@ -68,7 +68,7 @@ Single end-to-end test exercising all protocol layers over real TLS with SPIFFE 
 
 ### Phase 1 — Adversarial Boundary Testing
 
-10 hostile scenarios across 5 cloud models spanning multiple providers. Every scenario is designed to trigger a DENY — models attempt direct forbidden-tool use, mid-execution prompt injection, DAN-style jailbreaking, resource-scope violations, social engineering with false urgency, path traversal, budget exhaustion, obfuscated command injection, multi-turn gradual steering toward forbidden actions, and chained tool attacks (write script → execute). See [test-results](python/tests/test-results/) for per-model breakdowns.
+10 hostile scenarios across 5 cloud models spanning multiple providers. Every scenario is designed to trigger a DENY — models attempt direct forbidden-tool use, mid-execution prompt injection, DAN-style jailbreaking, social engineering, resource-scope violations, path traversal, budget exhaustion, obfuscated command injection, multi-turn gradual steering toward forbidden actions, and chained tool attacks (write script → execute). The public redaction keeps the aggregate result here and omits raw per-model fixture artifacts from the repository.
 
 | Metric | Value |
 |--------|-------|
@@ -119,7 +119,7 @@ The Go `pkg/aat` package implements 13 constraint types, token serialization, de
 | Go AAT | full suite | All passing |
 | MIC conformance (new) | 29 | All passing |
 
-[Full test results →](python/tests/test-results/) · [Proof & evidence site →](site/)
+[Python test suite →](python/tests/) · Aggregate report: `python/tests/comprehensive_test_report.json` · [Proof & evidence site →](site/)
 
 ## Evaluator Quickstart
 
@@ -213,11 +213,6 @@ This repo currently includes:
   [evidence-bundle guide](docs/guides/read-phase1-evidence-bundle.md)
 - a journey-log [article series](docs/articles/README.md) — Article 06 (Public Import Discipline) and Article 05 (Proof Media That Actually Means Something) are the first-wave shippers
 - a public audit trail at [`docs/audit/`](docs/audit/) mirroring the GitHub Code Scanning dismissal record so triage decisions are auditable from the repo tree without GitHub credentials
-- the content safety plugin — deterministic regex-based PII and credential detection (credit cards, SSNs, emails, API keys) with deny/redact/warn modes; see [`docs/guides/content-safety.md`](docs/guides/content-safety.md)
-- the OPA/Rego policy backend — subprocess-based Rego evaluation composing with native, Cedar, and ForbidRules backends under DENY-wins semantics; see [`docs/reference/opa-backend.md`](docs/reference/opa-backend.md)
-- the MCP gateway — JSON-RPC 2.0 stdio transport intercepting `tools/call` for policy evaluation and content safety scanning; see [`docs/guides/mcp-gateway.md`](docs/guides/mcp-gateway.md)
-- the eBPF kernel capture integration — Go daemon protocol handler and session registry with a Python Unix-socket client wired into the proxy session lifecycle; see [`docs/guides/kernel-capture.md`](docs/guides/kernel-capture.md)
-- the NIST AI RMF self-assessment mapping Ardur components to all 4 RMF functions with an OWASP Agentic Top 10 crosswalk; see [`docs/compliance/nist-ai-rmf-mapping.md`](docs/compliance/nist-ai-rmf-mapping.md)
 
 ## What Is Coming Next
 
@@ -237,7 +232,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 |----------------------|-------------|---------------------------------|
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, and native-host examples; deferred README-only OpenAI Agents SDK and Google ADK directories | more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
-| **Policy engine**    | native checks, forbid-rules, Cedar bridge, OPA/Rego backend, AAT constraint engine (13 types) | broader Biscuit datalog examples |
+| **Policy engine**    | native checks, forbid-rules, Cedar bridge, AAT constraint engine (13 types) | OPA and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |
 | **Receipts sink**    | local JSON / stdout-oriented receipt surfaces | OTel emitters and durable storage examples |
 

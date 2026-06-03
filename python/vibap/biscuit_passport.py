@@ -28,7 +28,6 @@ from biscuit_auth import (
     Rule,
 )
 
-from ._hashing import sha256_hex
 from .passport import (
     MissionPassport,
     _cwd_is_subpath,

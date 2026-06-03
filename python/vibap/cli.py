@@ -666,48 +666,6 @@ def cmd_profile_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_mcp_gateway(args: argparse.Namespace) -> int:
-    from .mcp_gateway import MCPGatewayConfig, run_mcp_gateway
-    from .content_safety import ContentSafetyConfig
-    from .passport import generate_keypair, issue_passport, load_mission_file
-    from .proxy import GovernanceProxy
-
-    keys_dir = args.keys_dir or Path.home() / ".ardur" / "keys"
-    state_dir = args.state_dir or Path.home() / ".ardur" / "state"
-    log_path = args.log_path or state_dir / "governance_log.jsonl"
-    private_key, public_key = generate_keypair(keys_dir=keys_dir)
-
-    proxy = GovernanceProxy(
-        log_path=log_path,
-        state_dir=state_dir,
-        keys_dir=keys_dir,
-        public_key=public_key,
-    )
-
-    session_id = None
-    passport_token = None
-    if args.mission:
-        mission, ttl_s, _ = load_mission_file(args.mission)
-        token = issue_passport(mission, private_key, ttl_s=ttl_s)
-        passport_token = token
-        session = proxy.start_session(token)
-        session_id = session.jti if hasattr(session, "jti") else ""
-
-    cs_config = None
-    if args.content_safety:
-        cs_config = ContentSafetyConfig(mode=args.content_safety_mode)
-
-    config = MCPGatewayConfig(
-        upstream_command=list(args.upstream_command),
-        proxy=proxy,
-        private_key=private_key,
-        session_id=session_id,
-        passport_token=passport_token,
-        content_safety_config=cs_config,
-    )
-    return run_mcp_gateway(config)
-
-
 def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
     response = claude_code_doctor(plugin_dir=args.plugin_dir, home=args.home)
     _print_json(response)
@@ -1085,16 +1043,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cedar entities JSON file (used with --cedar-policy)",
     )
     protect_cc.set_defaults(func=cmd_protect_claude_code)
-
-    mcp_gw = subparsers.add_parser("mcp-gateway", help="run the MCP governance gateway (stdio transport)")
-    mcp_gw.add_argument("upstream_command", nargs="+", help="MCP server command and arguments")
-    mcp_gw.add_argument("--mission", type=Path, help="mission JSON for policy evaluation")
-    mcp_gw.add_argument("--keys-dir", type=Path, help="directory containing signing keys")
-    mcp_gw.add_argument("--state-dir", type=Path, help="directory for persisted sessions")
-    mcp_gw.add_argument("--log-path", type=Path, help="JSONL audit log path")
-    mcp_gw.add_argument("--content-safety", action="store_true", help="enable content safety scanning")
-    mcp_gw.add_argument("--content-safety-mode", choices=["deny", "redact", "warn"], default="warn", help="content safety mode")
-    mcp_gw.set_defaults(func=cmd_mcp_gateway)
 
     return parser
 

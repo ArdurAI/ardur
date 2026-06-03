@@ -17,6 +17,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 - [`README.md`](/__ardur_internal__/source/docs/readme/)
 - [`TESTING.md`](/__ardur_internal__/source/docs/testing/)
+- [`conductor-bootstrap.md`](/__ardur_internal__/source/docs/conductor-bootstrap/)
 - [`coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/)
 - [`engineering-standards.md`](/__ardur_internal__/source/docs/engineering-standards/)
 - [`known-limitations.md`](/__ardur_internal__/source/docs/known-limitations/)
@@ -31,7 +32,6 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`articles/`](/__ardur_internal__/source/docs/articles/)
 - [`audit/`](/__ardur_internal__/source/docs/audit/)
 - [`comparisons/`](/__ardur_internal__/source/docs/comparisons/)
-- [`compliance/`](/__ardur_internal__/source/docs/compliance/)
 - [`decisions/`](/__ardur_internal__/source/docs/decisions/)
 - [`guides/`](/__ardur_internal__/source/docs/guides/)
 - [`reference/`](/__ardur_internal__/source/docs/reference/)

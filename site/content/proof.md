@@ -51,11 +51,12 @@ export ARDUR_OLLAMA_API_KEY="your-key"
 cd python
 PYTHONPATH=. python tests/run_cloud_model_test.py "$MODEL_NAME"
 
-# Results land in tests/test-results/
+# Results are written as local artifacts for the run.
 ```
 
-The test script and all result data are in the repo at
-`python/tests/run_cloud_model_test.py` and `python/tests/test-results/`.
+The runnable test script is in the repo at
+`python/tests/run_cloud_model_test.py`. The redacted public tree keeps aggregate
+reports but does not ship raw per-model fixture artifacts.
 
 ---
 

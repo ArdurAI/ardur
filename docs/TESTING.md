@@ -103,7 +103,9 @@ round-trips, full §7 chain verification scenarios, and Registry operations.
 ## Cloud Model Governance Tests
 
 Real-world integration tests proving governance proxy enforcement with live
-LLMs. Results are in `python/tests/test-results/`.
+LLMs can be run locally when provider credentials are available. The redacted
+public tree keeps the runnable harnesses and aggregate reports, but does not
+ship raw per-model result fixtures.
 
 ```bash
 ARDUR_OLLAMA_API_KEY="<key>" python tests/run_cloud_model_test.py <model_name>

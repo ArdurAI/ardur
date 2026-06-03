@@ -2,3 +2,4 @@
 # The current tree stores only a redacted marker; this keeps full-history scanning
 # enabled while suppressing the exact fixture fingerprint from commit 2286b899.
 2286b899d98c580edd7baf90a688f80a7b7ec86e:python/tests/run_advanced_adversarial.py:ardur-ec-private-key:419
+python/tests/run_advanced_adversarial.py:ardur-ec-private-key:419

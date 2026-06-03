@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from ._hashing import canonical_json, sha256_hex
 from .passport import (
     ALGORITHM,
     DEFAULT_IAT_FUTURE_SKEW_S,
@@ -126,9 +125,12 @@ _BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _TOKEN_FIELD_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
+def _canonical_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
 
 def _stable_identifier(prefix: str, payload: dict[str, Any]) -> str:
-    digest = sha256_hex(canonical_json(payload))[:32]
+    digest = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()[:32]
     return f"{prefix}:{digest}"
 
 
@@ -166,7 +168,7 @@ class BoundedReplayCache(MutableSet[str]):
 
 
 def _b64url_sha256(payload: dict[str, Any]) -> str:
-    digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).digest()
+    digest = hashlib.sha256(_canonical_json(payload).encode("utf-8")).digest()
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
@@ -549,7 +551,7 @@ def build_receipt(
     # Default json.dumps escapes non-ASCII (ensure_ascii=True) while
     # _canonical_json does not — flagged in Phase 3 audit HIGH #2.
     arguments_hash = hashlib.sha256(
-        canonical_json(
+        _canonical_json(
             dict(getattr(event, "arguments", {}) or {})
         ).encode("utf-8")
     ).hexdigest()
@@ -790,7 +792,7 @@ def verify_chain(
                     "parent_receipt_hash; chain head must have neither"
                 )
             continue
-        expected_hash = sha256_hex(tokens[index - 1])
+        expected_hash = hashlib.sha256(tokens[index - 1].encode("ascii")).hexdigest()
         if claims.get("parent_receipt_hash") != expected_hash:
             raise ReceiptChainError(
                 f"parent_receipt_hash mismatch at index {index}: "

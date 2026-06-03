@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "c488b38181d55a873bfbd05dc08873275e78ecc361e2193de5580ed6cdd80fb7"
+source_sha256: "73304c7598fe2ded8c5ff4afb0d579e23eae0bc20c2a3f4e285cf846d3fc9a93"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -120,7 +120,9 @@ round-trips, full §7 chain verification scenarios, and Registry operations.
 ## Cloud Model Governance Tests
 
 Real-world integration tests proving governance proxy enforcement with live
-LLMs. Results are in `python/tests/test-results/`.
+LLMs can be run locally when provider credentials are available. The redacted
+public tree keeps the runnable harnesses and aggregate reports, but does not
+ship raw per-model result fixtures.
 
 ```bash
 ARDUR_OLLAMA_API_KEY="<key>" python tests/run_cloud_model_test.py <model_name>
