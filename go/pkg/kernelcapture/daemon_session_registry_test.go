@@ -1,0 +1,278 @@
+package kernelcapture
+
+import (
+	"context"
+	"net"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestDaemonSessionRegistryRegistersStatusesAndEndsSession(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	handshake := daemonSessionRegistryTestHandshake("session-1")
+	register := daemonRegisterSessionRequest("session-1", 1234, 60)
+	register.RegisterSession.MissionID = "mission-1"
+	register.RegisterSession.TraceID = "trace-1"
+	register.RegisterSession.PIDNamespaceID = 42
+	register.RegisterSession.CgroupID = 99
+	register.RegisterSession.HandoffMetadata = map[string]any{"command_argc": float64(2), "handoff_source": "launch_wrapper"}
+
+	response := registry.HandleAuthorizedRequest(context.Background(), register, handshake)
+	if !response.OK {
+		t.Fatalf("register response ok=false, error=%q", response.Error)
+	}
+	if response.Method != DaemonProtocolMethodRegisterSession || response.SessionID != "session-1" || response.Status != DaemonSessionStatusRegistered {
+		t.Fatalf("register response = %#v", response)
+	}
+
+	record, ok := registry.Session("session-1")
+	if !ok {
+		t.Fatalf("registered session missing from registry")
+	}
+	if record.SessionID != "session-1" || record.MissionID != "mission-1" || record.TraceID != "trace-1" {
+		t.Fatalf("record identity = %#v", record)
+	}
+	if record.RootPID != 1234 || record.PIDNamespaceID != 42 || record.CgroupID != 99 {
+		t.Fatalf("record process identity = %#v", record)
+	}
+	if len(record.EventClasses) != 1 || record.EventClasses[0] != DaemonProtocolEventProcessLifecycle {
+		t.Fatalf("event classes = %#v", record.EventClasses)
+	}
+	if !record.RegisteredAt.Equal(now) || !record.ExpiresAt.Equal(now.Add(60*time.Second)) || !record.EndedAt.IsZero() {
+		t.Fatalf("record times registered=%s expires=%s ended=%s", record.RegisteredAt, record.ExpiresAt, record.EndedAt)
+	}
+	if record.PeerUID != 501 || record.PeerGID != 20 || record.PeerPID != 4321 || record.CredentialSource != DaemonPeerCredentialSourceLinuxSOPeerCred {
+		t.Fatalf("record peer evidence = %#v", record)
+	}
+	if record.SocketPath != "/run/ardur/kernelcapture/control.sock" {
+		t.Fatalf("socket path = %q", record.SocketPath)
+	}
+	if record.Status(now) != DaemonSessionStatusActive {
+		t.Fatalf("record status = %q, want active", record.Status(now))
+	}
+
+	// The registry must not retain mutable caller-owned slices/maps.
+	register.RegisterSession.EventClasses[0] = "mutated"
+	register.RegisterSession.HandoffMetadata["handoff_source"] = "mutated"
+	record, ok = registry.Session("session-1")
+	if !ok {
+		t.Fatalf("registered session missing after mutation check")
+	}
+	if record.EventClasses[0] != DaemonProtocolEventProcessLifecycle {
+		t.Fatalf("registry retained mutable event class slice: %#v", record.EventClasses)
+	}
+	if record.HandoffMetadata["handoff_source"] != "launch_wrapper" {
+		t.Fatalf("registry retained mutable handoff metadata: %#v", record.HandoffMetadata)
+	}
+
+	status := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-1"), handshake)
+	if !status.OK || status.Status != DaemonSessionStatusActive {
+		t.Fatalf("active status response = %#v", status)
+	}
+
+	now = now.Add(5 * time.Second)
+	ended := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-1"), handshake)
+	if !ended.OK || ended.Status != DaemonSessionStatusEnded {
+		t.Fatalf("end response = %#v", ended)
+	}
+	record, ok = registry.Session("session-1")
+	if !ok || !record.EndedAt.Equal(now) || record.Status(now) != DaemonSessionStatusEnded {
+		t.Fatalf("ended record = %#v ok=%t", record, ok)
+	}
+
+	endedStatus := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-1"), handshake)
+	if endedStatus.OK || endedStatus.Status != DaemonSessionStatusEnded || !strings.Contains(endedStatus.Error, "not active") {
+		t.Fatalf("ended status response = %#v", endedStatus)
+	}
+}
+
+func TestDaemonSessionRegistryRejectsDuplicateActiveSession(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 30, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	handshake := daemonSessionRegistryTestHandshake("session-dup")
+	first := daemonRegisterSessionRequest("session-dup", 111, 60)
+	second := daemonRegisterSessionRequest("session-dup", 222, 60)
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), first, handshake); !response.OK {
+		t.Fatalf("first register response = %#v", response)
+	}
+	duplicate := registry.HandleAuthorizedRequest(context.Background(), second, handshake)
+	if duplicate.OK || duplicate.Status != DaemonSessionStatusActive || !strings.Contains(duplicate.Error, "already active") {
+		t.Fatalf("duplicate response = %#v", duplicate)
+	}
+	record, ok := registry.Session("session-dup")
+	if !ok || record.RootPID != 111 {
+		t.Fatalf("duplicate register mutated active record = %#v ok=%t", record, ok)
+	}
+}
+
+func TestDaemonSessionRegistryRejectsNonAllowPeerHandshake(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 45, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	handshake := daemonSessionRegistryTestHandshake("session-denied")
+	handshake.Authorization.Verdict = DaemonPeerAuthorizationVerdictDeny
+	handshake.Authorization.Reason = "test denied peer"
+
+	response := registry.HandleAuthorizedRequest(context.Background(), daemonRegisterSessionRequest("session-denied", 222, 60), handshake)
+	if response.OK || !strings.Contains(response.Error, "allow verdict") {
+		t.Fatalf("non-allow handshake response = %#v", response)
+	}
+	if _, ok := registry.Session("session-denied"); ok {
+		t.Fatalf("non-allow handshake registered a session")
+	}
+}
+
+func TestDaemonSessionRegistryEnforcesMaxActiveSessions(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 55, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	registry.maxSessions = 1
+	handshake := daemonSessionRegistryTestHandshake("session-cap")
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), daemonRegisterSessionRequest("session-a", 111, 60), handshake); !response.OK {
+		t.Fatalf("first register response = %#v", response)
+	}
+	capacity := registry.HandleAuthorizedRequest(context.Background(), daemonRegisterSessionRequest("session-b", 222, 60), handshake)
+	if capacity.OK || capacity.Status != DaemonSessionStatusCapacityExceeded || !strings.Contains(capacity.Error, "capacity exceeded") {
+		t.Fatalf("capacity response = %#v", capacity)
+	}
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-a"), handshake); !response.OK {
+		t.Fatalf("end session-a response = %#v", response)
+	}
+	reused := registry.HandleAuthorizedRequest(context.Background(), daemonRegisterSessionRequest("session-b", 222, 60), handshake)
+	if !reused.OK || reused.Status != DaemonSessionStatusRegistered {
+		t.Fatalf("register after ended session prune response = %#v", reused)
+	}
+	if _, ok := registry.Session("session-a"); ok {
+		t.Fatalf("inactive session-a was not pruned before admitting replacement")
+	}
+}
+
+func TestDaemonSessionRegistryExpiresAndRejectsUnknownSessions(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 13, 0, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	handshake := daemonSessionRegistryTestHandshake("session-expire")
+
+	missing := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("missing"), handshake)
+	if missing.OK || missing.Status != DaemonSessionStatusNotFound || !strings.Contains(missing.Error, "not found") {
+		t.Fatalf("missing status response = %#v", missing)
+	}
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), daemonRegisterSessionRequest("session-expire", 333, 1), handshake); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+	now = now.Add(2 * time.Second)
+	expired := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-expire"), handshake)
+	if expired.OK || expired.Status != DaemonSessionStatusExpired || !strings.Contains(expired.Error, "expired") {
+		t.Fatalf("expired status response = %#v", expired)
+	}
+	endedExpired := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-expire"), handshake)
+	if endedExpired.OK || endedExpired.Status != DaemonSessionStatusExpired || !strings.Contains(endedExpired.Error, "expired") {
+		t.Fatalf("end expired response = %#v", endedExpired)
+	}
+}
+
+func TestDaemonUnixSocketServerHandlesSessionLifecycleWithRegistry(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 14, 0, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	server, cancel := startDaemonUnixSocketServerForTest(t, daemonSocketServerTestOptions{
+		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
+			return DaemonSocketPeerObservation{
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+				SocketPath:       socketPath,
+			}, nil
+		},
+		handleAuthorizedRequest: registry.HandleAuthorizedRequest,
+	})
+	defer cancel()
+
+	registered := sendDaemonUnixSocketRequest(t, server.SocketPath(), daemonEncodeProtocolRequest(t, daemonRegisterSessionRequest("socket-session", 444, 60)))
+	if !registered.OK || registered.Method != DaemonProtocolMethodRegisterSession || registered.SessionID != "socket-session" || registered.Status != DaemonSessionStatusRegistered {
+		t.Fatalf("socket register response = %#v", registered)
+	}
+	active := sendDaemonUnixSocketRequest(t, server.SocketPath(), daemonEncodeProtocolRequest(t, daemonSessionStatusRequest("socket-session")))
+	if !active.OK || active.Status != DaemonSessionStatusActive {
+		t.Fatalf("socket active response = %#v", active)
+	}
+	now = now.Add(10 * time.Second)
+	ended := sendDaemonUnixSocketRequest(t, server.SocketPath(), daemonEncodeProtocolRequest(t, daemonEndSessionRequest("socket-session")))
+	if !ended.OK || ended.Status != DaemonSessionStatusEnded {
+		t.Fatalf("socket end response = %#v", ended)
+	}
+	inactive := sendDaemonUnixSocketRequest(t, server.SocketPath(), daemonEncodeProtocolRequest(t, daemonSessionStatusRequest("socket-session")))
+	if inactive.OK || inactive.Status != DaemonSessionStatusEnded || !strings.Contains(inactive.Error, "not active") {
+		t.Fatalf("socket ended status response = %#v", inactive)
+	}
+}
+
+func daemonSessionRegistryTestHandshake(sessionID string) DaemonProtocolPeerHandshake {
+	return DaemonProtocolPeerHandshake{
+		ProtocolVersion:  DaemonProtocolVersion,
+		Method:           DaemonProtocolMethodRegisterSession,
+		SessionID:        sessionID,
+		SocketPath:       "/run/ardur/kernelcapture/control.sock",
+		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+		Authorization: DaemonPeerAuthorization{
+			Verdict: DaemonPeerAuthorizationVerdictAllow,
+			Reason:  "observed peer uid is explicitly allowed",
+			UID:     501,
+			GID:     20,
+			PID:     4321,
+			Matched: "uid",
+		},
+	}
+}
+
+func daemonRegisterSessionRequest(sessionID string, rootPID uint32, ttlSeconds int64) DaemonProtocolRequest {
+	return DaemonProtocolRequest{
+		ProtocolVersion: DaemonProtocolVersion,
+		Method:          DaemonProtocolMethodRegisterSession,
+		RegisterSession: &DaemonRegisterSessionRequest{
+			SessionID:    sessionID,
+			RootPID:      rootPID,
+			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   ttlSeconds,
+		},
+	}
+}
+
+func daemonSessionStatusRequest(sessionID string) DaemonProtocolRequest {
+	return DaemonProtocolRequest{
+		ProtocolVersion: DaemonProtocolVersion,
+		Method:          DaemonProtocolMethodSessionStatus,
+		SessionStatus:   &DaemonSessionStatusRequest{SessionID: sessionID},
+	}
+}
+
+func daemonEndSessionRequest(sessionID string) DaemonProtocolRequest {
+	return DaemonProtocolRequest{
+		ProtocolVersion: DaemonProtocolVersion,
+		Method:          DaemonProtocolMethodEndSession,
+		EndSession:      &DaemonEndSessionRequest{SessionID: sessionID},
+	}
+}
+
+func daemonEncodeProtocolRequest(t *testing.T, req DaemonProtocolRequest) []byte {
+	t.Helper()
+	encoded, err := EncodeDaemonProtocolRequest(req)
+	if err != nil {
+		t.Fatalf("EncodeDaemonProtocolRequest returned error: %v", err)
+	}
+	return encoded
+}

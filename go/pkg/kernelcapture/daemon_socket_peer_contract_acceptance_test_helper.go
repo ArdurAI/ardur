@@ -73,7 +73,9 @@ func acceptedUnixConnPair(t *testing.T) (*net.UnixConn, *net.UnixConn, func()) {
 }
 
 func isConnectionAlreadyClosed(err error) bool {
-	return strings.Contains(err.Error(), "closed network connection")
+	return strings.Contains(err.Error(), "closed network connection") ||
+		strings.Contains(err.Error(), "broken pipe") ||
+		strings.Contains(err.Error(), "connection reset by peer")
 }
 
 func writeUnixRequestAndClose(t *testing.T, conn *net.UnixConn, request string) {

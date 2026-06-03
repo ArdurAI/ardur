@@ -92,7 +92,7 @@
     {
       "id": "phase2-daemon-kernel-boundary",
       "title": "Phase 2 daemon/kernel capture is a bounded development proof",
-      "body": "The current dev branch includes a gated Linux eBPF process-lifecycle proof harness that loads and attaches exec/exit tracepoint programs in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, SO_PEERCRED retrieval, accepted-connection protocol, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized protocol requests, and a no-privilege/no-execution launch-wrapper session-proof seam for deterministic argv/cwd digest evidence. This supports a local experimental boundary claim only: no production daemon install/start/service management, no production live enforcement or long-lived session-state manager, no daemon-created/assigned cgroups, no universal CLI capture, no file/network side-effect capture, no cross-platform kernel capture, and no production readiness claim.",
+      "body": "The current dev branch includes a gated Linux eBPF process-lifecycle proof harness that loads and attaches exec/exit tracepoint programs in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, SO_PEERCRED retrieval, accepted-connection protocol, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized protocol requests, a capped in-memory daemon session registry for register/status/end requests, and a no-privilege/no-execution launch-wrapper session-proof seam for deterministic argv/cwd digest evidence. This supports a local experimental boundary claim only: no production daemon install/start/service management, no production live enforcement or persistent session-state manager, no daemon-created/assigned cgroups, no universal CLI capture, no file/network side-effect capture, no cross-platform kernel capture, and no production readiness claim.",
       "evidence_level": "code-and-doc",
       "maturity": "in-progress",
       "claim_type": "runtime-boundary",
@@ -111,6 +111,8 @@
         "go/pkg/kernelcapture/daemon_socket_peer_contract.go",
         "go/pkg/kernelcapture/daemon_socket_server.go",
         "go/pkg/kernelcapture/daemon_socket_server_test.go",
+        "go/pkg/kernelcapture/daemon_session_registry.go",
+        "go/pkg/kernelcapture/daemon_session_registry_test.go",
         "go/pkg/kernelcapture/daemon_accept_loop_plan.go",
         "go/pkg/kernelcapture/launch_wrapper_session.go",
         "go/pkg/kernelcapture/launch_wrapper_session_test.go"

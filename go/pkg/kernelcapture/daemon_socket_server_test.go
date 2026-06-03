@@ -130,7 +130,12 @@ func TestDaemonUnixSocketServerEnforcesBoundedConcurrency(t *testing.T) {
 		t.Fatalf("first connection did not enter authorized handler")
 	}
 
-	secondResponse := sendDaemonUnixSocketRequest(t, server.SocketPath(), daemonHealthRequest(t))
+	secondConn := dialDaemonUnixSocket(t, server.SocketPath())
+	defer secondConn.Close()
+	if _, err := secondConn.Write(daemonHealthRequest(t)); err != nil && !isConnectionAlreadyClosed(err) {
+		t.Fatalf("write second request: %v", err)
+	}
+	secondResponse := readDaemonUnixSocketResponse(t, secondConn)
 	if secondResponse.OK {
 		t.Fatalf("second response ok = true, want concurrency rejection")
 	}

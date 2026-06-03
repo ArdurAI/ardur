@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "dcab9329f693a90a7afa80729c0588ef57d8b0048efa53980a68d89aefd9ab9c"
+source_sha256: "bebc2d658975a15b924bd21a5c09ef9977a13c5bc2cc282cdf5c2e401c9db28d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -48,6 +48,14 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   enforces bounded request bytes/read timeout/concurrency, and still does not
   install/start a daemon, manage service lifecycle, create daemon-owned
   directories, pin BPF maps, create cgroups, or perform live enforcement.
+- Adds an in-memory `DaemonSessionRegistry` authorized-handler seam for
+  `register_session`, `session_status`, and `end_session`: it records bounded
+  session metadata only after protocol validation and peer authorization,
+  expires sessions by TTL, enforces a maximum active-session cap, rejects
+  duplicate active session ids, prunes/reuses inactive ids when admitting new
+  sessions, and fails closed for unknown, ended, or expired sessions. It is not
+  persistent storage, not a production daemon session manager, and not live
+  kernel enforcement.
 - Adds a local launch-wrapper session proof seam that converts generic CLI
   boundary metadata into a validated `register_session` request and a
   correlator seed receipt for the root process; it does not run commands,
@@ -115,19 +123,25 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
    - Fails closed for malformed requests, peer-observation failure, unauthorized peers, socket-path mismatch, invalid config, or concurrency exhaustion.
    - Does not install or start a daemon service, create/repair daemon custody directories, pin maps, create cgroups, manage long-lived session state, or perform live enforcement.
 
-11. `AuthorizeDaemonProtocolPeer` (contract only)
+11. `DaemonSessionRegistry` (in-memory authorized handler)
+   - Handles authorized `register_session`, `session_status`, and `end_session` requests after `DaemonUnixSocketServer` or another caller has joined the request to daemon-observed peer credentials.
+   - Stores bounded metadata in memory: session/mission/trace ids, root PID, PID namespace, cgroup id, event classes, sanitized handoff metadata, registration/expiry/end timestamps, and peer-observation evidence.
+   - Fails closed for duplicate active sessions, active-session capacity exhaustion, missing sessions, expired sessions, ended sessions, invalid protocol payloads, and canceled request contexts.
+   - Does not persist state across daemon restarts, install/start a service, create/assign cgroups, pin maps, execute commands, or perform live kernel enforcement.
+
+12. `AuthorizeDaemonProtocolPeer` (contract only)
    - Joins a validated daemon protocol request to daemon-observed peer credentials before future socket handling.
    - Requires the observation source to be explicit (`linux_so_peercred` today) and the observed socket path to match the validated dry-run daemon custody plan.
    - Fails closed for invalid protocol messages, missing/unsupported credential sources, socket-path mismatches, invalid custody plans, or unauthorized UID/GID policy.
    - Does not open, bind, listen on, accept, or inspect a socket; it does not perform the peer-credential syscall itself.
 
-12. `ObserveLinuxUnixPeerCredentials` (Linux seam)
+13. `ObserveLinuxUnixPeerCredentials` (Linux seam)
    - Reads SO_PEERCRED from an already-open `*net.UnixConn` and returns the daemon-owned `DaemonSocketPeerObservation` used by the handshake contract.
    - Requires the caller to supply the daemon-owned socket path and records `linux_so_peercred` as the explicit credential source.
    - Fails closed for a nil connection, missing socket path, SO_PEERCRED errors, or missing peer PID.
    - Does not open, bind, listen on, accept, install, start, or expose a daemon; Linux socketpair coverage exercises the retrieval seam without creating a public service.
 
-13. `BuildLaunchWrapperSessionProof` (contract only)
+14. `BuildLaunchWrapperSessionProof` (contract only)
    - Converts no-privilege launch-wrapper metadata for a generic CLI boundary into a validated daemon `register_session` request.
    - Seeds userspace correlation with the launched root PID, optional PID namespace, optional process-start monotonic timestamp, optional cgroup id, and launch wall-clock time.
    - Adds redacted handoff metadata, including command argv digest and argc, without storing raw argv, working directory text, executable paths, or environment values in the proof.
@@ -172,7 +186,7 @@ Rootless privileged containers can still fail if memlock cannot be raised or tra
 
 ## Privileged boundary
 
-This package does not install or start a daemon service, persist maps, create/repair daemon custody directories, create cgroups, or manage system startup. The only live socket behavior in this package is the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; it is not a service installer or production lifecycle manager.
+This package does not install or start a daemon service, persist maps, create/repair daemon custody directories, create cgroups, or manage system startup. The only live socket behavior in this package is the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; the only daemon session state is the in-memory `DaemonSessionRegistry` proof seam. Neither is a service installer, persistent store, or production lifecycle manager.
 `BuildDaemonCustodyPlan` records the local-only future daemon boundary as validated data:
 
 - config path: `/etc/ardur/kernelcapture-daemon.toml`, `0600`, root-owned
@@ -200,13 +214,13 @@ It rejects repository-controlled privileged paths when repository-root validatio
 
 Allowed claim after the gated smoke passes:
 
-Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
+Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session`, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
 
 Not claimed yet:
 
 - production daemon readiness
 - daemon installation, startup, service management, or system startup integration
-- long-lived daemon session-state management or live enforcement wiring
+- persistent/production daemon session-state management or live enforcement wiring
 - daemon-created/assigned per-session cgroups
 - universal CLI capture
 - file/network/privilege side-effect capture
