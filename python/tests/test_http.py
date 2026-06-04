@@ -1444,31 +1444,31 @@ class TestPythonProxyBearerAuth:
 # that round-8 audit identified as the regression vector.
 
 class TestPythonProxyBearerAuthSourceShape:
-    """Source-shape regressions that pin the digest length-oracle
+    """Source-shape regressions that pin fixed-length bearer comparison
     closure (round-8 FIX-R8-1) at the code-text level. These tests
-    fire when a refactor reverts the digest-then-compare without
+    fire when a refactor reverts fixed-length material comparison without
     explicitly migrating to an alternative length-independent compare.
     Brittle by design — a deliberate refactor must update both the
     code AND the test."""
 
-    def test_check_auth_source_contains_context_bound_digest_normalization(self):
-        """The Python proxy bearer-auth path must digest-normalize
+    def test_check_auth_source_contains_fixed_length_material_normalization(self):
+        """The Python proxy bearer-auth path must normalize
         both presented and expected tokens before comparison."""
         import inspect
         from vibap.proxy import serve_proxy
 
         src = inspect.getsource(serve_proxy)
-        # Pin the canonical pattern: digest both sides BEFORE compare_digest.
-        assert "_api_token_digest(provided)" in src, (
-            "FIX-R8-1 regression: bearer-auth must digest the presented "
+        # Pin the canonical pattern: normalize both sides BEFORE compare_digest.
+        assert "_api_token_compare_material(provided)" in src, (
+            "FIX-R8-1 regression: bearer-auth must normalize the presented "
             "token before constant-time compare to defeat the length "
-            "oracle. The pattern '_api_token_digest(provided)' is "
+            "oracle. The pattern '_api_token_compare_material(provided)' is "
             "missing from serve_proxy source. See round-8 audit "
             "MED-NEW-1 / round-9 FIX-R9-2."
         )
-        assert "api_token_digest = _api_token_digest" in src, (
-            "FIX-R8-1 regression: expected-token digest precomputation "
-            "missing. ``api_token_digest`` should be precomputed once."
+        assert "api_token_compare_material = _api_token_compare_material" in src, (
+            "FIX-R8-1 regression: expected-token compare-material precomputation "
+            "missing. ``api_token_compare_material`` should be precomputed once."
         )
         # Anti-pattern: raw bytes compared via hmac.compare_digest.
         # The round-8-revert pattern has the form
@@ -1476,25 +1476,25 @@ class TestPythonProxyBearerAuthSourceShape:
         assert "compare_digest(provided, api_token_bytes)" not in src, (
             "FIX-R8-1 regression: bearer-auth reverted to raw-bytes "
             "compare_digest, leaking expected-token length via timing. "
-            "Use compare_digest(provided_digest, api_token_digest) instead."
+            "Use compare_digest(provided_compare_material, api_token_compare_material) instead."
         )
 
-    def test_check_auth_uses_compare_digest_on_digests(self):
+    def test_check_auth_uses_compare_digest_on_fixed_length_material(self):
         """The compare_digest call must operate on the precomputed
-        digests, not on raw bytes."""
+        fixed-length material, not on raw bytes."""
         import inspect
         from vibap.proxy import serve_proxy
 
         src = inspect.getsource(serve_proxy)
         # The two acceptable shapes (allowing minor refactor flexibility):
         acceptable = [
-            "compare_digest(provided_digest, api_token_digest)",
-            "compare_digest(api_token_digest, provided_digest)",
+            "compare_digest(provided_compare_material, api_token_compare_material)",
+            "compare_digest(api_token_compare_material, provided_compare_material)",
         ]
         if not any(pattern in src for pattern in acceptable):
             raise AssertionError(
                 "FIX-R8-1 regression: compare_digest must be called on "
-                "the fixed-length digests of provided and api_token. "
+                "fixed-length material for provided and api_token. "
                 f"Expected one of {acceptable!r} in serve_proxy source."
             )
 

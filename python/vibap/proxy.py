@@ -43,7 +43,7 @@ from .tls import create_ssl_context, resolve_tls_paths
 _SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 MAX_REQUEST_BODY = 1024 * 1024  # 1 MiB
-_API_TOKEN_DIGEST_CONTEXT = b"ardur-vibap-proxy-token-compare-v1"
+_API_TOKEN_COMPARE_MAX_BYTES = 4096
 
 # Per-session in-process coordination for shared state_dir access. ``flock``
 # closes the cross-process hole, but same-process proxies can still share a
@@ -4832,19 +4832,11 @@ def _generate_api_token() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
 
 
-def _api_token_digest(token: bytes) -> bytes:
-    """Return a fixed-length bearer-token digest for constant-time compare."""
-    return hmac.digest(_API_TOKEN_DIGEST_CONTEXT, token, "sha256")
-
-
-def _token_fingerprint(token_digest: bytes) -> str:
-    """Return a token fingerprint safe to print or log."""
-    return token_digest.hex()[:16]
-
-
-def _display_token_fingerprint(token_digest: bytes) -> str:
-    """Return the startup-banner token fingerprint; never the token itself."""
-    return f"[redacted token fp:{_token_fingerprint(token_digest)}]"
+def _api_token_compare_material(token: bytes) -> bytes:
+    """Return fixed-length bearer-token material for constant-time compare."""
+    if len(token) > _API_TOKEN_COMPARE_MAX_BYTES:
+        raise ValueError("bearer token too long")
+    return len(token).to_bytes(4, "big") + token.ljust(_API_TOKEN_COMPARE_MAX_BYTES, b"\0")
 
 
 def serve_proxy(
@@ -4889,11 +4881,11 @@ def serve_proxy(
         api_token = _generate_api_token()
         token_source = "generated"
 
-    # Pre-digest once for the hot path. Round-8 (FIX-R8-1, 2026-04-29)
-    # normalized bearer auth to fixed-length digests before
-    # ``hmac.compare_digest``. This uses a context-bound HMAC digest rather
-    # than a bare SHA-256 so the digest is clearly not password storage and so
-    # token material never flows into startup logs.
+    # Pre-normalize once for the hot path. Round-8 (FIX-R8-1, 2026-04-29)
+    # normalized bearer auth before ``hmac.compare_digest``. This version
+    # avoids hashing token material entirely: compare material includes a fixed
+    # width length prefix plus a NUL-padded token body, so both operands passed
+    # to compare_digest always have identical length.
     # CPython's ``_tscmp`` (the
     # C function backing ``hmac.compare_digest``) iterates ``min(len_a,
     # len_b)`` and short-circuits on length mismatch, leaking the
@@ -4901,7 +4893,7 @@ def serve_proxy(
     # for the Go control-plane services (cmd/authority + pkg/governance);
     # round-8 closes the symmetric Python proxy gap that round-7 audit
     # flagged as MED-NEW-1.
-    api_token_digest = _api_token_digest(api_token.encode("ascii"))
+    api_token_compare_material = _api_token_compare_material(api_token.encode("ascii"))
 
     active_session_ref = {"id": initial_session_id}
     active_session_lock = threading.Lock()
@@ -5070,10 +5062,14 @@ def serve_proxy(
             except UnicodeEncodeError:
                 self._send_json(401, {"error": "bearer token must be ASCII"})
                 return False
-            # FIX-R8-1: digest-then-compare normalizes lengths and defeats
-            # the length oracle; see api_token_digest construction above.
-            provided_digest = _api_token_digest(provided)
-            if not hmac.compare_digest(provided_digest, api_token_digest):
+            # FIX-R8-1: compare fixed-length material to defeat the length
+            # oracle; see api_token_compare_material construction above.
+            try:
+                provided_compare_material = _api_token_compare_material(provided)
+            except ValueError:
+                self._send_json(401, {"error": "invalid bearer token"})
+                return False
+            if not hmac.compare_digest(provided_compare_material, api_token_compare_material):
                 self._send_json(401, {"error": "invalid bearer token"})
                 return False
             return True
@@ -5496,22 +5492,20 @@ def serve_proxy(
         "/sessions, /evaluate, /result, /end, /attest, /delegate"
     )
     if require_auth:
-        display_token = _display_token_fingerprint(api_token_digest)
         print("")
         print("=" * 72)
         print(f"Bearer auth REQUIRED on all endpoints except: {', '.join(sorted(PUBLIC_PATHS))}")
-        print(f"API token ({token_source}) fingerprint:")
-        print(f"    {display_token}")
+        print(f"API token ({token_source}): [redacted]")
         if token_source == "generated":
             print("Generated tokens are no longer printed; set VIBAP_API_TOKEN or pass --api-token for clients.")
         print("Send the actual configured token as:  Authorization: Bearer ***")
         print("Export for hooks/clients:        export VIBAP_API_TOKEN='<token>'")
         print("=" * 72)
         print("")
-        # Log-safe fingerprint only (never the full token).
+        # Log only redacted auth state; never emit token material.
         # The proxy's log_message is suppressed; emit a structured stderr line for audit.
         print(
-            f"[vibap] auth=on source={token_source} token_fp={_token_fingerprint(api_token_digest)}",
+            f"[vibap] auth=on source={token_source} token=redacted",
             file=sys.stderr,
         )
     else:

@@ -2,7 +2,7 @@
 title: "CodeQL Alert Dismissals — 2026-04-29"
 description: "The 11-round audit cycle (S2) terminated cleanly on 2026-04-29 with"
 source_path: "docs/audit/codeql-dismissals-2026-04-29.md"
-source_sha256: "5b35bfb5e1609e5b92301a80cee24d372ca9b5af8ab929ea1a374ee64bff8003"
+source_sha256: "3649e2f7839b654955e5299bc0d95c35ad399aed38a044693c3400e7bd53faa5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["audit"]
@@ -94,8 +94,8 @@ auto-close on the next CodeQL scan against `main` post-merge.
 - **Rule message:** *"This expression logs sensitive data (password)
   as clear text."*
 - **Disposition:** Superseded by code fix on `dev` (2026-06-04)
-- **Justification:** The stderr line now emits only a fingerprint derived from
-  the context-bound token digest, not a prefix/suffix slice of the token.
+- **Justification:** The stderr line now emits only `token=redacted`, not a
+  digest, fingerprint, prefix/suffix slice, or cleartext token.
 - **Extended reasoning:** This section records the original 2026-04-29 triage.
   The 2026-06-04 hardening removed direct token dataflow from both the startup
   banner and stderr audit line.
@@ -284,14 +284,15 @@ Triaged and dismissed on the same day.
   algorithm (SHA256) that is insecure for password hashing, since
   it is not a computationally expensive hash function."*
 - **Disposition:** Superseded by code fix on `dev` (2026-06-04)
-- **Justification:** Bearer-auth normalization now uses a context-bound HMAC
-  digest before `hmac.compare_digest`; the bare SHA-256 token-hashing site was
-  removed.
+- **Justification:** Bearer-auth normalization now uses fixed-length compare
+  material before `hmac.compare_digest`; the bare SHA-256 token-hashing site
+  was removed.
 - **Extended reasoning:**
   This section records the original 2026-04-29 triage. The underlying security
   predicate remains fixed-length comparison before `hmac.compare_digest`, but
-  the 2026-06-04 hardening moved from bare SHA-256 to `_api_token_digest()` to
-  avoid both the CodeQL password-hashing shape and direct token dataflow.
+  the 2026-06-04 hardening moved from bare SHA-256 to
+  `_api_token_compare_material()` to avoid both the CodeQL password-hashing
+  shape and direct token dataflow.
 
   Original context for the length-oracle defense:
 
