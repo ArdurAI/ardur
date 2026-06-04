@@ -479,7 +479,6 @@ class TestHTTPSecurityLayer:
         )
 
     def test_rate_limiting(self, http_proxy, monkeypatch):
-        base, _proxy = http_proxy
         # Test the RateLimiter directly — it's the same algorithm used by serve_proxy
         from vibap.rate_limiter import RateLimiter
 
