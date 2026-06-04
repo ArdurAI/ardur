@@ -347,19 +347,6 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
 def _write_public_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    try:
-        os.chmod(path, 0o644)
-    except OSError:
-        # Best-effort public-key readability; the public key is not secret.
-        pass
-    actual_mode = path.stat().st_mode & 0o777
-    if actual_mode != 0o644:
-        import sys
-        print(
-            f"WARNING: {path} permissions are {actual_mode:o}, expected 644; "
-            f"public key may not be readable by other local clients",
-            file=sys.stderr,
-        )
 
 
 def generate_keypair(

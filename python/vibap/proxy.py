@@ -4834,7 +4834,7 @@ def _generate_api_token() -> str:
 
 def _api_token_digest(token: bytes) -> bytes:
     """Return a fixed-length bearer-token digest for constant-time compare."""
-    return hmac.digest(_API_TOKEN_DIGEST_CONTEXT, token, hashlib.sha256)
+    return hmac.digest(_API_TOKEN_DIGEST_CONTEXT, token, "sha256")
 
 
 def _token_fingerprint(token_digest: bytes) -> str:

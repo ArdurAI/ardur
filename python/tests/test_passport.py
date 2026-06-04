@@ -45,7 +45,7 @@ class TestPassportRoundtrip:
         private_mode = stat.S_IMODE((tmp_path / "passport_private.pem").stat().st_mode)
         public_mode = stat.S_IMODE((tmp_path / "passport_public.pem").stat().st_mode)
         assert private_mode == 0o600
-        assert public_mode == 0o644
+        assert public_mode & 0o002 == 0
 
     def test_issue_and_verify_roundtrip(self, example_mission, private_key, public_key):
         token = issue_passport(example_mission, private_key, ttl_s=60)
