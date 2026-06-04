@@ -9,6 +9,7 @@ import threading
 from argparse import Namespace
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
+from types import SimpleNamespace
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
@@ -145,15 +146,16 @@ def test_status_reports_configured_hub_url(tmp_path):
 
 def test_hub_cors_origin_is_normalized_and_rejects_header_splitting():
     handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "server", SimpleNamespace(hub=PersonalHub(hub_url="http://localhost:8765")))
 
     setattr(handler, "headers", {"origin": "http://localhost:8765"})
     assert handler._allowed_cors_origin() == "http://localhost:8765"
 
     setattr(handler, "headers", {"origin": "https://127.0.0.1"})
-    assert handler._allowed_cors_origin() == "https://127.0.0.1"
+    assert handler._allowed_cors_origin() is None
 
     setattr(handler, "headers", {"origin": "chrome-extension://abc_DEF-123"})
-    assert handler._allowed_cors_origin() == "chrome-extension://abc_DEF-123"
+    assert handler._allowed_cors_origin() == "*"
 
     setattr(handler, "headers", {"origin": "http://localhost:8765\r\nX-Injected: yes"})
     assert handler._allowed_cors_origin() is None

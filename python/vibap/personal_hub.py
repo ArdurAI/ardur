@@ -838,17 +838,31 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         if parsed.scheme in {"chrome-extension", "moz-extension"}:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", parsed.netloc):
                 return None
-            return f"{parsed.scheme}://{parsed.netloc}"
+            return "*"
         if parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost"}:
             try:
-                port = parsed.port
+                parsed.port
             except ValueError:
                 return None
             if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
                 return None
-            host = parsed.hostname
-            return f"{parsed.scheme}://{host}:{port}" if port is not None else f"{parsed.scheme}://{host}"
+            configured = self._configured_loopback_cors_origin()
+            if configured and origin == configured:
+                return configured
         return None
+
+    def _configured_loopback_cors_origin(self) -> str | None:
+        configured = urlparse.urlparse(str(self.hub.hub_url))
+        if configured.scheme not in {"http", "https"} or configured.hostname not in {"127.0.0.1", "localhost"}:
+            return None
+        try:
+            port = configured.port
+        except ValueError:
+            return None
+        if configured.path not in {"", "/"} or configured.params or configured.query or configured.fragment:
+            return None
+        host = configured.hostname
+        return f"{configured.scheme}://{host}:{port}" if port is not None else f"{configured.scheme}://{host}"
 
     def _send_html(self, content: str, *, status: int = 200) -> None:
         data = content.encode("utf-8")
