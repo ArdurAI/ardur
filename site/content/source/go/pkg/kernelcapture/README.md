@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "4a6900ec635dcb32ec546ad0634d0c8d2ad86607491a4adbed9a92a57fbc2409"
+source_sha256: "ea0b31e65d0c020c667f375f1879a5048479b325d7dbfe584e122a2fa4fe6208"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -56,9 +56,10 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   sessions, fails closed for unknown, ended, or expired sessions, and exposes a
   safe active-session lookup, no-mutation handoff-plan builder,
   daemon-internal status snapshot wrapper, in-memory snapshot retention handler,
-  and narrow local `session_status` client proof for internal daemon
-  status/handoff code. It is not persistent storage, not a production daemon
-  session manager, and not live kernel enforcement.
+  narrow local `session_status` client proof, and no-write status evidence-log
+  planning seam for internal daemon status/handoff code. It is not persistent
+  storage, not a production daemon session manager, and not live kernel
+  enforcement.
 - Adds a no-mutation `BuildDaemonSessionHandoffPlan` seam that projects active
   registered session metadata into daemon-owned hashed state/runtime paths and a
   cgroup allowlist precondition sequence. It validates custody roots and a
@@ -142,24 +143,29 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
    - Keeps daemon-internal status snapshots out of the client-visible JSON-line protocol response: `session_status` still returns only the narrow status envelope.
    - Does not persist state across daemon restarts, install/start a service, create/assign cgroups, pin maps, execute commands, or perform live kernel enforcement.
 
-12. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
+12. `BuildDaemonSessionStatusEvidenceLogPlan` (no-write evidence-log plan)
+   - Projects a retained daemon-internal `DaemonSessionStatusSnapshot` into daemon-owned evidence-log plan data: schema version, entry kind, session-id-hashed evidence-log path under the validated state directory, snapshot entry digest, and bounded retention/rotation parameters.
+   - Fails closed for invalid custody, non-`session_status` or non-OK protocol responses, inactive/mismatched snapshot status, mismatched session IDs, zero `AsOf`, missing or already-executed handoff plan steps, custody-path escapes, forbidden raw/secret/path metadata, and invalid retention bounds.
+   - Marks every evidence-log step as `Executed=false` and does not write evidence-log files, create directories, rotate logs, persist snapshots, expand the client protocol, mutate BPF maps, assign cgroups, or enable live enforcement.
+
+13. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
    - Projects an active daemon registry record into daemon-owned hashed session state/runtime paths under the validated custody plan, plus a cgroup allowlist precondition sequence for the non-zero observed cgroup id.
    - Fails closed for inactive/expired/ended sessions, missing session/root PID/cgroup id, missing process-lifecycle event class, invalid custody plan, mismatched socket path, missing daemon-observed peer evidence, unsupported credential source, or forbidden raw/secret/path metadata.
    - Marks every handoff step as `Executed=false` and does not write checkpoint files, create runtime directories, create/assign cgroups, mutate BPF maps, pin maps, or enable live enforcement.
 
-13. `AuthorizeDaemonProtocolPeer` (contract only)
+14. `AuthorizeDaemonProtocolPeer` (contract only)
    - Joins a validated daemon protocol request to daemon-observed peer credentials before future socket handling.
    - Requires the observation source to be explicit (`linux_so_peercred` today) and the observed socket path to match the validated dry-run daemon custody plan.
    - Fails closed for invalid protocol messages, missing/unsupported credential sources, socket-path mismatches, invalid custody plans, or unauthorized UID/GID policy.
    - Does not open, bind, listen on, accept, or inspect a socket; it does not perform the peer-credential syscall itself.
 
-14. `ObserveLinuxUnixPeerCredentials` (Linux seam)
+15. `ObserveLinuxUnixPeerCredentials` (Linux seam)
    - Reads SO_PEERCRED from an already-open `*net.UnixConn` and returns the daemon-owned `DaemonSocketPeerObservation` used by the handshake contract.
    - Requires the caller to supply the daemon-owned socket path and records `linux_so_peercred` as the explicit credential source.
    - Fails closed for a nil connection, missing socket path, SO_PEERCRED errors, or missing peer PID.
    - Does not open, bind, listen on, accept, install, start, or expose a daemon; Linux socketpair coverage exercises the retrieval seam without creating a public service.
 
-15. `BuildLaunchWrapperSessionProof` (contract only)
+16. `BuildLaunchWrapperSessionProof` (contract only)
    - Converts no-privilege launch-wrapper metadata for a generic CLI boundary into a validated daemon `register_session` request.
    - Seeds userspace correlation with the launched root PID, optional PID namespace, optional process-start monotonic timestamp, optional cgroup id, and launch wall-clock time.
    - Adds redacted handoff metadata, including command argv digest and argc, without storing raw argv, working directory text, executable paths, or environment values in the proof.
@@ -232,7 +238,7 @@ It rejects repository-controlled privileged paths when repository-root validatio
 
 Allowed claim after the gated smoke passes:
 
-Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention through a daemon-side handler/sink, and a narrow local `session_status` client proof, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
+Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention through a daemon-side handler/sink, a narrow local `session_status` client proof, and a no-write status evidence-log planning seam with schema, digest, and rotation bounds, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
 
 Not claimed yet:
 
@@ -240,6 +246,7 @@ Not claimed yet:
 - daemon installation, startup, service management, or system startup integration
 - persistent/production daemon session-state management or live enforcement wiring
 - persistent status snapshot/evidence-log storage
+- evidence-log file creation, append/write path, or rotation
 - client-visible protocol expansion from daemon-internal status snapshots
 - daemon-created/assigned per-session cgroups
 - universal CLI capture
