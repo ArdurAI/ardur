@@ -4766,10 +4766,12 @@ class GovernanceProxy:
                 try:
                     os.close(fd)
                 except OSError:
+                    # Best-effort cleanup during error unwinding.
                     pass
             try:
                 tmp.unlink()
             except OSError:
+                # Best-effort cleanup during error unwinding.
                 pass
             raise
 

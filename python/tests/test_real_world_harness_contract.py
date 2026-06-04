@@ -367,6 +367,39 @@ def test_rwt_phase1_bundle_redacts_local_absolute_paths(monkeypatch, tmp_path):
     assert "/Users/" not in serialized
 
 
+def test_rwt_phase1_console_summary_redacts_bundle_paths(tmp_path):
+    harness = _load_harness()
+    repo = tmp_path / "repo"
+    output_dir = tmp_path / "reports" / "evidence" / "20260604-rwt-phase1"
+    temp_root = tmp_path / "temp-root"
+    ctx = SimpleNamespace(
+        repo=repo,
+        output_dir=output_dir,
+        temp_root=temp_root,
+        home=temp_root / "home",
+        ardur_home=temp_root / "ardur-home",
+        project=temp_root / "project",
+        evidence=temp_root / "evidence",
+        python_bin="/Users/test-user/.local/bin/python3.13",
+        ardur_bin=temp_root / "venv" / "bin" / "ardur",
+    )
+    bundle_path = output_dir / "rwt-phase1-bundle.redacted.json"
+    console_payload = {
+        "status": harness.STATUS_PASS,
+        "bundle": str(bundle_path),
+        "output_dir": str(output_dir),
+    }
+
+    summary = harness.redact_path_roots(console_payload, harness._path_placeholder_pairs(ctx))
+    serialized = json.dumps(summary, sort_keys=True)
+
+    assert summary["bundle"] == "<RWT_OUTPUT>/rwt-phase1-bundle.redacted.json"
+    assert summary["output_dir"] == "<RWT_OUTPUT>"
+    assert str(output_dir) not in serialized
+    assert str(temp_root) not in serialized
+    assert "/Users/" not in serialized
+
+
 def test_rwt_phase1_shareable_sanitizer_redacts_adversarial_local_paths(tmp_path):
     harness = _load_harness()
     repo = tmp_path / "repo"

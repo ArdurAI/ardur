@@ -155,13 +155,12 @@ def resolve_chain_state(*, trace_id: str) -> ChainState:
 @contextmanager
 def _locked(state: ChainState):
     state.lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(state.lock_file, "a+b")
-    try:
+    with open(state.lock_file, "a+b") as fd:
         fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
-        yield
-    finally:
-        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
-        fd.close()
+        try:
+            yield
+        finally:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
 
 
 def _append_receipt_unlocked(state: ChainState, signed_jwt: str) -> None:
@@ -224,6 +223,7 @@ def _write_private_text(path: Path, content: str) -> None:
     try:
         path.chmod(0o600)
     except OSError:
+        # Best-effort local fixture hardening; writing already succeeded.
         pass
 
 

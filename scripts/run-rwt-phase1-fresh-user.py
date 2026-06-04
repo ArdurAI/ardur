@@ -1353,7 +1353,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"warning: failed to patch cleanup metadata in bundle: {redact_text(str(exc))}", file=sys.stderr)
             bundle = {"status": overall_status(ctx.gate_results)}
-        print(json.dumps({"status": bundle.get("status", overall_status(ctx.gate_results)), "bundle": str(bundle_path), "output_dir": str(ctx.output_dir)}, indent=2))
+        console_payload = {
+            "status": bundle.get("status", overall_status(ctx.gate_results)),
+            "bundle": str(bundle_path),
+            "output_dir": str(ctx.output_dir),
+        }
+        print(json.dumps(redact_path_roots(console_payload, _path_placeholder_pairs(ctx)), indent=2))
     return exit_code
 
 

@@ -322,7 +322,7 @@ def test_gemini_report_excludes_invalid_jwt_claims_from_trusted_counts(tmp_path)
 
     keys_dir = tmp_path / "keys"
     chain_file = tmp_path / "chain" / "tampered" / CHAIN_FILENAME
-    _token, _public_key = _issue_gemini_passport(keys_dir)
+    _issue_gemini_passport(keys_dir)
     forged_token = pyjwt.encode(
         {
             "iss": "forged",

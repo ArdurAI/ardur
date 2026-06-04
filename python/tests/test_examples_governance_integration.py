@@ -114,8 +114,6 @@ class TestGovernanceEngineThroughDemoPaths:
         assert summary.get("agent") == "demo-agent"
 
     def test_delegation_parent_child_independent(self, proxy, keypair):
-        private_key, _public_key = keypair
-
         parent_jwt = _issue_read_only_passport(
             keypair,
             agent_id="parent",

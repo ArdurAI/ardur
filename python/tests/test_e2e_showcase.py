@@ -15,22 +15,16 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 
 import pytest
 
-import vibap.mission as mission_module
-from vibap.denial import DenialReason
-from vibap.passport import ALGORITHM, MissionPassport, issue_passport, verify_passport
-from vibap.proxy import Decision, GovernanceProxy, serve_proxy
+from vibap.passport import MissionPassport, issue_passport, verify_passport
+from vibap.proxy import serve_proxy
 from vibap.receipt import verify_chain
-
-from tests.conftest import v01_required_md_extras
 
 # ---------------------------------------------------------------------------
 # constants
