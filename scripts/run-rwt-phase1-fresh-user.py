@@ -1350,8 +1350,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             bundle["cleanup"] = redact_path_roots(cleanup_payload, _path_placeholder_pairs(ctx))
             bundle = finalize_shareable_bundle(bundle, ctx, "Post-cleanup bundle")
             bundle_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001
-            print(f"warning: failed to patch cleanup metadata in bundle: {redact_text(str(exc))}", file=sys.stderr)
+        except Exception:  # noqa: BLE001
+            print("warning: failed to patch cleanup metadata in bundle", file=sys.stderr)
             bundle = {"status": overall_status(ctx.gate_results)}
         console_payload = {
             "status": bundle.get("status", overall_status(ctx.gate_results)),

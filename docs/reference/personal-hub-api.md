@@ -22,7 +22,7 @@ Every endpoint except `GET /health` requires the Hub token written by
 | Where | How |
 |---|---|
 | Header (preferred) | `X-Ardur-Hub-Token: <token>` |
-| Header (alternate) | `Authorization: Bearer <token>` |
+| Header (alternate) | `Authorization: Bearer YOUR_TOKEN` |
 | Query (only for `GET /` and `GET /dashboard`) | `?token=<token>` |
 
 The token is compared with constant-time `secrets.compare_digest`. Missing or

@@ -2,7 +2,7 @@
 title: "Ardur Personal Hub HTTP API"
 description: "The Hub is the local service started by `ardur hub`. It accepts evidence"
 source_path: "docs/reference/personal-hub-api.md"
-source_sha256: "bdb7a539cbc352a904e0477b68c0730f1a867e4db67ceecf7623c33469760540"
+source_sha256: "c219dece5b16edfb945fdbd49da36275bc6e8f52601d9fd2b667bf1fa435c989"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -39,7 +39,7 @@ Every endpoint except `GET /health` requires the Hub token written by
 | Where | How |
 |---|---|
 | Header (preferred) | `X-Ardur-Hub-Token: <token>` |
-| Header (alternate) | `Authorization: Bearer <token>` |
+| Header (alternate) | `Authorization: Bearer YOUR_TOKEN` |
 | Query (only for `GET /` and `GET /dashboard`) | `?token=<token>` |
 
 The token is compared with constant-time `secrets.compare_digest`. Missing or

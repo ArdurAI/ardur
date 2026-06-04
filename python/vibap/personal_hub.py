@@ -370,7 +370,6 @@ class PersonalHub:
         self._validate_event_payload(payload)
         session_record = self.start_session(payload)
         source = _dict(payload.get("source"))
-        event = _dict(payload.get("event"))
         policy = self.check_policy(payload)
         tool_name = self._tool_name(source, policy)
         arguments = self._arguments(payload, policy)
@@ -833,13 +832,22 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
 
     def _allowed_cors_origin(self) -> str | None:
         origin = self.headers.get("origin", "").strip()
-        if not origin:
+        if not origin or "\r" in origin or "\n" in origin:
             return None
         parsed = urlparse.urlparse(origin)
         if parsed.scheme in {"chrome-extension", "moz-extension"}:
-            return origin
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", parsed.netloc):
+                return None
+            return f"{parsed.scheme}://{parsed.netloc}"
         if parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost"}:
-            return origin
+            try:
+                port = parsed.port
+            except ValueError:
+                return None
+            if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+                return None
+            host = parsed.hostname
+            return f"{parsed.scheme}://{host}:{port}" if port is not None else f"{parsed.scheme}://{host}"
         return None
 
     def _send_html(self, content: str, *, status: int = 200) -> None:

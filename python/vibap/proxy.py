@@ -43,6 +43,7 @@ from .tls import create_ssl_context, resolve_tls_paths
 _SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 MAX_REQUEST_BODY = 1024 * 1024  # 1 MiB
+_API_TOKEN_DIGEST_CONTEXT = b"ardur-vibap-proxy-token-compare-v1"
 
 # Per-session in-process coordination for shared state_dir access. ``flock``
 # closes the cross-process hole, but same-process proxies can still share a
@@ -3489,7 +3490,7 @@ class GovernanceProxy:
 
     def _session_path(self, session_id: str) -> Path:
         if not _SESSION_ID_RE.match(session_id):
-            raise ValueError(f"invalid session ID format: must be UUID")
+            raise ValueError("invalid session ID format: must be UUID")
         return self.sessions_dir / f"{session_id}.json"
 
     def _session_lock_path(self, session_id: str) -> Path:
@@ -4831,20 +4832,19 @@ def _generate_api_token() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
 
 
-def _redact_token(token: str) -> str:
-    """Return a short fingerprint of a token safe to print or log."""
-    if not token:
-        return "<empty>"
-    if len(token) <= 12:
-        return f"{token[:4]}...{token[-4:]}"
-    return f"{token[:8]}...{token[-4:]}"
+def _api_token_digest(token: bytes) -> bytes:
+    """Return a fixed-length bearer-token digest for constant-time compare."""
+    return hmac.digest(_API_TOKEN_DIGEST_CONTEXT, token, hashlib.sha256)
 
 
-def _display_token(token: str) -> str:
-    """Return the token value for the startup banner, redacted by default."""
-    if os.environ.get("VIBAP_PRINT_FULL_TOKEN") == "1":
-        return token
-    return _redact_token(token)
+def _token_fingerprint(token_digest: bytes) -> str:
+    """Return a token fingerprint safe to print or log."""
+    return token_digest.hex()[:16]
+
+
+def _display_token_fingerprint(token_digest: bytes) -> str:
+    """Return the startup-banner token fingerprint; never the token itself."""
+    return f"[redacted token fp:{_token_fingerprint(token_digest)}]"
 
 
 def serve_proxy(
@@ -4889,18 +4889,19 @@ def serve_proxy(
         api_token = _generate_api_token()
         token_source = "generated"
 
-    # Pre-encode once for the hot path. Round-8 (FIX-R8-1, 2026-04-29):
-    # the bearer-auth comparison now hashes both presented and expected
-    # tokens through SHA-256 before ``hmac.compare_digest``, normalizing
-    # both inputs to a fixed 32-byte length. CPython's ``_tscmp`` (the
+    # Pre-digest once for the hot path. Round-8 (FIX-R8-1, 2026-04-29)
+    # normalized bearer auth to fixed-length digests before
+    # ``hmac.compare_digest``. This uses a context-bound HMAC digest rather
+    # than a bare SHA-256 so the digest is clearly not password storage and so
+    # token material never flows into startup logs.
+    # CPython's ``_tscmp`` (the
     # C function backing ``hmac.compare_digest``) iterates ``min(len_a,
     # len_b)`` and short-circuits on length mismatch, leaking the
     # expected token's length to a remote attacker. Round-7 closed this
     # for the Go control-plane services (cmd/authority + pkg/governance);
     # round-8 closes the symmetric Python proxy gap that round-7 audit
     # flagged as MED-NEW-1.
-    api_token_bytes = api_token.encode("ascii")
-    api_token_hash = hashlib.sha256(api_token_bytes).digest()
+    api_token_digest = _api_token_digest(api_token.encode("ascii"))
 
     active_session_ref = {"id": initial_session_id}
     active_session_lock = threading.Lock()
@@ -5069,10 +5070,10 @@ def serve_proxy(
             except UnicodeEncodeError:
                 self._send_json(401, {"error": "bearer token must be ASCII"})
                 return False
-            # FIX-R8-1: hash-then-compare normalizes lengths and defeats
-            # the length oracle; see api_token_hash construction above.
-            provided_hash = hashlib.sha256(provided).digest()
-            if not hmac.compare_digest(provided_hash, api_token_hash):
+            # FIX-R8-1: digest-then-compare normalizes lengths and defeats
+            # the length oracle; see api_token_digest construction above.
+            provided_digest = _api_token_digest(provided)
+            if not hmac.compare_digest(provided_digest, api_token_digest):
                 self._send_json(401, {"error": "invalid bearer token"})
                 return False
             return True
@@ -5456,11 +5457,14 @@ def serve_proxy(
                 # Catch-all: log with full traceback so operators can triage.
                 # Without this, cryptography faults / invariant trips / disk I/O
                 # errors become anonymous 500s with no audit signal.
+                safe_method = getattr(self, "command", "OTHER")
+                if safe_method not in {"GET", "POST", "OPTIONS", "HEAD"}:
+                    safe_method = "OTHER"
                 logger.exception(
                     "Unhandled exception in VIBAP proxy HTTP handler",
                     extra={
-                        "method": getattr(self, "command", "?"),
-                        "path": getattr(self, "path", "?"),
+                        "method": safe_method,
+                        "path": "<request-path-redacted>",
                     },
                 )
                 self._send_json(500, {"error": "internal server error"})
@@ -5492,22 +5496,22 @@ def serve_proxy(
         "/sessions, /evaluate, /result, /end, /attest, /delegate"
     )
     if require_auth:
-        display_token = _display_token(api_token)
+        display_token = _display_token_fingerprint(api_token_digest)
         print("")
         print("=" * 72)
         print(f"Bearer auth REQUIRED on all endpoints except: {', '.join(sorted(PUBLIC_PATHS))}")
-        print(f"API token ({token_source}):")
+        print(f"API token ({token_source}) fingerprint:")
         print(f"    {display_token}")
-        if display_token != api_token:
-            print("Set VIBAP_PRINT_FULL_TOKEN=1 to print the full token once on stdout.")
-        print("Copy this value and send it as:  Authorization: Bearer <token>")
+        if token_source == "generated":
+            print("Generated tokens are no longer printed; set VIBAP_API_TOKEN or pass --api-token for clients.")
+        print("Send the actual configured token as:  Authorization: Bearer ***")
         print("Export for hooks/clients:        export VIBAP_API_TOKEN='<token>'")
         print("=" * 72)
         print("")
         # Log-safe fingerprint only (never the full token).
         # The proxy's log_message is suppressed; emit a structured stderr line for audit.
         print(
-            f"[vibap] auth=on source={token_source} token_fp={_redact_token(api_token)}",
+            f"[vibap] auth=on source={token_source} token_fp={_token_fingerprint(api_token_digest)}",
             file=sys.stderr,
         )
     else:

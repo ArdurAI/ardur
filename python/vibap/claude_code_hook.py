@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import re
-import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -125,13 +124,12 @@ def _locked(state: ChainState):
     # advisory and per-process; that's sufficient for the per-call hook
     # process model — see the README for the threaded-host caveat.
     state.lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(state.lock_file, "a+b")
-    try:
+    with open(state.lock_file, "a+b") as fd:
         fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
-        yield
-    finally:
-        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
-        fd.close()
+        try:
+            yield
+        finally:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
 
 
 def append_receipt(state: ChainState, signed_jwt: str) -> None:

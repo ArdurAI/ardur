@@ -10,7 +10,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 from typing import Sequence
 
@@ -90,6 +89,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         port=args.port,
         initial_session_id=initial_session_id,
         require_auth=args.require_auth,
+        api_token=args.api_token,
         tls_cert=args.tls_cert,
         tls_key=args.tls_key,
         no_tls=args.no_tls,
@@ -688,6 +688,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
     start.add_argument("--state-dir", type=Path, help="directory for persisted sessions")
     start.add_argument("--log-path", type=Path, help="JSONL audit log path")
+    start.add_argument("--api-token", help="Bearer token for clients; VIBAP_API_TOKEN still takes precedence")
     start.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
     start.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
     start.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")

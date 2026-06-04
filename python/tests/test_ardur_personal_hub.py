@@ -143,6 +143,28 @@ def test_status_reports_configured_hub_url(tmp_path):
     assert hub.status()["hub_url"] == "http://127.0.0.1:18765"
 
 
+def test_hub_cors_origin_is_normalized_and_rejects_header_splitting():
+    handler = object.__new__(_HubRequestHandler)
+
+    setattr(handler, "headers", {"origin": "http://localhost:8765"})
+    assert handler._allowed_cors_origin() == "http://localhost:8765"
+
+    setattr(handler, "headers", {"origin": "https://127.0.0.1"})
+    assert handler._allowed_cors_origin() == "https://127.0.0.1"
+
+    setattr(handler, "headers", {"origin": "chrome-extension://abc_DEF-123"})
+    assert handler._allowed_cors_origin() == "chrome-extension://abc_DEF-123"
+
+    setattr(handler, "headers", {"origin": "http://localhost:8765\r\nX-Injected: yes"})
+    assert handler._allowed_cors_origin() is None
+
+    setattr(handler, "headers", {"origin": "http://localhost:8765/path"})
+    assert handler._allowed_cors_origin() is None
+
+    setattr(handler, "headers", {"origin": "https://evil.example"})
+    assert handler._allowed_cors_origin() is None
+
+
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
 

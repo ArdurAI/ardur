@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import stat
 import time
 
 import jwt
@@ -13,6 +14,7 @@ import pytest
 from vibap.passport import (
     MissionPassport,
     derive_child_passport,
+    generate_keypair,
     issue_passport,
     verify_passport,
 )
@@ -37,6 +39,14 @@ def _tamper_payload(token: str, mutator) -> str:
 
 
 class TestPassportRoundtrip:
+    def test_generate_keypair_writes_private_key_restrictively(self, tmp_path):
+        generate_keypair(keys_dir=tmp_path)
+
+        private_mode = stat.S_IMODE((tmp_path / "passport_private.pem").stat().st_mode)
+        public_mode = stat.S_IMODE((tmp_path / "passport_public.pem").stat().st_mode)
+        assert private_mode == 0o600
+        assert public_mode == 0o644
+
     def test_issue_and_verify_roundtrip(self, example_mission, private_key, public_key):
         token = issue_passport(example_mission, private_key, ttl_s=60)
         claims = verify_passport(token, public_key)
@@ -636,7 +646,6 @@ class TestKbJwtSecondDecodeIatBound:
             issue_passport,
         )
         from vibap.proxy import GovernanceProxy
-        import vibap.proxy as proxy_mod
 
         # Generate a holder keypair.
         holder_priv = ec.generate_private_key(ec.SECP256R1())

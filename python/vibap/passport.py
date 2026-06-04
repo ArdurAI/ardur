@@ -323,18 +323,41 @@ def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
     return target
 
 
-def _write_bytes(path: Path, data: bytes, mode: int) -> None:
-    path.write_bytes(data)
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(path, mode)
-    except OSError:
-        pass
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(data)
+    finally:
+        if fd != -1:
+            os.close(fd)
     actual_mode = path.stat().st_mode & 0o777
-    if actual_mode != mode:
+    if actual_mode != 0o600:
         import sys
         print(
-            f"WARNING: {path} permissions are {actual_mode:o}, expected {mode:o}; "
+            f"WARNING: {path} permissions are {actual_mode:o}, expected 600; "
             f"private key may be readable by other users on this filesystem",
+            file=sys.stderr,
+        )
+
+
+def _write_public_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        # Best-effort public-key readability; the public key is not secret.
+        pass
+    actual_mode = path.stat().st_mode & 0o777
+    if actual_mode != 0o644:
+        import sys
+        print(
+            f"WARNING: {path} permissions are {actual_mode:o}, expected 644; "
+            f"public key may not be readable by other local clients",
             file=sys.stderr,
         )
 
@@ -355,22 +378,20 @@ def generate_keypair(
     priv_key = ec.generate_private_key(ec.SECP256R1())
     pub_key = priv_key.public_key()
 
-    _write_bytes(
+    _write_private_bytes(
         priv_path,
         priv_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         ),
-        0o600,
     )
-    _write_bytes(
+    _write_public_bytes(
         pub_path,
         pub_key.public_bytes(
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo,
         ),
-        0o644,
     )
     return priv_key, pub_key
 
