@@ -40,8 +40,9 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   safe active-session lookup, no-mutation handoff-plan builder,
   daemon-internal status snapshot wrapper, in-memory snapshot retention handler,
   narrow local `session_status` client proof, no-write status evidence-log
-  planning seam, in-memory JSONL evidence-log entry builder, and injected
-  in-memory append/rotation planner for internal daemon status/handoff code. It is not persistent
+  planning seam, in-memory JSONL evidence-log entry builder, injected
+  in-memory append/rotation planner, and injected filesystem append/rotation
+  adapter for internal daemon status/handoff code. It is not persistent
   storage, not a production daemon session manager, and not live kernel
   enforcement.
 - Adds a no-mutation `BuildDaemonSessionHandoffPlan` seam that projects active
@@ -142,24 +143,29 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
    - Revalidates the no-write plan and canonical entry bytes, bounds byte accounting with overflow guards, derives simulated rotation paths inside the evidence-log directory, and retains accepted entries only as copied memory.
    - Does not open files, create directories, create evidence-log files, perform a real append/write path, execute rotation, persist state, expand the client protocol, mutate BPF maps, assign cgroups, or enable live enforcement.
 
-15. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
+15. `ApplyDaemonSessionStatusEvidenceLogFilesystemAppend` (injected filesystem append/rotation adapter)
+   - Reuses the in-memory append planner, then executes a minimal `MkdirAll` + append or `MkdirAll` + rotate-rename + append sequence through a caller-injected filesystem surface.
+   - Uses the reviewed daemon-owned logical evidence-log paths, restrictive `0700`/`0600` modes, canonical JSONL validation, and state commit only after injected filesystem operations succeed; rotation append failure attempts rollback before returning a fail-closed error.
+   - Test coverage maps those daemon-owned logical paths into `t.TempDir()`; the package does not provide production daemon wiring, ownership changes, fsync/crash recovery, restart-safe persistence, service lifecycle, protocol expansion, BPF map mutation, cgroup assignment, or live enforcement.
+
+16. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
    - Projects an active daemon registry record into daemon-owned hashed session state/runtime paths under the validated custody plan, plus a cgroup allowlist precondition sequence for the non-zero observed cgroup id.
    - Fails closed for inactive/expired/ended sessions, missing session/root PID/cgroup id, missing process-lifecycle event class, invalid custody plan, mismatched socket path, missing daemon-observed peer evidence, unsupported credential source, or forbidden raw/secret/path metadata.
    - Marks every handoff step as `Executed=false` and does not write checkpoint files, create runtime directories, create/assign cgroups, mutate BPF maps, pin maps, or enable live enforcement.
 
-16. `AuthorizeDaemonProtocolPeer` (contract only)
+17. `AuthorizeDaemonProtocolPeer` (contract only)
    - Joins a validated daemon protocol request to daemon-observed peer credentials before future socket handling.
    - Requires the observation source to be explicit (`linux_so_peercred` today) and the observed socket path to match the validated dry-run daemon custody plan.
    - Fails closed for invalid protocol messages, missing/unsupported credential sources, socket-path mismatches, invalid custody plans, or unauthorized UID/GID policy.
    - Does not open, bind, listen on, accept, or inspect a socket; it does not perform the peer-credential syscall itself.
 
-17. `ObserveLinuxUnixPeerCredentials` (Linux seam)
+18. `ObserveLinuxUnixPeerCredentials` (Linux seam)
    - Reads SO_PEERCRED from an already-open `*net.UnixConn` and returns the daemon-owned `DaemonSocketPeerObservation` used by the handshake contract.
    - Requires the caller to supply the daemon-owned socket path and records `linux_so_peercred` as the explicit credential source.
    - Fails closed for a nil connection, missing socket path, SO_PEERCRED errors, or missing peer PID.
    - Does not open, bind, listen on, accept, install, start, or expose a daemon; Linux socketpair coverage exercises the retrieval seam without creating a public service.
 
-18. `BuildLaunchWrapperSessionProof` (contract only)
+19. `BuildLaunchWrapperSessionProof` (contract only)
    - Converts no-privilege launch-wrapper metadata for a generic CLI boundary into a validated daemon `register_session` request.
    - Seeds userspace correlation with the launched root PID, optional PID namespace, optional process-start monotonic timestamp, optional cgroup id, and launch wall-clock time.
    - Adds redacted handoff metadata, including command argv digest and argc, without storing raw argv, working directory text, executable paths, or environment values in the proof.
@@ -232,15 +238,15 @@ It rejects repository-controlled privileged paths when repository-root validatio
 
 Allowed claim after the gated smoke passes:
 
-Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention through a daemon-side handler/sink, a narrow local `session_status` client proof, a no-write status evidence-log planning seam with schema, digest, and rotation bounds, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions without filesystem writes, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
+Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts, a Linux SO_PEERCRED retrieval seam, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention through a daemon-side handler/sink, a narrow local `session_status` client proof, a no-write status evidence-log planning seam with schema, digest, and rotation bounds, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions without filesystem writes, an injected filesystem append/rotation adapter that executes validated logical-path writes through caller-provided filesystem implementations with temp-dir test coverage, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
 
 Not claimed yet:
 
 - production daemon readiness
 - daemon installation, startup, service management, or system startup integration
 - persistent/production daemon session-state management or live enforcement wiring
-- persistent status snapshot/evidence-log storage
-- evidence-log file creation, real append/write path, rotation execution, or persistence
+- production persistent status snapshot/evidence-log storage, fsync/crash recovery, or restart-safe evidence retention
+- daemon-owned evidence-log service wiring, ownership changes, or production append/rotation lifecycle
 - client-visible protocol expansion from daemon-internal status snapshots
 - daemon-created/assigned per-session cgroups
 - universal CLI capture

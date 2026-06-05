@@ -131,19 +131,46 @@ func PlanDaemonSessionStatusEvidenceLogAppend(state *DaemonSessionStatusEvidence
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
+	computed, err := computeDaemonSessionStatusEvidenceLogAppendLocked(state, entryBytes)
+	if err != nil {
+		return DaemonSessionStatusEvidenceLogAppendPlan{}, err
+	}
+	if computed.Plan.Decision == DaemonSessionStatusEvidenceLogAppendAccept {
+		state.entries = append(state.entries, append([]byte(nil), computed.CanonicalBytes...))
+		state.totalBytes = computed.Plan.PostBytes
+		return computed.Plan, nil
+	}
+	if computed.Plan.Decision == DaemonSessionStatusEvidenceLogAppendRotateThenAppend {
+		state.entries = [][]byte{append([]byte(nil), computed.CanonicalBytes...)}
+		state.totalBytes = computed.Plan.PostBytes
+		state.rotationCount = computed.Plan.RotationCount
+		return computed.Plan, nil
+	}
+	return computed.Plan, nil
+}
+
+type daemonSessionStatusEvidenceLogAppendComputation struct {
+	Plan           DaemonSessionStatusEvidenceLogAppendPlan
+	CanonicalBytes []byte
+}
+
+func computeDaemonSessionStatusEvidenceLogAppendLocked(state *DaemonSessionStatusEvidenceLogAppendState, entryBytes []byte) (daemonSessionStatusEvidenceLogAppendComputation, error) {
+	if state == nil {
+		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("state is required")
+	}
 	if err := validateDaemonSessionStatusEvidenceLogEntryPlan(state.plan); err != nil {
-		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogAppendPlanError("state plan is invalid: %v", err)
+		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("state plan is invalid: %v", err)
 	}
 	entry, canonicalBytes, err := validateEvidenceLogAppendEntryBytes(state.plan, entryBytes)
 	if err != nil {
-		return DaemonSessionStatusEvidenceLogAppendPlan{}, err
+		return daemonSessionStatusEvidenceLogAppendComputation{}, err
 	}
 
 	entryLen := len(canonicalBytes)
 	entryLen64 := int64(entryLen)
 	plannedAt := state.now()
 	if plannedAt.IsZero() {
-		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogAppendPlanError("clock returned zero planned_at")
+		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("clock returned zero planned_at")
 	}
 	base := state.baseAppendPlan(entry.EntryDigest, entryLen64, plannedAt)
 
@@ -152,39 +179,34 @@ func PlanDaemonSessionStatusEvidenceLogAppend(state *DaemonSessionStatusEvidence
 		base.Decision = DaemonSessionStatusEvidenceLogAppendReject
 		base.Reason = fmt.Sprintf("entry bytes %d exceeds max entry bytes %d", entryLen, state.plan.MaxEntryBytes)
 		base.PostBytes = state.totalBytes
-		return base, nil
+		return daemonSessionStatusEvidenceLogAppendComputation{Plan: base}, nil
 	}
 	if state.totalBytes < 0 {
-		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogAppendPlanError("state total bytes is negative")
+		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("state total bytes is negative")
 	}
 	if math.MaxInt64-state.totalBytes < entryLen64 {
-		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogAppendPlanError("append byte accounting would overflow")
+		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("append byte accounting would overflow")
 	}
 
 	candidateTotal := state.totalBytes + entryLen64
 	if candidateTotal <= state.plan.MaxLogBytes {
-		state.entries = append(state.entries, append([]byte(nil), canonicalBytes...))
-		state.totalBytes = candidateTotal
 		base.Decision = DaemonSessionStatusEvidenceLogAppendAccept
 		base.Reason = "entry fits current in-memory evidence-log bounds"
 		base.PostBytes = candidateTotal
 		base.RotationCount = state.rotationCount
-		return base, nil
+		return daemonSessionStatusEvidenceLogAppendComputation{Plan: base, CanonicalBytes: canonicalBytes}, nil
 	}
 
 	rotationPath, err := nextEvidenceLogRotationPath(state.plan, state.rotationCount)
 	if err != nil {
-		return DaemonSessionStatusEvidenceLogAppendPlan{}, err
+		return daemonSessionStatusEvidenceLogAppendComputation{}, err
 	}
-	state.entries = [][]byte{append([]byte(nil), canonicalBytes...)}
-	state.totalBytes = entryLen64
-	state.rotationCount++
 	base.Decision = DaemonSessionStatusEvidenceLogAppendRotateThenAppend
 	base.Reason = "entry would exceed current in-memory log bounds; simulated rotation is required before append"
 	base.RotationPath = rotationPath
 	base.PostBytes = entryLen64
-	base.RotationCount = state.rotationCount
-	return base, nil
+	base.RotationCount = state.rotationCount + 1
+	return daemonSessionStatusEvidenceLogAppendComputation{Plan: base, CanonicalBytes: canonicalBytes}, nil
 }
 
 func (s *DaemonSessionStatusEvidenceLogAppendState) baseAppendPlan(entryDigest string, entryBytes int64, plannedAt time.Time) DaemonSessionStatusEvidenceLogAppendPlan {
