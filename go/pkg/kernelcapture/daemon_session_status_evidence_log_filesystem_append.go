@@ -45,6 +45,22 @@ func ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(cfg DaemonSessionStatus
 	if cfg.State == nil {
 		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogFilesystemAppendError("state is required")
 	}
+	cfg.State.mu.Lock()
+	proposedPlan := copyDaemonSessionStatusEvidenceLogPlan(cfg.State.plan)
+	cfg.State.mu.Unlock()
+	return ApplyDaemonSessionStatusEvidenceLogFilesystemAppendForPlan(cfg, proposedPlan, entryBytes)
+}
+
+// ApplyDaemonSessionStatusEvidenceLogFilesystemAppendForPlan applies a JSONL
+// entry that was built from proposedPlan while preserving the byte/rotation
+// state in cfg.State. proposedPlan may carry a newer snapshot digest than the
+// state was opened with, but it must match the same session, evidence-log path,
+// schema, kind, and retention bounds. State is committed only after filesystem
+// operations succeed.
+func ApplyDaemonSessionStatusEvidenceLogFilesystemAppendForPlan(cfg DaemonSessionStatusEvidenceLogFilesystemAppendConfig, proposedPlan DaemonSessionStatusEvidenceLogPlan, entryBytes []byte) (DaemonSessionStatusEvidenceLogAppendPlan, error) {
+	if cfg.State == nil {
+		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogFilesystemAppendError("state is required")
+	}
 	if cfg.Filesystem == nil {
 		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogFilesystemAppendError("filesystem is required")
 	}
@@ -63,7 +79,7 @@ func ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(cfg DaemonSessionStatus
 	cfg.State.mu.Lock()
 	defer cfg.State.mu.Unlock()
 
-	computed, err := computeDaemonSessionStatusEvidenceLogAppendLocked(cfg.State, entryBytes)
+	computed, err := computeDaemonSessionStatusEvidenceLogAppendForPlanLocked(cfg.State, proposedPlan, entryBytes)
 	if err != nil {
 		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogFilesystemAppendError("append planning failed: %w", err)
 	}
@@ -98,10 +114,12 @@ func ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(cfg DaemonSessionStatus
 	if plan.Decision == DaemonSessionStatusEvidenceLogAppendAccept {
 		cfg.State.entries = append(cfg.State.entries, append([]byte(nil), computed.CanonicalBytes...))
 		cfg.State.totalBytes = plan.PostBytes
+		cfg.State.plan = copyDaemonSessionStatusEvidenceLogPlan(proposedPlan)
 	} else if plan.Decision == DaemonSessionStatusEvidenceLogAppendRotateThenAppend {
 		cfg.State.entries = [][]byte{append([]byte(nil), computed.CanonicalBytes...)}
 		cfg.State.totalBytes = plan.PostBytes
 		cfg.State.rotationCount = plan.RotationCount
+		cfg.State.plan = copyDaemonSessionStatusEvidenceLogPlan(proposedPlan)
 	} else {
 		return DaemonSessionStatusEvidenceLogAppendPlan{}, evidenceLogFilesystemAppendError("unsupported append decision %q", plan.Decision)
 	}

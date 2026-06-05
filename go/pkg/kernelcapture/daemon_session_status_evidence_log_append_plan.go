@@ -158,10 +158,17 @@ func computeDaemonSessionStatusEvidenceLogAppendLocked(state *DaemonSessionStatu
 	if state == nil {
 		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("state is required")
 	}
-	if err := validateDaemonSessionStatusEvidenceLogEntryPlan(state.plan); err != nil {
-		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("state plan is invalid: %v", err)
+	return computeDaemonSessionStatusEvidenceLogAppendForPlanLocked(state, state.plan, entryBytes)
+}
+
+func computeDaemonSessionStatusEvidenceLogAppendForPlanLocked(state *DaemonSessionStatusEvidenceLogAppendState, proposedPlan DaemonSessionStatusEvidenceLogPlan, entryBytes []byte) (daemonSessionStatusEvidenceLogAppendComputation, error) {
+	if state == nil {
+		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("state is required")
 	}
-	entry, canonicalBytes, err := validateEvidenceLogAppendEntryBytes(state.plan, entryBytes)
+	if err := validateEvidenceLogAppendStatePlanCompatible(state.plan, proposedPlan); err != nil {
+		return daemonSessionStatusEvidenceLogAppendComputation{}, err
+	}
+	entry, canonicalBytes, err := validateEvidenceLogAppendEntryBytes(proposedPlan, entryBytes)
 	if err != nil {
 		return daemonSessionStatusEvidenceLogAppendComputation{}, err
 	}
@@ -172,12 +179,12 @@ func computeDaemonSessionStatusEvidenceLogAppendLocked(state *DaemonSessionStatu
 	if plannedAt.IsZero() {
 		return daemonSessionStatusEvidenceLogAppendComputation{}, evidenceLogAppendPlanError("clock returned zero planned_at")
 	}
-	base := state.baseAppendPlan(entry.EntryDigest, entryLen64, plannedAt)
+	base := state.baseAppendPlanForPlan(proposedPlan, entry.EntryDigest, entryLen64, plannedAt)
 
-	maxEntryBytes := int(state.plan.MaxEntryBytes)
+	maxEntryBytes := int(proposedPlan.MaxEntryBytes)
 	if entryLen > maxEntryBytes {
 		base.Decision = DaemonSessionStatusEvidenceLogAppendReject
-		base.Reason = fmt.Sprintf("entry bytes %d exceeds max entry bytes %d", entryLen, state.plan.MaxEntryBytes)
+		base.Reason = fmt.Sprintf("entry bytes %d exceeds max entry bytes %d", entryLen, proposedPlan.MaxEntryBytes)
 		base.PostBytes = state.totalBytes
 		return daemonSessionStatusEvidenceLogAppendComputation{Plan: base}, nil
 	}
@@ -189,7 +196,7 @@ func computeDaemonSessionStatusEvidenceLogAppendLocked(state *DaemonSessionStatu
 	}
 
 	candidateTotal := state.totalBytes + entryLen64
-	if candidateTotal <= state.plan.MaxLogBytes {
+	if candidateTotal <= proposedPlan.MaxLogBytes {
 		base.Decision = DaemonSessionStatusEvidenceLogAppendAccept
 		base.Reason = "entry fits current in-memory evidence-log bounds"
 		base.PostBytes = candidateTotal
@@ -197,7 +204,7 @@ func computeDaemonSessionStatusEvidenceLogAppendLocked(state *DaemonSessionStatu
 		return daemonSessionStatusEvidenceLogAppendComputation{Plan: base, CanonicalBytes: canonicalBytes}, nil
 	}
 
-	rotationPath, err := nextEvidenceLogRotationPath(state.plan, state.rotationCount)
+	rotationPath, err := nextEvidenceLogRotationPath(proposedPlan, state.rotationCount)
 	if err != nil {
 		return daemonSessionStatusEvidenceLogAppendComputation{}, err
 	}
@@ -210,17 +217,21 @@ func computeDaemonSessionStatusEvidenceLogAppendLocked(state *DaemonSessionStatu
 }
 
 func (s *DaemonSessionStatusEvidenceLogAppendState) baseAppendPlan(entryDigest string, entryBytes int64, plannedAt time.Time) DaemonSessionStatusEvidenceLogAppendPlan {
+	return s.baseAppendPlanForPlan(s.plan, entryDigest, entryBytes, plannedAt)
+}
+
+func (s *DaemonSessionStatusEvidenceLogAppendState) baseAppendPlanForPlan(plan DaemonSessionStatusEvidenceLogPlan, entryDigest string, entryBytes int64, plannedAt time.Time) DaemonSessionStatusEvidenceLogAppendPlan {
 	return DaemonSessionStatusEvidenceLogAppendPlan{
 		Mode:            DaemonCustodyModeLocalOnlyScaffold,
-		SessionID:       strings.TrimSpace(s.plan.SessionID),
-		EvidenceLogPath: cleanPath(s.plan.EvidenceLogPath),
+		SessionID:       strings.TrimSpace(plan.SessionID),
+		EvidenceLogPath: cleanPath(plan.EvidenceLogPath),
 		EntryDigest:     entryDigest,
 		PreBytes:        s.totalBytes,
 		EntryBytes:      entryBytes,
 		PostBytes:       s.totalBytes,
-		MaxEntryBytes:   s.plan.MaxEntryBytes,
-		MaxLogBytes:     s.plan.MaxLogBytes,
-		MaxRotatedFiles: s.plan.MaxRotatedFiles,
+		MaxEntryBytes:   plan.MaxEntryBytes,
+		MaxLogBytes:     plan.MaxLogBytes,
+		MaxRotatedFiles: plan.MaxRotatedFiles,
 		RotationCount:   s.rotationCount,
 		PlannedAt:       plannedAt,
 		Steps: []DaemonSessionStatusEvidenceLogStep{
@@ -258,6 +269,34 @@ func (s *DaemonSessionStatusEvidenceLogAppendState) baseAppendPlan(entryDigest s
 			"live enforcement, cgroup assignment, or kernel-map mutation",
 		},
 	}
+}
+
+func validateEvidenceLogAppendStatePlanCompatible(statePlan DaemonSessionStatusEvidenceLogPlan, proposedPlan DaemonSessionStatusEvidenceLogPlan) error {
+	if err := validateDaemonSessionStatusEvidenceLogEntryPlan(statePlan); err != nil {
+		return evidenceLogAppendPlanError("state plan is invalid: %v", err)
+	}
+	if err := validateDaemonSessionStatusEvidenceLogEntryPlan(proposedPlan); err != nil {
+		return evidenceLogAppendPlanError("proposed plan is invalid: %v", err)
+	}
+	if statePlan.Mode != proposedPlan.Mode {
+		return evidenceLogAppendPlanError("proposed plan mode %q does not match state plan mode %q", proposedPlan.Mode, statePlan.Mode)
+	}
+	if strings.TrimSpace(statePlan.SessionID) != strings.TrimSpace(proposedPlan.SessionID) {
+		return evidenceLogAppendPlanError("proposed plan session id %q does not match state session id %q", proposedPlan.SessionID, statePlan.SessionID)
+	}
+	if cleanPath(statePlan.EvidenceLogPath) != cleanPath(proposedPlan.EvidenceLogPath) {
+		return evidenceLogAppendPlanError("proposed plan evidence-log path %q does not match state path %q", proposedPlan.EvidenceLogPath, statePlan.EvidenceLogPath)
+	}
+	if statePlan.SchemaVersion != proposedPlan.SchemaVersion {
+		return evidenceLogAppendPlanError("proposed plan schema version %q does not match state schema version %q", proposedPlan.SchemaVersion, statePlan.SchemaVersion)
+	}
+	if statePlan.EntryKind != proposedPlan.EntryKind {
+		return evidenceLogAppendPlanError("proposed plan entry kind %q does not match state entry kind %q", proposedPlan.EntryKind, statePlan.EntryKind)
+	}
+	if statePlan.MaxEntryBytes != proposedPlan.MaxEntryBytes || statePlan.MaxLogBytes != proposedPlan.MaxLogBytes || statePlan.MaxRotatedFiles != proposedPlan.MaxRotatedFiles {
+		return evidenceLogAppendPlanError("proposed plan retention bounds do not match state retention bounds")
+	}
+	return nil
 }
 
 func validateEvidenceLogAppendEntryBytes(plan DaemonSessionStatusEvidenceLogPlan, entryBytes []byte) (DaemonSessionStatusEvidenceLogEntry, []byte, error) {
