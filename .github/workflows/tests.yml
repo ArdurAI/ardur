@@ -56,6 +56,7 @@ jobs:
   python:
     name: Python
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -76,7 +77,10 @@ jobs:
 
       - name: Run pytest with coverage
         working-directory: python
-        run: python -m pytest tests/ -q --tb=short --cov=vibap --cov-report=term --cov-report=xml
+        timeout-minutes: 15
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: python -m pytest tests/ -q --tb=short --durations=20 --cov=vibap --cov-report=term --cov-report=xml
 
       - name: Show coverage summary
         working-directory: python
