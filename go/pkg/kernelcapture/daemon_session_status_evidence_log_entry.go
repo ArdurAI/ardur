@@ -82,12 +82,12 @@ func BuildDaemonSessionStatusEvidenceLogEntry(plan DaemonSessionStatusEvidenceLo
 	if err != nil {
 		return nil, evidenceLogEntryError("entry JSON encoding failed: %v", err)
 	}
-	if int64(len(data)+1) > plan.MaxEntryBytes {
-		return nil, evidenceLogEntryError("entry size %d exceeds max entry bytes %d", len(data)+1, plan.MaxEntryBytes)
+	maxEntryBytes := int(plan.MaxEntryBytes)
+	if len(data) >= maxEntryBytes {
+		return nil, evidenceLogEntryError("entry JSON bytes %d plus newline exceeds max entry bytes %d", len(data), plan.MaxEntryBytes)
 	}
 
-	result := make([]byte, 0, len(data)+1)
-	result = append(result, data...)
+	result := append([]byte(nil), data...)
 	result = append(result, '\n')
 	return result, nil
 }
