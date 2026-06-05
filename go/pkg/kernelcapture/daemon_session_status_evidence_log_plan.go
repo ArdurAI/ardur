@@ -198,6 +198,9 @@ func validateEvidenceLogSnapshot(snapshot DaemonSessionStatusSnapshot) error {
 	if !resp.OK {
 		return fmt.Errorf("snapshot response is not OK: %s", resp.Error)
 	}
+	if strings.TrimSpace(resp.Error) != "" {
+		return fmt.Errorf("snapshot response is OK but carries error text")
+	}
 	if resp.Status != DaemonSessionStatusActive {
 		return fmt.Errorf("protocol response status is %q, want active", resp.Status)
 	}

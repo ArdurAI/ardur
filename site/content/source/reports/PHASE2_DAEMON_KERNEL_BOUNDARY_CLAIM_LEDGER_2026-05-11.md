@@ -2,7 +2,7 @@
 title: "Phase 2 Daemon/Kernel Boundary Claim Ledger"
 description: "Date: 2026-05-12"
 source_path: "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md"
-source_sha256: "1ad9d370df1d7b1de84c3c3344cc972dbd5fccd5a2f71c913a237a91247fdc4d"
+source_sha256: "7cb0c4b9d8c297c916d4b4a1f0d5ef79c65bdf3cfb756f213a160b8379cc948d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -25,7 +25,7 @@ Scope: public-site claim ledger source for the current Phase 2 development bound
 
 The current `dev` branch supports a bounded development claim:
 
-> Ardur has a gated local Linux eBPF process-lifecycle proof harness that can load and attach exec/exit tracepoints in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, Linux `SO_PEERCRED` retrieval seam, accepted-connection protocol seam, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, a narrow local `session_status` client proof that rejects response expansion, and a no-write status evidence-log planning seam with schema/digest/rotation bounds, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, and a no-privilege/no-execution launch-wrapper session-proof seam with deterministic argv/cwd digest evidence.
+> Ardur has a gated local Linux eBPF process-lifecycle proof harness that can load and attach exec/exit tracepoints in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, Linux `SO_PEERCRED` retrieval seam, accepted-connection protocol seam, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, a narrow local `session_status` client proof that rejects response expansion, a no-write status evidence-log planning seam with schema/digest/rotation bounds, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, and a no-privilege/no-execution launch-wrapper session-proof seam with deterministic argv/cwd digest evidence.
 
 This is an experimental development boundary, not release or production readiness.
 
@@ -44,6 +44,7 @@ This is an experimental development boundary, not release or production readines
 - `go/pkg/kernelcapture/daemon_session_status_snapshot_handler.go` and `go/pkg/kernelcapture/daemon_session_status_snapshot_sink.go` implement the in-memory daemon-side retention handler/sink for successful authorized `session_status` snapshots; the sink stores detached copies only and performs no persistence or mutation outside memory.
 - `go/pkg/kernelcapture/daemon_session_status_client.go` implements the narrow local Unix-socket `session_status` client proof that sends a validated request and decodes only `DaemonProtocolResponse`, rejecting protocol response expansion.
 - `go/pkg/kernelcapture/daemon_session_status_evidence_log_plan.go` implements the no-write status evidence-log planning seam for retained daemon-internal snapshots: schema version, entry kind, session-id-hashed daemon-owned evidence-log path, snapshot entry digest, retention/rotation bounds, and fail-closed validation before any file creation/write/rotation path exists.
+- `go/pkg/kernelcapture/daemon_session_status_evidence_log_entry.go` implements the in-memory JSONL evidence-log entry builder: it validates the reviewed plan, revalidates snapshot integrity, recomputes the digest, fails closed on digest/session/size mismatch, and returns newline-terminated bytes without creating, appending, rotating, or persisting evidence-log files.
 - `go/pkg/kernelcapture/daemon_session_handoff_plan.go` implements the no-mutation daemon session handoff plan seam for active registry records, including hashed daemon-owned state/runtime paths and a non-zero cgroup allowlist precondition sequence without filesystem writes, cgroup assignment, BPF map mutation, or live enforcement.
 - `go/pkg/kernelcapture/daemon_accept_loop_plan.go` validates a dry-run accept-loop plan with custody validation, explicit UID/GID allowlists, bounded request bytes, read timeout, bounded concurrency, and non-executed preflight/bind/accept/peer-observation/decode/authorization/dispatch steps.
 - `go/pkg/kernelcapture/launch_wrapper_session.go` defines the launch-wrapper no-execution contract seam and deterministic evidence envelope.

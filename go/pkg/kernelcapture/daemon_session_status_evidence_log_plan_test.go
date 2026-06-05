@@ -123,6 +123,9 @@ func TestBuildDaemonSessionStatusEvidenceLogPlanFailsClosed(t *testing.T) {
 			cfg.Snapshot.ProtocolResponse.OK = false
 			cfg.Snapshot.ProtocolResponse.Error = "not ok"
 		}, want: "not OK"},
+		{name: "ok response with error text", mut: func(cfg *DaemonSessionStatusEvidenceLogConfig) {
+			cfg.Snapshot.ProtocolResponse.Error = "stale error"
+		}, want: "error text"},
 		{name: "protocol response inactive", mut: func(cfg *DaemonSessionStatusEvidenceLogConfig) {
 			cfg.Snapshot.ProtocolResponse.Status = DaemonSessionStatusEnded
 		}, want: "status"},
