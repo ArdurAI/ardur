@@ -30,7 +30,7 @@ jobs:
     outputs:
       languages: ${{ steps.detect.outputs.languages }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
 
       - id: detect
         name: Detect supported languages present in the tree
@@ -62,7 +62,7 @@ jobs:
       matrix:
         language: ${{ fromJSON(needs.detect-languages.outputs.languages) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
 
       # v3 is an annotated tag (tag-object 865f5f5c... → commit ce64ddcb...).
       # Pin to the commit SHA per the same discipline as the other
