@@ -2,6 +2,7 @@ package kernelcapture
 
 import (
 	"context"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -270,3 +271,45 @@ func assertProtocolResponseDoesNotExposeEvidenceLogInternals(t *testing.T, respo
 type errEvidenceLogHandlerTestAppendFailure struct{}
 
 func (errEvidenceLogHandlerTestAppendFailure) Error() string { return "simulated append failure" }
+
+// mappedEvidenceLogFilesystemUnion delegates to multiple underlying mapped
+// filesystems so tests can use a single handler with multiple per-session
+// temp-dir filesystem backends.
+type mappedEvidenceLogFilesystemUnion struct {
+	t *testing.T
+	m []*mappedEvidenceLogFilesystemForTest
+}
+
+func newMappedEvidenceLogFilesystemUnion(m ...*mappedEvidenceLogFilesystemForTest) *mappedEvidenceLogFilesystemUnion {
+	return &mappedEvidenceLogFilesystemUnion{m: m}
+}
+
+func (mu *mappedEvidenceLogFilesystemUnion) MkdirAll(path string, perm fs.FileMode) error {
+	for _, m := range mu.m {
+		if strings.HasPrefix(path+"/", m.logicalRoot+"/") || path == m.logicalRoot {
+			return m.MkdirAll(path, perm)
+		}
+	}
+	mu.t.Fatalf("MkdirAll path %q not matched by any union member", path)
+	return nil
+}
+
+func (mu *mappedEvidenceLogFilesystemUnion) AppendFile(path string, data []byte, perm fs.FileMode) error {
+	for _, m := range mu.m {
+		if strings.HasPrefix(path, m.logicalRoot) {
+			return m.AppendFile(path, data, perm)
+		}
+	}
+	mu.t.Fatalf("AppendFile path %q not matched by any union member", path)
+	return nil
+}
+
+func (mu *mappedEvidenceLogFilesystemUnion) Rename(oldPath, newPath string) error {
+	for _, m := range mu.m {
+		if strings.HasPrefix(oldPath, m.logicalRoot) && strings.HasPrefix(newPath, m.logicalRoot) {
+			return m.Rename(oldPath, newPath)
+		}
+	}
+	mu.t.Fatalf("Rename %q -> %q not matched by any union member", oldPath, newPath)
+	return nil
+}

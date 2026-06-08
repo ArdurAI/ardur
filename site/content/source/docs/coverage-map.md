@@ -2,7 +2,7 @@
 title: "Ardur Coverage Map"
 description: "**The single source of truth for what Ardur captures and what it does not.**"
 source_path: "docs/coverage-map.md"
-source_sha256: "e6eac27df988dda4d538fa56e287d9ddd4f4c3debf6bcc11e7127d9c470395d7"
+source_sha256: "65cda64ad552d11d6ee12ef607b4158f4aa36a8b5c17ef8096ce23ddb3d2dd8b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -24,6 +24,7 @@ plugin documentation, and every example. When the capture surface changes,
 this page changes; everywhere else just links to it.
 
 Last updated: 2026-06-05. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
+ - The handler also automatically removes in-memory evidence-log append state when sessions end or expire; it does not delete, rotate, archive, or rename evidence-log files.
 
 ## What Ardur captures today (v0.1)
 

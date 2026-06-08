@@ -151,7 +151,11 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
 
 16. `DaemonSessionStatusEvidenceLogHandler` (daemon-side injected evidence-log wiring)
    - For successful authorized `session_status` requests, composes the daemon-internal snapshot, no-write evidence-log plan, JSONL entry builder, per-session append state, and injected filesystem append adapter before retaining the snapshot.
-   - Forwards health/register/end requests to the registry without snapshot or evidence-log side effects, fails closed when the snapshot sink or filesystem is missing, and returns only the narrow `DaemonProtocolResponse` without evidence-log paths, digests, handoff plans, root PID, or cgroup fields.
+   - Forwards health/register requests to the registry without snapshot or evidence-log side effects.
+   - On successful `end_session`, removes the session's in-memory evidence-log append state without touching the evidence-log filesystem.
+   - On failed `session_status` with status `ended` or `expired`, also removes stale in-memory append state.
+   - Fails closed when the snapshot sink or filesystem is missing, and returns only the narrow `DaemonProtocolResponse` without evidence-log paths, digests, handoff plans, root PID, or cgroup fields.
+   - Provides `RemoveEvidenceLogAppendState` as a public lifecycle hygiene seam for external daemon code.
    - Uses caller-provided filesystem implementations and temp-dir path-mapping tests; it does not install/start a daemon, provide a default production filesystem writer, change ownership, fsync, provide crash recovery, mutate cgroups/BPF maps, or enable live enforcement.
 
 17. `BuildDaemonSessionHandoffPlan` (no-mutation plan)

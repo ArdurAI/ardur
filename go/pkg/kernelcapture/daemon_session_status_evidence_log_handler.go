@@ -71,7 +71,14 @@ func (h *DaemonSessionStatusEvidenceLogHandler) HandleAuthorizedRequest(ctx cont
 		if h.registry == nil {
 			return daemonSessionRegistryErrorResponse(req, "", "registry is required")
 		}
-		return h.registry.HandleAuthorizedRequest(ctx, req, handshake)
+		response := h.registry.HandleAuthorizedRequest(ctx, req, handshake)
+		if req.Method == DaemonProtocolMethodEndSession && response.OK {
+			sessionID := strings.TrimSpace(daemonProtocolRequestSessionID(req))
+			if sessionID != "" {
+				h.RemoveEvidenceLogAppendState(sessionID)
+			}
+		}
+		return response
 	}
 	if h.sink == nil {
 		return daemonSessionRegistryErrorResponse(req, "", "session status evidence-log snapshot sink is required")
@@ -85,6 +92,12 @@ func (h *DaemonSessionStatusEvidenceLogHandler) HandleAuthorizedRequest(ctx cont
 
 	snapshot, response := h.registry.HandleAuthorizedSessionStatusSnapshot(ctx, req, handshake, h.custody)
 	if !response.OK {
+		sessionID := strings.TrimSpace(daemonProtocolRequestSessionID(req))
+		if sessionID != "" {
+			if response.Status == DaemonSessionStatusEnded || response.Status == DaemonSessionStatusExpired {
+				h.RemoveEvidenceLogAppendState(sessionID)
+			}
+		}
 		return response
 	}
 	appendPlan, ok := h.appendSnapshot(snapshot)
@@ -116,6 +129,26 @@ func (h *DaemonSessionStatusEvidenceLogHandler) EvidenceLogStateSnapshot(session
 		return DaemonSessionStatusEvidenceLogAppendStateSnapshot{}, false
 	}
 	return state.Snapshot(), true
+}
+
+// RemoveEvidenceLogAppendState removes the per-session append state for the
+// given session ID. It is safe to call multiple times; subsequent calls are
+// no-ops. This is the lifecycle hygiene seam: callers (including the handler's
+// own HandleAuthorizedRequest for end_session and expired session_status) use
+// it to release in-memory evidence-log append state without touching the
+// evidence-log filesystem. It does not delete, rotate, archive, or rename
+// evidence-log files.
+func (h *DaemonSessionStatusEvidenceLogHandler) RemoveEvidenceLogAppendState(sessionID string) {
+	if h == nil {
+		return
+	}
+	path := h.evidenceLogPathForSession(sessionID)
+	if path == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.states, path)
 }
 
 func (h *DaemonSessionStatusEvidenceLogHandler) appendSnapshot(snapshot DaemonSessionStatusSnapshot) (DaemonSessionStatusEvidenceLogAppendPlan, bool) {

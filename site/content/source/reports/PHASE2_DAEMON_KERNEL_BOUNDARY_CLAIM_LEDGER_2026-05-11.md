@@ -2,7 +2,7 @@
 title: "Phase 2 Daemon/Kernel Boundary Claim Ledger"
 description: "Date: 2026-05-12"
 source_path: "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md"
-source_sha256: "6664d4e34628c0afaf333ee8e0e139da677af221b3e735fce97171df54cb8f8e"
+source_sha256: "8a3b3e2dca695a168e065136c43a114607f0ce7911ead6ebb498abfb4cc224f7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -48,6 +48,7 @@ This is an experimental development boundary, not release or production readines
 - `go/pkg/kernelcapture/daemon_session_status_evidence_log_append_plan.go` implements the injected in-memory append/rotation planner: it validates canonical JSONL entries, computes accept/rotate/reject decisions against a fake sink with overflow-guarded byte accounting, derives simulated rotation paths under the evidence-log directory, and retains accepted entries only as copied memory without opening, creating, appending, rotating, or persisting files.
 - `go/pkg/kernelcapture/daemon_session_status_evidence_log_filesystem_append.go` implements the injected filesystem append/rotation adapter: it reuses the in-memory planner, executes minimal mkdir/append or mkdir/rename/append operations through a caller-provided filesystem surface, commits state only after filesystem success, and is covered by temp-dir path-mapping tests.
 - `go/pkg/kernelcapture/daemon_session_status_evidence_log_handler.go` implements daemon-side `session_status` evidence-log wiring: successful authorized status snapshots are planned, encoded, appended through the injected filesystem adapter, then retained in memory while the client receives only `DaemonProtocolResponse`.
+   - It also automatically removes in-memory evidence-log append state on successful `end_session` and on failed/expired `session_status`.
 - `go/pkg/kernelcapture/daemon_session_handoff_plan.go` implements the no-mutation daemon session handoff plan seam for active registry records, including hashed daemon-owned state/runtime paths and a non-zero cgroup allowlist precondition sequence without filesystem writes, cgroup assignment, BPF map mutation, or live enforcement.
 - `go/pkg/kernelcapture/daemon_accept_loop_plan.go` validates a dry-run accept-loop plan with custody validation, explicit UID/GID allowlists, bounded request bytes, read timeout, bounded concurrency, and non-executed preflight/bind/accept/peer-observation/decode/authorization/dispatch steps.
 - `go/pkg/kernelcapture/launch_wrapper_session.go` defines the launch-wrapper no-execution contract seam and deterministic evidence envelope.
