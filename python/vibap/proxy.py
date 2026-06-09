@@ -1902,15 +1902,6 @@ class GovernanceProxy:
                     return normalized
         return None
 
-    def _missing_required_telemetry(
-        policy_claims: dict[str, Any],
-        arguments: dict[str, Any],
-    ) -> list[str]:
-        required = _declared_required_telemetry(policy_claims)
-        if not required:
-            return []
-        return _missing_declared_telemetry(arguments, required)
-
     @staticmethod
     def _record_tool_policy_event(
         session: GovernanceSession,

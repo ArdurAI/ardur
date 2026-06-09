@@ -101,7 +101,7 @@ def _is_placeholder_relative_path(text: str, start: int) -> bool:
 
 def replace_path_roots(text: str, pairs: Sequence[tuple[str, str]]) -> str:
     redacted = text
-    for source, placeholder in pairs:
+    for source, placeholder in sorted(pairs, key=lambda item: len(item[0]), reverse=True):
         if source:
             redacted = redacted.replace(source, placeholder)
     return redacted
