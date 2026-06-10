@@ -261,6 +261,6 @@ def map_tool_call(*, tool_name: str, tool_input: Mapping[str, Any]) -> dict[str,
     arguments: dict[str, Any] = dict(tool_input)
     arguments.update(mapper(tool_input))
     arguments["tool_name"] = tool_name
-    arguments.setdefault("envelope_signature_valid", True)
+    arguments.setdefault("envelope_signature_valid", "not-verified")
     arguments.setdefault("observed_manifest_digest", "not-observed")
     return arguments

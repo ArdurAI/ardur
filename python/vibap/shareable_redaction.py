@@ -28,12 +28,40 @@ LOCAL_PATH_LEAK_MARKERS = tuple(marker + "/" for marker in LOCAL_PATH_ROOT_MARKE
     "file://" + marker + "/" for marker in LOCAL_PATH_ROOT_MARKERS
 )
 
+_SLASH_LIKE_TRANSLATION = str.maketrans(
+    {
+        "\uff0f": "/",  # FULLWIDTH SOLIDUS
+        "\u2044": "/",  # FRACTION SLASH
+        "\u2215": "/",  # DIVISION SLASH
+        "\u29f8": "/",  # BIG SOLIDUS
+    }
+)
+_PERCENT_ENCODED_FILE_SCHEME_RE = re.compile(r"\bfile%3a", re.IGNORECASE)
+_PERCENT_ENCODED_SLASH_RE = re.compile(
+    r"%2f|%ef%bc%8f|%e2%81%84|%e2%88%95|%e2%a7%b8",
+    re.IGNORECASE,
+)
+
 # Delimiters are tuned for JSON/log strings. Unicode path components are allowed
 # because the negated character class only excludes whitespace and common string
 # punctuation.
 _PATH_CHARS = r"[^\s\]})>'\",;`]+"
 FILE_URI_RE = re.compile(rf"\bfile://(?:localhost)?(?P<path>/{_PATH_CHARS})", re.IGNORECASE)
 ABSOLUTE_PATH_RE = re.compile(rf"(?<![A-Za-z0-9_:.~-])(?P<path>/{_PATH_CHARS})")
+
+
+def _normalize_path_separators(text: str) -> str:
+    """Normalize encoded/confusable local-path separators before scanning.
+
+    Shareable artifacts must not leak local paths just because a producer used
+    Unicode solidus lookalikes or percent-encoded slash bytes. Keep this narrow:
+    decode only the file-scheme colon and slash separator forms that affect path
+    recognition, not arbitrary percent escapes in user text.
+    """
+
+    normalized = _PERCENT_ENCODED_FILE_SCHEME_RE.sub("file:", text)
+    normalized = _PERCENT_ENCODED_SLASH_RE.sub("/", normalized)
+    return normalized.translate(_SLASH_LIKE_TRANSLATION)
 
 
 def path_aliases(value: str | Path | None) -> list[str]:
@@ -58,7 +86,7 @@ def path_aliases(value: str | Path | None) -> list[str]:
 
 def local_path_root_marker(value: str) -> str:
     """Return the stable public marker for a local path or file URI."""
-    text = value
+    text = _normalize_path_separators(value)
     match = FILE_URI_RE.match(text)
     if match:
         text = match.group("path")
@@ -115,7 +143,8 @@ def redact_local_path_text(
     file_uri_replacement: Callable[[str], str] = file_uri_placeholder,
 ) -> str:
     """Redact configured roots, file:// targets, and local absolute paths."""
-    redacted = replace_path_roots(text, root_pairs)
+    redacted = _normalize_path_separators(text)
+    redacted = replace_path_roots(redacted, root_pairs)
     redacted = FILE_URI_RE.sub(lambda match: file_uri_replacement(match.group(0)), redacted)
 
     def replace_absolute(match: re.Match[str]) -> str:
@@ -147,6 +176,7 @@ def redact_local_paths(value: Any, *, root_pairs: Sequence[tuple[str, str]] = ()
 
 def local_path_leak_hits(text: str, *, extra_markers: Iterable[str] = ()) -> list[str]:
     """Return raw local path/file URI leak strings found in text."""
+    text = _normalize_path_separators(text)
     hits: set[str] = set()
     for marker in (*LOCAL_PATH_LEAK_MARKERS, *tuple(extra_markers)):
         if marker and marker in text:

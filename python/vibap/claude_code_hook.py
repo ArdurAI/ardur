@@ -39,7 +39,15 @@ DEFAULT_CHAIN_DIR = DEFAULT_HOME / "claude-code-hook"
 CHAIN_FILENAME = "receipts.jsonl"
 SUBAGENT_REGISTRY_FILENAME = "subagents.jsonl"
 CLAUDE_CODE_VISIBILITY_FULL = "full"
+HOOK_INPUT_MAX_CHARS = 1024 * 1024
 _SAFE_TRACE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+
+
+def _read_hook_input(stream: Any, *, max_chars: int = HOOK_INPUT_MAX_CHARS) -> str:
+    raw = stream.read(max_chars + 1)
+    if len(raw) > max_chars:
+        raise ValueError(f"hook input exceeds {max_chars} character limit")
+    return raw
 
 
 def _normalize_trace_id(value: Any) -> str | None:
@@ -1139,11 +1147,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    raw = sys.stdin.read()
     try:
+        raw = _read_hook_input(sys.stdin)
         hook_input = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError as exc:
         sys.stderr.write(f"ardur: invalid hook input JSON: {exc}\n")
+        return 1
+    except ValueError as exc:
+        sys.stderr.write(f"ardur: invalid hook input: {exc}\n")
         return 1
 
     handlers = {

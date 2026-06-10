@@ -859,6 +859,21 @@ def test_main_pre_reads_stdin_writes_stdout(tmp_path, monkeypatch):
     assert output["continue"] is True
 
 
+def test_main_rejects_oversize_stdin(monkeypatch, capsys):
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    payload = '{"x":"' + ("a" * (hook_module.HOOK_INPUT_MAX_CHARS + 1)) + '"}'
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "hook input exceeds" in captured.err
+
+
 def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
     from vibap import claude_code_daemon as daemon_module
     from vibap import claude_code_hook as hook_module

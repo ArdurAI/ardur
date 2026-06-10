@@ -47,6 +47,25 @@ def test_all_eleven_declared_fields_are_present_for_read() -> None:
         assert value not in (None, ""), f"empty {field}"
 
 
+def test_telemetry_mapper_defaults_envelope_signature_to_not_verified() -> None:
+    arguments = map_tool_call(
+        tool_name="mcp__custom__op",
+        tool_input={"name": "resource"},
+    )
+
+    assert arguments["envelope_signature_valid"] == "not-verified"
+    assert arguments["observed_manifest_digest"] == "not-observed"
+
+
+def test_telemetry_mapper_preserves_explicit_envelope_verification() -> None:
+    arguments = map_tool_call(
+        tool_name="Read",
+        tool_input={"file_path": "/tmp/x.txt", "envelope_signature_valid": True},
+    )
+
+    assert arguments["envelope_signature_valid"] is True
+
+
 # ---------------------------------------------------------------------------
 # Write
 # ---------------------------------------------------------------------------

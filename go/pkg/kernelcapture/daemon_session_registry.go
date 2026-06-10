@@ -151,7 +151,7 @@ func (r *DaemonSessionRegistry) HandleAuthorizedRequest(ctx context.Context, req
 	case DaemonProtocolMethodSessionStatus:
 		return r.handleSessionStatus(req)
 	case DaemonProtocolMethodEndSession:
-		return r.handleEndSession(req)
+		return r.handleEndSession(req, handshake)
 	default:
 		return daemonSessionRegistryErrorResponse(req, "", "unsupported method %q", req.Method)
 	}
@@ -224,7 +224,7 @@ func (r *DaemonSessionRegistry) handleSessionStatus(req DaemonProtocolRequest) D
 	}
 }
 
-func (r *DaemonSessionRegistry) handleEndSession(req DaemonProtocolRequest) DaemonProtocolResponse {
+func (r *DaemonSessionRegistry) handleEndSession(req DaemonProtocolRequest, handshake DaemonProtocolPeerHandshake) DaemonProtocolResponse {
 	sessionID := daemonProtocolRequestSessionID(req)
 	now := r.currentTime()
 	r.mu.Lock()
@@ -237,6 +237,9 @@ func (r *DaemonSessionRegistry) handleEndSession(req DaemonProtocolRequest) Daem
 	if status != DaemonSessionStatusActive {
 		return daemonSessionRegistryErrorResponse(req, status, "session %q is not active: %s", sessionID, status)
 	}
+	if !daemonSessionRegistryPeerOwnsRecord(record, handshake) {
+		return daemonSessionRegistryErrorResponse(req, status, "session %q is owned by a different peer", sessionID)
+	}
 	record.EndedAt = now
 	r.sessions[record.SessionID] = record
 	return DaemonProtocolResponse{
@@ -246,6 +249,13 @@ func (r *DaemonSessionRegistry) handleEndSession(req DaemonProtocolRequest) Daem
 		SessionID:       record.SessionID,
 		Status:          DaemonSessionStatusEnded,
 	}
+}
+
+func daemonSessionRegistryPeerOwnsRecord(record DaemonSessionRecord, handshake DaemonProtocolPeerHandshake) bool {
+	return record.PeerUID == handshake.Authorization.UID &&
+		record.PeerGID == handshake.Authorization.GID &&
+		record.PeerPID == handshake.Authorization.PID &&
+		record.CredentialSource == handshake.CredentialSource
 }
 
 func (r *DaemonSessionRegistry) currentTime() time.Time {
