@@ -17,15 +17,17 @@ are marked as adapter specs, not shipped capability.
 | [ardur-personal-native-host/](ardur-personal-native-host/) | optional bridge | local `ardur hub` + browser Native Messaging |
 | [_shared/](_shared/) | helpers | Imported by the three framework demos above |
 | [claude-code-hook/](claude-code-hook/) | pointer to runnable plugin | `python/` editable install + Claude Code |
-| [openai-agents-sdk/](openai-agents-sdk/) | deferred adapter spec | `python/` editable install + OpenAI Agents SDK + OpenAI API key |
-| [google-adk/](google-adk/) | deferred adapter spec | `python/` editable install + Google ADK + Google AI API key |
+| [openai-agents-sdk/](openai-agents-sdk/) | runnable no-key fixture | `python/` editable install; no OpenAI key for fixture mode |
+| [google-adk/](google-adk/) | runnable no-key fixture | `python/` editable install; no Google key for fixture mode |
 | [../plugins/claude-code/](../plugins/claude-code/) | runnable plugin | `python/` editable install + Claude Code |
 
 The runnable framework directories (`langchain-quickstart/`, `langgraph-quickstart/`, `autogen-quickstart/`) ship a `demo.py` entrypoint and, where applicable, a `Dockerfile` that produces the published `rahulnutakki/ardur-demo:*` images. They share helpers under [`_shared/`](_shared/) — provider selection, SVID fetch, Biscuit issuance, governed-session setup, receipt-chain verification, end-of-session attestation. No model identifiers are hard-coded in any of these files; provider config is sourced from environment variables at runtime (see [CONTRIBUTING.md](../CONTRIBUTING.md) "No specific LLM model names" rule).
 
-The deferred adapter directories carry READMEs that describe the dependency
-footprint and file layout the next import wave will produce. They are not
-advertised as runnable examples until code and tests land.
+The OpenAI Agents SDK and Google ADK directories now ship no-key/offline
+fixtures that exercise the visible provider tool-dispatch boundary, emit signed
+Ardur receipts, and verify the local receipt chain. Future live-provider
+adapters remain opt-in/manual because they require provider SDKs and runtime
+credentials.
 
 ## Running the mission examples (today, no agent required)
 
@@ -55,9 +57,11 @@ Each framework has its own tool-call interface, its own session-state model, and
 
 The current CI surface is the repo-wide Python and Go workflow in
 `.github/workflows/tests.yml`, plus CodeQL, link-check, secret-scan, format
-validation, and the Hugo site build. The Python job runs
-`python/tests/test_examples_smoke.py` as an offline, no-key examples smoke for
-the checked-in mission fixtures and this claim ledger. There is not a dedicated
+validation, and the Hugo site build. The repo-wide Python job runs all
+`python/tests/`, including `python/tests/test_examples_smoke.py` for mission
+fixtures and `python/tests/test_provider_adapter_fixtures.py` for these no-key
+adapter runners and shareable reports. The `examples-smoke` job separately runs
+organic governance/demo smoke coverage. There is not a dedicated
 `.github/workflows/examples-smoke.yml` today, and the provider-backed framework
 quickstarts remain opt-in/manual unless a future workflow adds real CI evidence
 for those live-provider demos.

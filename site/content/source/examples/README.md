@@ -2,7 +2,7 @@
 title: "Ardur Examples"
 description: "Working examples of Ardur governing AI agents across major frameworks and local"
 source_path: "examples/README.md"
-source_sha256: "106e989b7d5177474c262e19efa3fc4a39107f869fd2e2a474cdbebaaa582e40"
+source_sha256: "bbbd048e819e3e65e41e094ae2792c69be00c769f5e835075d62143cd94c519e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -34,15 +34,17 @@ are marked as adapter specs, not shipped capability.
 | [ardur-personal-native-host/](/__ardur_internal__/source/examples/ardur-personal-native-host/readme/) | optional bridge | local `ardur hub` + browser Native Messaging |
 | [_shared/](/__ardur_internal__/source/examples/_shared/) | helpers | Imported by the three framework demos above |
 | [claude-code-hook/](/__ardur_internal__/source/examples/claude-code-hook/readme/) | pointer to runnable plugin | `python/` editable install + Claude Code |
-| [openai-agents-sdk/](/__ardur_internal__/source/examples/openai-agents-sdk/readme/) | deferred adapter spec | `python/` editable install + OpenAI Agents SDK + OpenAI API key |
-| [google-adk/](/__ardur_internal__/source/examples/google-adk/readme/) | deferred adapter spec | `python/` editable install + Google ADK + Google AI API key |
+| [openai-agents-sdk/](/__ardur_internal__/source/examples/openai-agents-sdk/readme/) | runnable no-key fixture | `python/` editable install; no OpenAI key for fixture mode |
+| [google-adk/](/__ardur_internal__/source/examples/google-adk/readme/) | runnable no-key fixture | `python/` editable install; no Google key for fixture mode |
 | [../plugins/claude-code/](/__ardur_internal__/source/plugins/claude-code/readme/) | runnable plugin | `python/` editable install + Claude Code |
 
 The runnable framework directories (`langchain-quickstart/`, `langgraph-quickstart/`, `autogen-quickstart/`) ship a `demo.py` entrypoint and, where applicable, a `Dockerfile` that produces the published `rahulnutakki/ardur-demo:*` images. They share helpers under [`_shared/`](/__ardur_internal__/source/examples/_shared/) — provider selection, SVID fetch, Biscuit issuance, governed-session setup, receipt-chain verification, end-of-session attestation. No model identifiers are hard-coded in any of these files; provider config is sourced from environment variables at runtime (see [CONTRIBUTING.md](/__ardur_internal__/source/contributing/) "No specific LLM model names" rule).
 
-The deferred adapter directories carry READMEs that describe the dependency
-footprint and file layout the next import wave will produce. They are not
-advertised as runnable examples until code and tests land.
+The OpenAI Agents SDK and Google ADK directories now ship no-key/offline
+fixtures that exercise the visible provider tool-dispatch boundary, emit signed
+Ardur receipts, and verify the local receipt chain. Future live-provider
+adapters remain opt-in/manual because they require provider SDKs and runtime
+credentials.
 
 ## Running the mission examples (today, no agent required)
 
@@ -72,9 +74,11 @@ Each framework has its own tool-call interface, its own session-state model, and
 
 The current CI surface is the repo-wide Python and Go workflow in
 `.github/workflows/tests.yml`, plus CodeQL, link-check, secret-scan, format
-validation, and the Hugo site build. The Python job runs
-`python/tests/test_examples_smoke.py` as an offline, no-key examples smoke for
-the checked-in mission fixtures and this claim ledger. There is not a dedicated
+validation, and the Hugo site build. The repo-wide Python job runs all
+`python/tests/`, including `python/tests/test_examples_smoke.py` for mission
+fixtures and `python/tests/test_provider_adapter_fixtures.py` for these no-key
+adapter runners and shareable reports. The `examples-smoke` job separately runs
+organic governance/demo smoke coverage. There is not a dedicated
 `.github/workflows/examples-smoke.yml` today, and the provider-backed framework
 quickstarts remain opt-in/manual unless a future workflow adds real CI evidence
 for those live-provider demos.

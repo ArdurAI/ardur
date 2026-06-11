@@ -32,6 +32,7 @@
     "examples/ardur-personal-extension/manifest.json": "repo/examples/ardur-personal-extension/manifest.json",
     "examples/missions/delegation-mission.json": "repo/examples/missions/delegation-mission.json",
     "examples/missions/minimal-mission.json": "repo/examples/missions/minimal-mission.json",
+    "examples/missions/provider-adapter-no-key-mission.json": "repo/examples/missions/provider-adapter-no-key-mission.json",
     "examples/missions/three-backend-compose-mission.json": "repo/examples/missions/three-backend-compose-mission.json",
     "media/casts/ARDUR-CAP-001-mission-declaration.cast": "repo/media/casts/ARDUR-CAP-001-mission-declaration.cast",
     "media/casts/ARDUR-CAP-002-tool-policy.cast": "repo/media/casts/ARDUR-CAP-002-tool-policy.cast",
