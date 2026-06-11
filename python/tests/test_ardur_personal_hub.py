@@ -231,6 +231,37 @@ def test_hub_log_redacts_full_query_token():
     assert "?token=<redacted>&next=/" in redacted
 
 
+def test_hub_auth_uses_fixed_width_token_compare_material(monkeypatch):
+    from vibap import personal_hub
+
+    short = personal_hub._hub_token_compare_material("x")
+    longer = personal_hub._hub_token_compare_material("expected-token")
+    assert short is not None and longer is not None
+    assert len(short) == len(longer) == 4 + personal_hub._HUB_TOKEN_COMPARE_MAX_BYTES
+    assert short[:4] != longer[:4]
+
+    handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "server", SimpleNamespace(hub=SimpleNamespace(hub_token="expected-token")))
+    setattr(handler, "headers", {"authorization": "Bearer x"})
+    setattr(handler, "path", "/v1/export")
+    seen: dict[str, object] = {}
+
+    def fake_compare(left, right):
+        seen["types"] = (type(left), type(right))
+        seen["lengths"] = (len(left), len(right))
+        seen["left"] = left
+        seen["right"] = right
+        return left == right
+
+    monkeypatch.setattr(personal_hub.secrets, "compare_digest", fake_compare)
+
+    assert handler._is_authorized() is False
+    assert seen["types"] == (bytes, bytes)
+    assert seen["lengths"] == (4 + personal_hub._HUB_TOKEN_COMPARE_MAX_BYTES,) * 2
+    assert seen["left"] != b"x"
+    assert seen["right"] != b"expected-token"
+
+
 def test_hub_accepts_dashboard_token_query(tmp_path):
     with _running_hub(tmp_path) as (hub, base_url):
         request = urlrequest.Request(f"{base_url}/dashboard?token={hub.hub_token}")

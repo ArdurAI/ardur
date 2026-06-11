@@ -58,6 +58,7 @@ MAX_ACTIONS_PER_REVIEW = 160
 MAX_OBSERVATIONS_PER_REVIEW = 240
 HUB_TOKEN_ENV_VAR = "ARDUR_PERSONAL_HUB_TOKEN"
 HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
+_HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _QUERY_TOKEN_LOG_RE = re.compile(r"([?&]token=)[^\s&\"']+")
 _SHA256_DIGEST_RE = re.compile(r"^sha-256:[0-9a-f]{64}$")
 _SENSITIVE_TARGET_RE = re.compile(r"\b(password|secret|token|api[-_ ]?key|ssn)\b", re.I)
@@ -193,6 +194,32 @@ def _write_json(path: Path, payload: Any) -> None:
 
 def _new_hub_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _hub_token_compare_material(token: str) -> bytes | None:
+    """Return fixed-length Personal Hub token material for comparison.
+
+    ``secrets.compare_digest`` leaks operand length before comparing content.
+    Prefixing the UTF-8 byte length and padding the body makes presented and
+    expected Hub tokens the same width before the constant-time comparison.
+    """
+    token_bytes = token.encode("utf-8")
+    if len(token_bytes) > _HUB_TOKEN_COMPARE_MAX_BYTES:
+        return None
+    return len(token_bytes).to_bytes(4, "big") + token_bytes.ljust(
+        _HUB_TOKEN_COMPARE_MAX_BYTES,
+        b"\0",
+    )
+
+
+def _hub_tokens_match(supplied: str, expected: str) -> bool:
+    if not supplied or not expected:
+        return False
+    supplied_material = _hub_token_compare_material(supplied)
+    expected_material = _hub_token_compare_material(expected)
+    if supplied_material is None or expected_material is None:
+        return False
+    return secrets.compare_digest(supplied_material, expected_material)
 
 
 def _redact_url_tokens(message: str) -> str:
@@ -787,7 +814,7 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         if not supplied and allow_query_token:
             query = urlparse.parse_qs(urlparse.urlparse(self.path).query)
             supplied = str((query.get("token") or [""])[0]).strip()
-        return bool(supplied) and secrets.compare_digest(supplied, expected)
+        return _hub_tokens_match(supplied, expected)
 
     def _send_auth_required(self) -> None:
         self._send_json(
