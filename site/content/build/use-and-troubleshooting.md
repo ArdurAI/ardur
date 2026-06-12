@@ -35,8 +35,8 @@ without using GitHub as the documentation browser.
 - {{< repo-link "examples/ardur-personal-extension/README.md" "Ardur Personal browser extension" >}}
 - {{< repo-link "examples/ardur-personal-desktop/README.md" "Ardur Personal desktop-observe adapter" >}}
 - {{< repo-link "examples/ardur-personal-native-host/README.md" "Ardur Personal native-messaging host" >}}
-- {{< repo-link "examples/google-adk/README.md" "Google ADK quickstart (deferred adapter spec)" >}}
-- {{< repo-link "examples/openai-agents-sdk/README.md" "OpenAI Agents SDK quickstart (deferred adapter spec)" >}}
+- {{< repo-link "examples/google-adk/README.md" "Google ADK no-key fixture" >}}
+- {{< repo-link "examples/openai-agents-sdk/README.md" "OpenAI Agents SDK no-key fixture" >}}
 - {{< repo-link "examples/claude-code-hook/README.md" "Claude Code hook example" >}}
 
 ## Reference

@@ -2,7 +2,7 @@
 title: "How Ardur evaluates an action it hasn't seen yet"
 description: "A reviewer raised a sharp point about the protocol's pre-action evaluation hook: **\"In practice, LLM-driven calls are often not deterministically known at pre-action time, which ma"
 source_path: "docs/comparisons/hook-evaluation-model.md"
-source_sha256: "653fd6a0764afc68584a6751d2f5cdd099fe6a1e8822862ff56eda334a35a51f"
+source_sha256: "b3aa50d90cd3d0838e68193a2cf7249bce4983bc64b5712621b48f717f22bb5b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["comparison"]
@@ -91,7 +91,7 @@ If you're wiring up a framework adapter or building a custom agent against Ardur
 - **When you can't**: the verifier returns `insufficient_evidence` and fail-closed unless you opt out at deployment time. The opt-out is visible in every Receipt; reviewers can audit it.
 - **For inherently non-deterministic calls** (LLM queries, iterator/streaming results): split the evaluation. Pre-action approves the call's existence; post-action attestation evaluates the result against mission post-conditions.
 
-The runnable framework quickstarts under `examples/*-quickstart/` (LangChain, LangGraph, AutoGen) demonstrate each of these three paths against a working governance proxy. The OpenAI Agents SDK and Google ADK directories remain deferred adapter specs and will demonstrate the same paths once their code lift lands.
+The runnable framework quickstarts under `examples/*-quickstart/` (LangChain, LangGraph, AutoGen) demonstrate each of these three paths against a working governance proxy. The OpenAI Agents SDK and Google ADK directories now add offline/no-key fixtures for visible local tool-dispatch governance; they do not prove live provider API enforcement, provider-hidden reasoning visibility, or server-side tool-call capture.
 
 ## Open question
 

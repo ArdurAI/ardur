@@ -15,7 +15,8 @@ limitations.
 
 ## Useful Contribution Areas
 
-- Lift deferred adapter specs into runnable, tested examples.
+- Extend current no-key adapter fixtures into reviewed live-provider wrappers or
+  add more fixture coverage without overstating provider-side visibility.
 - Improve rerunnable proof media and verifier commands.
 - Add conformance vectors for public v0.1 specs.
 - Harden packaging so Ardur Personal can install without a source checkout.

@@ -2,7 +2,7 @@
 title: "Media"
 description: "This repo includes a small set of starter recordings for the public surface."
 source_path: "MEDIA.md"
-source_sha256: "4c147466e00393ae0d6d259f81d9758e8f7a8b726b28629ce6e4f4f11421fa8c"
+source_sha256: "d1ba541bb8f8b2782e89b9c61b6d392cd59aee1c76d4fb2dcb54ccec0ae35fdf"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["proof-media"]
@@ -81,6 +81,8 @@ proof recording.
 - an Ardur Personal Hub setup walkthrough covering `ardur setup`, `ardur hub`,
   and the browser extension at `examples/ardur-personal-extension/`
 
-A recording for the OpenAI Agents SDK and Google ADK adapters lands once
-those `examples/` directories graduate from deferred adapter specs to runnable
-code.
+- an OpenAI Agents SDK and Google ADK no-key fixture walkthrough using
+  `examples/openai-agents-sdk/` and `examples/google-adk/` (the fixtures are
+  runnable today; no recording is public yet). A future live-provider recording
+  remains separate because it needs provider SDKs, credentials, and separate
+  live-wrapper evidence.

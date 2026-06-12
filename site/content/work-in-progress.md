@@ -20,8 +20,8 @@ site should treat that work today.
 
 | Workstream | Why it matters | Public status |
 |---|---|---|
-| OpenAI Agents SDK adapter | Expands coverage beyond current runnable examples | {{< status-pill state="planned" label="planned" >}} |
-| Google ADK adapter | Expands framework coverage | {{< status-pill state="planned" label="planned" >}} |
+| OpenAI Agents SDK live-provider wrapper | Extends the current no-key fixture into provider-SDK-backed evidence | {{< status-pill state="planned" label="planned" >}} |
+| Google ADK live-provider wrapper | Extends the current no-key fixture into provider-SDK-backed evidence | {{< status-pill state="planned" label="planned" >}} |
 | Codex hooks | Brings the Claude Code-style lifecycle idea to another coding-agent surface | {{< status-pill state="planned" label="planned" >}} |
 | Claude Desktop MCP packaging | Gives local users a cleaner install path | {{< status-pill state="planned" label="planned" >}} |
 | Rerunnable proof media | Replaces archival casts with public-runtime recordings | {{< status-pill state="in-progress" label="in progress" >}} |
@@ -31,7 +31,8 @@ site should treat that work today.
 
 ## Audience
 
-- **Framework builders:** integration patterns and adapter specs.
+- **Framework builders:** integration patterns, no-key fixtures, and future
+  live-provider adapter specs.
 - **Coding-agent users:** local Hub, Claude Code plugin, browser, desktop, and
   native-host paths.
 - **Security reviewers:** claim ledger, denial semantics, specs, and media

@@ -1,8 +1,8 @@
 # Ardur Examples
 
 Working examples of Ardur governing AI agents across major frameworks and local
-assistant surfaces. Some directories are runnable today; deferred directories
-are marked as adapter specs, not shipped capability.
+assistant surfaces. Runnable directories are labeled by maturity; no-key
+provider fixtures are distinct from future live-provider wrappers.
 
 ## Status
 
@@ -49,9 +49,9 @@ ardur verify --token <token-from-issue-output>
 
 That exercises the core protocol surface end-to-end — mission compilation, passport issuance, signature, verification — without an LLM or framework in the loop. It's the fastest way to confirm a local install actually works.
 
-## Why deferred adapters instead of one big drop
+## Why adapters land in focused slices
 
-Each framework has its own tool-call interface, its own session-state model, and its own integration point where Ardur's governance proxy attaches. LangChain tool callbacks look nothing like AutoGen's `FunctionTool` registration; LangGraph's state graph wants the verifier wrapped around node transitions; the coding-agent CLI integration wires in via a hook lifecycle, not a Python import. Lifting these as one monolithic commit would conflate unrelated breakage. Per-framework directories let each adapter land, get reviewed, and run CI on its own.
+Each framework has its own tool-call interface, its own session-state model, and its own integration point where Ardur's governance proxy attaches. LangChain tool callbacks look nothing like AutoGen's `FunctionTool` registration; LangGraph's state graph wants the verifier wrapped around node transitions; the coding-agent CLI integration wires in via a hook lifecycle, not a Python import. Lifting these as one monolithic commit would conflate unrelated breakage. Per-framework directories let each adapter land, get reviewed, and run CI on its own. The OpenAI Agents SDK and Google ADK directories are runnable no-key fixtures today; live-provider wrappers remain separate because they would require provider SDKs, runtime credentials, and separate evidence for what the provider actually exposes.
 
 ## CI for examples
 

@@ -12,7 +12,7 @@ Already present:
 - the Ardur Personal Hub service plus its CLI surface
 - the Claude Code plugin and hook with signed receipts
 - runnable LangChain, LangGraph, and AutoGen quickstart examples
-- the Ardur Personal browser extension, desktop-observe adapter, and native-messaging host
+- the Ardur Personal browser extension, desktop-observe adapter, native-messaging host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures
 - dedicated Python and Go CI plus CodeQL, link-check, secret-scan, and Hugo workflows
 - the Hugo public evidence-site source tree under `site/`
 - the journey-log article series (Articles 05 and 06)
@@ -28,7 +28,7 @@ Already present:
 
 Next hardening work:
 
-- runnable OpenAI Agents SDK and Google ADK adapter lifts
+- live-provider OpenAI Agents SDK and Google ADK wrapper evidence beyond the current no-key fixtures
 - Codex hooks and Claude Desktop MCP packaging
 - public verifier and proof entry points with stable artifact paths so the archival walkthrough casts can be re-recorded against the public runtime
 - conformance test vectors imported under `docs/specs/conformance/` to retire the "private layout" notes in the v0.1 specs

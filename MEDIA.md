@@ -64,6 +64,8 @@ proof recording.
 - an Ardur Personal Hub setup walkthrough covering `ardur setup`, `ardur hub`,
   and the browser extension at `examples/ardur-personal-extension/`
 
-A recording for the OpenAI Agents SDK and Google ADK adapters lands once
-those `examples/` directories graduate from deferred adapter specs to runnable
-code.
+- an OpenAI Agents SDK and Google ADK no-key fixture walkthrough using
+  `examples/openai-agents-sdk/` and `examples/google-adk/` (the fixtures are
+  runnable today; no recording is public yet). A future live-provider recording
+  remains separate because it needs provider SDKs, credentials, and separate
+  live-wrapper evidence.

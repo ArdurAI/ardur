@@ -51,8 +51,11 @@ Code plugin docs.
 - {{< repo-link "examples/langchain-quickstart/README.md" "LangChain quickstart" >}}
 - {{< repo-link "examples/langgraph-quickstart/README.md" "LangGraph quickstart" >}}
 - {{< repo-link "examples/autogen-quickstart/README.md" "AutoGen quickstart" >}}
+- {{< repo-link "examples/openai-agents-sdk/README.md" "OpenAI Agents SDK no-key fixture" >}}
+- {{< repo-link "examples/google-adk/README.md" "Google ADK no-key fixture" >}}
 
 ## Keep In Mind
 
-OpenAI Agents SDK and Google ADK are currently deferred adapter specs, not
-runnable examples. Rerunnable proof media is also not public yet.
+OpenAI Agents SDK and Google ADK are runnable no-key fixtures for visible local
+tool-dispatch governance, not live-provider wrappers. Rerunnable proof media is
+also not public yet.

@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, Ardur captures every Claude Code tool-call invocation — file reads"
 source_path: "STATUS.md"
-source_sha256: "723afb32cda3d3aa88b70e7a1c93dc067ad255812eebeae74aee83f837952aad"
+source_sha256: "be10312316c8cd5c75a295f170c0930899af329236951194816ca986738168fe"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -51,7 +51,7 @@ caveat list, and [`ROADMAP.md`](/__ardur_internal__/source/roadmap/) for the pha
 - the `ardur` CLI ships subcommands for the protocol path (`issue`, `verify`, `attest`, `start`) and the Personal path (`hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `uninstall`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `profile init`, `protect claude-code`, `claude-code-hook`, `claude-code-report`, `gemini-cli-fixture`, `gemini-cli-hook`, `gemini-cli-report`, `codex-app-server-fixture`, `codex-app-server-event`, `codex-app-server-report`)
 - the Claude Code plugin is present under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks plus a smoke script
 - curated Go runtime, governance, and operator files are present under `go/` (the AAT package remains a fail-closed skeleton by design and is documented as such in `go/README.md`)
-- runnable framework examples are present under `examples/`: LangChain, LangGraph, and AutoGen quickstarts; the Ardur Personal browser extension; the Ardur Personal desktop-observe adapter; the Ardur Personal native-messaging host; and the Claude Code plugin pointer. JSON mission examples remain in `examples/missions/`. OpenAI Agents SDK and Google ADK directories are deferred adapter specs
+- runnable framework examples are present under `examples/`: LangChain, LangGraph, and AutoGen quickstarts; the Ardur Personal browser extension; the Ardur Personal desktop-observe adapter; the Ardur Personal native-messaging host; the Claude Code plugin pointer; and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
 - dedicated Python (3.10 + 3.13) and Go CI workflows run on every push and PR (`.github/workflows/tests.yml`), including the offline examples-smoke regression in `python/tests/test_examples_smoke.py`, alongside CodeQL, link-check, secret-scan, format validation, and the Hugo site build
 - the Hugo public evidence-site source tree is present under `site/`, with start-here / build / evidence sections that link each public claim back to the source file backing it
 - bootstrap and local-validation scripts ship under `scripts/` (`conductor-bootstrap.sh`, `setup-dev.sh`, `check-local.sh`)
@@ -67,7 +67,7 @@ caveat list, and [`ROADMAP.md`](/__ardur_internal__/source/roadmap/) for the pha
 
 ## In Progress
 
-- runnable OpenAI Agents SDK and Google ADK adapter lifts to replace the current deferred-spec READMEs
+- live-provider OpenAI Agents SDK and Google ADK wrapper evidence beyond the current no-key fixtures
 - live Codex hooks/cloud integration, Claude Desktop MCP packaging, and other non-fixture host integrations as separate next-cycle work
 - re-runnable public proof media — recordings made against the public runtime
   with stable verifier commands and artifact paths; this is separate from the

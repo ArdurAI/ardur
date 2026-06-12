@@ -2,7 +2,7 @@
 title: "Research Notes"
 description: "This public repo shape is based on a scan of strong public AI infrastructure"
 source_path: "RESEARCH.md"
-source_sha256: "0045e34a6832565c51e01912569a71241d8c48043530c5e93de48825d0411833"
+source_sha256: "1a4c69977b6c18dbf3005e5ea0532e143e8d4e3e64bdf82df81f654e3061a32e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -74,11 +74,13 @@ The repo includes:
 - curated Python and Go runtime imports
 - the Ardur Personal Hub service and Claude Code plugin
 - runnable LangChain, LangGraph, and AutoGen framework examples plus the
-  Ardur Personal browser extension, desktop-observe adapter, and native-host
+  Ardur Personal browser extension, desktop-observe adapter, native-host, and
+  offline/no-key OpenAI Agents SDK and Google ADK fixtures
 - dedicated Python and Go CI workflows
 - the Hugo public evidence-site source
 - selected archival recordings
 
 The remaining work is a tagged packaged distribution, end-to-end proof paths
-that retire the archival-only media caveat, OpenAI Agents SDK and Google ADK
-adapter lifts, and broader deployment validation.
+that retire the archival-only media caveat, live-provider OpenAI Agents SDK and
+Google ADK wrapper evidence beyond the current no-key fixtures, and broader
+deployment validation.

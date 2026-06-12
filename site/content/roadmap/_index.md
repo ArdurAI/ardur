@@ -18,7 +18,7 @@ evidence_levels: ["code-and-doc", "doc-and-manifest", "archival-media", "limitat
 - Low-latency Claude Code `PreToolUse` daemon-client path when the local
   compiler and daemon are available, with Python fallback.
 - Runnable LangChain, LangGraph, AutoGen, browser extension, desktop observe,
-  and native-host examples.
+  native-host, and offline/no-key OpenAI Agents SDK and Google ADK examples.
 - Public v0.1 specs, ADRs, CI workflows, agent instructions, articles, and
   source-backed Hugo site.
 
@@ -34,7 +34,7 @@ These are planned or in-progress items, not shipped claims:
 | Claude Desktop MCP packaging | Coming soon | Not first-class in the current public release candidate. |
 | Tagged packaging | Coming soon | PyPI, Homebrew, or OCI distribution suitable for regular users is not public yet. |
 | Rerunnable proof media | In progress | Current casts are archival until stable verifier commands and artifact paths land. |
-| OpenAI Agents SDK and Google ADK adapter lifts | In progress | Current directories are deferred adapter specs rather than runnable examples. |
+| Live-provider OpenAI Agents SDK and Google ADK wrappers | In progress | Current directories are runnable no-key fixtures; live provider API enforcement and provider-hidden/server-side behavior remain unclaimed. |
 | Broader deployment material | In progress | Current deployment evidence is useful SPIRE/Helm material, not a production-complete walkthrough. |
 
 ## Not Public Yet

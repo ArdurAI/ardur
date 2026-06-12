@@ -201,7 +201,7 @@ This repo currently includes:
 - Python governance runtime under `python/`; Go eBPF/K8s packages and a complete AAT credential-attenuation engine under `go/`
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`)
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
-- runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, and native-host. JSON mission examples remain in `examples/missions/`. OpenAI Agents SDK and Google ADK directories remain deferred adapter specs
+- runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
 - dedicated Python (3.10 + 3.13) and Go CI under `.github/workflows/tests.yml`, including the offline examples-smoke regression in `python/tests/test_examples_smoke.py`, plus CodeQL, link-check, secret-scan, format validation, and the Hugo build
 - the Hugo public evidence site source under `site/`, with each public claim linkable to its backing source file
 - bootstrap and verification scripts under `scripts/` (`conductor-bootstrap.sh`, `setup-dev.sh`, `check-local.sh`)
@@ -218,7 +218,7 @@ This repo currently includes:
 
 The next repo drops will add:
 
-- runnable OpenAI Agents SDK and Google ADK adapter lifts to replace the current deferred-spec README directories
+- live-provider OpenAI Agents SDK and Google ADK wrapper evidence as a separate, opt-in path beyond the current no-key fixture examples
 - Codex hooks and Claude Desktop MCP packaging as separate next-cycle integrations
 - re-runnable proof media — recordings made against the public runtime with stable verifier commands and artifact paths, replacing the current archival walkthrough casts
 - a tagged release with a regenerated Homebrew formula carrying Python resource stanzas, so non-technical users can install Ardur Personal without a source checkout
@@ -230,7 +230,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 
 | Layer                | In repo now | Still pending public validation |
 |----------------------|-------------|---------------------------------|
-| **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, and native-host examples; deferred README-only OpenAI Agents SDK and Google ADK directories | more runnable framework adapters |
+| **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixture examples | live-provider wrappers and more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, AAT constraint engine (13 types) | OPA and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |

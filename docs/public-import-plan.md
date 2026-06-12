@@ -91,9 +91,11 @@ ardur/
 
 4. **Examples — partly done.**
    Runnable: LangChain, LangGraph, AutoGen, Ardur Personal browser extension,
-   desktop-observe, native-host, plus the Claude Code plugin pointer. JSON
-   missions remain runnable. Deferred adapter specs: OpenAI Agents SDK,
-   Google ADK.
+   desktop-observe, native-host, offline/no-key OpenAI Agents SDK and Google
+   ADK fixtures, plus the Claude Code plugin pointer. JSON missions remain
+   runnable. Future live-provider wrappers for OpenAI Agents SDK and Google ADK
+   remain opt-in/manual until separate provider-SDK and credential-backed
+   evidence exists.
 
 5. **Go runtime and protocol schemas — done.**
    `go/` is a coherent module covering credential, governance, policy, SPIFFE,

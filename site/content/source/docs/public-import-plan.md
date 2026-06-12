@@ -2,7 +2,7 @@
 title: "Public Import Plan"
 description: "This plan converted the private source tree into the public Ardur repo without"
 source_path: "docs/public-import-plan.md"
-source_sha256: "dbac39872b84dcda2adda3365c4fea05108abaa09ce3db78d31d0366fe20f134"
+source_sha256: "01b6d7141e44d5e09aa0d8702c61387005253717479b3744c4942c6a4ebb4cf0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -108,9 +108,11 @@ ardur/
 
 4. **Examples — partly done.**
    Runnable: LangChain, LangGraph, AutoGen, Ardur Personal browser extension,
-   desktop-observe, native-host, plus the Claude Code plugin pointer. JSON
-   missions remain runnable. Deferred adapter specs: OpenAI Agents SDK,
-   Google ADK.
+   desktop-observe, native-host, offline/no-key OpenAI Agents SDK and Google
+   ADK fixtures, plus the Claude Code plugin pointer. JSON missions remain
+   runnable. Future live-provider wrappers for OpenAI Agents SDK and Google ADK
+   remain opt-in/manual until separate provider-SDK and credential-backed
+   evidence exists.
 
 5. **Go runtime and protocol schemas — done.**
    `go/` is a coherent module covering credential, governance, policy, SPIFFE,
