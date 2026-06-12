@@ -79,6 +79,38 @@ func TestDaemonSessionRegistryBuildsAuthorizedStatusSnapshot(t *testing.T) {
 	}
 }
 
+func TestDaemonSessionRegistryStatusSnapshotRejectsDifferentPeer(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 3, 18, 30, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	owner := daemonSessionRegistryTestHandshake("session-snapshot-owned")
+	register := daemonRegisterSessionRequest("session-snapshot-owned", 888, 60)
+	register.RegisterSession.CgroupID = 8800
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+	custody, err := BuildDaemonCustodyPlan(DefaultDaemonCustodyConfig())
+	if err != nil {
+		t.Fatalf("BuildDaemonCustodyPlan returned error: %v", err)
+	}
+
+	other := owner
+	other.Authorization.UID = 502
+	other.Authorization.GID = 21
+	other.Authorization.PID = 9876
+	other.Authorization.Reason = "different authorized peer"
+
+	snapshot, response := registry.HandleAuthorizedSessionStatusSnapshot(context.Background(), daemonSessionStatusRequest("session-snapshot-owned"), other, custody)
+	if response.OK || response.Status != DaemonSessionStatusActive || !strings.Contains(response.Error, "different peer") {
+		t.Fatalf("different peer snapshot response = %#v", response)
+	}
+	if snapshot.Status != "" || snapshot.Session.SessionID != "" || snapshot.HandoffPlan.SessionID != "" {
+		t.Fatalf("different peer produced snapshot = %#v", snapshot)
+	}
+}
+
 func TestDaemonSessionRegistryStatusSnapshotFailsClosedWithoutProtocolExpansion(t *testing.T) {
 	t.Parallel()
 

@@ -43,6 +43,7 @@ type DaemonSessionStatusEvidenceLogPlan struct {
 	Mode string
 
 	SessionID       string
+	StateDir        string
 	EvidenceLogPath string
 
 	SchemaVersion string
@@ -87,14 +88,15 @@ func BuildDaemonSessionStatusEvidenceLogPlan(cfg DaemonSessionStatusEvidenceLogC
 	}
 
 	sessionID := strings.TrimSpace(cfg.Snapshot.Session.SessionID)
+	stateDir := cleanPath(cfg.CustodyPlan.StateDir)
 	sessionKey := daemonSessionHandoffSessionKey(sessionID)
 	evidenceLogPath := filepath.Join(
-		cleanPath(cfg.CustodyPlan.StateDir),
+		stateDir,
 		"evidence",
 		"sessions",
 		sessionKey+".evlog",
 	)
-	if !lexicalPathWithin(evidenceLogPath, cfg.CustodyPlan.StateDir) {
+	if !lexicalPathWithin(evidenceLogPath, stateDir) {
 		return DaemonSessionStatusEvidenceLogPlan{}, evidenceLogPlanError("evidence-log path escaped daemon state directory")
 	}
 
@@ -106,6 +108,7 @@ func BuildDaemonSessionStatusEvidenceLogPlan(cfg DaemonSessionStatusEvidenceLogC
 	return DaemonSessionStatusEvidenceLogPlan{
 		Mode:            DaemonCustodyModeLocalOnlyScaffold,
 		SessionID:       sessionID,
+		StateDir:        stateDir,
 		EvidenceLogPath: evidenceLogPath,
 		SchemaVersion:   DaemonSessionStatusEvidenceLogSchemaVersion,
 		EntryKind:       DaemonSessionStatusEvidenceLogEntryKind,

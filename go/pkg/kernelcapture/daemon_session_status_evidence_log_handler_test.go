@@ -75,6 +75,55 @@ func TestDaemonSessionStatusEvidenceLogHandlerAppendsSuccessfulStatusSnapshots(t
 	}
 }
 
+func TestDaemonSessionStatusEvidenceLogHandlerRejectsStatusFromDifferentPeerWithoutEvidenceSideEffects(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 5, 20, 15, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	custody := daemonCustodyPlanForEvidenceLogHandlerTest(t)
+	sink := NewDaemonSessionStatusSnapshotSink()
+	sessionID := "handler-evidence-owned-session"
+	mapped := newMappedEvidenceLogFilesystemForTest(t, evidenceLogPathForHandlerTest(custody, sessionID))
+	handler := NewDaemonSessionStatusEvidenceLogHandler(DaemonSessionStatusEvidenceLogHandlerConfig{
+		Registry:     registry,
+		CustodyPlan:  custody,
+		SnapshotSink: sink,
+		Filesystem:   mapped,
+	})
+	owner := daemonSessionRegistryTestHandshake(sessionID)
+
+	register := daemonRegisterSessionRequest(sessionID, 5151, 60)
+	register.RegisterSession.CgroupID = 515100
+	if response := handler.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+
+	other := owner
+	other.Authorization.UID = 502
+	other.Authorization.GID = 21
+	other.Authorization.PID = 9876
+	other.Authorization.Reason = "different authorized peer"
+	rejected := handler.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest(sessionID), other)
+	if rejected.OK || rejected.Status != DaemonSessionStatusActive || !strings.Contains(rejected.Error, "different peer") {
+		t.Fatalf("different peer status response = %#v", rejected)
+	}
+	assertProtocolResponseDoesNotExposeEvidenceLogInternals(t, rejected)
+	if got := sink.Snapshots(); len(got) != 0 {
+		t.Fatalf("different peer retained snapshot: %#v", got)
+	}
+	if got := mapped.operations(); len(got) != 0 {
+		t.Fatalf("different peer touched evidence filesystem: %#v", got)
+	}
+	if _, ok := handler.EvidenceLogStateSnapshot(sessionID); ok {
+		t.Fatalf("different peer stored append state")
+	}
+
+	ownerStatus := handler.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest(sessionID), owner)
+	if !ownerStatus.OK || ownerStatus.Status != DaemonSessionStatusActive {
+		t.Fatalf("owner status response = %#v", ownerStatus)
+	}
+}
+
 func TestDaemonSessionStatusEvidenceLogHandlerRotatesThroughInjectedFilesystem(t *testing.T) {
 	t.Parallel()
 

@@ -137,11 +137,15 @@ func validateEvidenceLogFilesystemModes(directoryMode fs.FileMode, fileMode fs.F
 }
 
 func validateEvidenceLogFilesystemAppendPlanPaths(plan DaemonSessionStatusEvidenceLogAppendPlan) error {
+	stateDir := cleanPath(plan.StateDir)
+	if stateDir == "" || stateDir != plan.StateDir {
+		return evidenceLogFilesystemAppendError("daemon state dir must be clean and non-empty")
+	}
 	path := cleanPath(plan.EvidenceLogPath)
 	if path == "" || path != plan.EvidenceLogPath {
 		return evidenceLogFilesystemAppendError("evidence-log path must be clean and non-empty")
 	}
-	if !lexicalPathWithin(path, "/var/lib/ardur") {
+	if !lexicalPathWithin(path, stateDir) {
 		return evidenceLogFilesystemAppendError("evidence-log path %q is outside daemon state custody root", path)
 	}
 	parentDir := filepath.Dir(path)

@@ -99,6 +99,12 @@ func validateDaemonSessionStatusEvidenceLogEntryPlan(plan DaemonSessionStatusEvi
 	if strings.TrimSpace(plan.SessionID) == "" {
 		return fmt.Errorf("session id is required")
 	}
+	if strings.TrimSpace(plan.StateDir) == "" {
+		return fmt.Errorf("daemon state dir is required")
+	}
+	if cleanPath(plan.StateDir) != plan.StateDir {
+		return fmt.Errorf("daemon state dir must be clean")
+	}
 	if strings.TrimSpace(plan.EvidenceLogPath) == "" {
 		return fmt.Errorf("evidence-log path is required")
 	}

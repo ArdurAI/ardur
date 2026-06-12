@@ -149,7 +149,7 @@ func (r *DaemonSessionRegistry) HandleAuthorizedRequest(ctx context.Context, req
 	case DaemonProtocolMethodRegisterSession:
 		return r.handleRegisterSession(req, handshake)
 	case DaemonProtocolMethodSessionStatus:
-		return r.handleSessionStatus(req)
+		return r.handleSessionStatus(req, handshake)
 	case DaemonProtocolMethodEndSession:
 		return r.handleEndSession(req, handshake)
 	default:
@@ -209,11 +209,14 @@ func (r *DaemonSessionRegistry) handleRegisterSession(req DaemonProtocolRequest,
 	}
 }
 
-func (r *DaemonSessionRegistry) handleSessionStatus(req DaemonProtocolRequest) DaemonProtocolResponse {
+func (r *DaemonSessionRegistry) handleSessionStatus(req DaemonProtocolRequest, handshake DaemonProtocolPeerHandshake) DaemonProtocolResponse {
 	sessionID := daemonProtocolRequestSessionID(req)
 	record, status, err := r.lookupActiveSession(sessionID, r.currentTime())
 	if err != nil {
 		return daemonSessionRegistryErrorResponse(req, status, "%v", err)
+	}
+	if !daemonSessionRegistryPeerOwnsRecord(record, handshake) {
+		return daemonSessionRegistryErrorResponse(req, status, "session %q is owned by a different peer", sessionID)
 	}
 	return DaemonProtocolResponse{
 		ProtocolVersion: DaemonProtocolVersion,

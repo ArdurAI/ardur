@@ -63,6 +63,9 @@ func (r *DaemonSessionRegistry) HandleAuthorizedSessionStatusSnapshot(ctx contex
 	if err != nil {
 		return DaemonSessionStatusSnapshot{}, daemonSessionRegistryErrorResponse(req, status, "%v", err)
 	}
+	if !daemonSessionRegistryPeerOwnsRecord(record, handshake) {
+		return DaemonSessionStatusSnapshot{}, daemonSessionRegistryErrorResponse(req, status, "session %q is owned by a different peer", daemonProtocolRequestSessionID(req))
+	}
 	snapshot, err := buildDaemonSessionStatusSnapshot(record, status, asOf, custodyPlan)
 	if err != nil {
 		return DaemonSessionStatusSnapshot{}, daemonSessionRegistryErrorResponse(req, status, "status snapshot handoff plan failed: %v", err)

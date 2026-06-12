@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -537,6 +536,9 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
     try:
         output.chmod(0o700)
     except OSError:
+        # Best-effort fixture-directory hardening; mkdir(mode=0o700) already
+        # created new directories privately, but some existing or unusual
+        # filesystems can reject chmod after a successful mkdir.
         pass
     keys_dir = output / "keys"
     chain_path = output / CHAIN_FILENAME

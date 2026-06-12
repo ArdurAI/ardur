@@ -60,6 +60,7 @@ type DaemonSessionStatusEvidenceLogAppendPlan struct {
 	Reason   string
 
 	SessionID       string
+	StateDir        string
 	EvidenceLogPath string
 	RotationPath    string
 	EntryDigest     string
@@ -224,6 +225,7 @@ func (s *DaemonSessionStatusEvidenceLogAppendState) baseAppendPlanForPlan(plan D
 	return DaemonSessionStatusEvidenceLogAppendPlan{
 		Mode:            DaemonCustodyModeLocalOnlyScaffold,
 		SessionID:       strings.TrimSpace(plan.SessionID),
+		StateDir:        cleanPath(plan.StateDir),
 		EvidenceLogPath: cleanPath(plan.EvidenceLogPath),
 		EntryDigest:     entryDigest,
 		PreBytes:        s.totalBytes,
@@ -286,6 +288,9 @@ func validateEvidenceLogAppendStatePlanCompatible(statePlan DaemonSessionStatusE
 	}
 	if cleanPath(statePlan.EvidenceLogPath) != cleanPath(proposedPlan.EvidenceLogPath) {
 		return evidenceLogAppendPlanError("proposed plan evidence-log path %q does not match state path %q", proposedPlan.EvidenceLogPath, statePlan.EvidenceLogPath)
+	}
+	if cleanPath(statePlan.StateDir) != cleanPath(proposedPlan.StateDir) {
+		return evidenceLogAppendPlanError("proposed plan state dir %q does not match state dir %q", proposedPlan.StateDir, statePlan.StateDir)
 	}
 	if statePlan.SchemaVersion != proposedPlan.SchemaVersion {
 		return evidenceLogAppendPlanError("proposed plan schema version %q does not match state schema version %q", proposedPlan.SchemaVersion, statePlan.SchemaVersion)

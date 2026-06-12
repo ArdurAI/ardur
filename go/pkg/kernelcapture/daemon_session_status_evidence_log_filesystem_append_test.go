@@ -298,6 +298,32 @@ func TestDaemonSessionStatusEvidenceLogFilesystemAppendRejectsBadModesAndPathsBe
 	if got := mapped.operations(); len(got) != 0 {
 		t.Fatalf("path containment failure touched filesystem: %#v", got)
 	}
+
+	cfg = daemonSessionStatusEvidenceLogConfigForTest(t, "filesystem-append-state-sibling-escape-session")
+	plan, err = BuildDaemonSessionStatusEvidenceLogPlan(cfg)
+	if err != nil {
+		t.Fatalf("BuildDaemonSessionStatusEvidenceLogPlan returned error: %v", err)
+	}
+	plan.EvidenceLogPath = "/var/lib/ardur/sibling/escape.evlog"
+	entry, err = BuildDaemonSessionStatusEvidenceLogEntry(plan, cfg.Snapshot)
+	if err != nil {
+		t.Fatalf("BuildDaemonSessionStatusEvidenceLogEntry returned error for sibling escape fixture: %v", err)
+	}
+	state, err = NewDaemonSessionStatusEvidenceLogAppendState(plan, nil)
+	if err != nil {
+		t.Fatalf("NewDaemonSessionStatusEvidenceLogAppendState returned error for sibling escape fixture: %v", err)
+	}
+	mapped = newMappedEvidenceLogFilesystemForTest(t, plan.EvidenceLogPath)
+	_, err = ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(DaemonSessionStatusEvidenceLogFilesystemAppendConfig{State: state, Filesystem: mapped}, entry)
+	if err == nil {
+		t.Fatalf("expected daemon state sibling containment failure")
+	}
+	if !errors.Is(err, ErrDaemonSessionStatusEvidenceLogFilesystemAppend) || !strings.Contains(err.Error(), "outside daemon state") {
+		t.Fatalf("sibling path containment error = %v", err)
+	}
+	if got := mapped.operations(); len(got) != 0 {
+		t.Fatalf("sibling path containment failure touched filesystem: %#v", got)
+	}
 }
 
 func TestDaemonSessionStatusEvidenceLogFilesystemAppendRollbackAfterRotationAppendError(t *testing.T) {

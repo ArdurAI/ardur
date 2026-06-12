@@ -147,6 +147,36 @@ func TestDaemonSessionRegistryRejectsEndSessionByDifferentPeer(t *testing.T) {
 	}
 }
 
+func TestDaemonSessionRegistryRejectsStatusByDifferentPeer(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 42, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	owner := daemonSessionRegistryTestHandshake("session-status-owned")
+	register := daemonRegisterSessionRequest("session-status-owned", 1234, 60)
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+
+	other := owner
+	other.Authorization.UID = 502
+	other.Authorization.GID = 21
+	other.Authorization.PID = 9876
+	other.Authorization.Reason = "different authorized peer"
+	now = now.Add(5 * time.Second)
+
+	rejected := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-status-owned"), other)
+	if rejected.OK || rejected.Status != DaemonSessionStatusActive || !strings.Contains(rejected.Error, "different peer") {
+		t.Fatalf("different peer status response = %#v", rejected)
+	}
+
+	ownerStatus := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-status-owned"), owner)
+	if !ownerStatus.OK || ownerStatus.Status != DaemonSessionStatusActive {
+		t.Fatalf("owner status response = %#v", ownerStatus)
+	}
+}
+
 func TestDaemonSessionRegistryRejectsNonAllowPeerHandshake(t *testing.T) {
 	t.Parallel()
 
