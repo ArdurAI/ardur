@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -185,6 +186,43 @@ def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     assert json.loads(config_path.read_text())["hub_token"] == first["hub_token"]
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+
+def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
+    from vibap import personal_hub
+
+    fsync_calls: list[int] = []
+
+    def fake_fsync(fd: int) -> None:
+        fsync_calls.append(fd)
+
+    monkeypatch.setattr(personal_hub.os, "fsync", fake_fsync)
+    state_path = tmp_path / "state.json"
+    old_umask = os.umask(0o022)
+    try:
+        personal_hub._write_json(state_path, {"token": "placeholder-value", "ok": True})
+    finally:
+        os.umask(old_umask)
+
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {
+        "ok": True,
+        "token": "placeholder-value",
+    }
+    assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
+    assert fsync_calls, "Personal Hub JSON state must be fsynced before rename"
+
+
+def test_hub_session_state_files_remain_private_with_permissive_umask(tmp_path):
+    old_umask = os.umask(0o022)
+    try:
+        hub = PersonalHub(tmp_path)
+        hub.observe(_browser_payload("private session state"))
+    finally:
+        os.umask(old_umask)
+
+    for state_path in (hub.paths.config, hub.paths.sessions_index, hub.paths.reviews):
+        assert state_path.exists()
+        assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
 
 
 def test_hub_http_auth_protects_export_and_mutations(tmp_path):
