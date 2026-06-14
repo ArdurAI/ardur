@@ -89,7 +89,7 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
 6. `DaemonProtocolRequest` / `DecodeDaemonProtocolRequest` / `DecodeDaemonProtocolResponse` (contract only)
    - Specifies newline-delimited deterministic JSON for `health`, `register_session`, `end_session`, and `session_status`.
    - Accepts unprivileged session/mission/trace identity plus observed root PID, PID namespace, cgroup id, event class, and bounded TTL.
-   - Rejects unknown protocol versions, unknown event classes, missing session ids, unbounded TTLs, trailing non-JSON data, and client-supplied daemon-owned privileged path fields.
+   - Rejects unknown protocol versions, unknown event classes, missing session ids, missing root PID, missing cgroup id, unbounded TTLs, trailing non-JSON data, and client-supplied daemon-owned privileged path fields.
    - Decodes client-visible responses with unknown-field rejection so daemon-internal fields such as handoff plans, root PID, or cgroup data cannot accidentally become accepted wire response fields.
    - Applies the daemon-controlled field guard recursively and case-insensitively so future clients cannot hide daemon-owned filesystem authority or OS-observed peer identity inside metadata.
    - Keeps daemon-owned config/socket/bpffs paths and observed peer credentials out of client messages.
@@ -177,9 +177,9 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
 
 20. `BuildLaunchWrapperSessionProof` (contract only)
    - Converts no-privilege launch-wrapper metadata for a generic CLI boundary into a validated daemon `register_session` request.
-   - Seeds userspace correlation with the launched root PID, optional PID namespace, optional process-start monotonic timestamp, optional cgroup id, and launch wall-clock time.
+   - Seeds userspace correlation with the launched root PID, optional PID namespace, optional process-start monotonic timestamp, required cgroup id, and launch wall-clock time.
    - Adds redacted handoff metadata, including command argv digest and argc, without storing raw argv, working directory text, executable paths, or environment values in the proof.
-   - Rejects missing session id, empty command, missing root PID, missing start time, unbounded TTL, daemon-owned path or peer-credential fields, and raw command/path/environment handoff fields.
+   - Rejects missing session id, empty command, missing root PID, missing cgroup id, missing start time, unbounded TTL, daemon-owned path or peer-credential fields, and raw command/path/environment handoff fields.
    - Does not execute a command, open sockets, retrieve SO_PEERCRED, start/install a daemon, mutate cgroups or BPF maps, or capture subprocess/file/network side effects.
 
 ## Generate the eBPF object

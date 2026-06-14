@@ -99,6 +99,7 @@ func TestBuildLaunchWrapperSessionProofUsesExactArgvBytesForDigest(t *testing.T)
 		TraceID:    "trace-argv-bytes",
 		Command:    []string{"python3", "-c", "print('ok')"},
 		RootPID:    9001,
+		CgroupID:   900100,
 		StartedAt:  started,
 		TTLSeconds: 60,
 	}
@@ -138,6 +139,7 @@ func TestBuildLaunchWrapperSessionProofUsesExactWorkingDirectoryBytesForDigest(t
 		Command:          []string{"python3"},
 		WorkingDirectory: "/work/repo",
 		RootPID:          9002,
+		CgroupID:         900200,
 		StartedAt:        started,
 		TTLSeconds:       60,
 	}
@@ -175,6 +177,7 @@ func TestBuildLaunchWrapperSessionProofFailsClosed(t *testing.T) {
 		TraceID:    "trace-1",
 		Command:    []string{"true"},
 		RootPID:    1234,
+		CgroupID:   123400,
 		StartedAt:  time.Unix(1_778_230_100, 0).UTC(),
 		TTLSeconds: 60,
 	}
@@ -187,6 +190,7 @@ func TestBuildLaunchWrapperSessionProofFailsClosed(t *testing.T) {
 		{name: "missing command", mut: func(m *LaunchWrapperSessionMetadata) { m.Command = nil }},
 		{name: "empty command path", mut: func(m *LaunchWrapperSessionMetadata) { m.Command = []string{"   "} }},
 		{name: "missing root pid", mut: func(m *LaunchWrapperSessionMetadata) { m.RootPID = 0 }},
+		{name: "missing cgroup id", mut: func(m *LaunchWrapperSessionMetadata) { m.CgroupID = 0 }},
 		{name: "missing started at", mut: func(m *LaunchWrapperSessionMetadata) { m.StartedAt = time.Time{} }},
 		{name: "zero ttl", mut: func(m *LaunchWrapperSessionMetadata) { m.TTLSeconds = 0 }},
 		{name: "unbounded ttl", mut: func(m *LaunchWrapperSessionMetadata) { m.TTLSeconds = MaxDaemonProtocolTTLSeconds + 1 }},
@@ -248,6 +252,7 @@ func TestBuildLaunchWrapperSessionProofRejectsSecretLikeMetadataAtAnyDepth(t *te
 		TraceID:    "trace-1",
 		Command:    []string{"true"},
 		RootPID:    1234,
+		CgroupID:   123400,
 		StartedAt:  time.Unix(1_778_230_200, 0).UTC(),
 		TTLSeconds: 60,
 	}

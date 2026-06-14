@@ -185,6 +185,9 @@ func validateDaemonRegisterSession(req DaemonRegisterSessionRequest) error {
 	if req.RootPID == 0 {
 		return fmt.Errorf("%w: register_session root_pid is required", ErrDaemonProtocol)
 	}
+	if req.CgroupID == 0 {
+		return fmt.Errorf("%w: register_session cgroup_id is required", ErrDaemonProtocol)
+	}
 	if req.TTLSeconds <= 0 || req.TTLSeconds > MaxDaemonProtocolTTLSeconds {
 		return fmt.Errorf("%w: ttl_seconds must be between 1 and %d", ErrDaemonProtocol, MaxDaemonProtocolTTLSeconds)
 	}

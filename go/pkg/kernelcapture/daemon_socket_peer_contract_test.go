@@ -19,6 +19,7 @@ func TestAuthorizeDaemonProtocolPeerBindsObservedCredentialsToRequest(t *testing
 		RegisterSession: &DaemonRegisterSessionRequest{
 			SessionID:    "session-1",
 			RootPID:      1234,
+			CgroupID:     123400,
 			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
 			TTLSeconds:   60,
 		},
@@ -130,6 +131,7 @@ func TestAuthorizeDaemonProtocolPeerFailsClosed(t *testing.T) {
 		RegisterSession: &DaemonRegisterSessionRequest{
 			SessionID:    "session-1",
 			RootPID:      1234,
+			CgroupID:     123400,
 			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
 			TTLSeconds:   60,
 		},
@@ -235,7 +237,7 @@ func TestAuthorizeDaemonProtocolPeerFailsClosed(t *testing.T) {
 func TestAuthorizeDaemonProtocolPeerKeepsPeerIdentityOutOfClientJSON(t *testing.T) {
 	t.Parallel()
 
-	raw := []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"metadata":{"linux_so_peercred":{"uid":501,"gid":20,"pid":4321}}}}` + "\n")
+	raw := []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","root_pid":1234,"cgroup_id":123400,"event_classes":["process_lifecycle"],"ttl_seconds":60,"metadata":{"linux_so_peercred":{"uid":501,"gid":20,"pid":4321}}}}` + "\n")
 	_, err := DecodeDaemonProtocolRequest(raw)
 	if err == nil {
 		t.Fatalf("expected client-supplied peer identity rejection")

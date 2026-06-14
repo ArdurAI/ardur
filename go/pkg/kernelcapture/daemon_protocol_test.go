@@ -126,6 +126,7 @@ func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 		RegisterSession: &DaemonRegisterSessionRequest{
 			SessionID:    "session-1",
 			RootPID:      123,
+			CgroupID:     789,
 			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
 			TTLSeconds:   60,
 		},
@@ -139,6 +140,7 @@ func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 		{name: "unknown event class", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.EventClasses = []string{"file_io"} }},
 		{name: "missing session id", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.SessionID = "" }},
 		{name: "missing root pid", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.RootPID = 0 }},
+		{name: "missing cgroup id", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.CgroupID = 0 }},
 		{name: "zero ttl", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.TTLSeconds = 0 }},
 		{name: "unbounded ttl", mut: func(req *DaemonProtocolRequest) { req.RegisterSession.TTLSeconds = MaxDaemonProtocolTTLSeconds + 1 }},
 	} {
@@ -181,6 +183,7 @@ func TestDaemonProtocolValidationRejectsForbiddenHandoffMetadata(t *testing.T) {
 		RegisterSession: &DaemonRegisterSessionRequest{
 			SessionID:    "session-1",
 			RootPID:      123,
+			CgroupID:     789,
 			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
 			TTLSeconds:   60,
 		},

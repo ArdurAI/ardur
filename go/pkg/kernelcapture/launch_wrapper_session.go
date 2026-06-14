@@ -118,6 +118,9 @@ func normalizeLaunchWrapperSessionMetadata(meta LaunchWrapperSessionMetadata) (L
 	if meta.RootPID == 0 {
 		return LaunchWrapperSessionMetadata{}, fmt.Errorf("%w: root_pid is required", ErrLaunchWrapperSessionProof)
 	}
+	if meta.CgroupID == 0 {
+		return LaunchWrapperSessionMetadata{}, fmt.Errorf("%w: cgroup_id is required", ErrLaunchWrapperSessionProof)
+	}
 	if meta.StartedAt.IsZero() {
 		return LaunchWrapperSessionMetadata{}, fmt.Errorf("%w: started_at is required", ErrLaunchWrapperSessionProof)
 	}

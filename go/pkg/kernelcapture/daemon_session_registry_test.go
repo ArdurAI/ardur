@@ -406,6 +406,7 @@ func daemonRegisterSessionRequest(sessionID string, rootPID uint32, ttlSeconds i
 		RegisterSession: &DaemonRegisterSessionRequest{
 			SessionID:    sessionID,
 			RootPID:      rootPID,
+			CgroupID:     9001,
 			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
 			TTLSeconds:   ttlSeconds,
 		},
