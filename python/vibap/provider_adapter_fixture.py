@@ -1,10 +1,12 @@
-"""No-key provider-adapter proof fixtures for OpenAI Agents SDK and Google ADK.
+"""No-key provider-adapter proof fixtures for provider and host semantic surfaces.
 
-The fixture simulates the provider-visible tool-dispatch boundary, evaluates
-mapped calls through Ardur's native policy backend, emits signed execution
-receipts, and verifies the resulting receipt chain locally. It deliberately does
-not call provider APIs or claim visibility into provider-hidden reasoning or
-server-side tool dispatch.
+The fixture simulates provider-visible tool-dispatch or host-semantic boundaries
+for OpenAI Agents SDK, Google ADK, and Claude Code project-context evidence,
+evaluates mapped calls through Ardur's native policy backend, emits signed
+execution receipts, and verifies the resulting receipt chain locally. It
+deliberately does not call provider APIs or claim visibility into
+provider-hidden reasoning, host-side RAG internals, or server-side tool
+dispatch.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import argparse
 import hashlib
 import json
 import sys
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +47,28 @@ COVERAGE_GAPS = [
     "kernel_subprocess_network_side_effect_capture",
 ]
 
+CLAUDE_PROJECT_CONTEXT_ADAPTER = "claude-code-projects"
+CLAUDE_PROJECT_UNKNOWN_BOUNDARIES = (
+    "provider_hidden_upload_internals",
+    "provider_hidden_rag_internals",
+    "sync_source_internals",
+    "artifact_content_internals",
+    "network_fetch_internals",
+    "actual_provider_model_internals",
+)
+CLAUDE_PROJECT_METHODS = (
+    "project_info",
+    "project_read",
+    "project_search",
+    "project_write",
+    "project_delete",
+)
+CLAUDE_REMOTE_TRIGGER_OUTPUT_VERSION_OBSERVED = {
+    "2.1.175": False,
+    "2.1.176": False,
+    "2.1.177": False,
+}
+
 
 @dataclass(frozen=True)
 class AdapterConfig:
@@ -52,6 +77,8 @@ class AdapterConfig:
     schema_slug: str
     visible_boundary: str
     sdk_surface: dict[str, Any]
+    not_claimed: tuple[str, ...] = ()
+    coverage_gaps: tuple[str, ...] = ()
 
 
 ADAPTERS: dict[str, AdapterConfig] = {
@@ -79,6 +106,27 @@ ADAPTERS: dict[str, AdapterConfig] = {
             "model": "example-model-name-placeholder",
         },
     ),
+    CLAUDE_PROJECT_CONTEXT_ADAPTER: AdapterConfig(
+        adapter_id=CLAUDE_PROJECT_CONTEXT_ADAPTER,
+        display_name="Claude Code project context",
+        schema_slug="claude_code_projects",
+        visible_boundary="Claude Code ProjectsInput and ProjectsOutput no-key semantic fixture",
+        sdk_surface={
+            "package": "@anthropic-ai/claude-code",
+            "checked_versions": ["2.1.175", "2.1.176", "2.1.177"],
+            "project_methods": list(CLAUDE_PROJECT_METHODS),
+            "source_file": "sdk-tools.d.ts",
+            "model": "example-model-name-placeholder",
+        },
+        not_claimed=(
+            "live Claude account/project mutation",
+            "provider-side project upload capture",
+            "provider-side RAG or sync-source inspection",
+            "artifact-content or network-fetch internals visibility",
+            "actual provider model attestation",
+        ),
+        coverage_gaps=CLAUDE_PROJECT_UNKNOWN_BOUNDARIES,
+    ),
 }
 
 MAPPED_TOOLS: dict[str, dict[str, str]] = {
@@ -99,6 +147,36 @@ MAPPED_TOOLS: dict[str, dict[str, str]] = {
         "resource_family": "computation",
         "side_effect_class": "none",
         "content_class": "text_snippet",
+    },
+    "project_info": {
+        "action_class": "observe",
+        "resource_family": "claude_project_context",
+        "side_effect_class": "none",
+        "content_class": "claude_project_context",
+    },
+    "project_read": {
+        "action_class": "read",
+        "resource_family": "claude_project_context",
+        "side_effect_class": "none",
+        "content_class": "claude_project_document",
+    },
+    "project_search": {
+        "action_class": "query",
+        "resource_family": "claude_project_context",
+        "side_effect_class": "none",
+        "content_class": "claude_project_rag_result",
+    },
+    "project_write": {
+        "action_class": "write",
+        "resource_family": "claude_project_context",
+        "side_effect_class": "internal_write",
+        "content_class": "claude_project_document",
+    },
+    "project_delete": {
+        "action_class": "write",
+        "resource_family": "claude_project_context",
+        "side_effect_class": "state_change",
+        "content_class": "claude_project_document",
     },
 }
 
@@ -121,6 +199,100 @@ def _digest_payload(payload: Any) -> dict[str, str]:
 
 def _digest_file(path: Path) -> dict[str, str]:
     return {"alg": "sha-256", "value": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def _digest_string(value: str, *, scope: str = "custom") -> dict[str, str]:
+    return {
+        "alg": "sha-256",
+        "canonicalization": "none",
+        "scope": scope,
+        "value": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+    }
+
+
+def _redact_local_path_value(value: str, *, roots: Mapping[str, str | Path | None]) -> dict[str, Any]:
+    redacted = _redact_shareable(value, roots=roots)
+    if not isinstance(redacted, str):
+        redacted = "<LOCAL_PATH>"
+    if redacted == value and value.startswith("/"):
+        redacted = f"<LOCAL_PATH>/{Path(value).name}"
+    return {
+        "redacted_path": redacted,
+        "path_sha256": _digest_string(value, scope="local_path"),
+        "path_visibility": "redacted_local_path",
+    }
+
+
+def _redact_content_value(value: str) -> dict[str, Any]:
+    return {
+        "content_present": True,
+        "content_sha256": _digest_string(value, scope="content"),
+        "content_bytes": len(value.encode("utf-8")),
+    }
+
+
+def _sanitize_claude_project_value(value: Any, *, key: str | None, roots: Mapping[str, str | Path | None]) -> Any:
+    if key in {"local_path", "local_file"} and isinstance(value, str):
+        return _redact_local_path_value(value, roots=roots)
+    if key == "content" and isinstance(value, str):
+        return _redact_content_value(value)
+    if key == "config" and isinstance(value, Mapping):
+        return {
+            "redacted": True,
+            "config_sha256": _digest_payload(dict(value)),
+            "config_visibility": "opaque_sync_config",
+        }
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _sanitize_claude_project_value(child_value, key=str(child_key), roots=roots)
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_claude_project_value(item, key=key, roots=roots) for item in value]
+    return value
+
+
+def normalize_claude_project_context_call(
+    call: Mapping[str, Any],
+    *,
+    roots: Mapping[str, str | Path | None],
+) -> dict[str, Any]:
+    """Return a shareable Claude project-context call with local payloads redacted.
+
+    The fixture models host-reported Claude project knowledge semantics only. It
+    never carries raw local upload paths, local-file output paths, opaque sync
+    config, or document content into receipts or shareable reports.
+    """
+
+    normalized = deepcopy(dict(call))
+    raw_arguments = normalized.get("arguments")
+    if not isinstance(raw_arguments, Mapping):
+        return normalized
+    arguments = deepcopy(dict(raw_arguments))
+    event = arguments.get("host_semantic_event")
+    if isinstance(event, Mapping):
+        event_dict = deepcopy(dict(event))
+        requested_input = event_dict.get("requested_input")
+        if isinstance(requested_input, Mapping):
+            requested = dict(requested_input)
+            if requested.get("method") == "project_write" and "content" in requested and "local_path" in requested:
+                raise ValueError("project_write.content and project_write.local_path are mutually exclusive")
+        event_dict.setdefault("event_class", "host_semantic_event")
+        event_dict.setdefault("evidence_class", ["policy_input", "session_context", "host_semantic_event"])
+        event_dict.setdefault("unknown_boundaries", list(CLAUDE_PROJECT_UNKNOWN_BOUNDARIES))
+        event_dict["requested_input"] = _sanitize_claude_project_value(
+            event_dict.get("requested_input", {}),
+            key=None,
+            roots=roots,
+        )
+        event_dict["host_reported_output"] = _sanitize_claude_project_value(
+            event_dict.get("host_reported_output", {}),
+            key=None,
+            roots=roots,
+        )
+        arguments["host_semantic_event"] = event_dict
+    normalized["arguments"] = arguments
+    return normalized
 
 
 def _status_from_verdict(verdict: str) -> str:
@@ -153,7 +325,14 @@ def _map_tool_call(adapter: AdapterConfig, tool_name: str, raw_args: Mapping[str
     normalized = str(tool_name or "").strip()
     key = normalized.lower().replace("-", "_")
     target = _target_from_args(normalized, raw_args)
-    base = dict(raw_args)
+    if adapter.adapter_id == CLAUDE_PROJECT_CONTEXT_ADAPTER:
+        base = {
+            str(arg_key): arg_value
+            for arg_key, arg_value in raw_args.items()
+            if arg_key in {"method", "path", "query", "force"}
+        }
+    else:
+        base = dict(raw_args)
     mapping = MAPPED_TOOLS.get(key)
     if mapping is None:
         return (
@@ -310,7 +489,7 @@ def _emit_receipt(
     return receipt_obj
 
 
-def _fixture_calls(adapter: AdapterConfig) -> list[dict[str, Any]]:
+def _fixture_calls(adapter: AdapterConfig, *, output: Path | None = None) -> list[dict[str, Any]]:
     if adapter.adapter_id == "openai-agents-sdk":
         surface = {
             "dispatch_kind": "function_tool",
@@ -318,13 +497,143 @@ def _fixture_calls(adapter: AdapterConfig) -> list[dict[str, Any]]:
             "runner_event": "Runner.run tool_call",
             "model": "example-model-name-placeholder",
         }
-    else:
+    elif adapter.adapter_id == "google-adk":
         surface = {
             "dispatch_kind": "adk_function_tool",
             "tool_boundary": "BaseTool.run_async",
             "agent_type": "LlmAgent",
             "model": "example-model-name-placeholder",
         }
+    else:
+        output_root = output or Path(".")
+        local_upload = output_root / "host-local" / "project-upload-source.md"
+        local_read = output_root / "host-local" / "project-read-result.md"
+        surface = {
+            "dispatch_kind": "claude_projects_tool",
+            "tool_boundary": "ProjectsInput / ProjectsOutput",
+            "package": "@anthropic-ai/claude-code",
+            "checked_versions": ["2.1.175", "2.1.176", "2.1.177"],
+            "model": "example-model-name-placeholder",
+            "resolvedModel": "example-resolved-model-placeholder",
+        }
+
+        def project_call(
+            call_id: str,
+            method: str,
+            requested_input: Mapping[str, Any],
+            host_reported_output: Mapping[str, Any],
+        ) -> dict[str, Any]:
+            return {
+                "call_id": call_id,
+                "tool_name": method,
+                "arguments": {
+                    "method": method,
+                    "path": str(requested_input.get("path", "claude/project-context")),
+                    "query": requested_input.get("query"),
+                    "force": requested_input.get("force"),
+                    "host_semantic_event": {
+                        "method": method,
+                        "requested_input": dict(requested_input),
+                        "host_reported_output": dict(host_reported_output),
+                    },
+                },
+                "provider_visible": surface,
+            }
+
+        return [
+            project_call(
+                "claude-project-info",
+                "project_info",
+                {"method": "project_info"},
+                {
+                    "method": "project_info",
+                    "name": "No-key fixture project",
+                    "description": "Local Claude project-context fixture; no provider account used.",
+                    "instructions": "Treat project knowledge as host-reported context, not Ardur-observed truth.",
+                    "files": [
+                        {"path": "claude/instructions.md", "file_kind": "instruction", "created_at": "2026-06-13T00:00:00Z"},
+                        {"path": "claude/customer-notes.md", "file_kind": "document", "created_at": "2026-06-13T00:00:00Z"},
+                    ],
+                    "sync_sources": [
+                        {
+                            "type": "git",
+                            "config": {
+                                "repo": "example/private-project-context",
+                                "branch": "main",
+                                "opaque_material": "raw-config-value-that-must-not-leak",
+                            },
+                        }
+                    ],
+                    "knowledge_budget": {"used_bytes": 2048, "limit_bytes": 100000},
+                    "rag_state": "host_reported_unknown_to_ardur",
+                },
+            ),
+            project_call(
+                "claude-project-read",
+                "project_read",
+                {"method": "project_read", "path": "claude/customer-notes.md"},
+                {
+                    "method": "project_read",
+                    "path": "claude/customer-notes.md",
+                    "file_kind": "document",
+                    "content": "host-reported project note body",
+                    "local_file": str(local_read),
+                    "created_at": "2026-06-13T00:00:00Z",
+                },
+            ),
+            project_call(
+                "claude-project-search",
+                "project_search",
+                {"method": "project_search", "query": "customer deployment context", "n": 3},
+                {
+                    "method": "project_search",
+                    "query": "customer deployment context",
+                    "rag_state": "host_reported_unknown_to_ardur",
+                    "hits": [
+                        {"path": "claude/customer-notes.md", "score": 0.82, "file_kind": "document"},
+                    ],
+                },
+            ),
+            project_call(
+                "claude-project-write-content",
+                "project_write",
+                {
+                    "method": "project_write",
+                    "path": "claude/inline-context.md",
+                    "content": "inline host-supplied project context",
+                },
+                {
+                    "method": "project_write",
+                    "path": "claude/inline-context.md",
+                    "doc_uuid": "doc-inline-placeholder",
+                    "replaced": False,
+                    "rag_state": "host_reported_unknown_to_ardur",
+                },
+            ),
+            project_call(
+                "claude-project-write-local-path",
+                "project_write",
+                {
+                    "method": "project_write",
+                    "path": "claude/uploaded-context.md",
+                    "local_path": str(local_upload),
+                    "force": True,
+                },
+                {
+                    "method": "project_write",
+                    "path": "claude/uploaded-context.md",
+                    "doc_uuid": "doc-upload-placeholder",
+                    "replaced": True,
+                    "rag_state": "host_reported_unknown_to_ardur",
+                },
+            ),
+            project_call(
+                "claude-project-delete",
+                "project_delete",
+                {"method": "project_delete", "path": "claude/old-context.md"},
+                {"method": "project_delete", "path": "claude/old-context.md", "deleted": True},
+            ),
+        ]
     return [
         {
             "call_id": "call-allow-read",
@@ -357,10 +666,10 @@ def _call_measurements(
     status: str | None = None,
     receipt_id: str | None = None,
 ) -> dict[str, Any]:
-    unknown_boundaries = list(COVERAGE_GAPS)
+    unknown_boundaries = list(COVERAGE_GAPS) + list(adapter.coverage_gaps)
     if mapping_confidence == "unknown":
         unknown_boundaries.append("unmapped_provider_tool_schema")
-    return {
+    result = {
         "schema_version": f"ardur.{adapter.schema_slug}.no_key_fixture.measurements.v0.1",
         "adapter_id": adapter.adapter_id,
         "visible_boundary": adapter.visible_boundary,
@@ -379,6 +688,22 @@ def _call_measurements(
         "unknown_boundaries": unknown_boundaries,
         "claim_boundary": "visible local provider-adapter tool-dispatch fixture evidence only",
     }
+    call_arguments = call.get("arguments", {})
+    if isinstance(call_arguments, Mapping):
+        host_semantic_event = call_arguments.get("host_semantic_event")
+        if isinstance(host_semantic_event, Mapping):
+            result["host_semantic_event"] = dict(host_semantic_event)
+            result["claim_boundary"] = "host-reported Claude project-context semantics from no-key local fixture only"
+    return result
+
+
+def _result_with_host_semantic_event(result: dict[str, Any], call: Mapping[str, Any]) -> dict[str, Any]:
+    call_arguments = call.get("arguments", {})
+    if isinstance(call_arguments, Mapping):
+        host_semantic_event = call_arguments.get("host_semantic_event")
+        if isinstance(host_semantic_event, Mapping):
+            result["host_semantic_event"] = dict(host_semantic_event)
+    return result
 
 
 def _handle_call(
@@ -390,20 +715,26 @@ def _handle_call(
     chain_tokens: list[str],
     chain_path: Path,
     trace_id: str,
+    roots: Mapping[str, str | Path | None],
 ) -> dict[str, Any]:
-    tool_name = str(call["tool_name"])
-    arguments, mapping_confidence = _map_tool_call(adapter, tool_name, dict(call.get("arguments", {})))
+    safe_call = (
+        normalize_claude_project_context_call(call, roots=roots)
+        if adapter.adapter_id == CLAUDE_PROJECT_CONTEXT_ADAPTER
+        else dict(call)
+    )
+    tool_name = str(safe_call["tool_name"])
+    arguments, mapping_confidence = _map_tool_call(adapter, tool_name, dict(safe_call.get("arguments", {})))
     base_event = _build_policy_event(
         adapter=adapter,
         claims=claims,
-        call_id=str(call["call_id"]),
+        call_id=str(safe_call["call_id"]),
         tool_name=tool_name,
         arguments=arguments,
         trace_id=trace_id,
     )
     measurements = _call_measurements(
         adapter=adapter,
-        call=call,
+        call=safe_call,
         arguments=arguments,
         mapping_confidence=mapping_confidence,
         trace_id=trace_id,
@@ -414,7 +745,7 @@ def _handle_call(
         unknown_event = _build_policy_event(
             adapter=adapter,
             claims=claims,
-            call_id=str(call["call_id"]),
+            call_id=str(safe_call["call_id"]),
             tool_name=tool_name,
             arguments=arguments,
             trace_id=trace_id,
@@ -442,15 +773,18 @@ def _handle_call(
                 }
             ],
         )
-        return {
-            "call_id": str(call["call_id"]),
-            "tool_name": tool_name,
-            "status": "unknown",
-            "block": True,
-            "mapping_confidence": mapping_confidence,
-            "receipt_id": receipt_obj.receipt_id,
-            "reason": reason,
-        }
+        return _result_with_host_semantic_event(
+            {
+                "call_id": str(safe_call["call_id"]),
+                "tool_name": tool_name,
+                "status": "unknown",
+                "block": True,
+                "mapping_confidence": mapping_confidence,
+                "receipt_id": receipt_obj.receipt_id,
+                "reason": reason,
+            },
+            safe_call,
+        )
 
     final, decisions = _evaluate_native_policy(base_event, claims)
     decision_dicts = _policy_decision_dicts(decisions)
@@ -461,7 +795,7 @@ def _handle_call(
         deny_event = _build_policy_event(
             adapter=adapter,
             claims=claims,
-            call_id=str(call["call_id"]),
+            call_id=str(safe_call["call_id"]),
             tool_name=tool_name,
             arguments=arguments,
             trace_id=trace_id,
@@ -481,15 +815,18 @@ def _handle_call(
             measurements={**measurements, "status": "deny"},
             policy_decisions=decision_dicts,
         )
-        return {
-            "call_id": str(call["call_id"]),
-            "tool_name": tool_name,
-            "status": "deny",
-            "block": True,
-            "mapping_confidence": mapping_confidence,
-            "receipt_id": receipt_obj.receipt_id,
-            "reason": reason,
-        }
+        return _result_with_host_semantic_event(
+            {
+                "call_id": str(safe_call["call_id"]),
+                "tool_name": tool_name,
+                "status": "deny",
+                "block": True,
+                "mapping_confidence": mapping_confidence,
+                "receipt_id": receipt_obj.receipt_id,
+                "reason": reason,
+            },
+            safe_call,
+        )
 
     base_event.policy_decisions = decision_dicts
     receipt_obj = _emit_receipt(
@@ -504,15 +841,18 @@ def _handle_call(
         measurements={**measurements, "status": "allow"},
         policy_decisions=decision_dicts,
     )
-    return {
-        "call_id": str(call["call_id"]),
-        "tool_name": tool_name,
-        "status": "allow",
-        "block": False,
-        "mapping_confidence": mapping_confidence,
-        "receipt_id": receipt_obj.receipt_id,
-        "reason": "allowed by composed native policy",
-    }
+    return _result_with_host_semantic_event(
+        {
+            "call_id": str(safe_call["call_id"]),
+            "tool_name": tool_name,
+            "status": "allow",
+            "block": False,
+            "mapping_confidence": mapping_confidence,
+            "receipt_id": receipt_obj.receipt_id,
+            "reason": "allowed by composed native policy",
+        },
+        safe_call,
+    )
 
 
 def _root_pairs(mapping: Mapping[str, str | Path | None]) -> list[tuple[str, str]]:
@@ -552,6 +892,11 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
 
     trace_id = f"{adapter.adapter_id}:no-key-fixture"
     chain_tokens: list[str] = []
+    roots = {
+        "OUTPUT_DIR": output,
+        "MISSION_TEMPLATE": mission_file,
+        "ARDUR_KEYS": keys_dir,
+    }
     call_results = [
         _handle_call(
             adapter=adapter,
@@ -561,8 +906,9 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
             chain_tokens=chain_tokens,
             chain_path=chain_path,
             trace_id=trace_id,
+            roots=roots,
         )
-        for call in _fixture_calls(adapter)
+        for call in _fixture_calls(adapter, output=output)
     ]
 
     verified_claims = verify_chain(list(chain_tokens), public_key, verify_expiry=verify_expiry)
@@ -576,11 +922,6 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
             for gap in adapter_measurements.get("unknown_boundaries", []) or []:
                 coverage_gaps.add(str(gap))
 
-    roots = {
-        "OUTPUT_DIR": output,
-        "MISSION_TEMPLATE": mission_file,
-        "ARDUR_KEYS": keys_dir,
-    }
     passport_public = {
         key: value
         for key, value in passport_claims.items()
@@ -627,7 +968,7 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
         "policy_verdict_counts": counts,
         "visible_tool_calls": call_results,
         "coverage_gaps": sorted(coverage_gaps),
-        "not_claimed": list(NOT_CLAIMED),
+        "not_claimed": list(NOT_CLAIMED) + list(adapter.not_claimed),
         "verification": {
             "chain_file": str(chain_path),
             "valid": True,
@@ -636,6 +977,45 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
         },
         "receipts": verified_claims,
     }
+    if adapter.adapter_id == CLAUDE_PROJECT_CONTEXT_ADAPTER:
+        report["claude_project_context"] = {
+            "schema_version": "ardur.claude_code_projects.project_context.v0.1",
+            "host_semantic_methods": list(CLAUDE_PROJECT_METHODS),
+            "model_provenance": {
+                "requested_model": "example-model-name-placeholder",
+                "resolvedModel": "example-resolved-model-placeholder",
+                "actual_provider_model": "unknown",
+                "fork_subagent": {
+                    "subagent_type": "fork",
+                    "requested_override": "example-ignored-model-override-placeholder",
+                    "override_honored": False,
+                    "effective_model_source": "inherited_parent_model",
+                    "boundary": "host SDK type/comment surface only; live provider execution remains unknown",
+                },
+            },
+            "source_boundaries": {
+                "artifact_output": {
+                    "source_type": "ArtifactOutput",
+                    "version": "artifact-version-placeholder",
+                    "boundary": "host-reported artifact version only",
+                },
+                "web_fetch_output": {
+                    "source_type": "WebFetchOutput",
+                    "artifactRead": {
+                        "slug": "project-context-artifact-placeholder",
+                        "ver": "artifact-version-placeholder",
+                    },
+                    "boundary": "does not prove artifact content or network-fetch internals",
+                },
+                "remote_trigger_output": {
+                    "fields_observed": ["status", "json", "summary"],
+                    "version_field_observed_by_version": dict(CLAUDE_REMOTE_TRIGGER_OUTPUT_VERSION_OBSERVED),
+                    "boundary": "2.1.175/2.1.176/2.1.177 source surfaces did not expose a version field here",
+                },
+            },
+            "unknown_boundaries": list(CLAUDE_PROJECT_UNKNOWN_BOUNDARIES),
+            "claim_boundary": "no-key/local fixture for Claude project-context source semantics; no live Claude claim",
+        }
     redacted_report = _redact_shareable(report, roots=roots)
     report_path.write_text(json.dumps(redacted_report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return redacted_report

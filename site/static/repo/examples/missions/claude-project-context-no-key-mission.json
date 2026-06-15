@@ -1,0 +1,18 @@
+{
+  "agent_id": "claude-project-context-no-key-fixture",
+  "mission": "Exercise local no-key Claude Code project-context semantic events with explicit unknown boundaries",
+  "allowed_tools": [
+    "project_info",
+    "project_read",
+    "project_search",
+    "project_write",
+    "project_delete"
+  ],
+  "forbidden_tools": [],
+  "resource_scope": ["claude/*"],
+  "max_tool_calls": 12,
+  "max_duration_s": 300,
+  "delegation_allowed": false,
+  "max_delegation_depth": 0,
+  "allowed_side_effect_classes": ["none", "internal_write", "state_change"]
+}

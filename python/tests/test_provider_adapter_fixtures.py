@@ -222,3 +222,159 @@ def test_no_key_provider_adapter_runner_reports_missing_default_dependencies(tmp
     assert "missing PyJWT" in completed.stderr
     assert "Run ./scripts/setup-dev.sh" in completed.stderr
     assert not (out_dir / "report.json").exists()
+
+CLAUDE_PROJECT_MISSION = REPO_ROOT / "examples" / "missions" / "claude-project-context-no-key-mission.json"
+CLAUDE_PROJECT_ADAPTER = "claude-code-projects"
+CLAUDE_UNKNOWN_BOUNDARIES = {
+    "provider_hidden_upload_internals",
+    "provider_hidden_rag_internals",
+    "sync_source_internals",
+    "artifact_content_internals",
+    "network_fetch_internals",
+    "actual_provider_model_internals",
+}
+CLAUDE_METHODS = {"project_info", "project_read", "project_search", "project_write", "project_delete"}
+
+
+def _run_claude_project_fixture(tmp_path: Path) -> tuple[dict[str, Any], Path]:
+    from vibap.provider_adapter_fixture import run_fixture
+
+    out_dir = tmp_path / "claude-project-context"
+    report = run_fixture(adapter_id=CLAUDE_PROJECT_ADAPTER, out_dir=out_dir, mission_path=CLAUDE_PROJECT_MISSION)
+    return report, out_dir
+
+
+def _host_events(report: dict[str, Any]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for call in report["visible_tool_calls"]:
+        event = call.get("host_semantic_event")
+        assert isinstance(event, dict)
+        events.append(event)
+    return events
+
+
+def test_claude_project_context_fixture_report_shape_and_boundaries(tmp_path: Path) -> None:
+    """Claude project context is modeled as no-key host-semantic evidence, not live Claude proof."""
+
+    report, _out_dir = _run_claude_project_fixture(tmp_path)
+
+    assert report["receipt_chain_verified"] is True
+    assert report["receipt_count"] == 6
+    assert report["policy_verdict_counts"] == {"allow": 6, "deny": 0, "unknown": 0}
+    assert report["adapter"]["id"] == CLAUDE_PROJECT_ADAPTER
+    assert report["adapter"]["visible_boundary"] == "Claude Code ProjectsInput and ProjectsOutput no-key semantic fixture"
+    assert set(report["claude_project_context"]["host_semantic_methods"]) == CLAUDE_METHODS
+    assert report["claude_project_context"]["claim_boundary"] == (
+        "no-key/local fixture for Claude project-context source semantics; no live Claude claim"
+    )
+    assert report["claude_project_context"]["model_provenance"]["actual_provider_model"] == "unknown"
+    assert report["claude_project_context"]["model_provenance"]["resolvedModel"] == "example-resolved-model-placeholder"
+    assert "live Claude account/project mutation" in report["not_claimed"]
+    assert "provider-side RAG or sync-source inspection" in report["not_claimed"]
+    assert set(report["coverage_gaps"]).issuperset(CLAUDE_UNKNOWN_BOUNDARIES)
+
+
+def test_claude_project_context_host_semantic_events_are_redacted_and_classified(tmp_path: Path) -> None:
+    """Project read/write/search events keep provenance while stripping raw content and local paths."""
+
+    report, _out_dir = _run_claude_project_fixture(tmp_path)
+    events = _host_events(report)
+    methods = {str(event["method"]) for event in events}
+
+    assert methods == CLAUDE_METHODS
+    for event in events:
+        assert event["event_class"] == "host_semantic_event"
+        assert event["evidence_class"] == ["policy_input", "session_context", "host_semantic_event"]
+        assert set(event["unknown_boundaries"]) == CLAUDE_UNKNOWN_BOUNDARIES
+
+    read_event = next(event for event in events if event["method"] == "project_read")
+    read_output = read_event["host_reported_output"]
+    assert read_output["content"]["content_present"] is True
+    assert read_output["content"]["content_bytes"] == len("host-reported project note body".encode("utf-8"))
+    assert "content_sha256" in read_output["content"]
+    assert "host-reported project note body" not in json.dumps(read_output, sort_keys=True)
+    assert read_output["local_file"]["redacted_path"] == "<OUTPUT_DIR>/host-local/project-read-result.md"
+    assert read_output["local_file"]["path_visibility"] == "redacted_local_path"
+
+    info_event = next(event for event in events if event["method"] == "project_info")
+    sync_config = info_event["host_reported_output"]["sync_sources"][0]["config"]
+    assert sync_config["redacted"] is True
+    assert sync_config["config_visibility"] == "opaque_sync_config"
+    assert "raw-config-value-that-must-not-leak" not in json.dumps(sync_config, sort_keys=True)
+
+
+def test_claude_project_context_shareable_report_has_no_raw_local_or_project_content(tmp_path: Path) -> None:
+    """Persisted shareable report must not leak local roots, raw project content, or opaque sync config."""
+
+    report, out_dir = _run_claude_project_fixture(tmp_path)
+    report_text = (out_dir / "report.json").read_text(encoding="utf-8")
+    claims_text = (out_dir / "passport.claims.redacted.json").read_text(encoding="utf-8")
+    combined = json.dumps(report, sort_keys=True) + report_text + claims_text
+
+    forbidden = (
+        str(out_dir),
+        str(out_dir.resolve()),
+        str(REPO_ROOT),
+        "/Users/",
+        "/private/",
+        "raw-config-value-that-must-not-leak",
+        "host-reported project note body",
+        "inline host-supplied project context",
+    )
+    for marker in forbidden:
+        assert marker not in combined
+    assert "<OUTPUT_DIR>/host-local/project-upload-source.md" in combined
+    assert "<OUTPUT_DIR>/host-local/project-read-result.md" in combined
+    assert "<MISSION_TEMPLATE>" in combined
+
+
+def test_claude_project_context_source_boundary_fields_do_not_invent_remote_trigger_version(tmp_path: Path) -> None:
+    """Artifact/WebFetch version provenance is distinct from absent RemoteTriggerOutput.version."""
+
+    report, _out_dir = _run_claude_project_fixture(tmp_path)
+    source_boundaries = report["claude_project_context"]["source_boundaries"]
+
+    assert source_boundaries["artifact_output"] == {
+        "source_type": "ArtifactOutput",
+        "version": "artifact-version-placeholder",
+        "boundary": "host-reported artifact version only",
+    }
+    assert source_boundaries["web_fetch_output"]["artifactRead"] == {
+        "slug": "project-context-artifact-placeholder",
+        "ver": "artifact-version-placeholder",
+    }
+    remote_trigger = source_boundaries["remote_trigger_output"]
+    assert remote_trigger["fields_observed"] == ["status", "json", "summary"]
+    assert remote_trigger["version_field_observed_by_version"] == {
+        "2.1.175": False,
+        "2.1.176": False,
+        "2.1.177": False,
+    }
+    assert "version" not in remote_trigger
+
+
+def test_claude_project_write_rejects_ambiguous_content_and_local_path(tmp_path: Path) -> None:
+    """A project_write fixture cannot carry both inline content and local_path evidence."""
+
+    from vibap.provider_adapter_fixture import normalize_claude_project_context_call
+
+    with pytest.raises(ValueError, match="project_write.content and project_write.local_path are mutually exclusive"):
+        normalize_claude_project_context_call(
+            {
+                "call_id": "bad-claude-project-write",
+                "tool_name": "project_write",
+                "arguments": {
+                    "host_semantic_event": {
+                        "method": "project_write",
+                        "requested_input": {
+                            "method": "project_write",
+                            "path": "claude/ambiguous.md",
+                            "content": "raw inline content",
+                            "local_path": str(tmp_path / "ambiguous.md"),
+                        },
+                        "host_reported_output": {},
+                    }
+                },
+            },
+            roots={"OUTPUT_DIR": tmp_path},
+        )

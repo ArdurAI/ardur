@@ -30,6 +30,7 @@
     "examples/_shared/demo_scenes.py": "repo/examples/_shared/demo_scenes.py",
     "examples/_shared/verify_bundle.py": "repo/examples/_shared/verify_bundle.py",
     "examples/ardur-personal-extension/manifest.json": "repo/examples/ardur-personal-extension/manifest.json",
+    "examples/missions/claude-project-context-no-key-mission.json": "repo/examples/missions/claude-project-context-no-key-mission.json",
     "examples/missions/delegation-mission.json": "repo/examples/missions/delegation-mission.json",
     "examples/missions/minimal-mission.json": "repo/examples/missions/minimal-mission.json",
     "examples/missions/provider-adapter-no-key-mission.json": "repo/examples/missions/provider-adapter-no-key-mission.json",
