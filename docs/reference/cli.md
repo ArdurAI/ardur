@@ -122,11 +122,17 @@ ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
 ### `ardur doctor-claude-code`
 
 Verify the Claude Code plugin and active passport setup. Reports missing
-plugin files, missing `claude` binary, missing or stale `active_mission.jwt`.
+plugin files, missing `claude` binary, missing or stale `active_mission.jwt`,
+and machine-readable `next_steps` remediation hints when a check fails.
 
 ```text
 ardur doctor-claude-code [--home DIR] [--plugin-dir DIR]
 ```
+
+The command is local-only: it inspects files, PATH, and Claude Code plugin
+validation state, but does not run a live Claude prompt or call a provider API.
+Use failed `next_steps` entries to recover the setup, then re-run the doctor
+before claiming the local Claude Code path is ready.
 
 ### `ardur uninstall`
 

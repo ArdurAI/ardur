@@ -270,3 +270,111 @@ def test_claude_code_doctor_reports_missing_plugin_files(tmp_path):
     checks = {check["name"]: check for check in response["checks"]}
     assert checks["plugin_dir"]["ok"] is False
     assert checks["plugin_manifest"]["ok"] is False
+    assert "next_steps" in response
+    steps = response["next_steps"]
+    assert isinstance(steps, list)
+    assert len(steps) > 0
+    step_checks = {step["check"]: step for step in steps}
+    assert "plugin_files" in step_checks
+    assert step_checks["plugin_files"]["action"] == "repair_plugin_path"
+    assert "ardur doctor-claude-code" in step_checks["plugin_files"]["command"]
+
+
+def test_claude_code_doctor_omits_next_steps_when_setup_is_healthy(tmp_path, monkeypatch):
+    plugin_dir = tmp_path / "healthy-plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / ".claude-plugin").mkdir()
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text("{}")
+    hooks_dir = plugin_dir / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text("{}")
+    for hook_name in ("pre_tool_use", "post_tool_use", "subagent_start", "subagent_stop"):
+        (hooks_dir / hook_name).write_text("#!/bin/sh\ntrue\n")
+        (hooks_dir / hook_name).chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "active_mission.jwt").write_text("eyJhbG...fake")
+
+    # Make the test deterministic: fake `claude` on PATH and make
+    # `claude plugin validate` succeed so the doctor reports ok=True.
+    import shutil as _shutil
+    _orig_which = _shutil.which
+
+    def _fake_which(cmd, **kw):
+        if cmd == "claude":
+            return "/fake/claude"
+        return _orig_which(cmd, **kw)
+
+    monkeypatch.setattr(_shutil, "which", _fake_which)
+
+    import subprocess as _sp
+    _orig_run = _sp.run
+
+    def _fake_run(cmd, **kw):
+        if isinstance(cmd, list) and cmd and cmd[0] == "/fake/claude" and "validate" in cmd:
+            return _orig_run(["true"], **kw)
+        return _orig_run(cmd, **kw)
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+
+    response = claude_code_doctor(plugin_dir=plugin_dir, home=home)
+
+    assert response["ok"] is True
+    assert "next_steps" in response
+    assert response["next_steps"] == []
+
+
+def test_claude_code_doctor_reports_plugin_validate_failure(tmp_path, monkeypatch):
+    plugin_dir = tmp_path / "bad-plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / ".claude-plugin").mkdir()
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text("{}")
+    hooks_dir = plugin_dir / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text("{}")
+    for hook_name in ("pre_tool_use", "post_tool_use", "subagent_start", "subagent_stop"):
+        (hooks_dir / hook_name).write_text("#!/bin/sh\ntrue\n")
+        (hooks_dir / hook_name).chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "active_mission.jwt").write_text("eyJhbG...fake")
+
+    # Make this failure-mode regression independent of the host machine:
+    # the doctor should see Claude as installed, then report the failing
+    # plugin validation as the next actionable remediation.
+    import shutil as _shutil
+    _orig_which = _shutil.which
+
+    def _fake_which(cmd, **kw):
+        if cmd == "claude":
+            return "/fake/claude"
+        return _orig_which(cmd, **kw)
+
+    monkeypatch.setattr(_shutil, "which", _fake_which)
+
+    import subprocess as _sp
+    _orig_run = _sp.run
+
+    def _fake_run(cmd, **kw):
+        expected = ["/fake/claude", "plugin", "validate", str(plugin_dir.resolve())]
+        if cmd == expected:
+            return _sp.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout="",
+                stderr="deterministic plugin validation failure",
+            )
+        return _orig_run(cmd, **kw)
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+
+    response = claude_code_doctor(plugin_dir=plugin_dir, home=home)
+
+    assert response["ok"] is False
+    assert "next_steps" in response
+    steps = response["next_steps"]
+    step_checks = {step["check"]: step for step in steps}
+    assert "plugin_validate" in step_checks
+    assert step_checks["plugin_validate"]["action"] == "validate_plugin"
+    assert "claude plugin validate" in step_checks["plugin_validate"]["command"]
+    assert "deterministic plugin validation failure" in step_checks["plugin_validate"]["detail"]

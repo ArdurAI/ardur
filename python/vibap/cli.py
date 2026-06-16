@@ -459,6 +459,89 @@ def _write_private_text(path: Path, text: str) -> None:
             os.close(fd)
 
 
+def _claude_code_doctor_next_steps(
+    checks: list[dict[str, object]],
+    plugin: Path,
+    active_passport: Path,
+) -> list[dict[str, str]]:
+    by_name = {str(check["name"]): check for check in checks}
+    steps: list[dict[str, str]] = []
+    plugin_check_names = [
+        "plugin_dir",
+        "plugin_manifest",
+        "plugin_hooks",
+        "pre_tool_use",
+        "post_tool_use",
+        "subagent_start",
+        "subagent_stop",
+    ]
+    missing_plugin_checks = [
+        name for name in plugin_check_names if not bool(by_name.get(name, {}).get("ok"))
+    ]
+    if missing_plugin_checks:
+        steps.append(
+            {
+                "check": "plugin_files",
+                "action": "repair_plugin_path",
+                "command": shlex.join(["ardur", "doctor-claude-code", "--plugin-dir", str(plugin)]),
+                "detail": "Missing Claude Code plugin checks: " + ", ".join(missing_plugin_checks),
+            }
+        )
+
+    claude_check = by_name.get("claude_binary", {})
+    if not bool(claude_check.get("ok")):
+        steps.append(
+            {
+                "check": "claude_binary",
+                "action": "install_claude_code",
+                "command": "claude --version",
+                "detail": "Install Claude Code CLI and ensure `claude` is on PATH, then rerun doctor.",
+            }
+        )
+
+    active_passport_check = by_name.get("active_passport", {})
+    if not bool(active_passport_check.get("ok")):
+        steps.append(
+            {
+                "check": "active_passport",
+                "action": "run_protect_claude_code",
+                "command": shlex.join(
+                    [
+                        "ardur",
+                        "protect",
+                        "claude-code",
+                        "--scope",
+                        "<your-project>",
+                        "--home",
+                        str(active_passport.parent),
+                        "--plugin-dir",
+                        str(plugin),
+                    ]
+                ),
+                "detail": "Create an active Mission Passport for the local Claude Code plugin.",
+            }
+        )
+
+    plugin_validate_check = by_name.get("plugin_validate", {})
+    if (
+        not bool(plugin_validate_check.get("ok"))
+        and not missing_plugin_checks
+        and bool(claude_check.get("ok"))
+    ):
+        steps.append(
+            {
+                "check": "plugin_validate",
+                "action": "validate_plugin",
+                "command": shlex.join(["claude", "plugin", "validate", str(plugin)]),
+                "detail": str(
+                    plugin_validate_check.get("detail")
+                    or "Claude Code plugin validation failed; inspect the validation output."
+                ),
+            }
+        )
+    return steps
+
+
 def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None) -> dict[str, object]:
     plugin = (plugin_dir or _default_claude_plugin_dir()).expanduser().resolve()
     checks = _claude_code_plugin_checks(plugin)
@@ -491,7 +574,12 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
             "ok": False,
             "detail": "skipped; missing claude binary or plugin files",
         })
-    return {"ok": all(bool(check["ok"]) for check in checks), "checks": checks}
+    ok = all(bool(check["ok"]) for check in checks)
+    return {
+        "ok": ok,
+        "checks": checks,
+        "next_steps": [] if ok else _claude_code_doctor_next_steps(checks, plugin, active_passport),
+    }
 
 
 def _resolve_protect_policies(

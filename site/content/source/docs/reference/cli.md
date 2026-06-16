@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "394592e723b217e4709cedf3c9c38744f35ecb237a6681f53fef9ebd2c50ea5c"
+source_sha256: "b7887058be9074fdeec86c0aa26c832e844fe3e7be0886f79fadbaced4332501"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -139,11 +139,17 @@ ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
 ### `ardur doctor-claude-code`
 
 Verify the Claude Code plugin and active passport setup. Reports missing
-plugin files, missing `claude` binary, missing or stale `active_mission.jwt`.
+plugin files, missing `claude` binary, missing or stale `active_mission.jwt`,
+and machine-readable `next_steps` remediation hints when a check fails.
 
 ```text
 ardur doctor-claude-code [--home DIR] [--plugin-dir DIR]
 ```
+
+The command is local-only: it inspects files, PATH, and Claude Code plugin
+validation state, but does not run a live Claude prompt or call a provider API.
+Use failed `next_steps` entries to recover the setup, then re-run the doctor
+before claiming the local Claude Code path is ready.
 
 ### `ardur uninstall`
 
