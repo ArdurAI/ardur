@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b7887058be9074fdeec86c0aa26c832e844fe3e7be0886f79fadbaced4332501"
+source_sha256: "580a8b44762d4f149f7a98648f01ad1fcc288ec8203be8cb0bcc07c378ab9ffe"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -259,6 +259,14 @@ ardur claude-code-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
 
 `--verify-expiry` also enforces short receipt expiry windows during chain
 verification (off by default so reports work on archived chains).
+
+When no local Claude Code hook receipts are present, the JSON report includes a
+`next_steps` array and the human output prints a concise "Next steps" section:
+configure `ardur protect claude-code`, run the printed
+`claude --plugin-dir ...` command, then rerun `ardur claude-code-report`. These
+hints use placeholders such as `<your-project>`, `<ardur-home>`, and
+`<claude-code-plugin>`; they do not call Claude, contact a provider, or imply
+visibility into provider-hidden actions.
 
 ### `ardur gemini-cli-fixture`
 

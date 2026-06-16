@@ -35,6 +35,44 @@ def _claude_code_meta(claim: Mapping[str, Any]) -> dict[str, Any]:
     return dict(meta) if isinstance(meta, dict) else {}
 
 
+def _empty_report_next_steps() -> list[dict[str, str]]:
+    """Deterministic local remediation hints for a report with no receipts."""
+    return [
+        {
+            "condition": "no_claude_code_receipts",
+            "action": "configure_claude_code_protection",
+            "command": (
+                "ardur protect claude-code --scope <your-project> "
+                "--home <ardur-home> --plugin-dir <claude-code-plugin>"
+            ),
+            "detail": (
+                "Create a local Mission Passport for the project. The command prints "
+                "the Claude Code plugin invocation to run next."
+            ),
+        },
+        {
+            "condition": "no_claude_code_receipts",
+            "action": "run_claude_code_with_plugin",
+            "command": "VIBAP_HOME=<ardur-home> claude --plugin-dir <claude-code-plugin>",
+            "detail": (
+                "Run a local Claude Code session with the configured plugin; hook "
+                "receipts should appear under "
+                "<ardur-home>/claude-code-hook/<trace-id>/receipts.jsonl."
+            ),
+        },
+        {
+            "condition": "no_claude_code_receipts",
+            "action": "rerun_receipt_report",
+            "command": "ardur claude-code-report --home <ardur-home>",
+            "detail": (
+                "Verify the local receipt chains after the run. This report reads "
+                "local hook receipts only and does not call live providers or prove "
+                "provider-hidden actions."
+            ),
+        },
+    ]
+
+
 def _is_lifecycle_claim(claim: Mapping[str, Any]) -> bool:
     return str(claim.get("tool", "")) in {"SubagentStart", "SubagentStop"}
 
@@ -309,6 +347,7 @@ def build_claude_code_report(
         "chain_verification": {"ok": True, "verify_expiry": verify_expiry},
         "chain_count": len(chains),
         "receipt_count": len(all_claims),
+        "next_steps": _empty_report_next_steps() if not all_claims else [],
         "totals": {
             "tools": _counter_dict([str(claim.get("tool", "")) for claim in all_claims]),
             "verdicts": _counter_dict([str(claim.get("verdict", "")) for claim in all_claims]),

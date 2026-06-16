@@ -243,6 +243,14 @@ ardur claude-code-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
 `--verify-expiry` also enforces short receipt expiry windows during chain
 verification (off by default so reports work on archived chains).
 
+When no local Claude Code hook receipts are present, the JSON report includes a
+`next_steps` array and the human output prints a concise "Next steps" section:
+configure `ardur protect claude-code`, run the printed
+`claude --plugin-dir ...` command, then rerun `ardur claude-code-report`. These
+hints use placeholders such as `<your-project>`, `<ardur-home>`, and
+`<claude-code-plugin>`; they do not call Claude, contact a provider, or imply
+visibility into provider-hidden actions.
+
 ### `ardur gemini-cli-fixture`
 
 Write a local-only Gemini CLI settings/context fixture and print a redacted

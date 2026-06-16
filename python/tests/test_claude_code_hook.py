@@ -419,11 +419,66 @@ def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(tmp_path, 
         verify_expiry=False,
     )
     assert report["totals"]["dispatch_count"] == 1
+    assert report["next_steps"] == []
     assert report["totals"]["dispatch_launch_count"] == 1
     assert report["totals"]["dispatch_observation_count"] == 0
     assert report["totals"]["dispatch_receipt_count"] == 1
     assert report["totals"]["tools"] == {"Agent": 1}
     assert report["totals"]["side_effect_classes"] == {"subagent_launch": 1}
+
+
+def test_empty_claude_code_report_includes_local_next_steps(tmp_path):
+    from vibap.claude_code_report import build_claude_code_report
+
+    report = build_claude_code_report(
+        home=tmp_path,
+        chain_dir=tmp_path / "missing-chain",
+        keys_dir=tmp_path / "keys",
+        verify_expiry=False,
+    )
+
+    assert report["chain_count"] == 0
+    assert report["receipt_count"] == 0
+    steps = report["next_steps"]
+    assert [step["action"] for step in steps] == [
+        "configure_claude_code_protection",
+        "run_claude_code_with_plugin",
+        "rerun_receipt_report",
+    ]
+    rendered_steps = repr(steps)
+    assert "ardur protect claude-code" in rendered_steps
+    assert "claude --plugin-dir" in rendered_steps
+    assert "ardur claude-code-report" in rendered_steps
+    assert "<your-project>" in rendered_steps
+    assert "<ardur-home>" in rendered_steps
+    assert "<claude-code-plugin>" in rendered_steps
+    assert str(tmp_path) not in rendered_steps
+
+
+def test_empty_claude_code_report_human_output_prints_next_steps(tmp_path, capsys):
+    import argparse
+
+    from vibap.cli import cmd_claude_code_report
+
+    exit_code = cmd_claude_code_report(
+        argparse.Namespace(
+            home=tmp_path,
+            chain_dir=tmp_path / "missing-chain",
+            keys_dir=tmp_path / "keys",
+            verify_expiry=False,
+            json=False,
+        )
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Ardur Claude Code receipt report: 0 receipts across 0 chains" in output
+    assert "Next steps:" in output
+    assert "ardur protect claude-code" in output
+    assert "claude --plugin-dir" in output
+    assert "ardur claude-code-report" in output
+    next_steps_output = output.split("Next steps:", 1)[1]
+    assert str(tmp_path) not in next_steps_output
 
 
 def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(tmp_path, monkeypatch):

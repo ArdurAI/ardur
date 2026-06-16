@@ -172,6 +172,15 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     )
     print(f"Per-child attribution: {report['coverage']['per_child_attribution']}")
     print(f"Attribution: {report['coverage']['attribution']}")
+    next_steps = report.get("next_steps") or []
+    if next_steps:
+        print("Next steps:")
+        for index, step in enumerate(next_steps, start=1):
+            command = step.get("command", "")
+            detail = step.get("detail", "")
+            print(f"{index}. {command}")
+            if detail:
+                print(f"   {detail}")
     return 0
 
 
