@@ -198,7 +198,7 @@ def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
     def fake_fsync(fd: int) -> None:
         fsync_calls.append(fd)
 
-    def tracked_open(file: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+    def tracked_open(file: str | os.PathLike[str], flags: int, mode: int = 0o600) -> int:
         open_calls.append((os.fspath(file), flags, mode))
         return real_open(file, flags, mode)
 
