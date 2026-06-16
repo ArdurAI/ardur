@@ -786,6 +786,39 @@ def _status_from_verdict(verdict: str) -> str:
     return "deny"
 
 
+def _empty_report_next_steps() -> list[dict[str, str]]:
+    """Deterministic local remediation hints for a Codex app-server report with no receipts."""
+    return [
+        {
+            "condition": "no_codex_app_server_receipts",
+            "action": "create_codex_app_server_fixture",
+            "command": "ardur codex-app-server-fixture --project-dir <your-project>",
+            "detail": (
+                "Create a local-only Codex app-server fixture and inspect the generated config/schema. "
+                "Use --home <ardur-home> or --chain-dir <chain-dir> when you need explicit local paths."
+            ),
+        },
+        {
+            "condition": "no_codex_app_server_receipts",
+            "action": "feed_local_codex_app_server_event",
+            "command": "ardur codex-app-server-event --keys-dir <ardur-home>/keys",
+            "detail": (
+                "Feed a local Codex app-server host-event JSON object through Ardur's fixture/helper "
+                "so a local receipt chain is written."
+            ),
+        },
+        {
+            "condition": "no_codex_app_server_receipts",
+            "action": "rerun_receipt_report",
+            "command": "ardur codex-app-server-report --home <ardur-home>",
+            "detail": (
+                "Verify the local receipt chains after the event. This report reads local fixture "
+                "receipts only and does not prove live Codex cloud behavior or provider-hidden actions."
+            ),
+        },
+    ]
+
+
 def _digest_text(value: str) -> dict[str, str]:
     return {
         "alg": "sha-256",
@@ -933,6 +966,7 @@ def build_shareable_report(
         "unknown_boundary_count": len(coverage_gaps),
         "verification": verification,
         "invalid_chains": invalid_chains,
+        "next_steps": _empty_report_next_steps() if not receipt_claims else [],
         "claim_boundary": {
             "scope": "local_fixture_only",
             "not_claimed": [

@@ -223,10 +223,64 @@ def test_codex_host_events_emit_allow_deny_unknown_receipts_and_redacted_report(
     )
     report_text = json.dumps(report, sort_keys=True)
     assert report["policy_verdict_counts"] == {"allow": 1, "deny": 1, "unknown": 1}
+    assert report["next_steps"] == []
     assert "provider_hidden_actions" in report["coverage_gaps"]
     assert "unmapped_codex_host_event_schema" in report["coverage_gaps"]
     assert str(tmp_path) not in report_text
     assert "raw-secret-value-that-must-not-be-copied" not in report_text
+
+
+def test_empty_codex_app_server_report_includes_local_next_steps(tmp_path):
+    from vibap.codex_app_server_fixture import build_shareable_report
+
+    report = build_shareable_report(
+        home=tmp_path / "home",
+        chain_dir=tmp_path / "missing-chain",
+        keys_dir=tmp_path / "keys",
+        verify_expiry=False,
+    )
+
+    assert report["chain_count"] == 0
+    assert report["receipt_count"] == 0
+    steps = report["next_steps"]
+    assert [step["action"] for step in steps] == [
+        "create_codex_app_server_fixture",
+        "feed_local_codex_app_server_event",
+        "rerun_receipt_report",
+    ]
+    rendered_steps = repr(steps)
+    assert "ardur codex-app-server-fixture --project-dir <your-project>" in rendered_steps
+    assert "ardur codex-app-server-event" in rendered_steps
+    assert "ardur codex-app-server-report" in rendered_steps
+    assert "<your-project>" in rendered_steps
+    assert "<ardur-home>" in rendered_steps
+    assert str(tmp_path) not in rendered_steps
+
+
+def test_empty_codex_app_server_report_human_output_prints_next_steps(tmp_path, capsys):
+    import argparse
+
+    from vibap.cli import cmd_codex_app_server_report
+
+    exit_code = cmd_codex_app_server_report(
+        argparse.Namespace(
+            home=tmp_path / "home",
+            chain_dir=tmp_path / "missing-chain",
+            keys_dir=tmp_path / "keys",
+            verify_expiry=False,
+            json=False,
+        )
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Ardur Codex app-server receipt report: 0 receipts across 0 chains" in output
+    assert "Next steps:" in output
+    assert "ardur codex-app-server-fixture --project-dir <your-project>" in output
+    assert "ardur codex-app-server-event" in output
+    assert "ardur codex-app-server-report" in output
+    next_steps_output = output.split("Next steps:", 1)[1]
+    assert str(tmp_path) not in next_steps_output
 
 
 def test_codex_shareable_report_summarizes_high_risk_target_text(tmp_path, monkeypatch):

@@ -294,6 +294,15 @@ ardur gemini-cli-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                         [--verify-expiry] [--json]
 ```
 
+When no local Gemini CLI hook receipts are present, the JSON report includes a
+`next_steps` array and the human output prints a concise "Next steps" section:
+create a local fixture with `ardur gemini-cli-fixture --project-dir <your-project>`,
+configure Gemini CLI to use the generated local hook/settings, run a local
+Gemini CLI command that triggers a hook, then rerun `ardur gemini-cli-report`.
+These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
+`<chain-dir>`; they do not call Gemini, contact a provider, or imply visibility
+into provider-hidden actions.
+
 ### `ardur codex-app-server-fixture`
 
 Write a local-only Codex app-server config/schema/context fixture and print a
@@ -338,6 +347,15 @@ enforcement.
 ardur codex-app-server-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                               [--verify-expiry] [--json]
 ```
+
+When no local Codex app-server receipts are present, the JSON report includes a
+`next_steps` array and the human output prints a concise "Next steps" section:
+create a local fixture with `ardur codex-app-server-fixture --project-dir <your-project>`,
+feed a local Codex app-server host-event JSON object through
+`ardur codex-app-server-event`, then rerun `ardur codex-app-server-report`.
+These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
+`<chain-dir>`; they do not call Codex, contact a provider, prove live Codex
+cloud behavior, or imply visibility into provider-hidden actions.
 
 ### `ardur posture scan`
 

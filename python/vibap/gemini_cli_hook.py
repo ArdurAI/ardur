@@ -757,6 +757,39 @@ def _status_from_verdict(verdict: str) -> str:
     return "deny"
 
 
+def _empty_report_next_steps() -> list[dict[str, str]]:
+    """Deterministic local remediation hints for a Gemini report with no receipts."""
+    return [
+        {
+            "condition": "no_gemini_cli_receipts",
+            "action": "create_gemini_cli_fixture",
+            "command": "ardur gemini-cli-fixture --project-dir <your-project>",
+            "detail": (
+                "Create a local-only Gemini CLI fixture and inspect the generated settings/context. "
+                "Use --home <ardur-home> or --chain-dir <chain-dir> when you need explicit local paths."
+            ),
+        },
+        {
+            "condition": "no_gemini_cli_receipts",
+            "action": "run_gemini_cli_with_local_hook",
+            "command": "gemini",
+            "detail": (
+                "Configure Gemini CLI to use the generated local hook/settings, then run a local "
+                "Gemini CLI command for <your-project> that triggers a hook."
+            ),
+        },
+        {
+            "condition": "no_gemini_cli_receipts",
+            "action": "rerun_receipt_report",
+            "command": "ardur gemini-cli-report --home <ardur-home>",
+            "detail": (
+                "Verify the local receipt chains after the run. This report reads local fixture "
+                "receipts only and does not prove live provider behavior or provider-hidden actions."
+            ),
+        },
+    ]
+
+
 def build_shareable_report(
     *,
     home: Path | None = None,
@@ -828,6 +861,7 @@ def build_shareable_report(
         "unknown_boundary_count": len(coverage_gaps),
         "verification": verification,
         "invalid_chains": invalid_chains,
+        "next_steps": _empty_report_next_steps() if not receipt_claims else [],
         "claim_boundary": {
             "scope": "local_fixture_only",
             "not_claimed": [

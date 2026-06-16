@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "580a8b44762d4f149f7a98648f01ad1fcc288ec8203be8cb0bcc07c378ab9ffe"
+source_sha256: "f68780c605900c56072c6be15fd778c135b23dcc9b90588a8f2d48fa12f94594"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -311,6 +311,15 @@ ardur gemini-cli-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                         [--verify-expiry] [--json]
 ```
 
+When no local Gemini CLI hook receipts are present, the JSON report includes a
+`next_steps` array and the human output prints a concise "Next steps" section:
+create a local fixture with `ardur gemini-cli-fixture --project-dir <your-project>`,
+configure Gemini CLI to use the generated local hook/settings, run a local
+Gemini CLI command that triggers a hook, then rerun `ardur gemini-cli-report`.
+These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
+`<chain-dir>`; they do not call Gemini, contact a provider, or imply visibility
+into provider-hidden actions.
+
 ### `ardur codex-app-server-fixture`
 
 Write a local-only Codex app-server config/schema/context fixture and print a
@@ -355,6 +364,15 @@ enforcement.
 ardur codex-app-server-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                               [--verify-expiry] [--json]
 ```
+
+When no local Codex app-server receipts are present, the JSON report includes a
+`next_steps` array and the human output prints a concise "Next steps" section:
+create a local fixture with `ardur codex-app-server-fixture --project-dir <your-project>`,
+feed a local Codex app-server host-event JSON object through
+`ardur codex-app-server-event`, then rerun `ardur codex-app-server-report`.
+These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
+`<chain-dir>`; they do not call Codex, contact a provider, prove live Codex
+cloud behavior, or imply visibility into provider-hidden actions.
 
 ### `ardur posture scan`
 

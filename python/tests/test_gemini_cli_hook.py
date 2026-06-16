@@ -249,10 +249,63 @@ def test_gemini_hook_allow_deny_unknown_receipts_and_redacted_report(tmp_path, m
     )
     report_text = json.dumps(report, sort_keys=True)
     assert report["policy_verdict_counts"] == {"allow": 1, "deny": 1, "unknown": 1}
+    assert report["next_steps"] == []
     assert report["unknown_boundary_count"] >= 1
     assert "provider_hidden_actions" in report["coverage_gaps"]
     assert str(tmp_path) not in report_text
     assert "raw-secret-value-that-must-not-be-copied" not in report_text
+
+
+def test_empty_gemini_report_includes_local_next_steps(tmp_path):
+    from vibap.gemini_cli_hook import build_shareable_report
+
+    report = build_shareable_report(
+        home=tmp_path / "home",
+        chain_dir=tmp_path / "missing-chain",
+        keys_dir=tmp_path / "keys",
+        verify_expiry=False,
+    )
+
+    assert report["chain_count"] == 0
+    assert report["receipt_count"] == 0
+    steps = report["next_steps"]
+    assert [step["action"] for step in steps] == [
+        "create_gemini_cli_fixture",
+        "run_gemini_cli_with_local_hook",
+        "rerun_receipt_report",
+    ]
+    rendered_steps = repr(steps)
+    assert "ardur gemini-cli-fixture --project-dir <your-project>" in rendered_steps
+    assert "settings" in rendered_steps
+    assert "ardur gemini-cli-report" in rendered_steps
+    assert "<your-project>" in rendered_steps
+    assert "<ardur-home>" in rendered_steps
+    assert str(tmp_path) not in rendered_steps
+
+
+def test_empty_gemini_report_human_output_prints_next_steps(tmp_path, capsys):
+    import argparse
+
+    from vibap.cli import cmd_gemini_cli_report
+
+    exit_code = cmd_gemini_cli_report(
+        argparse.Namespace(
+            home=tmp_path / "home",
+            chain_dir=tmp_path / "missing-chain",
+            keys_dir=tmp_path / "keys",
+            verify_expiry=False,
+            json=False,
+        )
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Ardur Gemini CLI receipt report: 0 receipts across 0 chains" in output
+    assert "Next steps:" in output
+    assert "ardur gemini-cli-fixture --project-dir <your-project>" in output
+    assert "ardur gemini-cli-report" in output
+    next_steps_output = output.split("Next steps:", 1)[1]
+    assert str(tmp_path) not in next_steps_output
 
 
 @pytest.mark.parametrize(

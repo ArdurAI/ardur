@@ -56,6 +56,19 @@ def _print_json(payload: dict) -> None:
     print(json.dumps(payload, indent=2))
 
 
+def _print_report_next_steps(report: dict) -> None:
+    next_steps = report.get("next_steps") or []
+    if not next_steps:
+        return
+    print("Next steps:")
+    for index, step in enumerate(next_steps, start=1):
+        command = step.get("command", "")
+        detail = step.get("detail", "")
+        print(f"{index}. {command}")
+        if detail:
+            print(f"   {detail}")
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     proxy = GovernanceProxy(
@@ -172,15 +185,7 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     )
     print(f"Per-child attribution: {report['coverage']['per_child_attribution']}")
     print(f"Attribution: {report['coverage']['attribution']}")
-    next_steps = report.get("next_steps") or []
-    if next_steps:
-        print("Next steps:")
-        for index, step in enumerate(next_steps, start=1):
-            command = step.get("command", "")
-            detail = step.get("detail", "")
-            print(f"{index}. {command}")
-            if detail:
-                print(f"   {detail}")
+    _print_report_next_steps(report)
     return 0
 
 
@@ -217,6 +222,7 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     print(f"Chains: {report['chain_dir']}")
     print(f"Verdicts: {report['policy_verdict_counts']}")
     print(f"Coverage gaps: {report['coverage_gaps']}")
+    _print_report_next_steps(report)
     return 0
 
 
@@ -255,6 +261,7 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
     print(f"Chains: {report['chain_dir']}")
     print(f"Verdicts: {report['policy_verdict_counts']}")
     print(f"Coverage gaps: {report['coverage_gaps']}")
+    _print_report_next_steps(report)
     return 0
 
 
