@@ -187,9 +187,10 @@ def _read_json(path: Path, default: Any) -> Any:
 
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    replaced = False
     try:
         with os.fdopen(fd, "wb") as handle:
             fd = -1
@@ -197,10 +198,16 @@ def _write_json(path: Path, payload: Any) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         tmp.replace(path)
+        replaced = True
         path.chmod(0o600)
     finally:
         if fd >= 0:
             os.close(fd)
+        if not replaced:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _new_hub_token() -> str:

@@ -192,12 +192,21 @@ def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
     from vibap import personal_hub
 
     fsync_calls: list[int] = []
+    open_calls: list[tuple[str, int, int]] = []
+    real_open = personal_hub.os.open
 
     def fake_fsync(fd: int) -> None:
         fsync_calls.append(fd)
 
+    def tracked_open(file: str | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        open_calls.append((os.fspath(file), flags, mode))
+        return real_open(file, flags, mode)
+
     monkeypatch.setattr(personal_hub.os, "fsync", fake_fsync)
+    monkeypatch.setattr(personal_hub.os, "open", tracked_open)
     state_path = tmp_path / "state.json"
+    legacy_tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+    legacy_tmp.write_text("legacy temp must not be reused", encoding="utf-8")
     old_umask = os.umask(0o022)
     try:
         personal_hub._write_json(state_path, {"token": "placeholder-value", "ok": True})
@@ -210,6 +219,15 @@ def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
     }
     assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
     assert fsync_calls, "Personal Hub JSON state must be fsynced before rename"
+    assert legacy_tmp.read_text(encoding="utf-8") == "legacy temp must not be reused"
+    assert open_calls
+    tmp_name, flags, mode = open_calls[0]
+    assert tmp_name != os.fspath(legacy_tmp)
+    assert tmp_name.endswith(".tmp")
+    assert ".json." in tmp_name
+    assert flags & os.O_EXCL
+    assert mode == 0o600
+    assert not os.path.exists(tmp_name)
 
 
 def test_hub_session_state_files_remain_private_with_permissive_umask(tmp_path):
