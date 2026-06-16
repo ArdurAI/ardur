@@ -383,6 +383,16 @@ Credential-like values are emitted as `[REDACTED]`; local absolute paths are
 replaced with stable `<PATH:...>` placeholders so reports can be shared without
 leaking private workstation paths.
 
+When receipt evidence is missing, unverified because public keys are unavailable,
+or broken by failed chain verification, the JSON output includes a `next_steps`
+array and Markdown output prints a concise `## Next steps` section. These hints
+use placeholders such as `<ardur-home>`, `<chain-dir>`, `<keys-dir>`, and
+`<your-project>` to guide local recovery without leaking workstation paths. The
+hints point users at local receipt production, key selection, and posture-scan
+reruns; they do not call live providers, prove provider-hidden actions, repair or
+reconstruct missing evidence, perform asset inventory, or claim kernel/process
+capture.
+
 ### `ardur posture report`
 
 Render a posture JSON document from `ardur posture scan --format json` as a

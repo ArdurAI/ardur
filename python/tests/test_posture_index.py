@@ -41,6 +41,16 @@ def _seed_pre_tool_receipts(tmp_path: Path, monkeypatch, calls: list[dict]) -> P
     return chain_dir
 
 
+def _assert_placeholder_safe_next_steps(next_steps: list[dict], tmp_path: Path, condition: str) -> None:
+    assert next_steps
+    assert any(step.get("condition") == condition for step in next_steps)
+    encoded = json.dumps(next_steps, sort_keys=True)
+    assert str(tmp_path) not in encoded
+    assert "<chain-dir>" in encoded
+    assert "<keys-dir>" in encoded
+    assert "tmp_path" not in encoded
+
+
 def test_redactor_redacts_local_paths_and_file_uris_but_preserves_https_urls():
     from vibap.posture_index import _Redactor
 
@@ -164,6 +174,7 @@ def test_scan_valid_chain_with_profile_and_bundle_is_redacted(tmp_path, monkeypa
     assert posture["schema_version"] == "ardur.posture_index.v0"
     assert posture["positioning"] == "derived_local_evidence"
     assert posture["chain_verification"]["status"] == "pass"
+    assert posture["next_steps"] == []
     assert posture["summary"]["receipt_count"] == 2
     assert posture["summary"]["policy_verdict_counts"] == {"allow": 1, "deny": 1, "unknown": 0}
     assert posture["observed_tools"] == {"Read": 1, "Write": 1}
@@ -210,10 +221,11 @@ def test_scan_broken_chain_reports_failed_verification_without_mutating(tmp_path
     assert posture["chains"][0]["verification"]["status"] == "fail"
     assert "broken_receipt_chain" in posture["coverage_gaps"]
     assert posture["summary"]["receipt_count"] == 1
+    _assert_placeholder_safe_next_steps(posture["next_steps"], tmp_path, "broken_receipt_chain")
 
 
 def test_scan_missing_telemetry_returns_unknown_gap(tmp_path):
-    from vibap.posture_index import build_posture_index
+    from vibap.posture_index import build_posture_index, format_posture_report
 
     posture = build_posture_index(receipts=tmp_path / "missing-telemetry", keys_dir=tmp_path)
 
@@ -221,6 +233,38 @@ def test_scan_missing_telemetry_returns_unknown_gap(tmp_path):
     assert posture["chain_verification"]["status"] == "missing"
     assert posture["summary"]["policy_verdict_counts"] == {"allow": 0, "deny": 0, "unknown": 1}
     assert "missing_receipt_telemetry" in posture["coverage_gaps"]
+    _assert_placeholder_safe_next_steps(posture["next_steps"], tmp_path, "missing_receipt_telemetry")
+    markdown = format_posture_report(posture)
+    assert "## Next steps" in markdown
+    assert "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format markdown" in markdown
+    assert str(tmp_path) not in markdown
+
+
+def test_scan_not_verified_chain_includes_keys_next_steps(tmp_path, monkeypatch):
+    chain_dir = _seed_pre_tool_receipts(
+        tmp_path,
+        monkeypatch,
+        [
+            {
+                "session_id": "sess-not-verified",
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": str(tmp_path / "unverified.txt")},
+            }
+        ],
+    )
+
+    from vibap.posture_index import build_posture_index
+
+    posture = build_posture_index(receipts=chain_dir, keys_dir=tmp_path / "missing-keys")
+
+    assert posture["chain_verification"]["status"] == "not_verified"
+    assert "receipt_chain_not_verified" in posture["coverage_gaps"]
+    _assert_placeholder_safe_next_steps(posture["next_steps"], tmp_path, "receipt_chain_not_verified")
+    assert any(
+        step.get("command") == "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format markdown"
+        for step in posture["next_steps"]
+    )
 
 
 def test_scan_unknown_boundary_for_bash_subprocess_effects(tmp_path, monkeypatch):
@@ -276,4 +320,5 @@ def test_cli_scan_json_and_report_markdown(tmp_path, monkeypatch, capsys):
     assert "# Ardur Posture Report" in markdown
     assert "derived local evidence" in markdown.lower()
     assert "Read: 1" in markdown
+    assert "## Next steps" not in markdown
     assert str(tmp_path) not in markdown

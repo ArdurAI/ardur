@@ -280,6 +280,57 @@ def _aggregate_verification(chains: list[dict[str, Any]]) -> dict[str, Any]:
     return {"status": status, "ok": ok, "chain_count": len(chains)}
 
 
+def _posture_next_steps(chain_verification: Mapping[str, Any], coverage_gaps: set[str]) -> list[dict[str, str]]:
+    """Return deterministic, placeholder-safe recovery hints for incomplete local evidence."""
+    status = str(chain_verification.get("status", "unknown"))
+    gaps = {str(gap) for gap in coverage_gaps}
+    steps: list[dict[str, str]] = []
+
+    if status == "missing" or "missing_receipt_telemetry" in gaps:
+        steps.append(
+            {
+                "condition": "missing_receipt_telemetry",
+                "action": "produce_or_select_local_receipts",
+                "command": "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format markdown",
+                "detail": (
+                    "Point --receipts at a local Ardur receipt chain produced under <ardur-home> by a "
+                    "protected run or fixture for <your-project>. If no chain exists, run the relevant "
+                    "local Ardur hook or fixture first; posture scan does not call providers or "
+                    "reconstruct missing evidence."
+                ),
+            }
+        )
+
+    if status == "not_verified" or "receipt_chain_not_verified" in gaps:
+        steps.append(
+            {
+                "condition": "receipt_chain_not_verified",
+                "action": "rerun_with_public_keys",
+                "command": "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format markdown",
+                "detail": (
+                    "Provide the local key directory containing passport_public.pem for the receipt source "
+                    "and rerun verification. Without keys, Ardur can only decode unverified local claims."
+                ),
+            }
+        )
+
+    if status == "fail" or "broken_receipt_chain" in gaps:
+        steps.append(
+            {
+                "condition": "broken_receipt_chain",
+                "action": "inspect_or_repair_local_evidence",
+                "command": "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json",
+                "detail": (
+                    "Inspect chain_verification and per-chain verification errors, restore the original "
+                    "local receipt chain or recapture evidence from <your-project>, then rerun posture scan. "
+                    "Ardur cannot reconstruct missing or tampered evidence."
+                ),
+            }
+        )
+
+    return steps
+
+
 def build_posture_index(
     *,
     receipts: Path,
@@ -404,6 +455,7 @@ def build_posture_index(
             "evidence_bundle": redactor.text(str(evidence_bundle)) if evidence_bundle is not None else None,
         },
         "chain_verification": chain_verification,
+        "next_steps": _posture_next_steps(chain_verification, coverage_gaps),
         "summary": {
             "chain_count": len(chains),
             "receipt_count": len(all_claims),
@@ -446,6 +498,7 @@ def format_posture_report(posture: Mapping[str, Any]) -> str:
     policy = posture.get("policy", {}) if isinstance(posture.get("policy"), Mapping) else {}
     profile = posture.get("profile", {}) if isinstance(posture.get("profile"), Mapping) else {}
     gaps = posture.get("coverage_gaps", []) if isinstance(posture.get("coverage_gaps"), list) else []
+    next_steps = posture.get("next_steps", []) if isinstance(posture.get("next_steps"), list) else []
 
     lines = [
         "# Ardur Posture Report",
@@ -492,6 +545,24 @@ def format_posture_report(posture: Mapping[str, Any]) -> str:
             lines.append(f"- {gap}")
     else:
         lines.append("- none")
+
+    if next_steps:
+        lines.extend(["", "## Next steps"])
+        for index, raw_step in enumerate(next_steps, start=1):
+            step = raw_step if isinstance(raw_step, Mapping) else {}
+            command = str(step.get("command", "")).strip()
+            detail = str(step.get("detail", "")).strip()
+            condition = str(step.get("condition", "")).strip()
+            action = str(step.get("action", "review_local_evidence")).strip()
+            label = action.replace("_", " ")
+            if command:
+                lines.append(f"{index}. `{command}`")
+            else:
+                lines.append(f"{index}. {label}")
+            if detail:
+                lines.append(f"   - {detail}")
+            if condition:
+                lines.append(f"   - Condition: `{condition}`")
 
     lines.append("")
     return "\n".join(lines)

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f68780c605900c56072c6be15fd778c135b23dcc9b90588a8f2d48fa12f94594"
+source_sha256: "19c4916882d41bd914d5fa22f3bbfd7d6b09d6d20475b251827f52f9eb876f60"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -399,6 +399,16 @@ or proof of effects outside the captured tool-call boundary.
 Credential-like values are emitted as `[REDACTED]`; local absolute paths are
 replaced with stable `<PATH:...>` placeholders so reports can be shared without
 leaking private workstation paths.
+
+When receipt evidence is missing, unverified because public keys are unavailable,
+or broken by failed chain verification, the JSON output includes a `next_steps`
+array and Markdown output prints a concise `## Next steps` section. These hints
+use placeholders such as `<ardur-home>`, `<chain-dir>`, `<keys-dir>`, and
+`<your-project>` to guide local recovery without leaking workstation paths. The
+hints point users at local receipt production, key selection, and posture-scan
+reruns; they do not call live providers, prove provider-hidden actions, repair or
+reconstruct missing evidence, perform asset inventory, or claim kernel/process
+capture.
 
 ### `ardur posture report`
 
