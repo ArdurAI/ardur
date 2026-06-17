@@ -2,7 +2,7 @@
 title: "Ardur Personal Hub HTTP API"
 description: "The Hub is the local service started by `ardur hub`. It accepts evidence"
 source_path: "docs/reference/personal-hub-api.md"
-source_sha256: "c219dece5b16edfb945fdbd49da36275bc6e8f52601d9fd2b667bf1fa435c989"
+source_sha256: "a4d6666f4a7bd190b84554b5b411bcd1309a6ef0d0cdeaf09381c8100e2709f8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -76,14 +76,16 @@ allowed via header *or* `?token=`. Response is `text/html` with strict CSP
 
 ### `GET /v1/status`
 
-Returns Hub state suitable for `ardur status`:
+Returns Hub state suitable for `ardur status`. Examples use `<ardur-home>`
+placeholders; real local API responses include the configured local Ardur home
+path.
 
 ```json
 {
   "ok": true,
   "schema_version": "...",
   "version": "...",
-  "home": "/Users/.../.vibap",
+  "home": "<ardur-home>",
   "verifier_id": "...",
   "hub_url": "http://127.0.0.1:8765",
   "sessions": 0,
