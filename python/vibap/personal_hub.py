@@ -1070,22 +1070,108 @@ def _write_launch_agent(paths: HubPaths, host: str, port: int) -> Path:
     return plist_path
 
 
+def _doctor_personal_next_steps(
+    *,
+    home_ok: bool,
+    config_ok: bool,
+    hub_token_ok: bool,
+    hub_ok: bool,
+) -> list[dict[str, str]]:
+    """Return deterministic local remediation hints for ``ardur doctor``.
+
+    The check details may include real local paths for diagnostics; these
+    remediation hints intentionally use placeholders so JSON output can be
+    copied into support notes without leaking temp homes, Hub tokens, or private
+    receipt locations.
+    """
+    if home_ok and config_ok and hub_token_ok and hub_ok:
+        return []
+
+    steps: list[dict[str, str]] = []
+    if not home_ok or not config_ok:
+        steps.append(
+            {
+                "condition": "missing_personal_setup",
+                "action": "run_setup",
+                "command": "ardur setup --home <ardur-home>",
+                "detail": (
+                    "Create the local Ardur Personal home, config, and Hub token. "
+                    "The setup command prints the Hub token once; do not paste the "
+                    "raw token into shared logs."
+                ),
+            }
+        )
+
+    if not hub_token_ok:
+        steps.append(
+            {
+                "condition": "missing_hub_token",
+                "action": "supply_or_rotate_hub_token",
+                "command": "ardur setup --home <ardur-home> --rotate-token",
+                "detail": (
+                    "Generate or rotate the local Hub token, then pass an existing "
+                    "token with --hub-token <hub-token> or ARDUR_PERSONAL_HUB_TOKEN=<hub-token>."
+                ),
+            }
+        )
+
+    if not hub_ok:
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "start_personal_hub",
+                "command": "ardur hub --home <ardur-home>",
+                "detail": (
+                    "Start the local loopback Ardur Personal Hub. If your config uses "
+                    "a non-default endpoint, use host/port settings that match <hub-url>."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": "doctor_failed",
+            "action": "rerun_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Re-run the local doctor after remediation. This check reads local "
+                "setup and Hub status only; it does not call live providers or prove "
+                "provider-hidden actions."
+            ),
+        }
+    )
+    return steps
+
+
 def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
     token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
     hub = hub_request("GET", "/v1/status", hub_url=args.hub_url, hub_token=token, home=args.home)
+    home_ok = paths.home.exists()
+    config_ok = paths.config.exists()
+    hub_token_ok = bool(token)
+    hub_ok = bool(hub.get("ok"))
     checks = [
-        {"name": "home", "ok": paths.home.exists(), "detail": str(paths.home)},
-        {"name": "config", "ok": paths.config.exists(), "detail": str(paths.config)},
-        {"name": "hub_token", "ok": bool(token), "detail": "configured" if token else "missing"},
-        {"name": "hub", "ok": bool(hub.get("ok")), "detail": hub.get("error") or args.hub_url},
+        {"name": "home", "ok": home_ok, "detail": str(paths.home)},
+        {"name": "config", "ok": config_ok, "detail": str(paths.config)},
+        {"name": "hub_token", "ok": hub_token_ok, "detail": "configured" if token else "missing"},
+        {"name": "hub", "ok": hub_ok, "detail": hub.get("error") or args.hub_url},
         {
             "name": "desktop_permissions",
             "ok": sys.platform == "darwin",
             "detail": "macOS Accessibility/Screen Recording must be granted for desktop capture",
         },
     ]
-    return {"ok": all(item["ok"] for item in checks[:4]), "checks": checks}
+    return {
+        "ok": all(item["ok"] for item in checks[:4]),
+        "checks": checks,
+        "next_steps": _doctor_personal_next_steps(
+            home_ok=home_ok,
+            config_ok=config_ok,
+            hub_token_ok=hub_token_ok,
+            hub_ok=hub_ok,
+        ),
+    }
 
 
 def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:

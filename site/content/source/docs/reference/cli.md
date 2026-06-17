@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "19c4916882d41bd914d5fa22f3bbfd7d6b09d6d20475b251827f52f9eb876f60"
+source_sha256: "329f34ca6bb7ac51fd22e6e03c69271190955d9e227b16f5187a3a7ddeb86c45"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -135,6 +135,13 @@ reachability, key material, write permissions.
 ```text
 ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
 ```
+
+The JSON output preserves the `ok` and `checks` fields and includes a
+machine-readable `next_steps` array when core setup checks fail. These local
+remediation hints cover missing setup/config/token state, starting or checking
+the loopback Hub, and re-running `ardur doctor`; they use placeholders such as
+`<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw local
+paths or tokens. When the core setup is healthy, `next_steps` is an empty array.
 
 ### `ardur doctor-claude-code`
 

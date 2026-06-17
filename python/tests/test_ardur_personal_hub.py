@@ -16,6 +16,7 @@ from urllib import request as urlrequest
 
 import pytest
 
+from vibap import personal_hub
 from vibap.ardur_personal_native_host import HOST_OBSERVATION_TYPE, handle_native_host_message
 from vibap.personal_hub import _HubRequestHandler, HubError, PersonalHub, run_under_hub, setup_personal
 from vibap.personal_hub import _redact_url_tokens
@@ -188,9 +189,80 @@ def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
-def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
-    from vibap import personal_hub
+def test_doctor_reports_next_steps_for_missing_setup_without_path_leaks(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    missing_home = tmp_path / "missing-home"
 
+    result = personal_hub.doctor_personal(
+        Namespace(home=missing_home, hub_url="http://127.0.0.1:8765", hub_token=None)
+    )
+
+    assert result["ok"] is False
+    assert {check["name"] for check in result["checks"]} >= {"home", "config", "hub_token", "hub"}
+    assert any(step["action"] == "run_setup" for step in result["next_steps"])
+    assert any(step["action"] == "rerun_doctor" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<ardur-home>" in next_steps_json
+    assert "ardur setup" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_doctor_reports_hub_next_steps_when_configured_hub_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "ardur.personal.config.v0.1",
+                "home": str(tmp_path),
+                "hub_url": "http://127.0.0.1:18765",
+                "hub_token": "test-token-placeholder",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    result = personal_hub.doctor_personal(
+        Namespace(home=tmp_path, hub_url="http://127.0.0.1:18765", hub_token=None)
+    )
+
+    assert result["ok"] is False
+    assert any(step["action"] == "start_personal_hub" for step in result["next_steps"])
+    assert not any(step["action"] == "run_setup" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<hub-url>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_doctor_healthy_core_setup_has_empty_next_steps(tmp_path):
+    with _running_hub(tmp_path) as (_, base_url):
+        result = personal_hub.doctor_personal(
+            Namespace(home=tmp_path, hub_url=base_url, hub_token=None)
+        )
+
+    assert result["ok"] is True
+    assert result["next_steps"] == []
+    assert {check["name"] for check in result["checks"]} >= {"home", "config", "hub_token", "hub"}
+
+
+def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
     fsync_calls: list[int] = []
     open_calls: list[tuple[str, int, int]] = []
     real_open = personal_hub.os.open

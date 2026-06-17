@@ -119,6 +119,13 @@ reachability, key material, write permissions.
 ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
 ```
 
+The JSON output preserves the `ok` and `checks` fields and includes a
+machine-readable `next_steps` array when core setup checks fail. These local
+remediation hints cover missing setup/config/token state, starting or checking
+the loopback Hub, and re-running `ardur doctor`; they use placeholders such as
+`<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw local
+paths or tokens. When the core setup is healthy, `next_steps` is an empty array.
+
 ### `ardur doctor-claude-code`
 
 Verify the Claude Code plugin and active passport setup. Reports missing
