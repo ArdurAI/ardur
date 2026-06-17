@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "2618c490d5a56821a2211831fd62079135e19fe7585a869547e097902e771a96"
+source_sha256: "24fdbe4177983e88108c940ab7a0ea8109f8a4fdcb5dd6a0038069052b7ce542"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -170,7 +170,7 @@ were unauthenticated — anyone with network reach could mint credentials
 or ingest fabricated governance events. Round-5 closes both:
 
 - `go/cmd/authority`: `/sign` and `/status` require
-  `Authorization: Bearer <token>` matching `ARDUR_AUTHORITY_TOKEN`
+  `Authorization: Bearer <authority-token>` matching `ARDUR_AUTHORITY_TOKEN`
   (≥32 bytes). The binary refuses to start unless the token is set or
   `--no-require-auth` is passed for explicit local-dev opt-out. Public
   endpoints (`/attestation`, `/public-key`, `/healthz`) remain

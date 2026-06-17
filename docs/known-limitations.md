@@ -153,7 +153,7 @@ were unauthenticated — anyone with network reach could mint credentials
 or ingest fabricated governance events. Round-5 closes both:
 
 - `go/cmd/authority`: `/sign` and `/status` require
-  `Authorization: Bearer <token>` matching `ARDUR_AUTHORITY_TOKEN`
+  `Authorization: Bearer <authority-token>` matching `ARDUR_AUTHORITY_TOKEN`
   (≥32 bytes). The binary refuses to start unless the token is set or
   `--no-require-auth` is passed for explicit local-dev opt-out. Public
   endpoints (`/attestation`, `/public-key`, `/healthz`) remain
