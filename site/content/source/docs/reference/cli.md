@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "7be7c400396ea5ddcbf1856bc70c4049c694c62e28fabfefddd2cdfe3fa9f8e7"
+source_sha256: "d016c3414eec5d5adfd6052201432b20a9c1a3e322b7524453cd64c60310c8de"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -223,8 +223,22 @@ ardur personal-native-host [--hub-url URL] [--hub-token TOKEN] [--home DIR]
                            [--once-json FILE]
 ```
 
-`--once-json` is a development-mode flag: process one JSON message file and
-exit (used by tests and the smoke harness, not by browsers).
+`--once-json` is the development/smoke path: process one JSON message file and
+exit with the native-host JSON response. Browsers do not pass this flag; they
+use Native Messaging length-prefix framing, but Hub setup/auth failures carry
+the same JSON response payload inside that framing.
+
+When the local Hub cannot be reached or returns a local token/auth setup error,
+`personal-native-host` preserves the failing `ok: false` / `error_code` response
+and adds a deterministic `next_steps` array. The hints are local/no-key recovery
+guidance only: run setup if needed, start the loopback Hub, supply or rotate the
+Hub token, run `ardur doctor`, then re-run `ardur personal-native-host
+--once-json <native-message.json> --home <ardur-home> --hub-url <hub-url>
+--hub-token <hub-token>`. They use placeholders such as `<ardur-home>`,
+`<hub-url>`, `<hub-token>`, and `<native-message.json>` and do not claim browser
+store deployment proof, live provider/API behavior, provider-hidden action
+visibility, native-host installation proof, release readiness, or public
+metadata readiness.
 
 ### `ardur personal-native-manifest`
 

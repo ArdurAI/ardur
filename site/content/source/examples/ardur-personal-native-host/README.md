@@ -2,9 +2,9 @@
 title: "Ardur Personal Native Messaging Bridge"
 description: "The preferred browser path is direct loopback HTTP to the local Hub. This"
 source_path: "examples/ardur-personal-native-host/README.md"
-source_sha256: "d9120221200ec6660c2b9affa47b9c8a223f1d0bcb260d611c545e29386319a1"
+source_sha256: "281e168602b02aaa28918b73f4ec408db842e2d622df770e26578393aa694093"
 weight: 100
-maturity: ["public-now"]
+maturity: ["in-progress"]
 claim_types: ["integration"]
 surfaces: ["examples"]
 frameworks: ["framework-agnostic"]
@@ -41,4 +41,30 @@ The Hub must be running:
 
 ```bash
 PYTHONPATH=python python3 -m vibap.cli hub
+```
+
+If the Hub has not been set up yet, run setup first, then start the Hub and
+check the local setup:
+
+```bash
+PYTHONPATH=python python3 -m vibap.cli setup --home <ardur-home>
+PYTHONPATH=python python3 -m vibap.cli hub --home <ardur-home>
+PYTHONPATH=python python3 -m vibap.cli doctor --home <ardur-home> --hub-url <hub-url>
+```
+
+`--once-json` is the development/smoke path; browser Native Messaging receives
+the same JSON response payload inside its length-prefixed native-host response
+framing. Hub-unavailable or Hub-token/setup failures return deterministic local
+`next_steps` in that JSON response. These hints are local/no-key recovery
+guidance only and use placeholders such as `<ardur-home>`, `<hub-url>`,
+`<hub-token>`, and `<native-message.json>`.
+
+Placeholder-safe smoke form:
+
+```bash
+PYTHONPATH=python python3 -m vibap.cli personal-native-host \
+  --once-json <native-message.json> \
+  --home <ardur-home> \
+  --hub-url <hub-url> \
+  --hub-token <hub-token>
 ```

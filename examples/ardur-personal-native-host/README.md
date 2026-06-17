@@ -25,3 +25,29 @@ The Hub must be running:
 ```bash
 PYTHONPATH=python python3 -m vibap.cli hub
 ```
+
+If the Hub has not been set up yet, run setup first, then start the Hub and
+check the local setup:
+
+```bash
+PYTHONPATH=python python3 -m vibap.cli setup --home <ardur-home>
+PYTHONPATH=python python3 -m vibap.cli hub --home <ardur-home>
+PYTHONPATH=python python3 -m vibap.cli doctor --home <ardur-home> --hub-url <hub-url>
+```
+
+`--once-json` is the development/smoke path; browser Native Messaging receives
+the same JSON response payload inside its length-prefixed native-host response
+framing. Hub-unavailable or Hub-token/setup failures return deterministic local
+`next_steps` in that JSON response. These hints are local/no-key recovery
+guidance only and use placeholders such as `<ardur-home>`, `<hub-url>`,
+`<hub-token>`, and `<native-message.json>`.
+
+Placeholder-safe smoke form:
+
+```bash
+PYTHONPATH=python python3 -m vibap.cli personal-native-host \
+  --once-json <native-message.json> \
+  --home <ardur-home> \
+  --hub-url <hub-url> \
+  --hub-token <hub-token>
+```

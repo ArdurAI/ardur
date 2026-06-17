@@ -206,8 +206,22 @@ ardur personal-native-host [--hub-url URL] [--hub-token TOKEN] [--home DIR]
                            [--once-json FILE]
 ```
 
-`--once-json` is a development-mode flag: process one JSON message file and
-exit (used by tests and the smoke harness, not by browsers).
+`--once-json` is the development/smoke path: process one JSON message file and
+exit with the native-host JSON response. Browsers do not pass this flag; they
+use Native Messaging length-prefix framing, but Hub setup/auth failures carry
+the same JSON response payload inside that framing.
+
+When the local Hub cannot be reached or returns a local token/auth setup error,
+`personal-native-host` preserves the failing `ok: false` / `error_code` response
+and adds a deterministic `next_steps` array. The hints are local/no-key recovery
+guidance only: run setup if needed, start the loopback Hub, supply or rotate the
+Hub token, run `ardur doctor`, then re-run `ardur personal-native-host
+--once-json <native-message.json> --home <ardur-home> --hub-url <hub-url>
+--hub-token <hub-token>`. They use placeholders such as `<ardur-home>`,
+`<hub-url>`, `<hub-token>`, and `<native-message.json>` and do not claim browser
+store deployment proof, live provider/API behavior, provider-hidden action
+visibility, native-host installation proof, release readiness, or public
+metadata readiness.
 
 ### `ardur personal-native-manifest`
 
