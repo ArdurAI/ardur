@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "92402f56767ab65a9f02fb6c7e1c9b1b8c5387fc5cbade86a2cb6128286aa689"
+source_sha256: "d425aae1a9ae035c32dc98ae331d81668d017c392388ae7e3ce2862737220562"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -39,6 +39,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
+| [Host adoption/governance source-semantic vectors](/__ardur_internal__/source/docs/specs/source-semantic-vectors/readme/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
 

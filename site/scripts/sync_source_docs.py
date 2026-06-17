@@ -44,6 +44,7 @@ PUBLIC_ARTIFACT_GLOBS = [
     ".github/ISSUE_TEMPLATE/*.yml",
     ".github/workflows/*.yml",
     "docs/**/*.json",
+    "docs/**/*.jsonl",
     "python/vibap/_specs/*.json",
     "go/spec/**/*.json",
     "examples/**/*.json",

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.dev/spec/source-semantic-vectors/host-adoption-governance-v0.1.schema.json",
+  "title": "Ardur host adoption/governance source-semantic vector",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "vector_id",
+    "source_family",
+    "source_pin",
+    "source_confidence",
+    "source_semantic_signal",
+    "evidence_classes",
+    "ardur_mapping",
+    "unknown_boundaries",
+    "fixture_assertions",
+    "not_claimed",
+    "claim_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.source_semantic_vector.v0.1"
+    },
+    "vector_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "source_family": {
+      "type": "string",
+      "enum": [
+        "codex",
+        "claude-code",
+        "claude-code-action",
+        "gemini-cli",
+        "toolhive"
+      ]
+    },
+    "source_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "observed_at", "source_snapshot_sha256"],
+      "properties": {
+        "kind": {"type": "string"},
+        "value": {"type": "string"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "source_snapshot_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "source_matrix_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "review_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "source_confidence": {
+      "const": "source_semantic_only"
+    },
+    "source_semantic_signal": {
+      "type": "string",
+      "minLength": 12
+    },
+    "evidence_classes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "policy_input",
+          "session_context",
+          "host_runtime_event",
+          "cloud_agent_run",
+          "deployment_context",
+          "unknown"
+        ]
+      }
+    },
+    "ardur_mapping": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "array", "object", "null"]
+      }
+    },
+    "unknown_boundaries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9_]+$"}
+    },
+    "fixture_assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 8}
+    },
+    "not_claimed": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 8}
+    },
+    "claim_boundary": {
+      "type": "string",
+      "pattern": "^Source-semantic no-key vector only;"
+    }
+  }
+}

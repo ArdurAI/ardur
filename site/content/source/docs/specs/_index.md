@@ -29,3 +29,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 - [`execution-receipt-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json)
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)
+
+## Child Sections
+
+- [`source-semantic-vectors/`](/__ardur_internal__/source/docs/specs/source-semantic-vectors/)
