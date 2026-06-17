@@ -110,6 +110,15 @@ Show Hub status — current sessions, latest receipt, adapter availability.
 ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR]
 ```
 
+When the local Hub cannot be reached or returns a local token/auth setup error,
+the JSON output keeps the failing status response and adds a deterministic
+`next_steps` array. These hints are local-only setup guidance: run setup if
+needed, start the loopback Hub, supply or rotate the Hub token, then re-run
+`ardur status` or `ardur doctor`. They use placeholders such as
+`<ardur-home>`, `<hub-url>`, and `<hub-token>` and do not claim live provider
+behavior, provider-hidden action visibility, or release readiness. Healthy Hub
+responses preserve the existing response shape and omit actionable remediation.
+
 ### `ardur doctor`
 
 Health-check the local Ardur Personal setup: config presence, Hub

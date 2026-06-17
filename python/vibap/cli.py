@@ -31,6 +31,7 @@ from .personal_hub import (
     run_under_hub,
     serve_hub,
     setup_personal,
+    status_response_with_next_steps,
     uninstall_personal,
 )
 from .claude_code_report import build_claude_code_report
@@ -343,6 +344,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         hub_token=args.hub_token,
         home=args.home,
     )
+    response = status_response_with_next_steps(response)
     _print_json(response)
     return 0 if response.get("ok") else 1
 

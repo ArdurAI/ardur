@@ -262,6 +262,84 @@ def test_doctor_healthy_core_setup_has_empty_next_steps(tmp_path):
     assert {check["name"] for check in result["checks"]} >= {"home", "config", "hub_token", "hub"}
 
 
+def test_status_reports_next_steps_for_unavailable_hub_without_path_leaks(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    monkeypatch.setattr(
+        cli_module,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    rc = cli_module.cmd_status(
+        Namespace(home=tmp_path, hub_url="http://127.0.0.1:8765", hub_token=None)
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert result["ok"] is False
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"run_setup_if_needed", "start_personal_hub", "supply_or_rotate_hub_token", "rerun_status_or_doctor"} <= actions
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<ardur-home>" in next_steps_json
+    assert "<hub-url>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_status_reports_token_next_steps_without_raw_secret(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    raw_secret = "example-token-placeholder"
+    monkeypatch.setattr(
+        cli_module,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    rc = cli_module.cmd_status(
+        Namespace(home=None, hub_url="http://127.0.0.1:8765", hub_token=raw_secret)
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert any(step["action"] == "supply_or_rotate_hub_token" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<hub-token>" in next_steps_json
+    assert raw_secret not in next_steps_json
+
+
+def test_status_success_preserves_hub_response_shape(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    response = {
+        "ok": True,
+        "schema_version": "ardur.personal.hub.v0.1",
+        "sessions": 0,
+        "session_reviews": 0,
+        "adapters": {"browser": "available"},
+    }
+    monkeypatch.setattr(cli_module, "hub_request", lambda *_args, **_kwargs: response)
+
+    rc = cli_module.cmd_status(
+        Namespace(home=None, hub_url="http://127.0.0.1:8765", hub_token=None)
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert result == response
+    assert "next_steps" not in result
+
+
 def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
     fsync_calls: list[int] = []
     open_calls: list[tuple[str, int, int]] = []

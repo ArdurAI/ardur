@@ -1017,6 +1017,93 @@ def hub_request(
         return {"ok": False, "error": str(exc), "error_code": "hub_unavailable"}
 
 
+def status_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
+    """Return ``ardur status`` output with local remediation hints when useful.
+
+    Healthy Hub responses stay unchanged. Failure hints are intentionally
+    deterministic and placeholder-only: the raw status response can carry local
+    diagnostics, but the remediation guidance must be safe to paste into support
+    notes without leaking temp homes, Hub tokens, or generated receipt paths.
+    """
+    if response.get("ok"):
+        return response
+
+    steps = _status_next_steps_for_response(response)
+    if not steps:
+        return response
+    return {**response, "next_steps": steps}
+
+
+def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    error_code = str(response.get("error_code") or "").strip().lower()
+    status = str(response.get("status") or "").strip()
+    error = str(response.get("error") or "").strip().lower()
+
+    hub_unavailable = error_code == "hub_unavailable"
+    token_problem = (
+        error_code in {"hub_auth_required", "hub_token_missing", "unauthorized"}
+        or status == "401"
+        or ("token" in error and ("required" in error or "missing" in error or "unauthorized" in error))
+        or ("authorization" in error and ("required" in error or "missing" in error or "unauthorized" in error))
+    )
+
+    if not hub_unavailable and not token_problem:
+        return []
+
+    steps: list[dict[str, str]] = []
+    if hub_unavailable:
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "run_setup_if_needed",
+                "command": "ardur setup --home <ardur-home>",
+                "detail": (
+                    "Create local Ardur Personal config and Hub token if setup has not run yet. "
+                    "Do not paste raw tokens into shared logs."
+                ),
+            }
+        )
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "start_personal_hub",
+                "command": "ardur hub --home <ardur-home>",
+                "detail": (
+                    "Start the local loopback Ardur Personal Hub. If your config uses a "
+                    "non-default endpoint, use host/port settings that match <hub-url>."
+                ),
+            }
+        )
+
+    if hub_unavailable or token_problem:
+        steps.append(
+            {
+                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "action": "supply_or_rotate_hub_token",
+                "command": "ardur status --hub-url <hub-url> --hub-token <hub-token>",
+                "detail": (
+                    "Supply the existing local Hub token with --hub-token <hub-token> or "
+                    "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>; rotate it with "
+                    "ardur setup --home <ardur-home> --rotate-token only when needed."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": "status_failed",
+            "action": "rerun_status_or_doctor",
+            "command": "ardur status --hub-url <hub-url>",
+            "detail": (
+                "Re-run local status after remediation, or run ardur doctor --home "
+                "<ardur-home> --hub-url <hub-url> for setup diagnostics. This guidance "
+                "does not call live providers or prove provider-hidden actions."
+            ),
+        }
+    )
+    return steps
+
+
 def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
     paths.home.mkdir(parents=True, exist_ok=True)

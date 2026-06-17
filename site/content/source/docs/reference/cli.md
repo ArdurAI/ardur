@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "329f34ca6bb7ac51fd22e6e03c69271190955d9e227b16f5187a3a7ddeb86c45"
+source_sha256: "747df4fc5736f1c651dd88c0507f03df6ae44154f3e9673b4d595c5b0b3bc397"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -126,6 +126,15 @@ Show Hub status — current sessions, latest receipt, adapter availability.
 ```text
 ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR]
 ```
+
+When the local Hub cannot be reached or returns a local token/auth setup error,
+the JSON output keeps the failing status response and adds a deterministic
+`next_steps` array. These hints are local-only setup guidance: run setup if
+needed, start the loopback Hub, supply or rotate the Hub token, then re-run
+`ardur status` or `ardur doctor`. They use placeholders such as
+`<ardur-home>`, `<hub-url>`, and `<hub-token>` and do not claim live provider
+behavior, provider-hidden action visibility, or release readiness. Healthy Hub
+responses preserve the existing response shape and omit actionable remediation.
 
 ### `ardur doctor`
 
