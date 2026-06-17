@@ -660,6 +660,39 @@ def _resolve_protect_policies(
     return policies
 
 
+def _protect_claude_code_missing_scope_response(profile_present: bool) -> dict[str, object]:
+    profile_detail = (
+        "The selected profile does not define `Protect folder:`."
+        if profile_present
+        else "No `--scope` was provided and no profile with `Protect folder:` was selected."
+    )
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "missing_scope",
+        "condition": "missing_scope",
+        "message": "ardur protect claude-code requires --scope or a profile with `Protect folder:`.",
+        "next_steps": [
+            {
+                "action": "pass_scope",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Choose the local project folder Claude Code is allowed to work in.",
+            },
+            {
+                "action": "create_profile",
+                "command": "ardur profile init --template safe-coding --path ARDUR.md",
+                "detail": "Create an editable profile that includes a `Protect folder:` line.",
+            },
+            {
+                "action": "use_profile",
+                "command": "ardur protect claude-code --profile ARDUR.md",
+                "detail": "Run protection from the profile after setting `Protect folder:`.",
+            },
+        ],
+        "detail": profile_detail,
+    }
+
+
 def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     profile = load_ardur_profile(args.profile) if args.profile else None
     mode_name = _normalize_protect_mode(args.mode or (profile.mode if profile and profile.mode else "safe-coding"))
@@ -674,7 +707,7 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         else:
             raw_scope = Path(args.profile).expanduser().parent / profile_scope
     if raw_scope is None:
-        raise ValueError("ardur protect claude-code requires --scope or a profile with `Protect folder:`")
+        return _protect_claude_code_missing_scope_response(profile_present=bool(args.profile))
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     home.mkdir(parents=True, exist_ok=True)
@@ -745,9 +778,20 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
 
 def cmd_protect_claude_code(args: argparse.Namespace) -> int:
     result = protect_claude_code(args)
+    ok = bool(result.get("ok"))
     if args.json:
         _print_json(result)
-        return 0
+        return 0 if ok else 1
+    if not ok:
+        print("Ardur Claude Code protection was not configured.")
+        message = result.get("message")
+        if message:
+            print(str(message))
+        detail = result.get("detail")
+        if detail:
+            print(str(detail))
+        _print_report_next_steps(result)
+        return 1
     print("Ardur Claude Code protection configured.")
     print(f"mode: {result['mode']}")
     print(f"scope: {result['scope']}")

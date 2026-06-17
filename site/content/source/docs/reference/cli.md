@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "d53be74ded1034270a10431c7e778001a05f7dc6aab5ec90c8d7a5cc9a9f55c8"
+source_sha256: "7be7c400396ea5ddcbf1856bc70c4049c694c62e28fabfefddd2cdfe3fa9f8e7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -265,6 +265,12 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown
 profile is a friendly layer over the same capability set.
+
+If neither `--scope` nor a profile `Protect folder:` value is available, the
+command exits nonzero without configuring Claude Code. JSON output includes
+`ok: false`, `error: "missing_scope"`, `condition: "missing_scope"`, and
+local `next_steps`; human output prints the same recovery guidance under a
+"Next steps" section with placeholders such as `<your-project>`.
 
 ### `ardur claude-code-hook`
 

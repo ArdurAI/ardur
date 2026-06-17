@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -12,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from vibap.ardur_profile import load_ardur_profile
-from vibap.cli import claude_code_doctor, cmd_profile_init, protect_claude_code
+from vibap.cli import (
+    claude_code_doctor,
+    cmd_profile_init,
+    cmd_protect_claude_code,
+    protect_claude_code,
+)
 from vibap.passport import load_public_key, verify_passport
 
 
@@ -37,6 +43,89 @@ def _protect_args(**overrides):
     }
     values.update(overrides)
     return argparse.Namespace(**values)
+
+
+def test_protect_claude_code_missing_scope_json_has_next_steps(tmp_path, capsys):
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin-is-not-checked-before-scope",
+        )
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "missing_scope"
+    assert response["condition"] == "missing_scope"
+    assert "next_steps" in response
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur protect claude-code --scope <your-project>" in commands
+    assert "ardur profile init --template safe-coding --path ARDUR.md" in commands
+    assert "ardur protect claude-code --profile ARDUR.md" in commands
+    assert str(tmp_path) not in captured.out
+
+
+def test_protect_claude_code_missing_scope_human_has_next_steps(tmp_path, capsys):
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin-is-not-checked-before-scope",
+        )
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Next steps:" in captured.out
+    assert "ardur protect claude-code --scope <your-project>" in captured.out
+    assert "ardur profile init --template safe-coding --path ARDUR.md" in captured.out
+    assert "ardur protect claude-code --profile ARDUR.md" in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_protect_claude_code_profile_missing_scope_json_has_next_steps(tmp_path, capsys):
+    profile = tmp_path / "ARDUR.md"
+    profile.write_text(
+        """# Ardur Guardrails
+Mode: safe coding
+Mission: Missing scope regression.
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            profile=profile,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin-is-not-checked-before-scope",
+        )
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["condition"] == "missing_scope"
+    assert response["detail"] == "The selected profile does not define `Protect folder:`."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur protect claude-code --scope <your-project>" in commands
+    assert "ardur protect claude-code --profile ARDUR.md" in commands
+    assert str(tmp_path) not in captured.out
 
 
 def test_profile_parses_friendly_markdown_rules(tmp_path):
