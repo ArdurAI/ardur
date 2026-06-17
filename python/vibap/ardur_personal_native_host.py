@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import BinaryIO, Any
 
-from .personal_hub import DEFAULT_HUB_URL, hub_request
+from .personal_hub import DEFAULT_HUB_URL, hub_request, _hub_setup_failure_flags
 
 HOST_OBSERVATION_TYPE = "ardur.personal.host_observation.v0.1"
 NATIVE_HOST_NAME = "dev.ardur.personal"
@@ -80,7 +80,83 @@ def handle_native_host_message(
                 "raw_content_included": False,
             },
         }
-    return hub_request("POST", "/v1/events/observe", payload, hub_url=hub_url, hub_token=hub_token, home=home)
+    response = hub_request("POST", "/v1/events/observe", payload, hub_url=hub_url, hub_token=hub_token, home=home)
+    return native_host_response_with_next_steps(response)
+
+
+def native_host_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
+    """Return native-host output with safe local remediation hints when useful."""
+    if response.get("ok"):
+        return response
+
+    steps = _native_host_next_steps_for_response(response)
+    if not steps:
+        return response
+    return {**response, "next_steps": steps}
+
+
+def _native_host_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    hub_unavailable, token_problem = _hub_setup_failure_flags(response)
+    if not hub_unavailable and not token_problem:
+        return []
+
+    steps: list[dict[str, str]] = []
+    if hub_unavailable:
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "run_setup_if_needed",
+                "command": "ardur setup --home <ardur-home>",
+                "detail": (
+                    "Create local Ardur Personal config and Hub token if setup has not run yet. "
+                    "Do not paste raw tokens into shared logs."
+                ),
+            }
+        )
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "start_personal_hub",
+                "command": "ardur hub --home <ardur-home>",
+                "detail": (
+                    "Start the local loopback Ardur Personal Hub. If your config uses a "
+                    "non-default endpoint, use host/port settings that match <hub-url>."
+                ),
+            }
+        )
+
+    if hub_unavailable or token_problem:
+        steps.append(
+            {
+                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "action": "supply_or_rotate_hub_token",
+                "command": (
+                    "ardur personal-native-host --once-json <native-message.json> "
+                    "--home <ardur-home> --hub-url <hub-url> --hub-token <hub-token>"
+                ),
+                "detail": (
+                    "Supply the existing local Hub token with --hub-token <hub-token> or "
+                    "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>; rotate it with "
+                    "ardur setup --home <ardur-home> --rotate-token only when needed."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": "personal_native_host_failed",
+            "action": "rerun_personal_native_host_or_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Confirm local setup before re-running ardur personal-native-host --once-json "
+                "<native-message.json> --home <ardur-home> --hub-url <hub-url>. "
+                "This guidance is local/no-key setup help only; it does not call live providers, "
+                "prove provider-hidden actions, expose services beyond loopback, or broaden "
+                "current Hub policy enforcement."
+            ),
+        }
+    )
+    return steps
 
 
 def run_native_host(

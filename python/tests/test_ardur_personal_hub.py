@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -16,6 +18,7 @@ from urllib import request as urlrequest
 
 import pytest
 
+from vibap import ardur_personal_native_host as native_host
 from vibap import personal_hub
 from vibap.ardur_personal_native_host import HOST_OBSERVATION_TYPE, handle_native_host_message
 from vibap.personal_hub import _HubRequestHandler, HubError, PersonalHub, run_under_hub, setup_personal
@@ -595,6 +598,147 @@ def test_native_host_uses_custom_home_for_hub_token(tmp_path):
         )
 
     assert response["ok"] is True
+
+
+def test_native_host_unavailable_hub_reports_placeholder_next_steps_without_path_or_token_leaks(
+    tmp_path,
+    monkeypatch,
+):
+    raw_token = "example-native-host-token-placeholder"
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    response = native_host.handle_native_host_message(
+        {
+            "type": HOST_OBSERVATION_TYPE,
+            "hub_event": _browser_payload("native bridge failure"),
+        },
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    assert response["ok"] is False
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {
+        "run_setup_if_needed",
+        "start_personal_hub",
+        "supply_or_rotate_hub_token",
+        "rerun_personal_native_host_or_doctor",
+    } <= actions
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "ardur personal-native-host" in next_steps_json
+    assert "<native-message.json>" in next_steps_json
+    assert "<ardur-home>" in next_steps_json
+    assert "<hub-url>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+    assert raw_token not in next_steps_json
+
+
+def test_native_host_auth_failure_reports_token_next_steps_without_raw_secret(
+    tmp_path,
+    monkeypatch,
+):
+    raw_token = "example-native-host-auth-token-placeholder"
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    response = native_host.handle_native_host_message(
+        {
+            "type": HOST_OBSERVATION_TYPE,
+            "hub_event": _browser_payload("native bridge auth failure"),
+        },
+        hub_url="http://127.0.0.1:8765",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    assert response["ok"] is False
+    assert any(step["action"] == "supply_or_rotate_hub_token" for step in response["next_steps"])
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "--hub-token <hub-token>" in next_steps_json
+    assert "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_native_host_success_preserves_hub_response_shape(monkeypatch):
+    response = {
+        "ok": True,
+        "receipt": {"receipt_id": "native-host-receipt-placeholder"},
+        "session_review": {"provider": "Browser extension"},
+    }
+    monkeypatch.setattr(native_host, "hub_request", lambda *_args, **_kwargs: response)
+
+    result = native_host.handle_native_host_message(
+        {
+            "type": HOST_OBSERVATION_TYPE,
+            "hub_event": _browser_payload("native bridge success"),
+        },
+        hub_url="http://127.0.0.1:8765",
+        home=None,
+    )
+
+    assert result == response
+    assert "next_steps" not in result
+
+
+def test_run_native_host_binary_framing_includes_next_steps_on_hub_setup_failure(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    message = {
+        "type": HOST_OBSERVATION_TYPE,
+        "hub_event": _browser_payload("native bridge framed failure"),
+    }
+    data = json.dumps(message).encode("utf-8")
+    stdin = io.BytesIO(struct.pack("<I", len(data)) + data)
+    stdout = io.BytesIO()
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token="example-native-host-framed-token-placeholder",
+        home=tmp_path,
+    )
+
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    assert response["ok"] is False
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "ardur personal-native-host" in next_steps_json
+    assert "<native-message.json>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
 
 
 def test_run_under_hub_unavailable_hub_reports_placeholder_next_steps(
