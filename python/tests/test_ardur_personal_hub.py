@@ -494,6 +494,114 @@ def test_native_host_uses_custom_home_for_hub_token(tmp_path):
     assert response["ok"] is True
 
 
+def test_run_under_hub_unavailable_hub_reports_placeholder_next_steps(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    sentinel = tmp_path / "child-ran.txt"
+
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(sentinel)!r}).write_text('ran')",
+            ],
+            hub_url="http://127.0.0.1:9",
+            hub_token=None,
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert "Ardur Hub unavailable: connection refused" in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur setup --home <ardur-home>" in remediation
+    assert "ardur hub --home <ardur-home>" in remediation
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in remediation
+    assert "<hub-token>" in remediation
+    assert str(tmp_path) not in remediation
+
+
+def test_run_under_hub_auth_failure_reports_token_next_steps_without_raw_secret(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    raw_token = "example-hub-token-placeholder"
+
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token=raw_token,
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert captured.out == ""
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "--hub-token <hub-token>" in remediation
+    assert "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>" in remediation
+    assert raw_token not in remediation
+    assert str(tmp_path) not in remediation
+
+
+def test_run_under_hub_blocked_policy_keeps_126_receipt_and_no_remediation(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+    with _running_hub(tmp_path) as (_, base_url):
+        exit_code = run_under_hub(
+            Namespace(
+                command=["sudo", "rm", "-rf", "/"],
+                hub_url=base_url,
+                hub_token=None,
+                home=tmp_path,
+            )
+        )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert "Ardur blocked command:" in captured.err
+    assert "receipt:" in captured.err
+    assert "Next steps:" not in captured.err
+
+
 def test_run_under_hub_streams_output_without_subprocess_run(tmp_path, capfd, monkeypatch):
     def fail_subprocess_run(*_args, **_kwargs):
         raise AssertionError("run_under_hub must not buffer output with subprocess.run")
@@ -517,6 +625,7 @@ def test_run_under_hub_streams_output_without_subprocess_run(tmp_path, capfd, mo
     assert exit_code == 0
     assert "stream-out" in captured.out
     assert "stream-err" in captured.err
+    assert "Next steps:" not in captured.err
 
 
 @contextmanager

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "747df4fc5736f1c651dd88c0507f03df6ae44154f3e9673b4d595c5b0b3bc397"
+source_sha256: "d53be74ded1034270a10431c7e778001a05f7dc6aab5ec90c8d7a5cc9a9f55c8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -186,6 +186,16 @@ Run a CLI command through the local Hub. Non-interactive only.
 ```text
 ardur run [--hub-url URL] [--hub-token TOKEN] [--home DIR] -- <command>
 ```
+
+If the local Hub cannot be reached, or session start/policy setup fails before
+`<command>` runs because local Hub auth/token state is missing or invalid,
+`ardur run` preserves the existing setup-failure exit code (`127`) and prints a
+placeholder-safe `Next steps:` section to stderr. The remediation text points to
+local setup, Hub startup, Hub token supply/rotation, and `ardur doctor` using
+`<ardur-home>`, `<hub-url>`, `<hub-token>`, and `<command>` placeholders rather
+than copying raw temp homes or tokens. Blocked commands still exit `126` with a
+receipt when policy evaluation succeeds; successful commands preserve stdout,
+stderr, and child exit-code streaming without remediation noise.
 
 ### `ardur desktop-observe`
 

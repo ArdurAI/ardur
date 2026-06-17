@@ -1034,7 +1034,7 @@ def status_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
     return {**response, "next_steps": steps}
 
 
-def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+def _hub_setup_failure_flags(response: dict[str, Any]) -> tuple[bool, bool]:
     error_code = str(response.get("error_code") or "").strip().lower()
     status = str(response.get("status") or "").strip()
     error = str(response.get("error") or "").strip().lower()
@@ -1046,6 +1046,11 @@ def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, 
         or ("token" in error and ("required" in error or "missing" in error or "unauthorized" in error))
         or ("authorization" in error and ("required" in error or "missing" in error or "unauthorized" in error))
     )
+    return hub_unavailable, token_problem
+
+
+def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    hub_unavailable, token_problem = _hub_setup_failure_flags(response)
 
     if not hub_unavailable and not token_problem:
         return []
@@ -1102,6 +1107,87 @@ def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, 
         }
     )
     return steps
+
+
+def run_recovery_next_steps_for_response(
+    response: dict[str, Any],
+    *,
+    phase: str,
+) -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for ``ardur run`` setup failures."""
+    hub_unavailable, token_problem = _hub_setup_failure_flags(response)
+    if not hub_unavailable and not token_problem and not response.get("error"):
+        return []
+
+    steps: list[dict[str, str]] = []
+    if hub_unavailable:
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "run_setup_if_needed",
+                "command": "ardur setup --home <ardur-home>",
+                "detail": (
+                    "Create local Ardur Personal config and Hub token if setup has not run yet. "
+                    "Do not paste raw tokens into shared logs."
+                ),
+            }
+        )
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "start_personal_hub",
+                "command": "ardur hub --home <ardur-home>",
+                "detail": (
+                    "Start the local loopback Ardur Personal Hub. If your config uses a "
+                    "non-default endpoint, use host/port settings that match <hub-url>."
+                ),
+            }
+        )
+
+    if hub_unavailable or token_problem:
+        steps.append(
+            {
+                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "action": "supply_or_rotate_hub_token",
+                "command": (
+                    "ardur run --home <ardur-home> --hub-url <hub-url> "
+                    "--hub-token <hub-token> -- <command>"
+                ),
+                "detail": (
+                    "Supply the existing local Hub token with --hub-token <hub-token> or "
+                    "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>; rotate it with "
+                    "ardur setup --home <ardur-home> --rotate-token only when needed."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": f"run_{phase}_failed",
+            "action": "rerun_doctor_then_run",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Confirm local setup before re-running ardur run --home <ardur-home> "
+                "--hub-url <hub-url> -- <command>. This guidance is local/no-key setup "
+                "help only; it does not call live providers, prove provider-hidden "
+                "actions, or broaden current Hub policy enforcement."
+            ),
+        }
+    )
+    return steps
+
+
+def _print_run_recovery_next_steps(response: dict[str, Any], *, phase: str) -> None:
+    steps = run_recovery_next_steps_for_response(response, phase=phase)
+    if not steps:
+        return
+    print("Next steps:", file=sys.stderr)
+    for index, step in enumerate(steps, start=1):
+        command = step.get("command", "")
+        detail = step.get("detail", "")
+        print(f"{index}. {command}", file=sys.stderr)
+        if detail:
+            print(f"   {detail}", file=sys.stderr)
 
 
 def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
@@ -1288,6 +1374,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
     start = hub_request("POST", "/v1/sessions/start", start_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not start.get("ok"):
         print(f"Ardur Hub unavailable: {start.get('error')}", file=sys.stderr)
+        _print_run_recovery_next_steps(start, phase="session_start")
         return 127
     check_payload = {
         **start_payload,
@@ -1302,6 +1389,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
     check = hub_request("POST", "/v1/policy/check", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not check.get("ok"):
         print(f"Ardur policy check failed: {check.get('error')}", file=sys.stderr)
+        _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
     policy = _dict(check.get("policy"))
     if policy.get("verdict") == "blocked":
