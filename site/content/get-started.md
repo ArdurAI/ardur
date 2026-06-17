@@ -106,7 +106,7 @@ Ardur ships a native Claude Code plugin:
 PYTHONPATH=python python -m vibap.cli profile init
 
 # Protect your Claude Code session
-PYTHONPATH=python python -m vibap.cli protect claude-code
+PYTHONPATH=python python -m vibap.cli protect claude-code --profile ARDUR.md
 ```
 
 See the [Claude Code plugin README]({{< relref "/source/plugins/claude-code/README.md" >}}) for the full setup.

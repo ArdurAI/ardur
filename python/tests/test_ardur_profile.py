@@ -128,6 +128,17 @@ Mission: Missing scope regression.
     assert str(tmp_path) not in captured.out
 
 
+def test_get_started_claude_code_snippet_uses_profile_after_init():
+    """Keep the get-started copy/paste path aligned with profile init output."""
+
+    get_started = REPO_ROOT / "site" / "content" / "get-started.md"
+    lines = get_started.read_text(encoding="utf-8").splitlines()
+
+    assert "PYTHONPATH=python python -m vibap.cli profile init" in lines
+    assert "PYTHONPATH=python python -m vibap.cli protect claude-code --profile ARDUR.md" in lines
+    assert "PYTHONPATH=python python -m vibap.cli protect claude-code" not in lines
+
+
 def test_profile_parses_friendly_markdown_rules(tmp_path):
     profile = tmp_path / "ARDUR.md"
     profile.write_text(
