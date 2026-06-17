@@ -340,6 +340,109 @@ def test_status_success_preserves_hub_response_shape(monkeypatch, capsys):
     assert "next_steps" not in result
 
 
+def test_desktop_observe_unavailable_hub_reports_placeholder_next_steps_without_path_leaks(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    result = personal_hub.desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=None,
+            session_id=None,
+            hub_url="http://127.0.0.1:9",
+            hub_token=None,
+            home=tmp_path,
+        )
+    )
+
+    assert result["ok"] is False
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {
+        "run_setup_if_needed",
+        "start_personal_hub",
+        "supply_or_rotate_hub_token",
+        "rerun_desktop_observe_or_doctor",
+    } <= actions
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur desktop-observe" in next_steps_json
+    assert "<ardur-home>" in next_steps_json
+    assert "<hub-url>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_desktop_observe_auth_failure_reports_token_next_steps_without_raw_secret(
+    tmp_path,
+    monkeypatch,
+):
+    raw_token = "example-hub-token-placeholder"
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    result = personal_hub.desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=None,
+            session_id=None,
+            hub_url="http://127.0.0.1:8765",
+            hub_token=raw_token,
+            home=tmp_path,
+        )
+    )
+
+    assert result["ok"] is False
+    assert any(step["action"] == "supply_or_rotate_hub_token" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "--hub-token <hub-token>" in next_steps_json
+    assert "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_desktop_observe_success_preserves_hub_response_shape(monkeypatch):
+    response = {
+        "ok": True,
+        "receipt": {"receipt_id": "desktop-receipt-placeholder"},
+        "session_review": {"provider": "ExampleApp"},
+    }
+    monkeypatch.setattr(personal_hub, "hub_request", lambda *_args, **_kwargs: response)
+
+    result = personal_hub.desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=None,
+            session_id=None,
+            hub_url="http://127.0.0.1:8765",
+            hub_token=None,
+            home=None,
+        )
+    )
+
+    assert result == response
+    assert "next_steps" not in result
+
+
 def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
     fsync_calls: list[int] = []
     open_calls: list[tuple[str, int, int]] = []

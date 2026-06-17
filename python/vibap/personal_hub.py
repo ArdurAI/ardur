@@ -1109,6 +1109,81 @@ def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, 
     return steps
 
 
+def desktop_observe_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
+    """Return ``ardur desktop-observe`` output with safe local remediation hints."""
+    if response.get("ok"):
+        return response
+
+    steps = _desktop_observe_next_steps_for_response(response)
+    if not steps:
+        return response
+    return {**response, "next_steps": steps}
+
+
+def _desktop_observe_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    hub_unavailable, token_problem = _hub_setup_failure_flags(response)
+    if not hub_unavailable and not token_problem:
+        return []
+
+    steps: list[dict[str, str]] = []
+    if hub_unavailable:
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "run_setup_if_needed",
+                "command": "ardur setup --home <ardur-home>",
+                "detail": (
+                    "Create local Ardur Personal config and Hub token if setup has not run yet. "
+                    "Do not paste raw tokens into shared logs."
+                ),
+            }
+        )
+        steps.append(
+            {
+                "condition": "hub_unavailable",
+                "action": "start_personal_hub",
+                "command": "ardur hub --home <ardur-home>",
+                "detail": (
+                    "Start the local loopback Ardur Personal Hub. If your config uses a "
+                    "non-default endpoint, use host/port settings that match <hub-url>."
+                ),
+            }
+        )
+
+    if hub_unavailable or token_problem:
+        steps.append(
+            {
+                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "action": "supply_or_rotate_hub_token",
+                "command": (
+                    "ardur desktop-observe --app <app-name> --title <window-title> "
+                    "--home <ardur-home> --hub-url <hub-url> --hub-token <hub-token>"
+                ),
+                "detail": (
+                    "Supply the existing local Hub token with --hub-token <hub-token> or "
+                    "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>; rotate it with "
+                    "ardur setup --home <ardur-home> --rotate-token only when needed."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": "desktop_observe_failed",
+            "action": "rerun_desktop_observe_or_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Confirm local setup before re-running ardur desktop-observe --app "
+                "<app-name> --title <window-title> --home <ardur-home> --hub-url "
+                "<hub-url>. This guidance is local/no-key setup help only; it does "
+                "not call live providers, prove provider-hidden actions, or broaden "
+                "current Hub policy enforcement."
+            ),
+        }
+    )
+    return steps
+
+
 def run_recovery_next_steps_for_response(
     response: dict[str, Any],
     *,
@@ -1460,6 +1535,7 @@ def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
     }
     token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
     response = hub_request("POST", "/v1/events/observe", payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
+    response = desktop_observe_response_with_next_steps(response)
     if permission_note:
         response["permission_note"] = permission_note
     return response
