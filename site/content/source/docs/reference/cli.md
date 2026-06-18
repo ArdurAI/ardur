@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "3e954e28e9554f8387aae6e42457d9ac22faec134dd1f8bd2cc54488d92af40f"
+source_sha256: "59e84194b130c863cb168369ee799a23ca742ad21ee3a538e926e9f01a8d14b2"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -191,11 +191,15 @@ Remove Ardur Personal launch files (the macOS LaunchAgent plist installed by
 `ardur setup`) without deleting the home directory by default.
 
 ```text
-ardur uninstall [--home DIR] [--remove-data]
+ardur uninstall [--home DIR] [--remove-data] [--dry-run]
 ```
 
 `--remove-data` also deletes the local Ardur Personal evidence and key
 material under the home directory.
+
+Use `--dry-run` to print deterministic JSON showing the local LaunchAgent and,
+when `--remove-data` is also set, the Ardur Personal home directory that would
+be removed. Dry-run mode does not delete launch files or data.
 
 ### `ardur run -- COMMAND ...`
 

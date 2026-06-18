@@ -1420,6 +1420,22 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
 def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
     launch_agent = Path.home() / "Library" / "LaunchAgents" / "dev.ardur.personal-hub.plist"
+    would_remove = []
+    if launch_agent.exists():
+        would_remove.append(str(launch_agent))
+    if args.remove_data and paths.home.exists():
+        would_remove.append(str(paths.home))
+
+    if getattr(args, "dry_run", False):
+        return {
+            "ok": True,
+            "dry_run": True,
+            "would_remove": would_remove,
+            "removed": [],
+            "data_kept": True,
+            "would_keep_data": not args.remove_data,
+        }
+
     removed = []
     if launch_agent.exists():
         launch_agent.unlink()

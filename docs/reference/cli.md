@@ -174,11 +174,15 @@ Remove Ardur Personal launch files (the macOS LaunchAgent plist installed by
 `ardur setup`) without deleting the home directory by default.
 
 ```text
-ardur uninstall [--home DIR] [--remove-data]
+ardur uninstall [--home DIR] [--remove-data] [--dry-run]
 ```
 
 `--remove-data` also deletes the local Ardur Personal evidence and key
 material under the home directory.
+
+Use `--dry-run` to print deterministic JSON showing the local LaunchAgent and,
+when `--remove-data` is also set, the Ardur Personal home directory that would
+be removed. Dry-run mode does not delete launch files or data.
 
 ### `ardur run -- COMMAND ...`
 

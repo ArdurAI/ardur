@@ -193,6 +193,100 @@ def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
+def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    data_file = personal_home / "receipt.json"
+    data_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    rc = cli_module.main(
+        [
+            "uninstall",
+            "--home",
+            str(personal_home),
+            "--remove-data",
+            "--dry-run",
+        ]
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert result == {
+        "ok": True,
+        "dry_run": True,
+        "would_remove": [str(launch_agent), str(personal_home)],
+        "removed": [],
+        "data_kept": True,
+        "would_keep_data": False,
+    }
+    assert launch_agent.exists()
+    assert data_file.exists()
+
+
+def test_uninstall_default_removes_only_launch_agent_and_keeps_data(tmp_path, monkeypatch):
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    data_file = personal_home / "receipt.json"
+    data_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    result = personal_hub.uninstall_personal(
+        Namespace(home=personal_home, remove_data=False, dry_run=False)
+    )
+
+    assert result == {
+        "ok": True,
+        "removed": [str(launch_agent)],
+        "data_kept": True,
+    }
+    assert not launch_agent.exists()
+    assert data_file.exists()
+
+
+def test_uninstall_remove_data_removes_only_temp_launch_agent_and_temp_home(
+    tmp_path, monkeypatch
+):
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    (personal_home / "receipt.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    result = personal_hub.uninstall_personal(
+        Namespace(home=personal_home, remove_data=True, dry_run=False)
+    )
+
+    assert result == {
+        "ok": True,
+        "removed": [str(launch_agent), str(personal_home)],
+        "data_kept": False,
+    }
+    assert not launch_agent.exists()
+    assert not personal_home.exists()
+
+
 def test_doctor_reports_next_steps_for_missing_setup_without_path_leaks(tmp_path, monkeypatch):
     monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
     monkeypatch.setattr(

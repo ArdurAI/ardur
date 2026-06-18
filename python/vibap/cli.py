@@ -1238,6 +1238,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also remove local Ardur Personal evidence and keys",
     )
+    uninstall.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="preview uninstall removals without deleting launch files or local data",
+    )
     uninstall.set_defaults(func=cmd_uninstall)
 
     run = subparsers.add_parser("run", help="run a CLI command through Ardur Personal Hub")
