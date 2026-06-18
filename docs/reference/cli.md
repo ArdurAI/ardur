@@ -39,6 +39,24 @@ hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
 
+### `ardur kill-switch`
+
+Activate or deactivate the emergency kill switch on a running governance proxy.
+
+```text
+ardur kill-switch [--deactivate] [--proxy-url URL] [--api-token TOKEN]
+```
+
+If the local proxy cannot be reached, TLS/scheme setup looks wrong, or the
+proxy rejects the bearer token, the JSON output preserves `ok: false` and adds
+deterministic `next_steps`. The hints are local/no-key recovery guidance only:
+start the loopback governance proxy, match the `<proxy-url>` scheme/host/port,
+supply or rotate `<api-token>`, then rerun `ardur kill-switch`. They use
+placeholders such as `<proxy-url>`, `<proxy-port>`, and `<api-token>` rather
+than copying raw tokens, URL credentials, or private paths. Successful
+activate/deactivate responses preserve the proxy response shape and omit
+remediation noise.
+
 ### `ardur issue`
 
 Issue an ES256-signed Mission Passport JWT.

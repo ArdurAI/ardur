@@ -302,8 +302,120 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return 0
 
 
+def _kill_switch_next_steps_for_failure(
+    error: str,
+    *,
+    status: int | None = None,
+) -> list[dict[str, str]]:
+    """Return placeholder-only remediation hints for kill-switch setup failures."""
+    normalized_error = error.strip().lower().replace("_", " ")
+    status_text = str(status or "").strip()
+
+    proxy_unavailable = any(
+        marker in normalized_error
+        for marker in {
+            "connection refused",
+            "connection reset",
+            "connection aborted",
+            "network is unreachable",
+            "no route to host",
+            "name or service not known",
+            "nodename nor servname",
+            "timed out",
+            "urlopen error",
+        }
+    )
+    tls_problem = any(
+        marker in normalized_error
+        for marker in {
+            "ssl",
+            "tls",
+            "certificate",
+            "wrong version number",
+            "handshake",
+        }
+    )
+    token_problem = (
+        status_text in {"401", "403"}
+        or "authorization" in normalized_error
+        or "unauthorized" in normalized_error
+        or "bearer token" in normalized_error
+        or "invalid bearer" in normalized_error
+        or "api token" in normalized_error
+    )
+    endpoint_problem = status_text in {"404", "405"} or "not found" in normalized_error
+
+    if not proxy_unavailable and not tls_problem and not token_problem and not endpoint_problem:
+        return []
+
+    steps: list[dict[str, str]] = []
+    if proxy_unavailable or tls_problem or endpoint_problem:
+        steps.append(
+            {
+                "condition": "proxy_tls_setup" if tls_problem else "proxy_unavailable",
+                "action": "start_or_check_governance_proxy",
+                "command": "VIBAP_API_TOKEN=<api-token> ardur start --host 127.0.0.1 --port <proxy-port>",
+                "detail": (
+                    "Start the local loopback governance proxy and keep its token private. "
+                    "Use --tls-cert/--tls-key if your proxy URL uses https with explicit certs, "
+                    "or --no-tls only for local development."
+                ),
+            }
+        )
+        steps.append(
+            {
+                "condition": "proxy_tls_setup" if tls_problem else "proxy_url_check",
+                "action": "check_proxy_url_scheme",
+                "command": "ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>",
+                "detail": (
+                    "Use the scheme, host, and port printed by ardur start; keep any URL "
+                    "credentials or raw tokens out of logs and shared artifacts."
+                ),
+            }
+        )
+
+    if token_problem:
+        steps.append(
+            {
+                "condition": "proxy_token_required",
+                "action": "supply_proxy_api_token",
+                "command": "ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>",
+                "detail": (
+                    "Pass the configured proxy API token with --api-token <api-token> or "
+                    "ARDUR_API_TOKEN=<api-token>. Do not paste the raw token into shared logs."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": "kill_switch_proxy_request_failed",
+            "action": "rerun_kill_switch_or_health_check",
+            "command": "ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>",
+            "detail": (
+                "After local proxy setup is fixed, rerun ardur kill-switch or check the "
+                "loopback proxy health endpoint. These hints are local/no-key setup guidance "
+                "only and do not claim external provider visibility or live enforcement beyond "
+                "the configured proxy."
+            ),
+        }
+    )
+    return steps
+
+
+def _kill_switch_failure_response(error: str, *, status: int | None = None) -> dict:
+    response: dict = {"ok": False, "error": error}
+    if status is not None:
+        response["status"] = status
+    steps = _kill_switch_next_steps_for_failure(error, status=status)
+    if steps:
+        response["next_steps"] = steps
+    return response
+
+
 def cmd_kill_switch(args: argparse.Namespace) -> int:
     import ssl
+    import urllib.error as urlerror
     import urllib.request as urlreq
 
     proxy_url = (
@@ -326,8 +438,18 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
             result = json.loads(resp.read().decode("utf-8"))
             _print_json(result)
             return 0
+    except urlerror.HTTPError as exc:
+        error = str(exc)
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload.get("error"):
+            error = str(payload["error"])
+        _print_json(_kill_switch_failure_response(error, status=exc.code))
+        return 1
     except Exception as exc:
-        _print_json({"ok": False, "error": str(exc)})
+        _print_json(_kill_switch_failure_response(str(exc)))
         return 1
 
 

@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import threading
+from email.message import Message
 from argparse import Namespace
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
@@ -341,6 +342,126 @@ def test_status_success_preserves_hub_response_shape(monkeypatch, capsys):
     assert rc == 0
     assert result == response
     assert "next_steps" not in result
+
+
+def test_kill_switch_unavailable_proxy_reports_placeholder_next_steps_without_token_leaks(
+    monkeypatch,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-proxy-token-placeholder"
+    raw_url_password = "url-password-placeholder"
+
+    def raise_unavailable(*_args, **_kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_unavailable)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(
+            deactivate=False,
+            proxy_url=f"https://user:{raw_url_password}@127.0.0.1:8443",
+            api_token=raw_token,
+        )
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert response["ok"] is False
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {
+        "start_or_check_governance_proxy",
+        "check_proxy_url_scheme",
+        "rerun_kill_switch_or_health_check",
+    } <= actions
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "<proxy-url>" in next_steps_json
+    assert "<proxy-port>" in next_steps_json
+    assert "<api-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+    assert raw_url_password not in next_steps_json
+
+
+def test_kill_switch_tls_setup_failure_reports_scheme_next_steps(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    def raise_tls_failure(*_args, **_kwargs):
+        raise OSError("[SSL: WRONG_VERSION_NUMBER] wrong version number")
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_tls_failure)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://127.0.0.1:8443", api_token=None)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert any(step["condition"] == "proxy_tls_setup" for step in response["next_steps"])
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "--tls-cert/--tls-key" in next_steps_json
+    assert "--no-tls" in next_steps_json
+
+
+def test_kill_switch_auth_failure_reports_token_next_steps_without_raw_secret(
+    monkeypatch,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-proxy-auth-token-placeholder"
+    error_payload = io.BytesIO(json.dumps({"error": "missing bearer token"}).encode("utf-8"))
+
+    def raise_http_error(*_args, **_kwargs):
+        raise urlerror.HTTPError(
+            url="https://127.0.0.1:8443/admin/kill-switch",
+            code=401,
+            msg="Unauthorized",
+            hdrs=Message(),
+            fp=error_payload,
+        )
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_http_error)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=True, proxy_url="https://127.0.0.1:8443", api_token=raw_token)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert response["status"] == 401
+    assert any(step["action"] == "supply_proxy_api_token" for step in response["next_steps"])
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "--api-token <api-token>" in next_steps_json
+    assert "ARDUR_API_TOKEN=<api-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+
+
+def test_kill_switch_success_preserves_proxy_response_shape(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    proxy_response = {"kill_switch": "activated"}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return False
+
+        def read(self):
+            return json.dumps(proxy_response).encode("utf-8")
+
+    monkeypatch.setattr(urlrequest, "urlopen", lambda *_args, **_kwargs: FakeResponse())
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://127.0.0.1:8443", api_token=None)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert response == proxy_response
+    assert "next_steps" not in response
 
 
 def test_desktop_observe_unavailable_hub_reports_placeholder_next_steps_without_path_leaks(

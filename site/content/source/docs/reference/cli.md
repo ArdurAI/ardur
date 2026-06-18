@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "d016c3414eec5d5adfd6052201432b20a9c1a3e322b7524453cd64c60310c8de"
+source_sha256: "cfea17d6501d409b63b936b0933c1833cbb57fbfd51193dc25f3480feb639977"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -55,6 +55,24 @@ sessions and passport state can contain bearer credentials, including parent
 hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
+
+### `ardur kill-switch`
+
+Activate or deactivate the emergency kill switch on a running governance proxy.
+
+```text
+ardur kill-switch [--deactivate] [--proxy-url URL] [--api-token TOKEN]
+```
+
+If the local proxy cannot be reached, TLS/scheme setup looks wrong, or the
+proxy rejects the bearer token, the JSON output preserves `ok: false` and adds
+deterministic `next_steps`. The hints are local/no-key recovery guidance only:
+start the loopback governance proxy, match the `<proxy-url>` scheme/host/port,
+supply or rotate `<api-token>`, then rerun `ardur kill-switch`. They use
+placeholders such as `<proxy-url>`, `<proxy-port>`, and `<api-token>` rather
+than copying raw tokens, URL credentials, or private paths. Successful
+activate/deactivate responses preserve the proxy response shape and omit
+remediation noise.
 
 ### `ardur issue`
 
