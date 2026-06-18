@@ -217,6 +217,20 @@ ardur desktop-observe [--hub-url URL] [--hub-token TOKEN] [--home DIR]
 `--text` is an explicit-consent visible text excerpt to include in the
 session review; omit it to record an app/title-only observation.
 
+When the local Hub cannot be reached or returns a local token/auth setup error,
+`desktop-observe` preserves the failing `ok: false` / `error_code` JSON response
+and adds deterministic `next_steps`. The hints are local/no-key recovery
+guidance only: run setup if needed, start the loopback Hub, supply or rotate the
+Hub token, run `ardur doctor`, then re-run `ardur desktop-observe --app
+<app-name> --title <window-title> --home <ardur-home> --hub-url <hub-url>
+--hub-token <hub-token>`. They use placeholders such as `<ardur-home>`,
+`<hub-url>`, `<hub-token>`, `<app-name>`, and `<window-title>` rather than
+copying raw local paths, temp homes, URL credentials, or tokens. This does not
+claim live provider/API behavior, provider-hidden action visibility, browser
+store/native-host installation proof, release readiness, or public metadata
+readiness; successful observations preserve the Hub response shape without
+remediation noise.
+
 ### `ardur personal-native-host`
 
 Run the browser native-messaging host that bridges the browser extension to

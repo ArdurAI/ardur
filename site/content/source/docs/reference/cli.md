@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "59e84194b130c863cb168369ee799a23ca742ad21ee3a538e926e9f01a8d14b2"
+source_sha256: "507fa544482f305eff2cd05f543089df606829a435e946c8cd577a3c4c6c554d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -233,6 +233,20 @@ ardur desktop-observe [--hub-url URL] [--hub-token TOKEN] [--home DIR]
 
 `--text` is an explicit-consent visible text excerpt to include in the
 session review; omit it to record an app/title-only observation.
+
+When the local Hub cannot be reached or returns a local token/auth setup error,
+`desktop-observe` preserves the failing `ok: false` / `error_code` JSON response
+and adds deterministic `next_steps`. The hints are local/no-key recovery
+guidance only: run setup if needed, start the loopback Hub, supply or rotate the
+Hub token, run `ardur doctor`, then re-run `ardur desktop-observe --app
+<app-name> --title <window-title> --home <ardur-home> --hub-url <hub-url>
+--hub-token <hub-token>`. They use placeholders such as `<ardur-home>`,
+`<hub-url>`, `<hub-token>`, `<app-name>`, and `<window-title>` rather than
+copying raw local paths, temp homes, URL credentials, or tokens. This does not
+claim live provider/API behavior, provider-hidden action visibility, browser
+store/native-host installation proof, release readiness, or public metadata
+readiness; successful observations preserve the Hub response shape without
+remediation noise.
 
 ### `ardur personal-native-host`
 
