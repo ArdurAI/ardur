@@ -684,6 +684,33 @@ def _validate_claude_code_plugin_dir(plugin_dir: Path) -> None:
         raise FileNotFoundError(f"Claude Code plugin is incomplete: {details}")
 
 
+def _protect_claude_code_plugin_incomplete_response(
+    failed_checks: list[dict[str, object]],
+) -> dict[str, object]:
+    missing_checks = [str(check["name"]) for check in failed_checks]
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "claude_code_plugin_incomplete",
+        "condition": "claude_code_plugin_incomplete",
+        "message": "Claude Code plugin directory is missing or incomplete.",
+        "detail": "Missing Claude Code plugin checks: " + ", ".join(missing_checks),
+        "missing_checks": missing_checks,
+        "next_steps": [
+            {
+                "action": "check_plugin",
+                "command": "ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>",
+                "detail": "Verify the local Claude Code plugin files before configuring protection.",
+            },
+            {
+                "action": "rerun_protect",
+                "command": "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>",
+                "detail": "After the plugin path is corrected, rerun protection for the project folder.",
+            },
+        ],
+    }
+
+
 def _write_private_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -932,7 +959,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     home.mkdir(parents=True, exist_ok=True)
     plugin_dir = Path(args.plugin_dir).expanduser().resolve()
-    _validate_claude_code_plugin_dir(plugin_dir)
+    failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
+    if failed_plugin_checks:
+        return _protect_claude_code_plugin_incomplete_response(failed_plugin_checks)
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir or (home / "keys"))
     if profile and profile.allowed_tools:
         # A profile with an explicit allowlist is authoritative: if the author

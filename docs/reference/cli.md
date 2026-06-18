@@ -323,6 +323,15 @@ command exits nonzero without configuring Claude Code. JSON output includes
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
 
+If the selected Claude Code plugin directory is missing or incomplete, the
+command also exits nonzero without writing `active_mission.jwt`. JSON output
+includes `ok: false`, `error: "claude_code_plugin_incomplete"`,
+`condition: "claude_code_plugin_incomplete"`, stable `missing_checks`, and
+placeholder-only `next_steps` such as
+`ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>`;
+human output prints the same recovery guidance without a Python traceback or raw
+local temp paths.
+
 ### `ardur claude-code-hook`
 
 Implements the Claude Code hook executable invoked by

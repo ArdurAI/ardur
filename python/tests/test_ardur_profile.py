@@ -10,8 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from vibap.ardur_profile import load_ardur_profile
 from vibap.cli import (
     claude_code_doctor,
@@ -397,21 +395,72 @@ def test_profile_init_existing_profile_human_has_next_steps(tmp_path, capsys):
     assert str(tmp_path) not in captured.out
 
 
-def test_protect_claude_code_fails_when_plugin_files_are_missing(tmp_path):
+def test_protect_claude_code_missing_plugin_json_has_next_steps(tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()
 
-    with pytest.raises(FileNotFoundError) as exc_info:
-        protect_claude_code(
-            _protect_args(
-                scope=project,
-                home=tmp_path / "home",
-                keys_dir=tmp_path / "keys",
-                plugin_dir=tmp_path / "missing-plugin",
-            )
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin",
         )
+    )
 
-    assert "Claude Code plugin is incomplete" in str(exc_info.value)
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "claude_code_plugin_incomplete"
+    assert response["condition"] == "claude_code_plugin_incomplete"
+    assert response["missing_checks"] == [
+        "plugin_dir",
+        "plugin_manifest",
+        "plugin_hooks",
+        "pre_tool_use",
+        "post_tool_use",
+        "subagent_start",
+        "subagent_stop",
+    ]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_missing_plugin_human_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin",
+        )
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur Claude Code protection was not configured." in captured.out
+    assert "Claude Code plugin directory is missing or incomplete." in captured.out
+    assert "Missing Claude Code plugin checks: plugin_dir, plugin_manifest" in captured.out
+    assert "Next steps:" in captured.out
+    assert "ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>" in captured.out
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
 
 
 def test_claude_code_doctor_reports_missing_plugin_files(tmp_path):

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b8a3da18f0d34e6991aa4439737395e7141c684cfd9312a11e4f89cdd5a598d1"
+source_sha256: "2f0dfdc73d285b5464c833e0b5e38823c7ad05aca17d313585a9596a1298fcb0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -339,6 +339,15 @@ command exits nonzero without configuring Claude Code. JSON output includes
 `ok: false`, `error: "missing_scope"`, `condition: "missing_scope"`, and
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
+
+If the selected Claude Code plugin directory is missing or incomplete, the
+command also exits nonzero without writing `active_mission.jwt`. JSON output
+includes `ok: false`, `error: "claude_code_plugin_incomplete"`,
+`condition: "claude_code_plugin_incomplete"`, stable `missing_checks`, and
+placeholder-only `next_steps` such as
+`ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>`;
+human output prints the same recovery guidance without a Python traceback or raw
+local temp paths.
 
 ### `ardur claude-code-hook`
 
