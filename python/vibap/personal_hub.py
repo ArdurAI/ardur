@@ -10,6 +10,7 @@ framework and CLI integrations.
 from __future__ import annotations
 
 import argparse
+from contextlib import suppress
 import hashlib
 import html
 import json
@@ -128,7 +129,7 @@ def _stream_subprocess(command: list[str]) -> StreamedProcessResult:
     stdout_hash = hashlib.sha256()
     stderr_hash = hashlib.sha256()
     counts = {"stdout": 0, "stderr": 0}
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
 
     def pump(stream, target, hasher, key: str) -> None:
         try:
@@ -140,13 +141,11 @@ def _stream_subprocess(command: list[str]) -> StreamedProcessResult:
                 counts[key] += len(chunk)
                 target.write(chunk)
                 target.flush()
-        except BaseException as exc:  # pragma: no cover - stdout/stderr pipe failures are host-specific
+        except Exception as exc:  # pragma: no cover - stdout/stderr pipe failures are host-specific
             errors.append(exc)
         finally:
-            try:
+            with suppress(OSError):
                 stream.close()
-            except OSError:
-                pass
 
     assert process.stdout is not None
     assert process.stderr is not None
@@ -204,10 +203,8 @@ def _write_json(path: Path, payload: Any) -> None:
         if fd >= 0:
             os.close(fd)
         if not replaced:
-            try:
+            with suppress(FileNotFoundError):
                 tmp.unlink()
-            except FileNotFoundError:
-                pass
 
 
 def _new_hub_token() -> str:
@@ -270,10 +267,8 @@ def _ensure_hub_config(
     config.setdefault("created_at", _utc_now())
     config["updated_at"] = _utc_now()
     _write_json(paths.config, config)
-    try:
+    with suppress(OSError):
         paths.config.chmod(0o600)
-    except OSError:
-        pass
     return config
 
 
