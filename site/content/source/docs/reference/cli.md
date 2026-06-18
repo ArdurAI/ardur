@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "cfea17d6501d409b63b936b0933c1833cbb57fbfd51193dc25f3480feb639977"
+source_sha256: "3e954e28e9554f8387aae6e42457d9ac22faec134dd1f8bd2cc54488d92af40f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -278,6 +278,15 @@ ardur profile init --template TEMPLATE
 ```
 
 Templates: `read-only`, `safe-coding`. Default path: `./ARDUR.md`.
+
+If the target profile already exists and `--force` is omitted, the command
+fails closed instead of overwriting local guardrails. JSON output includes
+`ok: false`, `error: "profile_exists"`, `condition: "profile_exists"`, and
+deterministic `next_steps`; human output prints the same recovery guidance under
+"Next steps". The placeholder-only local recovery commands are
+`ardur profile init --path ARDUR.md --force` when you intend to replace the
+profile, or `ardur protect claude-code --profile ARDUR.md` to use the existing
+profile.
 
 ### `ardur protect claude-code`
 

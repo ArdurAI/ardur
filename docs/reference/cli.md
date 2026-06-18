@@ -262,6 +262,15 @@ ardur profile init --template TEMPLATE
 
 Templates: `read-only`, `safe-coding`. Default path: `./ARDUR.md`.
 
+If the target profile already exists and `--force` is omitted, the command
+fails closed instead of overwriting local guardrails. JSON output includes
+`ok: false`, `error: "profile_exists"`, `condition: "profile_exists"`, and
+deterministic `next_steps`; human output prints the same recovery guidance under
+"Next steps". The placeholder-only local recovery commands are
+`ardur profile init --path ARDUR.md --force` when you intend to replace the
+profile, or `ardur protect claude-code --profile ARDUR.md` to use the existing
+profile.
+
 ### `ardur protect claude-code`
 
 Compile a Mission Passport (from an `ARDUR.md` profile or from CLI flags) and
