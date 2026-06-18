@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+import jwt
+
 from . import __version__
 from .ardur_profile import PROFILE_TEMPLATES, ArdurProfile, load_ardur_profile, write_profile_template
 from .ardur_personal_native_host import (
@@ -130,11 +132,103 @@ def cmd_issue(args: argparse.Namespace) -> int:
     return 0
 
 
+def _verify_failure_next_steps() -> list[dict[str, str]]:
+    return [
+        {
+            "condition": "invalid_passport_token",
+            "action": "verify_a_fresh_passport_token",
+            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "detail": (
+                "Use a Mission Passport JWT issued by this Ardur key directory. "
+                "Keep raw tokens out of shared logs and reports."
+            ),
+        },
+        {
+            "condition": "invalid_passport_token",
+            "action": "issue_a_new_passport_if_needed",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": "Issue a fresh local Mission Passport when the old token is malformed, expired, or signed by a different key.",
+        },
+    ]
+
+
+def _verify_failure_response(exc: Exception) -> dict:
+    detail = str(exc).strip() or exc.__class__.__name__
+    return {
+        "ok": False,
+        "valid": False,
+        "error": "invalid_passport_token",
+        "condition": "invalid_passport_token",
+        "message": "Mission Passport token could not be verified.",
+        "detail": detail,
+        "next_steps": _verify_failure_next_steps(),
+    }
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     _, public_key = generate_keypair(keys_dir=args.keys_dir)
-    claims = verify_passport(args.token, public_key)
+    try:
+        claims = verify_passport(args.token, public_key)
+    except (jwt.PyJWTError, PermissionError, ValueError) as exc:
+        _print_json(_verify_failure_response(exc))
+        return 1
     _print_json({"valid": True, "claims": claims})
     return 0
+
+
+def _attest_failure_condition(exc: Exception) -> tuple[str, str]:
+    message = str(exc).lower()
+    if "invalid session id format" in message:
+        return (
+            "invalid_session_id",
+            "Session identifiers must be UUIDs produced by an Ardur governed session.",
+        )
+    if "unknown session" in message:
+        return (
+            "session_not_found",
+            "No persisted session was found for the supplied session id in the selected state directory.",
+        )
+    return (
+        "attestation_failed",
+        "The session could not be loaded or attested from the selected local state.",
+    )
+
+
+def _attest_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    steps = [
+        {
+            "condition": condition,
+            "action": "retry_with_recorded_session_id",
+            "command": "ardur attest --session <session-id> --keys-dir <keys-dir> --state-dir <state-dir> --log-path <audit-log>",
+            "detail": (
+                "Use the exact session_id emitted by the governed session and the same local state directory. "
+                "Do not paste raw tokens or local private paths into shared artifacts."
+            ),
+        }
+    ]
+    if condition in {"invalid_session_id", "session_not_found"}:
+        steps.append(
+            {
+                "condition": condition,
+                "action": "start_or_find_a_governed_session",
+                "command": "ardur start --mission <mission.json> --keys-dir <keys-dir> --state-dir <state-dir> --log-path <audit-log>",
+                "detail": "Start or locate the governed session first, then attest using its UUID session id.",
+            }
+        )
+    return steps
+
+
+def _attest_failure_response(exc: Exception) -> dict:
+    condition, detail = _attest_failure_condition(exc)
+    return {
+        "ok": False,
+        "valid": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Behavioral attestation could not be issued for the requested session.",
+        "detail": detail,
+        "next_steps": _attest_failure_next_steps(condition),
+    }
 
 
 def cmd_attest(args: argparse.Namespace) -> int:
@@ -145,7 +239,11 @@ def cmd_attest(args: argparse.Namespace) -> int:
         keys_dir=args.keys_dir,
         public_key=public_key,
     )
-    token, claims = proxy.issue_attestation_for_session(args.session, private_key)
+    try:
+        token, claims = proxy.issue_attestation_for_session(args.session, private_key)
+    except (ValueError, PermissionError, jwt.PyJWTError) as exc:
+        _print_json(_attest_failure_response(exc))
+        return 1
     _print_json({"token": token, "claims": claims})
     return 0
 
