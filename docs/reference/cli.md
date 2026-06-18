@@ -184,6 +184,15 @@ Use `--dry-run` to print deterministic JSON showing the local LaunchAgent and,
 when `--remove-data` is also set, the Ardur Personal home directory that would
 be removed. Dry-run mode does not delete launch files or data.
 
+Dry-run JSON also includes a placeholder-safe `next_steps` array so users can
+interpret the preview before running a destructive command. The hints point to
+reviewing `would_remove`, unloading only the local Ardur Personal LaunchAgent if
+it is running, backing up/exporting `<ardur-home>` to `<backup-location>` before
+`--remove-data`, and rerunning `ardur uninstall` intentionally without
+`--dry-run` only after the preview matches intent. The guidance uses placeholders
+instead of raw local homes, temp paths, Hub tokens, evidence files, or key
+material.
+
 ### `ardur run -- COMMAND ...`
 
 Run a CLI command through the local Hub. Non-interactive only.

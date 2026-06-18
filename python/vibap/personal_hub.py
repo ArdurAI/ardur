@@ -1417,6 +1417,70 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _uninstall_dry_run_next_steps(remove_data: bool) -> list[dict[str, str]]:
+    """Return placeholder-only safety guidance for ``ardur uninstall --dry-run``.
+
+    The dry-run preview may intentionally include local paths in ``would_remove``
+    so users can verify exactly what would be removed. These hints are designed
+    to be copy/paste-safe: they use placeholders instead of raw home paths,
+    tokens, or receipt/key locations.
+    """
+    preview_command = "ardur uninstall --home <ardur-home> --dry-run"
+    uninstall_command = "ardur uninstall --home <ardur-home>"
+    if remove_data:
+        preview_command = "ardur uninstall --home <ardur-home> --remove-data --dry-run"
+        uninstall_command = "ardur uninstall --home <ardur-home> --remove-data"
+
+    steps = [
+        {
+            "condition": "uninstall_dry_run",
+            "action": "inspect_previewed_removals",
+            "command": preview_command,
+            "detail": (
+                "Review the would_remove list before deleting anything. Dry-run mode "
+                "does not remove the LaunchAgent or local Ardur Personal data."
+            ),
+        },
+        {
+            "condition": "launch_agent_may_be_running",
+            "action": "stop_local_launch_agent_if_running",
+            "command": "launchctl bootout gui/<uid> ~/Library/LaunchAgents/dev.ardur.personal-hub.plist",
+            "detail": (
+                "If the local Hub is running under the per-user LaunchAgent, unload "
+                "that local agent before the real uninstall. This affects only the "
+                "Ardur Personal LaunchAgent."
+            ),
+        },
+    ]
+    if remove_data:
+        steps.append(
+            {
+                "condition": "remove_data_requested",
+                "action": "back_up_or_export_local_data",
+                "command": "cp -R <ardur-home> <backup-location>",
+                "detail": (
+                    "--remove-data deletes local Ardur Personal evidence and key "
+                    "material. Back up or export anything you need before running the "
+                    "real uninstall."
+                ),
+            }
+        )
+
+    steps.append(
+        {
+            "condition": "preview_confirmed",
+            "action": "rerun_uninstall_intentionally",
+            "command": uninstall_command,
+            "detail": (
+                "After reviewing the dry-run preview, rerun without --dry-run only "
+                "if the listed removals match your intent. Without --remove-data, "
+                "the Ardur Personal home is kept."
+            ),
+        }
+    )
+    return steps
+
+
 def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
     launch_agent = Path.home() / "Library" / "LaunchAgents" / "dev.ardur.personal-hub.plist"
@@ -1434,6 +1498,7 @@ def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
             "removed": [],
             "data_kept": True,
             "would_keep_data": not args.remove_data,
+            "next_steps": _uninstall_dry_run_next_steps(bool(args.remove_data)),
         }
 
     removed = []

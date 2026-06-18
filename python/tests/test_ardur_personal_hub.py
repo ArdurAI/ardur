@@ -198,6 +198,7 @@ def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
 ):
     from vibap import cli as cli_module
 
+    raw_token = "example-hub-token-placeholder"
     user_home = tmp_path / "user-home"
     launch_agents = user_home / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True)
@@ -206,6 +207,9 @@ def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
 
     personal_home = tmp_path / "ardur-home"
     personal_home.mkdir()
+    (personal_home / "config.json").write_text(
+        json.dumps({"hub_token": raw_token}), encoding="utf-8"
+    )
     data_file = personal_home / "receipt.json"
     data_file.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
@@ -222,14 +226,65 @@ def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
     result = json.loads(capsys.readouterr().out)
 
     assert rc == 0
-    assert result == {
-        "ok": True,
-        "dry_run": True,
-        "would_remove": [str(launch_agent), str(personal_home)],
-        "removed": [],
-        "data_kept": True,
-        "would_keep_data": False,
-    }
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["would_remove"] == [str(launch_agent), str(personal_home)]
+    assert result["removed"] == []
+    assert result["data_kept"] is True
+    assert result["would_keep_data"] is False
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {
+        "inspect_previewed_removals",
+        "stop_local_launch_agent_if_running",
+        "back_up_or_export_local_data",
+        "rerun_uninstall_intentionally",
+    } <= actions
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<ardur-home>" in next_steps_json
+    assert "<backup-location>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+    assert raw_token not in next_steps_json
+    assert launch_agent.exists()
+    assert data_file.exists()
+
+
+def test_uninstall_dry_run_without_remove_data_guides_launch_agent_only_preview(
+    tmp_path, monkeypatch
+):
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    data_file = personal_home / "receipt.json"
+    data_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    result = personal_hub.uninstall_personal(
+        Namespace(home=personal_home, remove_data=False, dry_run=True)
+    )
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["would_remove"] == [str(launch_agent)]
+    assert result["removed"] == []
+    assert result["data_kept"] is True
+    assert result["would_keep_data"] is True
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {
+        "inspect_previewed_removals",
+        "stop_local_launch_agent_if_running",
+        "rerun_uninstall_intentionally",
+    } <= actions
+    assert "back_up_or_export_local_data" not in actions
+    next_steps_json = json.dumps(result["next_steps"])
+    next_step_commands_json = json.dumps([step["command"] for step in result["next_steps"]])
+    assert "<ardur-home>" in next_steps_json
+    assert "--remove-data" not in next_step_commands_json
+    assert str(tmp_path) not in next_steps_json
     assert launch_agent.exists()
     assert data_file.exists()
 

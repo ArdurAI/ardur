@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "507fa544482f305eff2cd05f543089df606829a435e946c8cd577a3c4c6c554d"
+source_sha256: "b8a3da18f0d34e6991aa4439737395e7141c684cfd9312a11e4f89cdd5a598d1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -200,6 +200,15 @@ material under the home directory.
 Use `--dry-run` to print deterministic JSON showing the local LaunchAgent and,
 when `--remove-data` is also set, the Ardur Personal home directory that would
 be removed. Dry-run mode does not delete launch files or data.
+
+Dry-run JSON also includes a placeholder-safe `next_steps` array so users can
+interpret the preview before running a destructive command. The hints point to
+reviewing `would_remove`, unloading only the local Ardur Personal LaunchAgent if
+it is running, backing up/exporting `<ardur-home>` to `<backup-location>` before
+`--remove-data`, and rerunning `ardur uninstall` intentionally without
+`--dry-run` only after the preview matches intent. The guidance uses placeholders
+instead of raw local homes, temp paths, Hub tokens, evidence files, or key
+material.
 
 ### `ardur run -- COMMAND ...`
 
