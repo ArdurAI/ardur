@@ -922,8 +922,41 @@ def cmd_protect_claude_code(args: argparse.Namespace) -> int:
     return 0
 
 
+def _profile_init_existing_profile_response() -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": "profile_exists",
+        "condition": "profile_exists",
+        "message": "ardur profile init will not overwrite an existing profile without --force.",
+        "detail": "Use --force only if you want to replace the current profile, or use the existing profile with protect claude-code.",
+        "next_steps": [
+            {
+                "action": "replace_profile",
+                "command": "ardur profile init --path ARDUR.md --force",
+                "detail": "Replace the local profile only if you intend to overwrite your current guardrails.",
+            },
+            {
+                "action": "use_existing_profile",
+                "command": "ardur protect claude-code --profile ARDUR.md",
+                "detail": "Use the existing editable profile when configuring Claude Code protection.",
+            },
+        ],
+    }
+
+
 def cmd_profile_init(args: argparse.Namespace) -> int:
-    path = write_profile_template(args.path, template=args.template, force=args.force)
+    try:
+        path = write_profile_template(args.path, template=args.template, force=args.force)
+    except FileExistsError:
+        result = _profile_init_existing_profile_response()
+        if args.json:
+            _print_json(result)
+        else:
+            print("Ardur profile was not created.")
+            print(str(result["message"]))
+            print(str(result["detail"]))
+            _print_report_next_steps(result)
+        return 1
     result = {
         "ok": True,
         "template": args.template,
