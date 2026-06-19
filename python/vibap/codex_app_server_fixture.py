@@ -801,10 +801,10 @@ def _empty_report_next_steps() -> list[dict[str, str]]:
         {
             "condition": "no_codex_app_server_receipts",
             "action": "feed_local_codex_app_server_event",
-            "command": "ardur codex-app-server-event --keys-dir <ardur-home>/keys",
+            "command": "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>",
             "detail": (
-                "Feed a local Codex app-server host-event JSON object through Ardur's fixture/helper "
-                "so a local receipt chain is written."
+                "Feed a local Codex app-server host-event JSON object from <event-json-file> "
+                "through Ardur's fixture/helper so a local receipt chain is written."
             ),
         },
         {

@@ -250,11 +250,17 @@ def test_empty_codex_app_server_report_includes_local_next_steps(tmp_path):
     ]
     rendered_steps = repr(steps)
     assert "ardur codex-app-server-fixture --project-dir <your-project>" in rendered_steps
-    assert "ardur codex-app-server-event" in rendered_steps
+    feed_event_step = steps[1]
+    assert feed_event_step["command"] == (
+        "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>"
+    )
     assert "ardur codex-app-server-report" in rendered_steps
     assert "<your-project>" in rendered_steps
+    assert "<keys-dir>" in rendered_steps
+    assert "<event-json-file>" in rendered_steps
     assert "<ardur-home>" in rendered_steps
     assert str(tmp_path) not in rendered_steps
+    assert "<ABSOLUTE_PATH:" not in rendered_steps
 
 
 def test_empty_codex_app_server_report_human_output_prints_next_steps(tmp_path, capsys):
@@ -277,10 +283,11 @@ def test_empty_codex_app_server_report_human_output_prints_next_steps(tmp_path, 
     assert "Ardur Codex app-server receipt report: 0 receipts across 0 chains" in output
     assert "Next steps:" in output
     assert "ardur codex-app-server-fixture --project-dir <your-project>" in output
-    assert "ardur codex-app-server-event" in output
+    assert "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>" in output
     assert "ardur codex-app-server-report" in output
     next_steps_output = output.split("Next steps:", 1)[1]
     assert str(tmp_path) not in next_steps_output
+    assert "<ABSOLUTE_PATH:" not in next_steps_output
 
 
 def test_codex_shareable_report_summarizes_high_risk_target_text(tmp_path, monkeypatch):
