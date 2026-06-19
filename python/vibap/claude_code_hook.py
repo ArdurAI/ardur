@@ -193,6 +193,10 @@ class MissionLoadError(RuntimeError):
     """Raised when no usable Mission Passport can be located or verified."""
 
 
+class HookInputNotObjectError(ValueError):
+    """Raised when stdin parses but is not a hook-event JSON object."""
+
+
 def _candidate_passport_sources() -> list[tuple[str, str]]:
     """Return a list of ``(source_label, raw_jwt)`` pairs to try in order.
 
@@ -1126,6 +1130,67 @@ def _handle_pre_tool_use_daemon_first(
     return handle_pre_tool_use(hook_input, keys_dir=keys_dir)
 
 
+def _claude_code_hook_input_next_steps(condition: str, *, phase: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "configure_claude_code_protection",
+            "command": "ardur protect claude-code --scope <your-project> --home <ardur-home>",
+            "detail": (
+                "Configure local Claude Code protection and inspect the generated hook/plugin setup "
+                "before feeding hook JSON."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_with_hook_event_json_file",
+            "command": (
+                f"ardur claude-code-hook {phase} --keys-dir <keys-dir> "
+                "< <claude-code-hook-event-json-file>"
+            ),
+            "detail": (
+                "Feed a Claude Code hook JSON object from <claude-code-hook-event-json-file>. "
+                "Keep sensitive values and local private paths out of shared logs and reports."
+            ),
+        },
+    ]
+
+
+def _claude_code_hook_input_failure_response(exc: Exception, *, phase: str) -> dict[str, Any]:
+    if isinstance(exc, json.JSONDecodeError):
+        condition = "claude_code_hook_input_malformed"
+        message = "Claude Code hook input is not valid JSON."
+        detail = (
+            "Input must be a valid JSON object; "
+            f"parsing failed at line {exc.lineno}, column {exc.colno}."
+        )
+    else:
+        condition = "claude_code_hook_input_not_object"
+        message = "Claude Code hook input must be a JSON object."
+        detail = (
+            "Input must be a JSON object from <claude-code-hook-event-json-file>; arrays, "
+            "strings, numbers, booleans, and null are not accepted."
+        )
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": _claude_code_hook_input_next_steps(condition, phase=phase),
+    }
+
+
+def _load_hook_input(stream: Any) -> dict[str, Any]:
+    raw = _read_hook_input(stream)
+    if not raw.strip():
+        return {}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise HookInputNotObjectError("Claude Code hook payload must be a JSON object")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Reads hook input JSON from stdin, writes hook
     output JSON to stdout. Exit code is 0 on success (handler returned
@@ -1148,10 +1213,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        raw = _read_hook_input(sys.stdin)
-        hook_input = json.loads(raw) if raw.strip() else {}
+        hook_input = _load_hook_input(sys.stdin)
     except json.JSONDecodeError as exc:
-        sys.stderr.write(f"ardur: invalid hook input JSON: {exc}\n")
+        print(json.dumps(_claude_code_hook_input_failure_response(exc, phase=args.phase), sort_keys=True))
+        return 1
+    except HookInputNotObjectError as exc:
+        print(json.dumps(_claude_code_hook_input_failure_response(exc, phase=args.phase), sort_keys=True))
         return 1
     except ValueError as exc:
         sys.stderr.write(f"ardur: invalid hook input: {exc}\n")

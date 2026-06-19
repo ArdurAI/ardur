@@ -914,6 +914,77 @@ def test_main_pre_reads_stdin_writes_stdout(tmp_path, monkeypatch):
     assert output["continue"] is True
 
 
+@pytest.mark.parametrize(
+    ("stdin_payload", "condition", "expected_detail"),
+    [
+        (
+            "{not-json",
+            "claude_code_hook_input_malformed",
+            "parsing failed at line 1, column 2",
+        ),
+        (
+            "[1, 2, 3]",
+            "claude_code_hook_input_not_object",
+            "arrays, strings, numbers, booleans, and null are not accepted",
+        ),
+    ],
+)
+def test_claude_code_hook_cli_returns_structured_input_error_next_steps(
+    tmp_path, stdin_payload, condition, expected_detail
+):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[2]
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "VIBAP_HOME": str(tmp_path / "ardur-home"),
+        "ARDUR_CC_HOOK_DIR": str(tmp_path / "chain"),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+    env.pop("ARDUR_MISSION_PASSPORT", None)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vibap.cli",
+            "claude-code-hook",
+            "pre",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        input=stdin_payload,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+        cwd=repo_root,
+        timeout=20,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == condition
+    assert output["condition"] == condition
+    assert expected_detail in output["detail"]
+    assert [step["action"] for step in output["next_steps"]] == [
+        "configure_claude_code_protection",
+        "rerun_with_hook_event_json_file",
+    ]
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home>" in output_text
+    assert "ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>" in output_text
+    assert "Traceback" not in output_text
+    assert stdin_payload not in output_text
+    assert str(tmp_path) not in output_text
+
+
 def test_main_rejects_oversize_stdin(monkeypatch, capsys):
     import io
 

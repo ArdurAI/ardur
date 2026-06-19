@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "7650d7baa9dc6b0b260c42cda6d3e09fc363dfffd6f40b8a6a88ba2ccfc0b2af"
+source_sha256: "d2c0d75c347bc0119c4bc260bff2fc7fad6c7d712ba64008783c0a98f0d0c44b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -355,6 +355,20 @@ Implements the Claude Code hook executable invoked by
 `plugins/claude-code/hooks/`. Not intended for human invocation; called by
 Claude Code with hook-specific stdin payloads (`pre`, `post`, `subagent-start`,
 `subagent-stop`).
+
+```text
+ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>
+```
+
+If stdin is malformed JSON or parses to a non-object JSON value, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields, a concise `detail`, and
+placeholder-only `next_steps`. The recovery hints point to local commands such
+as `ardur protect claude-code --scope <your-project> --home <ardur-home>` and
+`ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>`.
+They do not call Claude, contact a provider, claim visibility into
+provider-hidden actions, or require copying sensitive values or local private paths
+into shared logs.
 
 ### `ardur claude-code-report`
 

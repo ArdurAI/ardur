@@ -339,6 +339,20 @@ Implements the Claude Code hook executable invoked by
 Claude Code with hook-specific stdin payloads (`pre`, `post`, `subagent-start`,
 `subagent-stop`).
 
+```text
+ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>
+```
+
+If stdin is malformed JSON or parses to a non-object JSON value, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields, a concise `detail`, and
+placeholder-only `next_steps`. The recovery hints point to local commands such
+as `ardur protect claude-code --scope <your-project> --home <ardur-home>` and
+`ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>`.
+They do not call Claude, contact a provider, claim visibility into
+provider-hidden actions, or require copying sensitive values or local private paths
+into shared logs.
+
 ### `ardur claude-code-report`
 
 Read a Claude Code receipt chain and emit a human or JSON summary of allow,
