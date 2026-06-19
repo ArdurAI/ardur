@@ -361,12 +361,90 @@ def test_doctor_reports_next_steps_for_missing_setup_without_path_leaks(tmp_path
 
     assert result["ok"] is False
     assert {check["name"] for check in result["checks"]} >= {"home", "config", "hub_token", "hub"}
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+    assert checks_by_name["home"]["detail"] == "<ardur-home>"
+    assert checks_by_name["config"]["detail"] == "<ardur-config>"
     assert any(step["action"] == "run_setup" for step in result["next_steps"])
     assert any(step["action"] == "rerun_doctor" for step in result["next_steps"])
     next_steps_json = json.dumps(result["next_steps"])
+    result_json = json.dumps(result)
     assert "<ardur-home>" in next_steps_json
+    assert "<ardur-config>" in result_json
     assert "ardur setup" in next_steps_json
-    assert str(tmp_path) not in next_steps_json
+    assert str(tmp_path) not in result_json
+
+
+def test_doctor_cli_missing_setup_stdout_is_placeholder_safe(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    missing_home = tmp_path / "missing-home"
+
+    rc = cli_module.cmd_doctor(
+        Namespace(home=missing_home, hub_url="http://127.0.0.1:9", hub_token=None)
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["checks"]
+    assert result["next_steps"]
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+    assert checks_by_name["home"]["detail"] == "<ardur-home>"
+    assert checks_by_name["config"]["detail"] == "<ardur-config>"
+    stdout_stderr = captured.out + captured.err
+    for marker in (
+        "/Users/",
+        "/home/",
+        "/private/var/folders/",
+        "/tmp/",
+        str(tmp_path),
+        "<ABSOLUTE_PATH:",
+        "example-raw-token-value",
+        "http://user:",
+    ):
+        assert marker not in stdout_stderr
+
+
+def test_doctor_cli_redacts_hub_url_credentials_from_check_detail(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error_code": "hub_unavailable",
+        },
+    )
+    raw_secret = "example-raw-token-value"
+    hub_url = f"http://user:{raw_secret}@127.0.0.1:9/status?token={raw_secret}"
+
+    rc = cli_module.cmd_doctor(
+        Namespace(home=tmp_path / "missing-home", hub_url=hub_url, hub_token=None)
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+
+    assert rc == 1
+    assert captured.err == ""
+    assert checks_by_name["hub"]["detail"] == "http://127.0.0.1:9/status?token=<redacted>"
+    stdout_stderr = captured.out + captured.err
+    assert raw_secret not in stdout_stderr
+    assert "http://user:" not in stdout_stderr
 
 
 def test_doctor_reports_hub_next_steps_when_configured_hub_is_unavailable(tmp_path, monkeypatch):

@@ -241,6 +241,21 @@ def _redact_url_tokens(message: str) -> str:
     return _QUERY_TOKEN_LOG_RE.sub(r"\1<redacted>", message)
 
 
+def _redact_url_for_user_output(value: str) -> str:
+    """Return a user-facing URL with query tokens and credentials redacted."""
+    redacted = _redact_url_tokens(value)
+    try:
+        parsed = urlparse.urlsplit(redacted)
+    except ValueError:
+        return "<hub-url>"
+    if "@" not in parsed.netloc:
+        return redacted
+    netloc = parsed.netloc.rsplit("@", 1)[1]
+    if not netloc:
+        return "<hub-url>"
+    return urlparse.urlunsplit(parsed._replace(netloc=netloc))
+
+
 def _load_hub_config(paths: HubPaths) -> dict[str, Any]:
     return _dict(_read_json(paths.config, {}))
 
@@ -1366,10 +1381,9 @@ def _doctor_personal_next_steps(
 ) -> list[dict[str, str]]:
     """Return deterministic local remediation hints for ``ardur doctor``.
 
-    The check details may include real local paths for diagnostics; these
-    remediation hints intentionally use placeholders so JSON output can be
-    copied into support notes without leaking temp homes, Hub tokens, or private
-    receipt locations.
+    The user-facing doctor JSON intentionally uses placeholders for local setup
+    paths and remediation hints so it can be copied into support notes without
+    leaking temp homes, Hub tokens, or private receipt locations.
     """
     if home_ok and config_ok and hub_token_ok and hub_ok:
         return []
@@ -1439,10 +1453,10 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     hub_token_ok = bool(token)
     hub_ok = bool(hub.get("ok"))
     checks = [
-        {"name": "home", "ok": home_ok, "detail": str(paths.home)},
-        {"name": "config", "ok": config_ok, "detail": str(paths.config)},
+        {"name": "home", "ok": home_ok, "detail": "<ardur-home>"},
+        {"name": "config", "ok": config_ok, "detail": "<ardur-config>"},
         {"name": "hub_token", "ok": hub_token_ok, "detail": "configured" if token else "missing"},
-        {"name": "hub", "ok": hub_ok, "detail": hub.get("error") or args.hub_url},
+        {"name": "hub", "ok": hub_ok, "detail": hub.get("error") or _redact_url_for_user_output(str(args.hub_url))},
         {
             "name": "desktop_permissions",
             "ok": sys.platform == "darwin",
