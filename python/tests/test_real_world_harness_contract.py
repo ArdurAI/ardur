@@ -246,6 +246,83 @@ def test_rwt_phase1_harness_allows_clean_local_candidate_commit(monkeypatch, tmp
     assert "clean local candidate" in repo_info["preflight_note"]
 
 
+def _stub_repo_preflight_git(monkeypatch, harness, *, origin_full: str, status: str = "", ancestor: bool = True) -> None:
+    origin_short = origin_full[:12]
+
+    def fake_short_git(_repo, *args):
+        if args == ("rev-parse", "HEAD"):
+            return origin_short
+        if args == ("rev-parse", "origin/dev"):
+            return origin_short
+        raise AssertionError(args)
+
+    def fake_git_text(_repo, *args):
+        if args == ("status", "--short"):
+            return status
+        if args == ("rev-parse", "origin/dev"):
+            return origin_full
+        raise AssertionError(args)
+
+    monkeypatch.setattr(harness, "short_git", fake_short_git)
+    monkeypatch.setattr(harness, "git_text", fake_git_text)
+    monkeypatch.setattr(
+        harness,
+        "git_success",
+        lambda _repo, *args: ancestor if args == ("merge-base", "--is-ancestor", "origin/dev", "HEAD") else False,
+    )
+
+
+@pytest.mark.parametrize("expected_length", [7, 12, 40])
+def test_rwt_phase1_harness_accepts_matching_expected_origin_dev_prefixes(monkeypatch, tmp_path, expected_length):
+    harness = _load_harness()
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").write_text("gitdir: ../.git/worktrees/fake\n", encoding="utf-8")
+    origin_full = "abcdef1234567890abcdef1234567890abcdef12"
+    expected = origin_full[:expected_length]
+    _stub_repo_preflight_git(monkeypatch, harness, origin_full=origin_full)
+    ctx = SimpleNamespace(repo=fake_repo, expected_origin_dev=expected, allow_dirty=False)
+
+    repo_info, blocker = harness.validate_repo_preflight(ctx)
+
+    assert blocker is None
+    assert repo_info["origin_dev"] == origin_full[:12]
+    assert repo_info["expected_origin_dev"] == expected
+    assert repo_info["clean_before"] is True
+
+
+@pytest.mark.parametrize("expected", ["abcdef", "abcdee1", "abcdef1234567890abcdef1234567890abcdef13"])
+def test_rwt_phase1_harness_blocks_mismatched_expected_origin_dev_prefixes(monkeypatch, tmp_path, expected):
+    harness = _load_harness()
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").write_text("gitdir: ../.git/worktrees/fake\n", encoding="utf-8")
+    origin_full = "abcdef1234567890abcdef1234567890abcdef12"
+    _stub_repo_preflight_git(monkeypatch, harness, origin_full=origin_full)
+    ctx = SimpleNamespace(repo=fake_repo, expected_origin_dev=expected, allow_dirty=False)
+
+    repo_info, blocker = harness.validate_repo_preflight(ctx)
+
+    assert blocker == f"stale origin/dev: expected {expected} got {origin_full[:12]}"
+    assert repo_info["origin_dev"] == origin_full[:12]
+    assert repo_info["expected_origin_dev"] == expected
+
+
+def test_rwt_phase1_harness_keeps_dirty_block_after_expected_origin_dev_prefix_matches(monkeypatch, tmp_path):
+    harness = _load_harness()
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    (fake_repo / ".git").write_text("gitdir: ../.git/worktrees/fake\n", encoding="utf-8")
+    origin_full = "abcdef1234567890abcdef1234567890abcdef12"
+    _stub_repo_preflight_git(monkeypatch, harness, origin_full=origin_full, status=" M scripts/run-rwt-phase1-fresh-user.py")
+    ctx = SimpleNamespace(repo=fake_repo, expected_origin_dev=origin_full[:7], allow_dirty=False)
+
+    repo_info, blocker = harness.validate_repo_preflight(ctx)
+
+    assert blocker == "test worktree is dirty:  M scripts/run-rwt-phase1-fresh-user.py"
+    assert repo_info["dirty_paths_before"] == [" M scripts/run-rwt-phase1-fresh-user.py"]
+
+
 def test_rwt_phase1_harness_version_info_handles_missing_ardur_binary(tmp_path):
     harness = _load_harness()
     ctx = SimpleNamespace(

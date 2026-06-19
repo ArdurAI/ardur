@@ -546,6 +546,15 @@ def git_success(repo: Path, *args: str) -> bool:
     return run_raw(["git", *args], cwd=repo, allowed_exit_codes={0, 1}).returncode == 0
 
 
+def commit_prefix_matches(expected: str, *, actual_short: str, actual_full: str) -> bool:
+    expected = expected.strip()
+    actual_short = actual_short.strip()
+    actual_full = actual_full.strip()
+    if len(expected) < 7:
+        return False
+    return actual_short.startswith(expected) or actual_full.startswith(expected)
+
+
 def detect_python(candidate: str | None = None) -> str:
     candidates: list[str] = []
     if candidate:
@@ -637,8 +646,9 @@ def validate_repo_preflight(ctx: HarnessContext) -> tuple[dict[str, Any], str | 
         return {}, f"repo is not a git worktree: {ctx.repo}"
     head = short_git(ctx.repo, "rev-parse", "HEAD")
     origin_dev = short_git(ctx.repo, "rev-parse", "origin/dev")
+    origin_dev_full = git_text(ctx.repo, "rev-parse", "origin/dev") if ctx.expected_origin_dev else origin_dev
     status = git_text(ctx.repo, "status", "--short")
-    expected = ctx.expected_origin_dev or origin_dev
+    expected = ctx.expected_origin_dev.strip() if ctx.expected_origin_dev else origin_dev
     origin_dev_ancestor = head == origin_dev or git_success(ctx.repo, "merge-base", "--is-ancestor", "origin/dev", "HEAD")
     repo_info = {
         "worktree": str(ctx.repo),
@@ -649,7 +659,7 @@ def validate_repo_preflight(ctx: HarnessContext) -> tuple[dict[str, Any], str | 
         "clean_before": status == "",
         "dirty_paths_before": redact_text(status).splitlines() if status else [],
     }
-    if origin_dev != expected:
+    if not commit_prefix_matches(expected, actual_short=origin_dev, actual_full=origin_dev_full):
         return repo_info, f"stale origin/dev: expected {expected} got {origin_dev}"
     if not origin_dev_ancestor and not ctx.allow_dirty:
         return repo_info, f"test worktree does not contain origin/dev: head={head} origin/dev={origin_dev}"
@@ -1300,7 +1310,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Ardur RWT-1/RWT-2/RWT-3-preflight in a fresh-user temp environment")
     parser.add_argument("--repo", type=Path, default=repo_root_from_script(), help="Clean Ardur repo/worktree to test (default: this script's repo)")
     parser.add_argument("--output-dir", type=Path, help="Directory for redacted evidence bundle and command outputs")
-    parser.add_argument("--expected-origin-dev", help="Expected short origin/dev commit; defaults to current origin/dev")
+    parser.add_argument("--expected-origin-dev", help="Expected origin/dev commit hash or matching prefix of at least 7 characters; defaults to current origin/dev")
     parser.add_argument("--allow-dirty", action="store_true", help="Allow a dirty/in-progress worktree; bundle will mark this as non-release-gate evidence")
     parser.add_argument("--keep-temp", action="store_true", help="Retain temp HOME/project/Ardur home for local debugging; default removes it")
     parser.add_argument("--python", help="Python >=3.10 interpreter to use for the fresh virtualenv")
