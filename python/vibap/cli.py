@@ -379,8 +379,67 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _posture_report_input_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "create_posture_json",
+            "command": "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json > <posture-json>",
+            "detail": (
+                "Create a posture JSON document from local Ardur artifacts first. "
+                "Keep local paths, private keys, and raw tokens out of shared reports."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_posture_report",
+            "command": "ardur posture report --input <posture-json> --format json",
+            "detail": "Render the generated posture JSON after the input file exists and parses successfully.",
+        },
+    ]
+
+
+def _posture_report_input_failure_response(exc: Exception) -> dict:
+    if isinstance(exc, FileNotFoundError):
+        condition = "posture_report_input_missing"
+        message = "Posture report input file could not be read."
+        detail = "No posture JSON file was found at the supplied --input path."
+    elif isinstance(exc, json.JSONDecodeError):
+        condition = "posture_report_input_malformed"
+        message = "Posture report input file is not valid JSON."
+        detail = f"JSON parsing failed at line {exc.lineno}, column {exc.colno}."
+    elif isinstance(exc, ValueError):
+        condition = "posture_report_input_invalid"
+        message = "Posture report input file is not a posture JSON object."
+        detail = "The supplied --input file must contain a JSON object produced by ardur posture scan."
+    else:
+        condition = "posture_report_input_unreadable"
+        message = "Posture report input file could not be read."
+        detail = f"Reading the supplied --input file failed with {exc.__class__.__name__}."
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": _posture_report_input_next_steps(condition),
+    }
+
+
 def cmd_posture_report(args: argparse.Namespace) -> int:
-    posture = json.loads(args.input.read_text(encoding="utf-8"))
+    try:
+        posture = json.loads(args.input.read_text(encoding="utf-8"))
+        if not isinstance(posture, dict):
+            raise ValueError("posture report input must be a JSON object")
+    except (FileNotFoundError, PermissionError, IsADirectoryError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        response = _posture_report_input_failure_response(exc)
+        if args.format == "json":
+            _print_json(response)
+        else:
+            print(f"Error: {response['message']}")
+            print(f"Detail: {response['detail']}")
+            _print_report_next_steps(response)
+        return 1
     if args.format == "json":
         _print_json(posture)
         return 0

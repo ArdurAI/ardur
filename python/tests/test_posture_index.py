@@ -322,3 +322,61 @@ def test_cli_scan_json_and_report_markdown(tmp_path, monkeypatch, capsys):
     assert "Read: 1" in markdown
     assert "## Next steps" not in markdown
     assert str(tmp_path) not in markdown
+
+
+def test_cli_posture_report_missing_input_json_returns_next_steps_without_path_leak(tmp_path, capsys):
+    from vibap.cli import main
+
+    missing_input = tmp_path / "missing-posture.json"
+
+    assert main(["posture", "report", "--input", str(missing_input), "--format", "json"]) == 1
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "posture_report_input_missing"
+    assert response["condition"] == "posture_report_input_missing"
+    assert "next_steps" in response
+    assert "<posture-json>" in encoded
+    assert "<chain-dir>" in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in captured.out
+
+
+def test_cli_posture_report_malformed_input_json_returns_next_steps_without_path_leak(tmp_path, capsys):
+    from vibap.cli import main
+
+    malformed_input = tmp_path / "malformed-posture.json"
+    malformed_input.write_text("{not-json", encoding="utf-8")
+
+    assert main(["posture", "report", "--input", str(malformed_input), "--format", "json"]) == 1
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "posture_report_input_malformed"
+    assert response["condition"] == "posture_report_input_malformed"
+    assert "next_steps" in response
+    assert "<posture-json>" in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in captured.out
+
+
+def test_cli_posture_report_missing_input_markdown_returns_next_steps_without_path_leak(tmp_path, capsys):
+    from vibap.cli import main
+
+    missing_input = tmp_path / "missing-posture.json"
+
+    assert main(["posture", "report", "--input", str(missing_input), "--format", "markdown"]) == 1
+    captured = capsys.readouterr()
+
+    assert captured.err == ""
+    assert "Error: Posture report input file could not be read." in captured.out
+    assert "Next steps:" in captured.out
+    assert "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json > <posture-json>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert "Traceback" not in captured.out
