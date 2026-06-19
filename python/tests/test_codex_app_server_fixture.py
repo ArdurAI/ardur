@@ -424,6 +424,80 @@ def test_codex_shareable_report_redacts_policy_reason_target_echoes(tmp_path, mo
         assert decision["reason_digest"]["alg"] == "sha-256"
 
 
+def _run_codex_app_server_event_cli(tmp_path: Path, stdin: str) -> subprocess.CompletedProcess[str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vibap.cli",
+            "codex-app-server-event",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        input=stdin,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+        cwd=repo_root,
+        timeout=20,
+    )
+
+
+def _assert_codex_app_server_event_input_error(
+    tmp_path: Path,
+    completed: subprocess.CompletedProcess[str],
+    *,
+    condition: str,
+) -> dict:
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == condition
+    assert output["condition"] == condition
+    assert "Codex app-server host-event input" in output["message"]
+    assert (
+        "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>"
+        in output_text
+    )
+    assert "ardur codex-app-server-fixture --project-dir <your-project>" in output_text
+    assert str(tmp_path) not in output_text
+    assert "{not-json" not in output_text
+    assert "[1,2,3]" not in output_text
+    assert "Traceback" not in output_text
+    assert "<ABSOLUTE_PATH:" not in output_text
+    return output
+
+
+def test_codex_app_server_event_cli_reports_malformed_json_with_next_steps(tmp_path):
+    completed = _run_codex_app_server_event_cli(tmp_path, "{not-json")
+
+    output = _assert_codex_app_server_event_input_error(
+        tmp_path,
+        completed,
+        condition="codex_app_server_event_input_malformed",
+    )
+    assert "valid JSON object" in output["detail"]
+
+
+def test_codex_app_server_event_cli_reports_non_object_json_with_next_steps(tmp_path):
+    completed = _run_codex_app_server_event_cli(tmp_path, "[1,2,3]")
+
+    output = _assert_codex_app_server_event_input_error(
+        tmp_path,
+        completed,
+        condition="codex_app_server_event_input_not_object",
+    )
+    assert "must be a JSON object" in output["detail"]
+
+
 def test_codex_app_server_event_cli_uses_exit_code_two_for_blocking_unknown(tmp_path):
     keys_dir = tmp_path / "keys"
     home = tmp_path / "home"

@@ -325,11 +325,70 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_codex_app_server_event(args: argparse.Namespace) -> int:
-    raw = sys.stdin.read()
-    payload = json.loads(raw) if raw.strip() else {}
+def _codex_app_server_event_input_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "create_codex_app_server_fixture",
+            "command": "ardur codex-app-server-fixture --project-dir <your-project>",
+            "detail": (
+                "Create a local-only Codex app-server fixture and inspect the generated "
+                "config/schema before feeding host-event JSON."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_with_event_json_file",
+            "command": "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>",
+            "detail": (
+                "Feed a Codex app-server host-event JSON object from <event-json-file>. "
+                "Keep raw tokens and local private paths out of shared logs and reports."
+            ),
+        },
+    ]
+
+
+def _codex_app_server_event_input_failure_response(exc: Exception) -> dict:
+    if isinstance(exc, json.JSONDecodeError):
+        condition = "codex_app_server_event_input_malformed"
+        message = "Codex app-server host-event input is not valid JSON."
+        detail = (
+            "Input must be a valid JSON object; "
+            f"parsing failed at line {exc.lineno}, column {exc.colno}."
+        )
+    else:
+        condition = "codex_app_server_event_input_not_object"
+        message = "Codex app-server host-event input must be a JSON object."
+        detail = (
+            "Input must be a JSON object from <event-json-file>; arrays, strings, "
+            "numbers, booleans, and null are not accepted."
+        )
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": _codex_app_server_event_input_next_steps(condition),
+    }
+
+
+def _load_codex_app_server_event_stdin(raw: str) -> dict:
+    if not raw.strip():
+        return {}
+    payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("Codex app-server host-event payload must be a JSON object")
+    return payload
+
+
+def cmd_codex_app_server_event(args: argparse.Namespace) -> int:
+    raw = sys.stdin.read()
+    try:
+        payload = _load_codex_app_server_event_stdin(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        _print_json(_codex_app_server_event_input_failure_response(exc))
+        return 1
     output = handle_codex_host_event(payload, keys_dir=args.keys_dir)
     _print_json(output)
     return 2 if output.get("block") else 0
