@@ -51,6 +51,10 @@ python3 scripts/run-rwt-phase1-fresh-user.py \
 python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
 ```
 
+The `--short=12` origin pin is the recommended copy/paste form. The harness also
+accepts a current commit identifier or matching `origin/dev` prefix of at least
+7 characters, but stale or mismatched pins still block.
+
 Expected result for a clean source checkout:
 
 - bundle `status` is `PASS`

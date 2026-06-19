@@ -2,7 +2,7 @@
 title: "Phase 1 Demo Packet"
 description: "Use this packet after the [Claude Code MVP quickstart](claude-code-mvp-quickstart.md)"
 source_path: "docs/guides/phase1-demo-packet.md"
-source_sha256: "95a06538de26eeae1b3d2e0aae61aff9dd070902db0b473963d4fadb5f44be64"
+source_sha256: "a2f3be9cd8cb9554c9645950c26ece23971a1abc5bc34a1fec382f25a3a87347"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -52,6 +52,10 @@ python3 scripts/run-rwt-phase1-fresh-user.py \
 
 python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
 ```
+
+Keep the `--short=12` origin pin for copy/paste demos. Shorter current-prefix
+pins are valid when they match `origin/dev` and are at least 7 characters, but
+stale or mismatched pins still block the proof path.
 
 The bundle is the primary shareable proof artifact for a no-key run. Read it
 with [Read The Phase 1 Evidence Bundle](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) before

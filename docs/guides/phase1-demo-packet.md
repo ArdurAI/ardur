@@ -36,6 +36,10 @@ python3 scripts/run-rwt-phase1-fresh-user.py \
 python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
 ```
 
+Keep the `--short=12` origin pin for copy/paste demos. Shorter current-prefix
+pins are valid when they match `origin/dev` and are at least 7 characters, but
+stale or mismatched pins still block the proof path.
+
 The bundle is the primary shareable proof artifact for a no-key run. Read it
 with [Read The Phase 1 Evidence Bundle](read-phase1-evidence-bundle.md) before
 copying any claim into a demo note, launch draft, or issue response.

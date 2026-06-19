@@ -2,7 +2,7 @@
 title: "Claude Code MVP Quickstart"
 description: "This is the shortest product-facing path through Ardur today from a source"
 source_path: "docs/guides/claude-code-mvp-quickstart.md"
-source_sha256: "891cb02aa961fb113566a7f829d531014e25d057ee4e70b2b91cadb0c65ff382"
+source_sha256: "c2990feb0a7718e55c02fee0bad84e0481ccc29604d8de5957ae5ffbb0820f27"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -67,6 +67,10 @@ python3 scripts/run-rwt-phase1-fresh-user.py \
 
 python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
 ```
+
+The `--short=12` origin pin is the recommended copy/paste form. The harness also
+accepts a current commit identifier or matching `origin/dev` prefix of at least
+7 characters, but stale or mismatched pins still block.
 
 Expected result for a clean source checkout:
 

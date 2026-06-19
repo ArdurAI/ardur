@@ -2,7 +2,7 @@
 title: "Read The Phase 1 Evidence Bundle"
 description: "The Phase 1 fresh-user harness writes a local, redacted evidence bundle that is"
 source_path: "docs/guides/read-phase1-evidence-bundle.md"
-source_sha256: "371b554951d2d3f03256f13013b15ab3a85d8f48749c984e071989451db6229b"
+source_sha256: "8589bbb680ec4d191096832b0684e88298cb4f157442f86644a50258e4f74998"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -36,6 +36,11 @@ python3 scripts/run-rwt-phase1-fresh-user.py \
 python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
 ```
 
+The `--short=12` command is the recommended copy/paste path because it matches
+the bundle's recorded `repo.origin_dev` short hash. The preflight also accepts a
+current commit identifier or matching `origin/dev` prefix of at least 7
+characters; stale or mismatched pins still block the run.
+
 The script uses temporary HOME, project, Ardur home, evidence, and wheel-build
 state. It does not log in to Claude Code, mutate your real global Claude config,
 use an external API key, start a privileged daemon, or publish anything.
@@ -45,7 +50,7 @@ use an external API key, start a privileged daemon, or publish anything.
 | Bundle field | What it means | How to read it |
 |---|---|---|
 | `status` | Overall harness result. | `PASS` means the required no-key gates passed. `FAIL`, `BLOCKED`, or `INSUFFICIENT_EVIDENCE` means do not use the bundle as readiness evidence until the listed issue is fixed and rerun. |
-| `repo` | The tested checkout and `origin/dev` preflight. | `clean_before` and `clean_after` should be `true` for release-gate evidence. `origin_dev` should match `expected_origin_dev`. |
+| `repo` | The tested checkout and `origin/dev` preflight. | `clean_before` and `clean_after` should be `true` for release-gate evidence. `expected_origin_dev` should equal the recorded `origin_dev` short hash or be a matching current commit / `origin/dev` prefix of at least 7 characters. A stale or mismatched expected value blocks the bundle. |
 | `gates` | RWT gate outcomes. | Read each gate separately; a skipped live-Claude gate is not the same thing as a failed no-key harness. |
 | `redaction` | Secret-safety checks on the shareable bundle. | `raw_secret_values_copied` must be `false`; `secret_scan_hits` must be `0`. |
 | `claim_mapping` | The claims the bundle supports and does not support. | Treat this as the human-readable claim ledger for the run. |
