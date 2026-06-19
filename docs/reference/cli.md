@@ -201,15 +201,18 @@ Run a CLI command through the local Hub. Non-interactive only.
 ardur run [--hub-url URL] [--hub-token TOKEN] [--home DIR] -- <command>
 ```
 
-If the local Hub cannot be reached, or session start/policy setup fails before
-`<command>` runs because local Hub auth/token state is missing or invalid,
-`ardur run` preserves the existing setup-failure exit code (`127`) and prints a
-placeholder-safe `Next steps:` section to stderr. The remediation text points to
-local setup, Hub startup, Hub token supply/rotation, and `ardur doctor` using
-`<ardur-home>`, `<hub-url>`, `<hub-token>`, and `<command>` placeholders rather
-than copying raw temp homes or tokens. Blocked commands still exit `126` with a
-receipt when policy evaluation succeeds; successful commands preserve stdout,
-stderr, and child exit-code streaming without remediation noise.
+If no command is supplied after `--`, `ardur run` exits `2`, leaves stdout empty,
+does not execute a child process, and prints placeholder-safe `Next steps:`
+guidance showing the `ardur run -- <command>` form. If the local Hub cannot be
+reached, or session start/policy setup fails before `<command>` runs because
+local Hub auth/token state is missing or invalid, `ardur run` preserves the
+existing setup-failure exit code (`127`) and prints a placeholder-safe
+`Next steps:` section to stderr. The remediation text points to local setup, Hub
+startup, Hub token supply/rotation, and `ardur doctor` using `<ardur-home>`,
+`<hub-url>`, `<hub-token>`, and `<command>` placeholders rather than copying raw
+temp homes or tokens. Blocked commands still exit `126` with a receipt when
+policy evaluation succeeds; successful commands preserve stdout, stderr, and
+child exit-code streaming without remediation noise.
 
 ### `ardur desktop-observe`
 

@@ -1011,6 +1011,46 @@ def test_run_native_host_binary_framing_includes_next_steps_on_hub_setup_failure
     assert str(tmp_path) not in next_steps_json
 
 
+def test_run_under_hub_missing_command_reports_placeholder_next_steps(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    sentinel = tmp_path / "child-ran.txt"
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("missing command must fail before Hub calls")
+
+    def fail_stream_subprocess(_command):
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("missing command must not execute a child process")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert "ardur run requires a command after --" in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur run -- <command>" in remediation
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in remediation
+    assert "<hub-token>" in remediation
+    assert "example-hub-token-placeholder" not in remediation
+    assert str(tmp_path) not in remediation
+
+
 def test_run_under_hub_unavailable_hub_reports_placeholder_next_steps(
     tmp_path,
     capsys,

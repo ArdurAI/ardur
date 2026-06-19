@@ -1247,8 +1247,44 @@ def run_recovery_next_steps_for_response(
     return steps
 
 
-def _print_run_recovery_next_steps(response: dict[str, Any], *, phase: str) -> None:
-    steps = run_recovery_next_steps_for_response(response, phase=phase)
+def run_missing_command_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for malformed ``ardur run`` usage."""
+    return [
+        {
+            "condition": "missing_run_command",
+            "action": "pass_command_after_separator",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Pass one non-interactive local command after --. Keep secrets, raw "
+                "Hub tokens, and private paths out of shared command examples."
+            ),
+        },
+        {
+            "condition": "missing_run_command",
+            "action": "include_hub_options_if_needed",
+            "command": (
+                "ardur run --home <ardur-home> --hub-url <hub-url> "
+                "--hub-token <hub-token> -- <command>"
+            ),
+            "detail": (
+                "Use explicit home, Hub URL, or Hub token placeholders only when your "
+                "local setup does not use defaults. Do not paste raw tokens into shared logs."
+            ),
+        },
+        {
+            "condition": "missing_run_command",
+            "action": "check_local_setup_before_running",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Confirm local setup before re-running ardur run -- <command>. This "
+                "guidance is local/no-key setup help only; it does not execute a child "
+                "command, call live providers, or broaden current Hub policy enforcement."
+            ),
+        },
+    ]
+
+
+def _print_run_next_steps(steps: list[dict[str, str]]) -> None:
     if not steps:
         return
     print("Next steps:", file=sys.stderr)
@@ -1258,6 +1294,14 @@ def _print_run_recovery_next_steps(response: dict[str, Any], *, phase: str) -> N
         print(f"{index}. {command}", file=sys.stderr)
         if detail:
             print(f"   {detail}", file=sys.stderr)
+
+
+def _print_run_recovery_next_steps(response: dict[str, Any], *, phase: str) -> None:
+    _print_run_next_steps(run_recovery_next_steps_for_response(response, phase=phase))
+
+
+def _print_run_missing_command_next_steps() -> None:
+    _print_run_next_steps(run_missing_command_next_steps())
 
 
 def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
@@ -1515,6 +1559,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
     command = list(args.command or [])
     if not command:
         print("ardur run requires a command after --", file=sys.stderr)
+        _print_run_missing_command_next_steps()
         return 2
     session_id = f"cli:{uuid.uuid4()}"
     start_payload = {
