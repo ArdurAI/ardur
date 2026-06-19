@@ -309,6 +309,70 @@ def test_empty_gemini_report_human_output_prints_next_steps(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
+    ("stdin_payload", "condition", "expected_detail"),
+    [
+        (
+            "{not-json",
+            "gemini_cli_hook_input_malformed",
+            "parsing failed at line 1, column 2",
+        ),
+        (
+            "[1, 2, 3]",
+            "gemini_cli_hook_input_not_object",
+            "arrays, strings, numbers, booleans, and null are not accepted",
+        ),
+    ],
+)
+def test_gemini_hook_cli_returns_structured_input_error_next_steps(
+    tmp_path, stdin_payload, condition, expected_detail
+):
+    repo_root = Path(__file__).resolve().parents[2]
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "VIBAP_HOME": str(tmp_path / "ardur-home"),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vibap.cli",
+            "gemini-cli-hook",
+            "pre",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        input=stdin_payload,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+        cwd=repo_root,
+        timeout=20,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == condition
+    assert output["condition"] == condition
+    assert expected_detail in output["detail"]
+    assert [step["action"] for step in output["next_steps"]] == [
+        "create_gemini_cli_fixture",
+        "rerun_with_hook_event_json_file",
+    ]
+    assert "ardur gemini-cli-fixture --project-dir <your-project>" in output_text
+    assert "ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>" in output_text
+    assert "Traceback" not in output_text
+    assert stdin_payload not in output_text
+    assert str(tmp_path) not in output_text
+
+
+@pytest.mark.parametrize(
     ("session_id", "env_trace_id", "expected_trace_id"),
     [
         ("..", None, ".."),

@@ -876,6 +876,54 @@ def build_shareable_report(
     return _shareable_redact(payload, roots=roots)
 
 
+def _gemini_cli_hook_input_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "create_gemini_cli_fixture",
+            "command": "ardur gemini-cli-fixture --project-dir <your-project>",
+            "detail": (
+                "Create a local-only Gemini CLI fixture and inspect the generated settings/context "
+                "before feeding hook JSON."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_with_hook_event_json_file",
+            "command": "ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>",
+            "detail": (
+                "Feed a Gemini CLI hook JSON object from <gemini-hook-event-json-file>. "
+                "Keep raw tokens and local private paths out of shared logs and reports."
+            ),
+        },
+    ]
+
+
+def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, json.JSONDecodeError):
+        condition = "gemini_cli_hook_input_malformed"
+        message = "Gemini CLI hook input is not valid JSON."
+        detail = (
+            "Input must be a valid JSON object; "
+            f"parsing failed at line {exc.lineno}, column {exc.colno}."
+        )
+    else:
+        condition = "gemini_cli_hook_input_not_object"
+        message = "Gemini CLI hook input must be a JSON object."
+        detail = (
+            "Input must be a JSON object from <gemini-hook-event-json-file>; arrays, "
+            "strings, numbers, booleans, and null are not accepted."
+        )
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": _gemini_cli_hook_input_next_steps(condition),
+    }
+
+
 def _load_json_stdin() -> dict[str, Any]:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -903,7 +951,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     phase = args.phase or args.phase_pos or "pre"
 
     if phase == "pre":
-        output = handle_pre_tool_call(_load_json_stdin(), keys_dir=args.keys_dir)
+        try:
+            hook_input = _load_json_stdin()
+        except (json.JSONDecodeError, ValueError) as exc:
+            _print_json(_gemini_cli_hook_input_failure_response(exc))
+            return 1
+        output = handle_pre_tool_call(hook_input, keys_dir=args.keys_dir)
         _print_json(output)
         return 2 if output.get("block") else 0
     if phase == "fixture":
