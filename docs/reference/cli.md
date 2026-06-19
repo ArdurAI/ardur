@@ -386,6 +386,16 @@ JSON object from stdin, evaluates the active Mission Passport from
 ardur gemini-cli-hook [pre|--phase pre] [--keys-dir DIR]
 ```
 
+If stdin is malformed JSON or parses to a non-object JSON value, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields, a concise `detail`, and
+placeholder-only `next_steps`. The recovery hints point to local commands such
+as `ardur gemini-cli-fixture --project-dir <your-project>` and
+`ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>`.
+They do not call Gemini, contact a provider, claim visibility into
+provider-hidden actions, or require copying raw tokens or local private paths
+into shared logs.
+
 `status=allow` means Ardur recorded evidence and left Gemini/user permission
 flow authoritative. `status=deny` and `status=unknown` return a blocking result
 for wrappers that fail closed. Unknown results are used for unmapped Gemini tool

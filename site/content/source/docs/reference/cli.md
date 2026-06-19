@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "605b8aa745d9cf9cb4284ba6825e5deb54178c1fc3daa68d59f42a0d9f482ce4"
+source_sha256: "7650d7baa9dc6b0b260c42cda6d3e09fc363dfffd6f40b8a6a88ba2ccfc0b2af"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -402,6 +402,16 @@ JSON object from stdin, evaluates the active Mission Passport from
 ```text
 ardur gemini-cli-hook [pre|--phase pre] [--keys-dir DIR]
 ```
+
+If stdin is malformed JSON or parses to a non-object JSON value, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields, a concise `detail`, and
+placeholder-only `next_steps`. The recovery hints point to local commands such
+as `ardur gemini-cli-fixture --project-dir <your-project>` and
+`ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>`.
+They do not call Gemini, contact a provider, claim visibility into
+provider-hidden actions, or require copying raw tokens or local private paths
+into shared logs.
 
 `status=allow` means Ardur recorded evidence and left Gemini/user permission
 flow authoritative. `status=deny` and `status=unknown` return a blocking result
