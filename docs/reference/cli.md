@@ -511,6 +511,22 @@ concise Markdown report, or re-emit it as formatted JSON.
 ardur posture report --input posture.json [--format markdown|json]
 ```
 
+If `--input` is missing, unreadable, a directory, malformed JSON, or JSON that
+is not an object, the command fails closed with exit code `1`. JSON output
+returns `ok: false`, matching `error` and `condition` fields, a human-readable
+`message` and `detail`, and a `next_steps` array. Markdown output prints
+`Error:`, `Detail:`, and a concise `Next steps:` section.
+
+The recovery hints are local-only and placeholder-only. They tell the user to
+create a posture JSON document with
+`ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json > <posture-json>`,
+then rerun `ardur posture report --input <posture-json> --format json`. The
+placeholders (`<chain-dir>`, `<keys-dir>`, and `<posture-json>`) are deliberate:
+the report path does not print local absolute paths, raw tokens, private keys, or
+provider credentials, and the hints do not call live providers, create missing
+evidence, reconstruct private keys, prove provider-hidden behavior, or claim
+kernel/process capture.
+
 ## Where to look next
 
 - [`../guides/ardur-personal-hub.md`](../guides/ardur-personal-hub.md) — the

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "2f0dfdc73d285b5464c833e0b5e38823c7ad05aca17d313585a9596a1298fcb0"
+source_sha256: "759d9885fe5cdc62ff0f388afe0bad0a3235ffea7ca61277c607a2746a486541"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -527,6 +527,22 @@ concise Markdown report, or re-emit it as formatted JSON.
 ```text
 ardur posture report --input posture.json [--format markdown|json]
 ```
+
+If `--input` is missing, unreadable, a directory, malformed JSON, or JSON that
+is not an object, the command fails closed with exit code `1`. JSON output
+returns `ok: false`, matching `error` and `condition` fields, a human-readable
+`message` and `detail`, and a `next_steps` array. Markdown output prints
+`Error:`, `Detail:`, and a concise `Next steps:` section.
+
+The recovery hints are local-only and placeholder-only. They tell the user to
+create a posture JSON document with
+`ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json > <posture-json>`,
+then rerun `ardur posture report --input <posture-json> --format json`. The
+placeholders (`<chain-dir>`, `<keys-dir>`, and `<posture-json>`) are deliberate:
+the report path does not print local absolute paths, raw tokens, private keys, or
+provider credentials, and the hints do not call live providers, create missing
+evidence, reconstruct private keys, prove provider-hidden behavior, or claim
+kernel/process capture.
 
 ## Where to look next
 
