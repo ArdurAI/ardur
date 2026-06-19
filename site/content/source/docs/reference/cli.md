@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "759d9885fe5cdc62ff0f388afe0bad0a3235ffea7ca61277c607a2746a486541"
+source_sha256: "605b8aa745d9cf9cb4284ba6825e5deb54178c1fc3daa68d59f42a0d9f482ce4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -478,10 +478,11 @@ When no local Codex app-server receipts are present, the JSON report includes a
 `next_steps` array and the human output prints a concise "Next steps" section:
 create a local fixture with `ardur codex-app-server-fixture --project-dir <your-project>`,
 feed a local Codex app-server host-event JSON object through
-`ardur codex-app-server-event`, then rerun `ardur codex-app-server-report`.
-These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
-`<chain-dir>`; they do not call Codex, contact a provider, prove live Codex
-cloud behavior, or imply visibility into provider-hidden actions.
+`ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>`, then
+rerun `ardur codex-app-server-report`. These hints use placeholders such as
+`<your-project>`, `<ardur-home>`, `<keys-dir>`, and `<event-json-file>`; they do
+not call Codex, contact a provider, prove live Codex cloud behavior, or imply
+visibility into provider-hidden actions.
 
 ### `ardur posture scan`
 

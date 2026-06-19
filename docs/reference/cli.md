@@ -461,10 +461,11 @@ When no local Codex app-server receipts are present, the JSON report includes a
 `next_steps` array and the human output prints a concise "Next steps" section:
 create a local fixture with `ardur codex-app-server-fixture --project-dir <your-project>`,
 feed a local Codex app-server host-event JSON object through
-`ardur codex-app-server-event`, then rerun `ardur codex-app-server-report`.
-These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
-`<chain-dir>`; they do not call Codex, contact a provider, prove live Codex
-cloud behavior, or imply visibility into provider-hidden actions.
+`ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>`, then
+rerun `ardur codex-app-server-report`. These hints use placeholders such as
+`<your-project>`, `<ardur-home>`, `<keys-dir>`, and `<event-json-file>`; they do
+not call Codex, contact a provider, prove live Codex cloud behavior, or imply
+visibility into provider-hidden actions.
 
 ### `ardur posture scan`
 
