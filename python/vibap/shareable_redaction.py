@@ -36,9 +36,25 @@ _SLASH_LIKE_TRANSLATION = str.maketrans(
         "\u29f8": "/",  # BIG SOLIDUS
     }
 )
-_PERCENT_ENCODED_FILE_SCHEME_RE = re.compile(r"\bfile%3a", re.IGNORECASE)
+# Match direct and repeatedly percent-encoded separator bytes without decoding
+# arbitrary percent escapes in surrounding user text. Examples:
+#   %2F, %252F, %25252F -> /
+#   file%3A, file%253A -> file:
+_PERCENT_ENCODED_BYTE_PREFIX = r"%(?:25){0,3}"
+_PERCENT_ENCODED_FILE_SCHEME_RE = re.compile(
+    rf"\bfile{_PERCENT_ENCODED_BYTE_PREFIX}3a",
+    re.IGNORECASE,
+)
 _PERCENT_ENCODED_SLASH_RE = re.compile(
-    r"%2f|%ef%bc%8f|%e2%81%84|%e2%88%95|%e2%a7%b8",
+    "|".join(
+        (
+            rf"{_PERCENT_ENCODED_BYTE_PREFIX}2f",
+            rf"{_PERCENT_ENCODED_BYTE_PREFIX}ef{_PERCENT_ENCODED_BYTE_PREFIX}bc{_PERCENT_ENCODED_BYTE_PREFIX}8f",
+            rf"{_PERCENT_ENCODED_BYTE_PREFIX}e2{_PERCENT_ENCODED_BYTE_PREFIX}81{_PERCENT_ENCODED_BYTE_PREFIX}84",
+            rf"{_PERCENT_ENCODED_BYTE_PREFIX}e2{_PERCENT_ENCODED_BYTE_PREFIX}88{_PERCENT_ENCODED_BYTE_PREFIX}95",
+            rf"{_PERCENT_ENCODED_BYTE_PREFIX}e2{_PERCENT_ENCODED_BYTE_PREFIX}a7{_PERCENT_ENCODED_BYTE_PREFIX}b8",
+        )
+    ),
     re.IGNORECASE,
 )
 
@@ -56,7 +72,8 @@ def _normalize_path_separators(text: str) -> str:
     Shareable artifacts must not leak local paths just because a producer used
     Unicode solidus lookalikes or percent-encoded slash bytes. Keep this narrow:
     decode only the file-scheme colon and slash separator forms that affect path
-    recognition, not arbitrary percent escapes in user text.
+    recognition, including repeated percent-encoding of those separator bytes,
+    not arbitrary percent escapes in user text.
     """
 
     normalized = _PERCENT_ENCODED_FILE_SCHEME_RE.sub("file:", text)

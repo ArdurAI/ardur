@@ -69,6 +69,40 @@ def test_percent_encoded_local_paths_are_redacted_and_detected() -> None:
     assert "/Users/rahul/project/secret.json" in local_path_leak_hits(text)
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "receipt at %252FUsers%252Frahul%252Fproject%252Fsecret.json",
+        "receipt at %25252FUsers%25252Frahul%25252Fproject%25252Fsecret.json",
+        "receipt at %25EF%25BC%258FUsers%25EF%25BC%258Frahul%25EF%25BC%258Fsecret.json",
+    ],
+)
+def test_nested_percent_encoded_local_paths_are_redacted_and_detected(text: str) -> None:
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <ABSOLUTE_PATH:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert any(hit.startswith("/Users/rahul") for hit in local_path_leak_hits(text))
+
+
+def test_nested_percent_encoded_file_uri_paths_are_redacted_and_detected() -> None:
+    text = "receipt at file%253A%252F%252F%252FUsers%252Frahul%252Fproject%252Fsecret.json"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <FILE_URI:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert "file:///Users/rahul/project/secret.json" in local_path_leak_hits(text)
+
+
+def test_unrelated_percent_escapes_are_not_fully_decoded() -> None:
+    text = "status=100%25 and space=%2520 before /tmp/secret.txt"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "status=100%25 and space=%2520 before <ABSOLUTE_PATH:/tmp>"
+
+
 def test_percent_encoded_file_uri_paths_are_redacted_and_detected() -> None:
     text = "receipt at file%3A%2F%2F%2FUsers%2Frahul%2Fproject%2Fsecret.json"
 
