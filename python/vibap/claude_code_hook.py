@@ -1119,7 +1119,7 @@ def _handle_pre_tool_use_daemon_first(
     daemon I/O fails. We do not fail the hook call on daemon availability.
     """
     try:
-        from .claude_code_daemon import dispatch_pre_tool_use, is_valid_pre_tool_use_output
+        from .claude_code_daemon_client import dispatch_pre_tool_use, is_valid_pre_tool_use_output
 
         daemon_output = dispatch_pre_tool_use(hook_input, keys_dir=keys_dir)
     except Exception:  # pragma: no cover - defensive daemon boundary

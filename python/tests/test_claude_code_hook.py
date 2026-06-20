@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -1006,11 +1007,11 @@ def test_main_rejects_oversize_stdin(monkeypatch, capsys):
 
 
 def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
-    from vibap import claude_code_daemon as daemon_module
+    from vibap import claude_code_daemon_client as daemon_client_module
     from vibap import claude_code_hook as hook_module
 
     monkeypatch.setattr(
-        daemon_module,
+        daemon_client_module,
         "dispatch_pre_tool_use",
         lambda hook_input, *, keys_dir=None: {
             "continue": True,
@@ -1031,11 +1032,11 @@ def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
 
 
 def test_pre_daemon_first_falls_back_when_daemon_unavailable(tmp_path, monkeypatch):
-    from vibap import claude_code_daemon as daemon_module
+    from vibap import claude_code_daemon_client as daemon_client_module
     from vibap import claude_code_hook as hook_module
 
     monkeypatch.setattr(
-        daemon_module,
+        daemon_client_module,
         "dispatch_pre_tool_use",
         lambda hook_input, *, keys_dir=None: None,
     )
@@ -1057,11 +1058,11 @@ def test_pre_daemon_first_falls_back_when_daemon_unavailable(tmp_path, monkeypat
 
 
 def test_pre_daemon_first_falls_back_when_daemon_output_is_malformed(tmp_path, monkeypatch):
-    from vibap import claude_code_daemon as daemon_module
+    from vibap import claude_code_daemon_client as daemon_client_module
     from vibap import claude_code_hook as hook_module
 
     monkeypatch.setattr(
-        daemon_module,
+        daemon_client_module,
         "dispatch_pre_tool_use",
         lambda hook_input, *, keys_dir=None: {"ok": True, "output": {"not": "hook-output"}},
     )
@@ -1083,6 +1084,29 @@ def test_pre_daemon_first_falls_back_when_daemon_output_is_malformed(tmp_path, m
         "systemMessage": "ardur: local fallback from malformed daemon output",
     }
     assert observed == {"tool_name": "Read", "keys_dir": tmp_path}
+
+
+def test_claude_daemon_hook_import_topology_is_acyclic():
+    package_root = Path(__file__).resolve().parents[1] / "vibap"
+    modules = {
+        "claude_code_daemon",
+        "claude_code_daemon_client",
+        "claude_code_hook",
+    }
+    edges: set[tuple[str, str]] = set()
+
+    for module_name in modules:
+        tree = ast.parse((package_root / f"{module_name}.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module in modules:
+                edges.add((module_name, node.module))
+
+    assert ("claude_code_daemon", "claude_code_hook") in edges
+    assert ("claude_code_hook", "claude_code_daemon_client") in edges
+    assert ("claude_code_hook", "claude_code_daemon") not in edges
+
+    cycle_edges = [edge for edge in edges if (edge[1], edge[0]) in edges]
+    assert cycle_edges == []
 
 
 def test_daemon_benchmark_helper_returns_duration_samples(tmp_path, monkeypatch):
