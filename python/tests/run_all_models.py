@@ -33,7 +33,7 @@ def get_available_models() -> list[str]:
             return [m["name"] for m in data.get("models", [])]
     except Exception as exc:
         print(f"Failed to query Ollama: {exc}")
-        sys.exit(1)
+        raise SystemExit(1) from exc
 
 
 def run_test(model: str) -> Path:

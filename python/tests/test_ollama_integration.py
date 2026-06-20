@@ -23,17 +23,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 
 import jwt as pyjwt
 import pytest
 
-import vibap.mission as mission_module
-from vibap.passport import ALGORITHM, MissionPassport, issue_passport
-from vibap.proxy import GovernanceProxy, serve_proxy
+from vibap.passport import MissionPassport, issue_passport
+from vibap.proxy import serve_proxy
 from vibap.receipt import verify_chain
-
-from tests.conftest import v01_required_md_extras
 
 
 # ---------------------------------------------------------------------------
@@ -58,8 +54,7 @@ def _ollama_available() -> bool:
     if not API_KEY:
         return False
     try:
-        import ollama
-        return True
+        return __import__("ollama") is not None
     except ImportError:
         return False
 

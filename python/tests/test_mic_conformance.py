@@ -16,11 +16,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from vibap.denial import DenialReason
 from vibap.passport import MissionPassport, issue_passport
-from vibap.proxy import Decision, GovernanceProxy
+from vibap.proxy import Decision
 
 from tests.conftest import v01_required_md_extras
 

@@ -19,10 +19,8 @@ Usage:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import signal
 import socket
 import ssl
 import sys
@@ -30,7 +28,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -157,7 +154,6 @@ def main():
 
     # ---- Setup TLS & proxy ----
     from vibap.tls import generate_self_signed_cert
-    from vibap.passport import generate_keypair
 
     tls_dir = WORK_DIR / "tls"
     key_path_obj, cert_path_obj, _ = generate_self_signed_cert(tls_dir)

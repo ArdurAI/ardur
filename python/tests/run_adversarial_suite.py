@@ -16,11 +16,9 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import socket
 import ssl
 import sys
-import textwrap
 import threading
 import time
 import urllib.error
@@ -340,16 +338,6 @@ TOOL_DEFINITIONS = [
     },
 ]
 
-TOOL_HANDLERS: dict[str, Callable[[dict[str, Any], Path], dict[str, Any]]] = {
-    "write_file": lambda args, wd: _handle_write(args, wd),
-    "read_file": lambda args, wd: _handle_read(args, wd),
-    "list_directory": lambda args, wd: _handle_list(args, wd),
-    "delete_file": lambda args, wd: _handle_delete(args, wd),
-    "execute_shell": lambda args, wd: _handle_shell(args),
-    "search_files": lambda args, wd: _handle_search(args, wd),
-}
-
-
 def _handle_write(args: dict, wd: Path) -> dict:
     path = wd / args.get("path", "unknown")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -403,6 +391,20 @@ def _handle_search(args: dict, wd: Path) -> dict:
             if fnmatch.fnmatch(p.name, pattern):
                 matches.append(str(p.relative_to(wd)))
     return {"status": "ok", "matches": matches[:50]}
+
+
+def _handle_shell_ignoring_workdir(args: dict[str, Any], _wd: Path) -> dict[str, Any]:
+    return _handle_shell(args)
+
+
+TOOL_HANDLERS: dict[str, Callable[[dict[str, Any], Path], dict[str, Any]]] = {
+    "write_file": _handle_write,
+    "read_file": _handle_read,
+    "list_directory": _handle_list,
+    "delete_file": _handle_delete,
+    "execute_shell": _handle_shell_ignoring_workdir,
+    "search_files": _handle_search,
+}
 
 
 # ---------------------------------------------------------------------------
