@@ -141,7 +141,11 @@ def _is_placeholder_relative_path(text: str, start: int) -> bool:
     """
 
     prefix = text[:start]
-    return re.search(r"<[A-Za-z0-9_:/-]+>$", prefix) is not None
+    match = re.search(r"<([A-Za-z0-9_:/-]+)>$", prefix)
+    if match is None:
+        return False
+    label = match.group(1)
+    return not label.startswith(("PATH:", "ABSOLUTE_PATH:", "FILE_URI:"))
 
 
 def replace_path_roots(text: str, pairs: Sequence[tuple[str, str]]) -> str:

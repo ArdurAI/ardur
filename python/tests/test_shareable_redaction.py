@@ -41,6 +41,15 @@ def test_lowercase_placeholder_relative_paths_are_not_rewritten() -> None:
     assert local_path_leak_hits(redacted) == []
 
 
+def test_redaction_placeholders_do_not_preserve_sensitive_suffixes() -> None:
+    redacted = redact_local_path_text("target <PATH:abc123>/secret-project/private.txt")
+
+    assert redacted == "target <PATH:abc123><ABSOLUTE_PATH:local>"
+    assert "secret-project" not in redacted
+    assert "private.txt" not in redacted
+    assert local_path_leak_hits(redacted) == []
+
+
 def test_file_uri_variants_are_redacted_and_detected() -> None:
     text = "open file://localhost/Users/rahul/project/secret.txt or file:///tmp/ardur/out.json"
 
