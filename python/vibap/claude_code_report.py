@@ -9,10 +9,24 @@ from typing import Any, Mapping
 
 from .passport import DEFAULT_HOME, load_public_key
 from .receipt import verify_chain
+from .shareable_redaction import path_aliases, redact_local_paths
 
 
 def _counter_dict(values: list[str]) -> dict[str, int]:
     return dict(sorted(Counter(values).items()))
+
+
+def _root_pairs(mapping: Mapping[str, str | Path | None]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for label, path in mapping.items():
+        placeholder = f"<{label}>"
+        for alias in path_aliases(path):
+            pairs.append((alias, placeholder))
+    return sorted(set(pairs), key=lambda item: len(item[0]), reverse=True)
+
+
+def _shareable_redact(value: Any, *, roots: Mapping[str, str | Path | None]) -> Any:
+    return redact_local_paths(value, root_pairs=_root_pairs(roots))
 
 
 def _is_dispatch_claim(claim: Mapping[str, Any]) -> bool:
@@ -339,7 +353,12 @@ def build_claude_code_report(
     per_child_attribution = _merge_attribution_mode(
         [str(chain["per_child_attribution"]) for chain in chains if chain["subagents"] or chain["unattributed_tool_receipts"]]
     )
-    return {
+    roots: dict[str, str | Path | None] = {
+        "CLAUDE_CODE_HOME": resolved_home,
+        "ARDUR_CLAUDE_CODE_CHAIN": resolved_chain_dir,
+        "ARDUR_KEYS": resolved_keys_dir,
+    }
+    report = {
         "ok": True,
         "home": str(resolved_home),
         "chain_dir": str(resolved_chain_dir),
@@ -382,3 +401,4 @@ def build_claude_code_report(
         },
         "chains": chains,
     }
+    return _shareable_redact(report, roots=roots)

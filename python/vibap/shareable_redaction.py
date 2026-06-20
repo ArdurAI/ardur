@@ -141,7 +141,7 @@ def _is_placeholder_relative_path(text: str, start: int) -> bool:
     """
 
     prefix = text[:start]
-    return re.search(r"<[A-Z0-9_:/-]+>$", prefix) is not None
+    return re.search(r"<[A-Za-z0-9_:/-]+>$", prefix) is not None
 
 
 def replace_path_roots(text: str, pairs: Sequence[tuple[str, str]]) -> str:

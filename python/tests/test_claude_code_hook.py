@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -439,6 +440,12 @@ def test_empty_claude_code_report_includes_local_next_steps(tmp_path):
 
     assert report["chain_count"] == 0
     assert report["receipt_count"] == 0
+    assert report["home"] == "<CLAUDE_CODE_HOME>"
+    assert report["chain_dir"] == "<ARDUR_CLAUDE_CODE_CHAIN>"
+    assert report["keys_dir"] == "<ARDUR_KEYS>"
+    report_text = json.dumps(report, sort_keys=True)
+    assert str(tmp_path) not in report_text
+    assert "<ABSOLUTE_PATH:" not in report_text
     steps = report["next_steps"]
     assert [step["action"] for step in steps] == [
         "configure_claude_code_protection",
@@ -478,6 +485,8 @@ def test_empty_claude_code_report_human_output_prints_next_steps(tmp_path, capsy
     assert "claude --plugin-dir" in output
     assert "ardur claude-code-report" in output
     next_steps_output = output.split("Next steps:", 1)[1]
+    assert str(tmp_path) not in output
+    assert "<ABSOLUTE_PATH:" not in output
     assert str(tmp_path) not in next_steps_output
 
 

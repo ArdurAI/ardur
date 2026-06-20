@@ -32,6 +32,15 @@ def test_redacted_placeholder_relative_paths_are_not_reported_as_absolute_leaks(
     assert local_path_leak_hits(redacted, extra_markers=("/private/tmp/ardur-run",)) == []
 
 
+def test_lowercase_placeholder_relative_paths_are_not_rewritten() -> None:
+    redacted = redact_local_path_text(
+        "receipts appear under <ardur-home>/claude-code-hook/<trace-id>/receipts.jsonl"
+    )
+
+    assert redacted == "receipts appear under <ardur-home>/claude-code-hook/<trace-id>/receipts.jsonl"
+    assert local_path_leak_hits(redacted) == []
+
+
 def test_file_uri_variants_are_redacted_and_detected() -> None:
     text = "open file://localhost/Users/rahul/project/secret.txt or file:///tmp/ardur/out.json"
 
