@@ -259,6 +259,11 @@ exit with the native-host JSON response. Browsers do not pass this flag; they
 use Native Messaging length-prefix framing, but Hub setup/auth failures carry
 the same JSON response payload inside that framing.
 
+Malformed Native Messaging framed input is also answered inside the same
+length-prefix framing with `ok: false`, a stable `condition`, concise
+non-secret detail, and placeholder-only `next_steps` guidance. The response does
+not echo raw malformed payload bytes, raw Hub tokens, or local filesystem paths.
+
 When the local Hub cannot be reached or returns a local token/auth setup error,
 `personal-native-host` preserves the failing `ok: false` / `error_code` response
 and adds a deterministic `next_steps` array. The hints are local/no-key recovery

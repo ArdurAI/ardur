@@ -1188,6 +1188,54 @@ def test_run_native_host_binary_framing_includes_next_steps_on_hub_setup_failure
     assert str(tmp_path) not in next_steps_json
 
 
+@pytest.mark.parametrize(
+    ("payload", "condition"),
+    [
+        (b'{"type": ', "personal_native_host_framed_json_malformed"),
+        (b"[]", "personal_native_host_framed_json_not_object"),
+    ],
+)
+def test_run_native_host_binary_framing_input_errors_are_structured(
+    tmp_path,
+    payload,
+    condition,
+):
+    stdin = io.BytesIO(struct.pack("<I", len(payload)) + payload)
+    stdout = io.BytesIO()
+    raw_token = "example-native-host-framed-input-token-placeholder"
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == condition
+    assert response["condition"] == condition
+    assert response["message"]
+    assert response["detail"]
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert payload.decode("utf-8", errors="ignore") not in encoded
+    assert "Traceback" not in encoded
+    assert "Expecting value" not in response["error"]
+
+
 def test_run_under_hub_missing_command_reports_placeholder_next_steps(
     tmp_path,
     capsys,

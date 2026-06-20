@@ -159,6 +159,62 @@ def _native_host_next_steps_for_response(response: dict[str, Any]) -> list[dict[
     return steps
 
 
+def _native_host_framed_input_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "validate_native_message_json",
+            "command": "ardur personal-native-host --once-json <native-message.json> --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Validate a local native-message JSON object before sending it through "
+                "browser Native Messaging. Keep raw payloads, local paths, and Hub tokens "
+                "out of shared logs and reports."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_personal_native_host_or_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "After the framed message is valid JSON, check local Ardur Personal setup "
+                "with doctor or rerun ardur personal-native-host --once-json "
+                "<native-message.json>."
+            ),
+        },
+    ]
+
+
+def native_host_framed_input_failure_response(exc: Exception) -> dict[str, Any]:
+    """Return a stable framed-input failure without echoing raw input."""
+    if isinstance(exc, json.JSONDecodeError):
+        condition = "personal_native_host_framed_json_malformed"
+        message = "Native Messaging framed input is not valid JSON."
+        detail = f"JSON parsing failed at line {exc.lineno}, column {exc.colno}."
+    elif isinstance(exc, UnicodeDecodeError):
+        condition = "personal_native_host_framed_json_unreadable"
+        message = "Native Messaging framed input could not be decoded as UTF-8."
+        detail = "Decode the Native Messaging payload as UTF-8 JSON before sending it."
+    elif isinstance(exc, ValueError):
+        condition = "personal_native_host_framed_json_not_object"
+        message = "Native Messaging framed input must be a JSON object."
+        detail = (
+            "The framed Native Messaging payload must decode to a JSON object; arrays, "
+            "strings, numbers, booleans, and null are not accepted."
+        )
+    else:
+        condition = "personal_native_host_framed_input_invalid"
+        message = "Native Messaging framed input could not be processed."
+        detail = f"Processing failed with {exc.__class__.__name__}."
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": _native_host_framed_input_next_steps(condition),
+    }
+
+
 def run_native_host(
     stdin: BinaryIO,
     stdout: BinaryIO,
@@ -180,17 +236,23 @@ def run_native_host(
         raw = stdin.read(length)
         try:
             message = json.loads(raw.decode("utf-8"))
-            response = handle_native_host_message(
-                message,
-                hub_url=hub_url,
-                hub_token=hub_token,
-                home=home,
-                storage_dir=storage_dir,
-                keys_dir=keys_dir,
-                caller_origin=caller_origin,
-            )
-        except Exception as exc:  # pragma: no cover - native host guardrail
-            response = {"ok": False, "error": str(exc)}
+            if not isinstance(message, dict):
+                raise ValueError("native host framed payload must be a JSON object")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            response = native_host_framed_input_failure_response(exc)
+        else:
+            try:
+                response = handle_native_host_message(
+                    message,
+                    hub_url=hub_url,
+                    hub_token=hub_token,
+                    home=home,
+                    storage_dir=storage_dir,
+                    keys_dir=keys_dir,
+                    caller_origin=caller_origin,
+                )
+            except Exception as exc:  # pragma: no cover - native host guardrail
+                response = {"ok": False, "error": str(exc)}
         data = json.dumps(response).encode("utf-8")
         stdout.write(struct.pack("<I", len(data)))
         stdout.write(data)
