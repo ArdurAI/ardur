@@ -1047,6 +1047,105 @@ def test_native_host_success_preserves_hub_response_shape(monkeypatch):
     assert "next_steps" not in result
 
 
+@pytest.mark.parametrize(
+    ("payload", "condition"),
+    [
+        ("{not-json", "personal_native_host_once_json_malformed"),
+        ("[]", "personal_native_host_once_json_not_object"),
+    ],
+)
+def test_personal_native_host_once_json_input_errors_are_structured(
+    tmp_path,
+    capsys,
+    payload,
+    condition,
+):
+    from vibap import cli as cli_module
+
+    message_path = tmp_path / "native-message.json"
+    message_path.write_text(payload, encoding="utf-8")
+    raw_token = "example-native-host-once-json-token-placeholder"
+
+    rc = cli_module.cmd_personal_native_host(
+        Namespace(
+            once_json=message_path,
+            hub_url="http://127.0.0.1:9",
+            hub_token=raw_token,
+            home=tmp_path / "ardur-home",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == condition
+    assert response["condition"] == condition
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_token not in combined
+    assert str(tmp_path) not in combined
+    assert payload not in combined
+    assert "Traceback" not in combined
+    assert "<ABSOLUTE_PATH:" not in combined
+
+
+def test_personal_native_host_once_json_preserves_valid_hub_failure_next_steps(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-native-host-valid-once-json-token-placeholder"
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    message_path = tmp_path / "valid-native-message.json"
+    message_path.write_text(
+        json.dumps(
+            {
+                "type": HOST_OBSERVATION_TYPE,
+                "hub_event": _browser_payload("valid once-json message"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli_module.cmd_personal_native_host(
+        Namespace(
+            once_json=message_path,
+            hub_url="http://127.0.0.1:9",
+            hub_token=raw_token,
+            home=tmp_path / "ardur-home",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert any(step["action"] == "rerun_personal_native_host_or_doctor" for step in response["next_steps"])
+    assert "<native-message.json>" in encoded
+    assert "<hub-token>" in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+
+
 def test_run_native_host_binary_framing_includes_next_steps_on_hub_setup_failure(
     tmp_path,
     monkeypatch,

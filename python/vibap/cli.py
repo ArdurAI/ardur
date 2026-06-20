@@ -708,9 +708,81 @@ def cmd_desktop_observe(args: argparse.Namespace) -> int:
     return 0 if response.get("ok") else 1
 
 
+def _personal_native_host_once_json_input_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "create_native_message_json",
+            "command": "ardur personal-native-host --once-json <native-message.json> --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Create a local native-message JSON object before using --once-json. "
+                "Keep local private paths and raw Hub tokens out of shared logs and reports."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_personal_native_host_or_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "After the input JSON is valid, check local Ardur Personal setup with doctor "
+                "or rerun ardur personal-native-host --once-json <native-message.json>."
+            ),
+        },
+    ]
+
+
+def _personal_native_host_once_json_failure_response(exc: Exception) -> dict:
+    if isinstance(exc, json.JSONDecodeError):
+        condition = "personal_native_host_once_json_malformed"
+        message = "Native Messaging --once-json input is not valid JSON."
+        detail = f"JSON parsing failed at line {exc.lineno}, column {exc.colno}."
+    elif isinstance(exc, ValueError):
+        condition = "personal_native_host_once_json_not_object"
+        message = "Native Messaging --once-json input must be a JSON object."
+        detail = (
+            "The supplied --once-json file must contain a native-message JSON object; "
+            "arrays, strings, numbers, booleans, and null are not accepted."
+        )
+    elif isinstance(exc, FileNotFoundError):
+        condition = "personal_native_host_once_json_missing"
+        message = "Native Messaging --once-json input file could not be read."
+        detail = "No native-message JSON file was found at the supplied --once-json path."
+    else:
+        condition = "personal_native_host_once_json_unreadable"
+        message = "Native Messaging --once-json input file could not be read."
+        detail = f"Reading the supplied --once-json file failed with {exc.__class__.__name__}."
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": _personal_native_host_once_json_input_next_steps(condition),
+    }
+
+
+def _load_personal_native_host_once_json(path: Path) -> dict:
+    message = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(message, dict):
+        raise ValueError("native host once-json payload must be a JSON object")
+    return message
+
+
 def cmd_personal_native_host(args: argparse.Namespace) -> int:
     if args.once_json:
-        message = json.loads(args.once_json.read_text(encoding="utf-8"))
+        try:
+            message = _load_personal_native_host_once_json(args.once_json)
+        except (
+            FileNotFoundError,
+            PermissionError,
+            IsADirectoryError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            _print_json(_personal_native_host_once_json_failure_response(exc))
+            return 1
         response = handle_native_host_message(message, hub_url=args.hub_url, hub_token=args.hub_token, home=args.home)
         _print_json(response)
         return 0 if response.get("ok") else 1
