@@ -10,7 +10,6 @@ import jwt
 import pytest
 
 import vibap.mission as mission_module
-from vibap.mission import load_mission_declaration
 from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import Decision
 from vibap.receipt import verify_chain
@@ -149,7 +148,7 @@ def test_start_session_from_aat_evaluates_and_emits_mission_bound_receipt(
     mission_id = "urn:ardur:mission:aat:permit"
     md_url = "https://issuer.example/md/aat-permit.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id)
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     _install_fetch_map(
         monkeypatch,
         {md_url: md_token},
@@ -260,7 +259,7 @@ def test_aat_child_tool_widening_fails_closed(
         mission_id=mission_id,
         allowed_tools=["read", "delete_file"],
     )
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     _install_fetch_map(
         monkeypatch,
         {md_url: md_token},
@@ -307,7 +306,6 @@ class TestAATProofOfPossession:
         self, proxy, private_key, tmp_path, monkeypatch
     ):
         from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
 
         # Mint an authoritative mission declaration so the adapter can resolve mission_ref.
         mission_id = "urn:mission:pop-test"
@@ -324,13 +322,13 @@ class TestAATProofOfPossession:
             mission_ref={
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
             tools=["read"],
         )
-        cache = MissionCache()
+        cache = mission_module.MissionCache()
         with pytest.raises(PermissionError, match="PoP inputs were not supplied"):
             material_from_aat_grant(
                 aat_token,
@@ -347,7 +345,6 @@ class TestAATProofOfPossession:
         legitimately need bearer mode must opt out *explicitly* so the
         security-relevant choice is visible at the call site."""
         from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
 
         mission_id = "urn:mission:pop-explicit-optout"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
@@ -363,13 +360,13 @@ class TestAATProofOfPossession:
             mission_ref={
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
             tools=["read"],
         )
-        cache = MissionCache()
+        cache = mission_module.MissionCache()
         material = material_from_aat_grant(
             aat_token,
             proxy.public_key,
@@ -401,7 +398,6 @@ class TestAATProofOfPossession:
         rejects malformed shapes with PermissionError. This parametrized
         test covers every shape the round-4 audit listed."""
         from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
 
         mission_id = f"urn:mission:cnf-malformed-{type(malformed_cnf).__name__}"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
@@ -434,14 +430,14 @@ class TestAATProofOfPossession:
             "mission_ref": {
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
             "cnf": malformed_cnf,
         }
         aat_token = jwt.encode(aat_claims, private_key, algorithm=ALGORITHM)
-        cache = MissionCache()
+        cache = mission_module.MissionCache()
         # The default require_pop=True must reject ANY non-None cnf —
         # even one that's the wrong shape — so an attacker can't bypass
         # PoP by sending cnf="" or cnf=42 etc.
@@ -460,7 +456,6 @@ class TestAATProofOfPossession:
         could replay it. The default is now True; this test proves it.
         """
         from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
 
         mission_id = "urn:mission:pop-default-fails-closed"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
@@ -476,13 +471,13 @@ class TestAATProofOfPossession:
             mission_ref={
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
             tools=["read"],
         )
-        cache = MissionCache()
+        cache = mission_module.MissionCache()
         # No explicit require_pop — relies on the new fail-closed default.
         with pytest.raises(PermissionError, match="PoP inputs were not supplied"):
             material_from_aat_grant(aat_token, proxy.public_key, cache)
@@ -505,7 +500,7 @@ class TestAATProofOfPossession:
             mission_ref={
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
@@ -576,7 +571,6 @@ class TestAATPoPHappyPath:
     ):
         from cryptography.hazmat.primitives.asymmetric import ec
         from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
         from vibap.passport import compute_jwk_thumbprint, create_kb_jwt
 
         # Generate a holder keypair distinct from the issuer.
@@ -616,7 +610,7 @@ class TestAATPoPHappyPath:
             "mission_ref": {
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
@@ -627,7 +621,7 @@ class TestAATPoPHappyPath:
         # Mint a KB-JWT bound to this exact AAT.
         kb_jwt = create_kb_jwt(holder_priv, aat_token)
 
-        cache = MissionCache()
+        cache = mission_module.MissionCache()
         material = material_from_aat_grant(
             aat_token,
             proxy.public_key,
@@ -652,7 +646,6 @@ class TestAATPoPHappyPath:
         """An AAT without any cnf claim is bearer-mode and must be accepted
         even when require_pop=True — the flag only gates cnf-carrying AATs."""
         from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
 
         mission_id = "urn:mission:bearer-aat"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
@@ -686,14 +679,14 @@ class TestAATPoPHappyPath:
             "mission_ref": {
                 "uri": md_url,
                 "mission_id": mission_id,
-                "mission_digest": load_mission_declaration(
+                "mission_digest": mission_module.load_mission_declaration(
                     md_jwt, proxy.public_key
                 ).payload_digest,
             },
         }
         aat_token = jwt.encode(claims, private_key, algorithm=ALGORITHM)
 
-        cache = MissionCache()
+        cache = mission_module.MissionCache()
         material = material_from_aat_grant(
             aat_token,
             proxy.public_key,
@@ -720,8 +713,6 @@ class TestAATAdapterEndToEnd:
         import copy
         import hashlib
 
-        from vibap.aat_adapter import material_from_aat_grant
-        from vibap.mission import MissionCache
         from vibap.passport import MissionPassport, issue_passport
         from vibap.policy_store import InMemoryPolicyStore
         from vibap.proxy import GovernanceProxy
@@ -746,7 +737,7 @@ class TestAATAdapterEndToEnd:
             mission, private_key, ttl_s=600,
             extra_claims=v01_required_md_extras(mission_id=mission_id),
         )
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
         _install_fetch_map(
             monkeypatch, {md_url: md_token},
             private_key=private_key, mission_ids=[mission_id],
@@ -845,7 +836,7 @@ class TestAATAdapterEndToEnd:
             mission, private_key, ttl_s=600,
             extra_claims=v01_required_md_extras(mission_id=mission_id),
         )
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
         _install_fetch_map(
             monkeypatch, {md_url: md_token},
             private_key=private_key, mission_ids=[mission_id],

@@ -28,7 +28,6 @@ import pytest
 # to stand up an HTTP server for testing. If serve_proxy gets refactored into
 # a factory, swap this for a direct call.
 import vibap.mission as mission_module
-from vibap.mission import load_mission_declaration
 from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import GovernanceProxy, serve_proxy
 from vibap.receipt import verify_chain
@@ -930,7 +929,7 @@ class TestHTTPAATInterop:
         mission_id = "urn:ardur:mission:aat:http"
         md_url = "https://issuer.example/md/aat-http.jwt"
         md_token = _issue_aat_md(private_key, mission_id=mission_id)
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
         _install_aat_fetch_map(
             monkeypatch,
             {md_url: md_token},
@@ -1012,7 +1011,7 @@ class TestHTTPAATPoP:
         mission_id = "urn:ardur:mission:aat:http-pop-default"
         md_url = "https://issuer.example/md/aat-pop-default.jwt"
         md_token = _issue_aat_md(private_key, mission_id=mission_id)
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
         _install_aat_fetch_map(
             monkeypatch,
             {md_url: md_token},
@@ -1048,7 +1047,7 @@ class TestHTTPAATPoP:
         mission_id = "urn:ardur:mission:aat:http-kb-size"
         md_url = "https://issuer.example/md/aat-kb-size.jwt"
         md_token = _issue_aat_md(private_key, mission_id=mission_id)
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
         _install_aat_fetch_map(
             monkeypatch,
             {md_url: md_token},

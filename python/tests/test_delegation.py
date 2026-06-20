@@ -5,7 +5,6 @@ explicit so a future refactor can't silently remove them."""
 from __future__ import annotations
 
 import hashlib
-import time
 
 import jwt
 import pytest

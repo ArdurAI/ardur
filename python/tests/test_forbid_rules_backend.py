@@ -8,7 +8,6 @@ no rule matches (default — compliance team has no opinion).
 from __future__ import annotations
 
 import hashlib
-import json
 
 import pytest
 

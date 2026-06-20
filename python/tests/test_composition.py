@@ -17,7 +17,6 @@ from vibap.policy_backend import (
     register_backend,
     timed_evaluate,
 )
-from vibap.proxy import Decision
 
 
 @dataclass
@@ -47,9 +46,9 @@ def _spec(pd: PolicyDecision) -> dict[str, str]:
     }
 
 
-def _expected_decision(decisions: list[PolicyDecision]) -> Decision:
+def _expected_decision(decisions: list[PolicyDecision]) -> proxy_module.Decision:
     final, _ = compose_decisions(decisions)
-    return Decision.PERMIT if final == "Allow" else Decision.DENY
+    return proxy_module.Decision.PERMIT if final == "Allow" else proxy_module.Decision.DENY
 
 
 def _expected_event_backends(
@@ -70,7 +69,7 @@ def _expected_event_backends(
 
 def _assert_matches_compose(
     *,
-    decision: Decision,
+    decision: proxy_module.Decision,
     reason: str,
     event,
     native_decision: PolicyDecision,
@@ -111,7 +110,7 @@ def _run_case(
     arguments: dict[str, str],
     native_decision: PolicyDecision,
     extra_decisions: list[PolicyDecision],
-) -> tuple[Decision, str, object]:
+) -> tuple[proxy_module.Decision, str, object]:
     register_backend(_FixedBackend(name="native", returned=native_decision))
     for pd in extra_decisions:
         register_backend(_FixedBackend(name=pd.backend, returned=pd))
@@ -276,7 +275,7 @@ class TestCompositionEquivalence:
         )
         session = proxy.start_session(issue_passport(mission, private_key, ttl_s=60))
         first_decision, _, _ = session.check_and_record("read_file", {"path": "x"})
-        assert first_decision == Decision.PERMIT
+        assert first_decision == proxy_module.Decision.PERMIT
 
         tool_name = "read_file"
         arguments = {"path": "x"}

@@ -19,7 +19,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.training_attestation import (

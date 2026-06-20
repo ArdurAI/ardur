@@ -21,9 +21,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-from cryptography.hazmat.primitives.asymmetric import ec
-
 from vibap.tool_response_provenance import (
     InMemoryToolKeyRegistry,
     ToolResponseSigner,

@@ -11,7 +11,6 @@ import jwt
 import pytest
 
 import vibap.mission as mission_module
-from vibap.mission import MissionStatusUnavailableError, load_mission_declaration
 from vibap.passport import MissionPassport, issue_passport
 from vibap.proxy import Decision
 
@@ -145,7 +144,7 @@ def test_proxy_verifies_md_and_emits_receipt(proxy, private_key, public_key, mon
     status_url = "https://issuer.example/status/permit.jwt"
     revocation_ref = status_url + "#idx=4"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=revocation_ref)
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={
@@ -182,7 +181,7 @@ def test_md_policy_is_authoritative_over_dg_scope(proxy, private_key, public_key
     md_url = "https://issuer.example/md/scope.jwt"
     status_url = "https://issuer.example/status/scope.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=1")
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
@@ -207,7 +206,7 @@ def test_revoked_md_returns_violation(proxy, private_key, public_key, monkeypatc
     md_url = "https://issuer.example/md/revoked.jwt"
     status_url = "https://issuer.example/status/revoked.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=7")
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
@@ -238,7 +237,7 @@ def test_tampered_md_returns_chain_invalid(tmp_path, private_key, public_key, se
     md_url = "https://issuer.example/md/tampered.jwt"
     status_url = "https://issuer.example/status/tampered.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=2")
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     tampered = _tamper_jwt_payload(md_token, {"mission": "tampered mission"})
     dg_token = _issue_dg(
         private_key,
@@ -264,7 +263,7 @@ def test_status_list_network_error_fails_closed(proxy, private_key, public_key, 
     md_url = "https://issuer.example/md/network.jwt"
     status_url = "https://issuer.example/status/network.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=5")
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
@@ -289,7 +288,7 @@ def test_oversized_status_list_rejected(proxy, private_key, public_key, monkeypa
     md_url = "https://issuer.example/md/oversized.jwt"
     status_url = "https://issuer.example/status/oversized.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=0")
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
@@ -309,7 +308,7 @@ def test_oversized_status_list_rejected(proxy, private_key, public_key, monkeypa
 
     assert decision == Decision.INSUFFICIENT_EVIDENCE
     assert reason == "status_list_too_large"
-    with pytest.raises(MissionStatusUnavailableError, match="size limit"):
+    with pytest.raises(mission_module.MissionStatusUnavailableError, match="size limit"):
         mission_module._fetch_text(status_url)
 
 
@@ -319,7 +318,7 @@ def test_zip_bomb_rejected(proxy, private_key, public_key, monkeypatch):
     status_url = "https://issuer.example/status/zip-bomb.jwt"
     revocation_ref = status_url + "#idx=0"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=revocation_ref)
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
@@ -353,7 +352,7 @@ def test_zip_bomb_rejected(proxy, private_key, public_key, monkeypatch):
 
     assert decision == Decision.INSUFFICIENT_EVIDENCE
     assert reason == "status_list_too_large"
-    with pytest.raises(MissionStatusUnavailableError, match="decompression limit"):
+    with pytest.raises(mission_module.MissionStatusUnavailableError, match="decompression limit"):
         mission_module.mission_is_revoked(md, public_key)
 
 
@@ -362,7 +361,7 @@ def test_mission_cache_avoids_refetching_md(proxy, private_key, public_key, monk
     md_url = "https://issuer.example/md/cache.jwt"
     status_url = "https://issuer.example/status/cache.jwt"
     md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=3")
-    md = load_mission_declaration(md_token, public_key)
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
@@ -400,15 +399,13 @@ def test_mission_cache_avoids_refetching_md(proxy, private_key, public_key, monk
 def test_fetch_rejects_ssrf_target_ip_classes(url, reason):
     """M1 regression: _assert_public_target must reject IP-literal URLs
     pointing at loopback, RFC1918, link-local, and IMDS ranges."""
-    from vibap.mission import MissionBindingError, _assert_public_target
-    with pytest.raises(MissionBindingError, match="non-public IP"):
-        _assert_public_target(url)
+    with pytest.raises(mission_module.MissionBindingError, match="non-public IP"):
+        mission_module._assert_public_target(url)
 
 
 def test_fetch_accepts_public_ip_literal():
     """M1 sanity: a public IP literal must NOT be blocked by _assert_public_target."""
-    from vibap.mission import _assert_public_target
-    _assert_public_target("https://8.8.8.8/foo")  # should not raise
+    mission_module._assert_public_target("https://8.8.8.8/foo")  # should not raise
 
 
 # --- FIX-3 from S2 hostile audit (2026-04-28): MD loader fail-closed
@@ -458,7 +455,7 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match=f"missing required v0.1 member: {missing_field}",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_load_fails_closed_on_invalid_conformance_profile(
         self, private_key, public_key
@@ -486,7 +483,7 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="conformance_profile",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_load_fails_closed_on_invalid_tool_manifest_digest(
         self, private_key, public_key
@@ -512,7 +509,7 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="tool_manifest_digest",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_load_fails_closed_on_mic_evidence_with_minimal_receipts(
         self, private_key, public_key
@@ -542,7 +539,7 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="MIC-Evidence",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_strict_schema_rejects_legacy_field_mixing(
         self, private_key, public_key
@@ -571,7 +568,7 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="violates v0.1 schema",
         ) as excinfo:
-            load_mission_declaration(md_token, public_key, strict_schema=True)
+            mission_module.load_mission_declaration(md_token, public_key, strict_schema=True)
         assert excinfo.value.reason == "schema_invalid"
 
 
@@ -591,8 +588,6 @@ class TestPinnedIPSSRFDefense:
         """If every IP a hostname resolves to is private, the pinned-IP
         helper must raise — never silently return a private IP for the
         connection to walk into."""
-        from vibap import mission as mission_module
-
         def fake_getaddrinfo(host, port, *args, **kwargs):
             # All-private resolution (IMDS + RFC1918)
             return [
@@ -612,8 +607,6 @@ class TestPinnedIPSSRFDefense:
     ):
         """Mixed resolution → return the first public IP, skipping any
         leading private entries that would have been rejected."""
-        from vibap import mission as mission_module
-
         def fake_getaddrinfo(host, port, *args, **kwargs):
             return [
                 (None, None, None, None, ("10.0.0.1", port)),       # private, skip
@@ -637,8 +630,6 @@ class TestPinnedIPSSRFDefense:
         We mock create_connection to capture what address the
         connection would have used, and confirm it's the pinned IP.
         """
-        from vibap import mission as mission_module
-
         # Force resolution to a known public IP
         monkeypatch.setattr(
             mission_module,
@@ -816,7 +807,7 @@ class TestStatusListIatSkewGuard:
                 revocation_ref=f"{status_url}#idx=0",
             ),
         )
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
 
         # Mint a status list whose iat is far in the future.
         far_future = int(time.time()) + 365 * 86400
@@ -886,4 +877,4 @@ class TestMissionDeclarationIatSkewGuard:
             mission_module.MissionBindingError,
             match="MD iat lies more than",
         ):
-            load_mission_declaration(token, public_key)
+            mission_module.load_mission_declaration(token, public_key)

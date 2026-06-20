@@ -9,7 +9,6 @@ from __future__ import annotations
 
 collect_ignore = ["run_cloud_model_test.py", "run_all_models.py", "run_adversarial_suite.py", "run_advanced_adversarial.py", "test_ardur_overhead_ab.py"]
 
-import os
 import socket
 from pathlib import Path
 from typing import Any, Callable
@@ -59,7 +58,6 @@ def v01_default_status_list_token(private_key, mission_id: str) -> str:
     mission referenced by the helper is reported as not revoked.
     """
     import base64
-    import json
     import time
     import zlib
 

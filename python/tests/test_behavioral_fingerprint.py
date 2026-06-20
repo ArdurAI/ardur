@@ -8,8 +8,6 @@ inject a mock client.
 
 from __future__ import annotations
 
-import hashlib
-import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -18,7 +16,6 @@ import pytest
 from vibap.behavioral_fingerprint import (
     AnthropicChallenger,
     BehavioralChallenger,
-    CanaryChallenge,
     CanaryPool,
     ChallengeResponse,
     FingerprintVerdict,

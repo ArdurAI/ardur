@@ -20,7 +20,7 @@ from vibap.backends.cedar import (
     _verify_sha256,
 )
 from vibap.passport import MissionPassport, issue_passport
-from vibap.policy_backend import PolicyDecision, get_backend
+from vibap.policy_backend import get_backend
 from vibap.proxy import Decision
 
 
