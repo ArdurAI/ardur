@@ -719,7 +719,6 @@ class TestAATAdapterEndToEnd:
         """AAT session backed by a PolicyStore with forbid_rules blocking /etc/ paths."""
         import copy
         import hashlib
-        import json
 
         from vibap.aat_adapter import material_from_aat_grant
         from vibap.mission import MissionCache

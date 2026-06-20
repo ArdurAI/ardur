@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import ssl
 import stat
 import struct
 import subprocess
@@ -662,6 +663,70 @@ def test_kill_switch_auth_failure_reports_token_next_steps_without_raw_secret(
     assert "--api-token <api-token>" in next_steps_json
     assert "ARDUR_API_TOKEN=<api-token>" in next_steps_json
     assert raw_token not in next_steps_json
+
+
+def test_kill_switch_loopback_proxy_allows_self_signed_tls(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    captured: dict[str, ssl.SSLContext] = {}
+    proxy_response = {"kill_switch": "activated"}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return False
+
+        def read(self):
+            return json.dumps(proxy_response).encode("utf-8")
+
+    def fake_urlopen(*_args, **kwargs):
+        captured["context"] = kwargs["context"]
+        return FakeResponse()
+
+    monkeypatch.setattr(urlrequest, "urlopen", fake_urlopen)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://127.0.0.1:8443", api_token=None)
+    )
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == proxy_response
+    assert captured["context"].verify_mode == ssl.CERT_NONE
+    assert captured["context"].check_hostname is False
+
+
+def test_kill_switch_remote_proxy_requires_verified_tls(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    captured: dict[str, ssl.SSLContext] = {}
+    proxy_response = {"kill_switch": "activated"}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return False
+
+        def read(self):
+            return json.dumps(proxy_response).encode("utf-8")
+
+    def fake_urlopen(*_args, **kwargs):
+        captured["context"] = kwargs["context"]
+        return FakeResponse()
+
+    monkeypatch.setattr(urlrequest, "urlopen", fake_urlopen)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://proxy.example.com:8443", api_token=None)
+    )
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == proxy_response
+    assert captured["context"].verify_mode == ssl.CERT_REQUIRED
+    assert captured["context"].check_hostname is True
 
 
 def test_kill_switch_success_preserves_proxy_response_shape(monkeypatch, capsys):

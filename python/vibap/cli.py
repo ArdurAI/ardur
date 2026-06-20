@@ -629,8 +629,37 @@ def _kill_switch_failure_response(error: str, *, status: int | None = None) -> d
     return response
 
 
-def cmd_kill_switch(args: argparse.Namespace) -> int:
+def _kill_switch_proxy_host_is_loopback(proxy_url: str) -> bool:
+    import ipaddress
+    from urllib.parse import urlparse
+
+    host = urlparse(proxy_url).hostname
+    if not host:
+        return False
+    normalized_host = host.strip().lower()
+    if normalized_host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized_host).is_loopback
+    except ValueError:
+        return False
+
+
+def _kill_switch_ssl_context(proxy_url: str):
     import ssl
+
+    ctx = ssl.create_default_context()
+    if _kill_switch_proxy_host_is_loopback(proxy_url):
+        # The local development proxy uses a self-signed certificate by default.
+        # Keep that ergonomic localhost path, but do not carry the insecure TLS
+        # policy to caller-supplied remote proxy URLs where bearer tokens cross
+        # the network.
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def cmd_kill_switch(args: argparse.Namespace) -> int:
     import urllib.error as urlerror
     import urllib.request as urlreq
 
@@ -646,9 +675,7 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
         "Authorization": f"Bearer {api_token}",
     }
     req = urlreq.Request(f"{proxy_url.rstrip('/')}/admin/kill-switch", data=payload, headers=headers)
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE  # localhost self-signed cert
+    ctx = _kill_switch_ssl_context(proxy_url)
     try:
         with urlreq.urlopen(req, timeout=5, context=ctx) as resp:
             result = json.loads(resp.read().decode("utf-8"))

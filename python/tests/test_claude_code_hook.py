@@ -13,7 +13,6 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.claude_code_hook import (
     ChainState,
-    DEFAULT_CHAIN_DIR,
     append_receipt,
     load_active_passport,
     MissionLoadError,
@@ -723,7 +722,6 @@ def test_long_scoped_bash_command_is_not_denied_by_truncated_target(tmp_path, mo
 
 
 def test_parallel_pre_tool_use_processes_serialize_receipt_chain(tmp_path):
-    import json
     import os
     import subprocess
     import sys
@@ -894,7 +892,6 @@ def test_post_tool_use_chains_to_pre_and_records_result_hash(tmp_path, monkeypat
 
 
 def test_main_pre_reads_stdin_writes_stdout(tmp_path, monkeypatch):
-    import json
     import os
     import subprocess
     import sys
@@ -941,7 +938,6 @@ def test_main_pre_reads_stdin_writes_stdout(tmp_path, monkeypatch):
 def test_claude_code_hook_cli_returns_structured_input_error_next_steps(
     tmp_path, stdin_payload, condition, expected_detail
 ):
-    import json
     import os
     import subprocess
     import sys
@@ -1538,7 +1534,6 @@ def test_daemon_refuses_to_replace_active_socket(tmp_path, monkeypatch):
 
 
 def test_wrapper_accepts_native_client_env_alias_before_python_fallback(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -1606,7 +1601,6 @@ def test_wrapper_accepts_native_client_env_alias_before_python_fallback(tmp_path
 
 
 def test_wrapper_accepts_pretty_printed_hook_json_when_daemon_disabled(tmp_path):
-    import json
     import os
     import subprocess
     import sys
@@ -1651,7 +1645,6 @@ def test_wrapper_accepts_pretty_printed_hook_json_when_daemon_disabled(tmp_path)
 
 
 def test_wrapper_falls_back_when_daemon_returns_error_payload(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -1763,7 +1756,6 @@ def test_wrapper_and_python_fallback_rejects_malformed_pretooluse_shape(
     tmp_path,
     malformed_daemon_response,
 ):
-    import json
     import os
     import socket
     import subprocess
@@ -1865,7 +1857,6 @@ def test_wrapper_and_python_fallback_rejects_malformed_pretooluse_shape(
 
 
 def test_native_pre_tool_use_client_rejects_truncated_ok_envelope(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -1950,7 +1941,6 @@ def test_native_pre_tool_use_client_rejects_truncated_ok_envelope(tmp_path):
 
 
 def test_native_pre_tool_use_client_rejects_spaced_false_ok_envelope_with_hook_output(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -2048,7 +2038,6 @@ def test_install_native_pre_tool_use_command_rebuilds_tampered_executable_with_i
 
 
 def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelope(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -2158,7 +2147,6 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelop
 
 
 def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_envelope(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -2261,7 +2249,6 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_enve
 
 
 def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daemon_output(tmp_path):
-    import json
     import os
     import socket
     import subprocess
@@ -2363,7 +2350,6 @@ def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daem
 
 
 def test_wrapper_stalled_daemon_socket_respects_millisecond_timeout(tmp_path):
-    import json
     import os
     import socket
     import subprocess
