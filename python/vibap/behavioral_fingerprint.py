@@ -161,7 +161,7 @@ class BehavioralChallenger(Protocol):
     """
 
     def run(self, challenges: list[CanaryChallenge]) -> FingerprintVerdict:
-        ...
+        raise NotImplementedError
 
 
 class NullChallenger:

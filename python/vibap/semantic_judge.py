@@ -127,7 +127,8 @@ class JudgeVerdict:
 class SemanticJudge(Protocol):
     """Pluggable advisory judge contract."""
 
-    def evaluate(self, request: JudgeRequest) -> JudgeVerdict: ...
+    def evaluate(self, request: JudgeRequest) -> JudgeVerdict:
+        raise NotImplementedError
 
 
 # --------------------------------------------------------------------------

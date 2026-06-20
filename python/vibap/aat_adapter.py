@@ -102,7 +102,6 @@ def material_from_aat_grant(
       claim that confirmation-bound credentials are holder-restricted.
     """
     claims = decode_aat_claims(token, public_key)
-    cnf = claims.get("cnf")
     # Round-4 hardening (FIX-R4-5, 2026-04-28): mirror the GovernanceProxy
     # passport path's robust cnf check. Previously the gate at
     # ``isinstance(cnf, dict) and require_pop`` silently routed cnf=""/0/

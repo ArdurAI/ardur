@@ -24,8 +24,8 @@ every backend abstains — in which case the action is denied.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol, runtime_checkable
 
 DecisionType = Literal["Allow", "Deny", "Abstain"]
 
@@ -88,7 +88,7 @@ class PolicyBackend(Protocol):
         catastrophic errors (malformed policy, solver crash,
         integrity-hash mismatch).
         """
-        ...
+        raise NotImplementedError
 
 
 def compose_decisions(

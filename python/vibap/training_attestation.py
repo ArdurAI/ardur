@@ -96,7 +96,6 @@ attestation_ref can opt into the stronger posture.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import time
@@ -361,7 +360,7 @@ class SignerKeyResolver(Protocol):
     """
 
     def resolve(self, key_id: str) -> ec.EllipticCurvePublicKey | None:
-        ...
+        raise NotImplementedError
 
 
 @dataclass
