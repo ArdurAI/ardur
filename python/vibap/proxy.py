@@ -69,7 +69,6 @@ from .aat_adapter import (  # noqa: E402
 )
 from .approvals import ApprovalRateTracker
 from .attestation import issue_attestation, verify_attestation
-from .backends.native import NativeBackend
 from .denial import DenialReason
 from .lineage_budget import (
     FileLineageBudgetLedger,
@@ -112,7 +111,7 @@ from .passport import (
 # called in exactly one method (``_build_receipt_log_entry``), so a deferred
 # local import there breaks the topological cycle without changing semantics.
 # See ``_build_receipt_log_entry`` for the deferred import.
-from .policy_backend import PolicyDecision, compose_decisions, get_backend, register_backend, timed_evaluate
+from .policy_backend import PolicyDecision, compose_decisions, get_backend, timed_evaluate
 
 DEFAULT_STATE_DIR = Path(os.environ.get("VIBAP_STATE_DIR", DEFAULT_HOME / "state")).expanduser()
 DEFAULT_LOG_PATH = DEFAULT_HOME / "governance_log.jsonl"
@@ -1842,10 +1841,7 @@ class GovernanceProxy:
         self._approval_trackers_lock = threading.Lock()
         self._approval_trackers: dict[tuple[int, float], ApprovalRateTracker] = {}
         self.mission_cache = MissionCache(max_entries=256)
-        try:
-            get_backend("native")
-        except KeyError:
-            register_backend(NativeBackend())
+        get_backend("native")
         self._initialize_passport_state_files()
 
     @property

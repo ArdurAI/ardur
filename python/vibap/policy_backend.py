@@ -23,6 +23,7 @@ every backend abstains — in which case the action is denied.
 
 from __future__ import annotations
 
+import importlib
 import time
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -125,22 +126,20 @@ def _bootstrap_builtin_backend(name: str) -> bool:
     dependencies again.
     """
     if name == "native":
-        from vibap.backends.native import NativeBackend
-
-        register_backend(NativeBackend())
+        module = importlib.import_module("vibap.backends.native")
+        register_backend(module.NativeBackend())
         return True
     if name == "forbid_rules":
-        from vibap.backends.forbid_rules import register as register_forbid_rules
-
-        register_forbid_rules()
+        module = importlib.import_module("vibap.backends.forbid_rules")
+        module.register()
         return True
     if name == "cedar":
         try:
-            from vibap.backends import register_cedar
+            module = importlib.import_module("vibap.backends.cedar")
         except Exception:
             return False
         try:
-            register_cedar()
+            module.register()
         except RuntimeError:
             return False
         return True
