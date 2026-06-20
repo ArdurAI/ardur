@@ -38,6 +38,9 @@ def _protect_args(**overrides):
         "max_tool_calls": 250,
         "max_duration_s": 86400,
         "ttl_s": None,
+        "forbid_rules": None,
+        "cedar_policy": None,
+        "cedar_entities": None,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -459,6 +462,229 @@ def test_protect_claude_code_missing_plugin_human_has_next_steps(tmp_path, capsy
     assert "Next steps:" in captured.out
     assert "ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>" in captured.out
     assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_malformed_forbid_rules_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    forbid_rules = tmp_path / "bad-forbid-rules.json"
+    forbid_rules.write_text("{not valid json", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            forbid_rules=forbid_rules,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_malformed"
+    assert response["policy_input"] == "--forbid-rules"
+    assert "invalid JSON" in response["detail"]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "python -m json.tool <forbid-rules.json>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --forbid-rules <forbid-rules.json>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_missing_forbid_rules_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            forbid_rules=tmp_path / "missing-forbid-rules.json",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_missing"
+    assert response["policy_input"] == "--forbid-rules"
+    assert response["detail"] == "Could not load --forbid-rules: the file was not found."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --forbid-rules <forbid-rules.json>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_unreadable_forbid_rules_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    forbid_rules_dir = tmp_path / "forbid-rules-directory.json"
+    forbid_rules_dir.mkdir()
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            forbid_rules=forbid_rules_dir,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_unreadable"
+    assert response["policy_input"] == "--forbid-rules"
+    assert response["detail"] == "Could not load --forbid-rules: reading the file failed with IsADirectoryError."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "python -m json.tool <forbid-rules.json>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_bad_cedar_entities_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "policy.cedar"
+    cedar_policy.write_text("permit(principal, action, resource);\n", encoding="utf-8")
+    cedar_entities = tmp_path / "bad-entities.json"
+    cedar_entities.write_text("[not valid json", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=cedar_policy,
+            cedar_entities=cedar_entities,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_malformed"
+    assert response["policy_input"] == "--cedar-entities"
+    assert "invalid JSON" in response["detail"]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "python -m json.tool <cedar-entities.json>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_malformed_forbid_rules_human_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    forbid_rules = tmp_path / "bad-forbid-rules.json"
+    forbid_rules.write_text("{not valid json", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            forbid_rules=forbid_rules,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur Claude Code protection was not configured." in captured.out
+    assert "Policy input file could not be loaded." in captured.out
+    assert "Could not load --forbid-rules: invalid JSON" in captured.out
+    assert "Next steps:" in captured.out
+    assert "python -m json.tool <forbid-rules.json>" in captured.out
+    assert "--forbid-rules <forbid-rules.json>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_forbid_rules_object_and_list_still_succeed(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    object_rules = tmp_path / "object-forbid-rules.json"
+    object_rules.write_text(json.dumps({"tool": "Bash", "reason": "local baseline"}), encoding="utf-8")
+    list_rules = tmp_path / "list-forbid-rules.json"
+    list_rules.write_text(json.dumps([{"tool": "Write", "reason": "local baseline"}]), encoding="utf-8")
+
+    object_result = protect_claude_code(
+        _protect_args(
+            scope=project,
+            home=tmp_path / "object-home",
+            keys_dir=tmp_path / "object-keys",
+            forbid_rules=object_rules,
+        )
+    )
+    list_result = protect_claude_code(
+        _protect_args(
+            scope=project,
+            home=tmp_path / "list-home",
+            keys_dir=tmp_path / "list-keys",
+            forbid_rules=list_rules,
+        )
+    )
+
+    assert object_result["ok"] is True
+    assert list_result["ok"] is True
+    assert Path(str(object_result["active_passport"])).exists()
+    assert Path(str(list_result["active_passport"])).exists()
+
+
+def test_protect_claude_code_missing_cedar_policy_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=tmp_path / "missing-policy.cedar",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_missing"
+    assert response["policy_input"] == "--cedar-policy"
+    assert response["detail"] == "Could not load --cedar-policy: the file was not found."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "test -r <policy.cedar>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar>" in commands
     assert str(tmp_path) not in captured.out
     assert not (tmp_path / "home" / "active_mission.jwt").exists()
 

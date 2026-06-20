@@ -901,6 +901,100 @@ def _protect_claude_code_plugin_incomplete_response(
     }
 
 
+class _ProtectPolicyInputError(ValueError):
+    def __init__(self, option: str, condition: str, detail: str) -> None:
+        super().__init__(detail)
+        self.option = option
+        self.condition = condition
+        self.detail = detail
+
+
+def _protect_policy_input_placeholder(option: str) -> str:
+    return {
+        "--forbid-rules": "<forbid-rules.json>",
+        "--cedar-policy": "<policy.cedar>",
+        "--cedar-entities": "<cedar-entities.json>",
+    }.get(option, "<policy-input-file>")
+
+
+def _protect_policy_input_next_steps(option: str, condition: str) -> list[dict[str, str]]:
+    placeholder = _protect_policy_input_placeholder(option)
+    steps: list[dict[str, str]] = []
+    if option in {"--forbid-rules", "--cedar-entities"}:
+        steps.append({
+            "condition": condition,
+            "action": "validate_policy_json",
+            "command": f"python -m json.tool {placeholder}",
+            "detail": "Validate the local policy JSON file before rerunning Claude Code protection.",
+        })
+    else:
+        steps.append({
+            "condition": condition,
+            "action": "check_policy_file",
+            "command": f"test -r {placeholder}",
+            "detail": "Confirm the local policy file exists and is readable before rerunning protection.",
+        })
+
+    if option == "--forbid-rules":
+        rerun_suffix = "--forbid-rules <forbid-rules.json>"
+    elif option == "--cedar-entities":
+        rerun_suffix = "--cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>"
+    else:
+        rerun_suffix = "--cedar-policy <policy.cedar>"
+    steps.append({
+        "condition": condition,
+        "action": "rerun_protect",
+        "command": (
+            "ardur protect claude-code --scope <your-project> --home <ardur-home> "
+            f"--plugin-dir <claude-code-plugin> {rerun_suffix}"
+        ),
+        "detail": "Rerun protection after the local policy input file is present, readable, and valid.",
+    })
+    return steps
+
+
+def _protect_policy_input_failure_response(exc: _ProtectPolicyInputError) -> dict[str, object]:
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_policy_input_invalid",
+        "condition": exc.condition,
+        "message": "Policy input file could not be loaded.",
+        "detail": exc.detail,
+        "policy_input": exc.option,
+        "next_steps": _protect_policy_input_next_steps(exc.option, exc.condition),
+    }
+
+
+def _read_protect_policy_text(path: Path, option: str) -> str:
+    try:
+        return path.expanduser().read_text("utf-8")
+    except FileNotFoundError as exc:
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_missing",
+            f"Could not load {option}: the file was not found.",
+        ) from exc
+    except (PermissionError, IsADirectoryError, OSError, UnicodeDecodeError) as exc:
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_unreadable",
+            f"Could not load {option}: reading the file failed with {exc.__class__.__name__}.",
+        ) from exc
+
+
+def _read_protect_policy_json(path: Path, option: str) -> object:
+    text = _read_protect_policy_text(path, option)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_malformed",
+            f"Could not load {option}: invalid JSON at line {exc.lineno}, column {exc.colno}.",
+        ) from exc
+
+
 def _write_private_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -1047,7 +1141,7 @@ def _resolve_protect_policies(
 
     # CLI flags (highest priority)
     if getattr(args, "forbid_rules", None) is not None:
-        rules = json.loads(Path(args.forbid_rules).read_text("utf-8"))
+        rules = _read_protect_policy_json(Path(args.forbid_rules), "--forbid-rules")
         if not isinstance(rules, list):
             rules = [rules]
         policies.append({
@@ -1060,10 +1154,10 @@ def _resolve_protect_policies(
             "data_inline": rules,
         })
     if getattr(args, "cedar_policy", None) is not None:
-        policy_src = Path(args.cedar_policy).read_text("utf-8")
-        entities: list[dict[str, object]] = []
+        policy_src = _read_protect_policy_text(Path(args.cedar_policy), "--cedar-policy")
+        entities: object = []
         if getattr(args, "cedar_entities", None) is not None:
-            entities = json.loads(Path(args.cedar_entities).read_text("utf-8"))
+            entities = _read_protect_policy_json(Path(args.cedar_entities), "--cedar-entities")
         policies.append({
             "backend": "cedar",
             "label": "cli-cedar-policy",
@@ -1152,6 +1246,12 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
     if failed_plugin_checks:
         return _protect_claude_code_plugin_incomplete_response(failed_plugin_checks)
+    # Validate policy input files before issuing keys/tokens so setup failures
+    # remain local, structured, and free of unnecessary generated artifacts.
+    try:
+        additional_policies = _resolve_protect_policies(args, profile, home)
+    except _ProtectPolicyInputError as exc:
+        return _protect_policy_input_failure_response(exc)
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir or (home / "keys"))
     if profile and profile.allowed_tools:
         # A profile with an explicit allowlist is authoritative: if the author
@@ -1179,7 +1279,6 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # Seed additional policies (Cedar / forbid_rules) into the persistent
     # store so the proxy picks them up at session-start time. Policies are
     # resolved from CLI flags first, then from the profile.
-    additional_policies = _resolve_protect_policies(args, profile, home)
     if additional_policies:
         from vibap.backed_policy_store import FileBackedPolicyStore
         store = FileBackedPolicyStore(home)
