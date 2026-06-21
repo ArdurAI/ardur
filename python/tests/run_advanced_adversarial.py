@@ -415,7 +415,7 @@ def test_memory_fix8_write_rejected(proxy_base: str, private_key) -> AdvancedTes
         "arguments": {
             "store_id": "test-store",
             "content": "sensitive data",
-            "actor_private_key_pem": "-----BEGIN EC PRIVATE KEY-----\nfake\n-----END EC PRIVATE KEY-----",
+            "actor_private_key_pem": "redacted credential marker",
         },
     })
     result.actual_decision = decision.get("decision", "UNKNOWN")

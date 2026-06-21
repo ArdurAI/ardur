@@ -1476,6 +1476,57 @@ def test_run_native_host_binary_framing_input_errors_are_structured(
     assert "Expecting value" not in response["error"]
 
 
+def test_run_native_host_binary_framing_rejects_oversized_message_before_body_read(
+    tmp_path,
+    monkeypatch,
+):
+    class HeaderOnlyNativeMessage(io.BytesIO):
+        def __init__(self, claimed_length: int) -> None:
+            super().__init__(struct.pack("<I", claimed_length))
+            self.read_sizes: list[int] = []
+
+        def read(self, size: int | None = -1) -> bytes:
+            self.read_sizes.append(-1 if size is None else size)
+            if len(self.read_sizes) > 1:
+                raise AssertionError("oversized native message body must not be read")
+            return super().read(size)
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("oversized native message must fail before Hub forwarding")
+
+    monkeypatch.setattr(native_host, "hub_request", fail_hub_request)
+    claimed_length = native_host.MAX_NATIVE_MESSAGE_BYTES + 1
+    stdin = HeaderOnlyNativeMessage(claimed_length)
+    stdout = io.BytesIO()
+    raw_token = "example-native-host-oversized-token-placeholder"
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    assert stdin.read_sizes == [4]
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_host_framed_message_too_large"
+    assert response["condition"] == "personal_native_host_framed_message_too_large"
+    assert str(claimed_length) in response["detail"]
+    assert str(native_host.MAX_NATIVE_MESSAGE_BYTES) in response["detail"]
+    assert "<native-message.json>" in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in encoded
+
+
 def test_run_native_host_binary_framing_unsupported_message_type_is_structured(tmp_path):
     raw_token = "example-native-host-framed-unsupported-token-placeholder"
     raw_type = "example.unsupported.native.message"

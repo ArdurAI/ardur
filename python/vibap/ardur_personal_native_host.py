@@ -20,6 +20,7 @@ from .personal_hub import DEFAULT_HUB_URL, hub_request, _hub_setup_failure_flags
 
 HOST_OBSERVATION_TYPE = "ardur.personal.host_observation.v0.1"
 NATIVE_HOST_NAME = "dev.ardur.personal"
+MAX_NATIVE_MESSAGE_BYTES = 1024 * 1024
 _CHROME_EXTENSION_ID_RE = re.compile(r"^[a-p]{32}$")
 
 
@@ -402,6 +403,23 @@ def native_host_framed_input_failure_response(exc: Exception) -> dict[str, Any]:
     }
 
 
+def native_host_framed_message_too_large_failure_response(length: int) -> dict[str, Any]:
+    """Return a stable oversized framed-input failure without reading the body."""
+    condition = "personal_native_host_framed_message_too_large"
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Native Messaging framed input exceeds the Ardur Personal host size limit.",
+        "detail": (
+            f"Native Messaging payload length {length} bytes exceeds the maximum "
+            f"{MAX_NATIVE_MESSAGE_BYTES} bytes; send a smaller observation or "
+            "digest-only evidence."
+        ),
+        "next_steps": _native_host_framed_input_next_steps(condition),
+    }
+
+
 def run_native_host(
     stdin: BinaryIO,
     stdout: BinaryIO,
@@ -420,6 +438,13 @@ def run_native_host(
         if len(raw_len) != 4:
             return
         length = struct.unpack("<I", raw_len)[0]
+        if length > MAX_NATIVE_MESSAGE_BYTES:
+            response = native_host_framed_message_too_large_failure_response(length)
+            data = json.dumps(response).encode("utf-8")
+            stdout.write(struct.pack("<I", len(data)))
+            stdout.write(data)
+            stdout.flush()
+            return
         raw = stdin.read(length)
         try:
             message = json.loads(raw.decode("utf-8"))
