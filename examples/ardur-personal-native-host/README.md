@@ -14,6 +14,13 @@ PYTHONPATH=python python3 -m vibap.cli personal-native-manifest \
   --browser chrome
 ```
 
+`--host-path` must point to an existing executable Native Messaging host file,
+not an empty value, directory, missing path, or non-executable file. Invalid host
+paths and invalid extension ids fail closed with parseable JSON on stdout,
+placeholder-only `next_steps`, a non-zero exit, and empty stderr. This validates
+local/no-key manifest inputs only; it is not browser-store deployment proof or
+Native Messaging installation proof.
+
 Install the generated JSON at:
 
 ```text

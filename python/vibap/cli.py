@@ -1733,7 +1733,7 @@ def build_parser() -> argparse.ArgumentParser:
         "personal-native-manifest",
         help="print a native messaging manifest for the Hub bridge",
     )
-    personal_native_manifest.add_argument("--host-path", type=Path, required=True)
+    personal_native_manifest.add_argument("--host-path", required=True)
     personal_native_manifest.add_argument("--extension-id", required=True)
     personal_native_manifest.add_argument(
         "--browser",

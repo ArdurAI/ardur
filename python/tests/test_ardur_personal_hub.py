@@ -1157,6 +1157,60 @@ def test_personal_native_manifest_extension_id_errors_are_structured(
 
 
 @pytest.mark.parametrize(
+    "case",
+    ["empty", "whitespace", "directory", "missing_file", "non_executable_file"],
+)
+def test_personal_native_manifest_host_path_errors_are_structured(tmp_path, capsys, case):
+    from vibap import cli as cli_module
+
+    if case == "empty":
+        host_path: str | os.PathLike[str] = ""
+        raw_input = ""
+    elif case == "whitespace":
+        host_path = "   "
+        raw_input = "   "
+    elif case == "directory":
+        host_path = tmp_path
+        raw_input = str(tmp_path)
+    elif case == "missing_file":
+        host_path = tmp_path / "missing-native-host"
+        raw_input = str(host_path)
+    else:
+        host_file = tmp_path / "native-host"
+        host_file.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        host_path = host_file
+        raw_input = str(host_file)
+
+    rc = cli_module.cmd_personal_native_manifest(
+        Namespace(
+            host_path=host_path,
+            extension_id="abcdefghijklmnopabcdefghijklmnop",
+            browser="chrome",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_manifest_host_path_invalid"
+    assert response["condition"] == "personal_native_manifest_host_path_invalid"
+    assert response["next_steps"]
+    assert "ardur personal-native-manifest" in encoded
+    assert "<native-host-path>" in encoded
+    assert "<extension-id>" in encoded
+    assert "<browser>" in encoded
+    assert str(tmp_path) not in combined
+    if raw_input.strip():
+        assert raw_input not in combined
+    assert "Traceback" not in combined
+    assert "<ABSOLUTE_PATH:" not in combined
+
+
+@pytest.mark.parametrize(
     ("browser", "extension_id", "manifest_field", "expected_value"),
     [
         (
@@ -1179,6 +1233,8 @@ def test_personal_native_manifest_preserves_valid_success_output(
     from vibap import cli as cli_module
 
     host_path = tmp_path / "host.py"
+    host_path.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    host_path.chmod(host_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     rc = cli_module.cmd_personal_native_manifest(
         Namespace(host_path=host_path, extension_id=extension_id, browser=browser)

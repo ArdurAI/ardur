@@ -9,6 +9,7 @@ the same Hub API instead of issuing an independent receipt format.
 from __future__ import annotations
 
 import json
+import os
 import re
 import struct
 import sys
@@ -62,6 +63,35 @@ def _native_host_manifest_extension_id_next_steps() -> list[dict[str, str]]:
     ]
 
 
+def _native_host_manifest_host_path_next_steps() -> list[dict[str, str]]:
+    condition = "personal_native_manifest_host_path_invalid"
+    return [
+        {
+            "condition": condition,
+            "action": "check_native_host_path",
+            "command": "test -f <native-host-path> && test -x <native-host-path>",
+            "detail": (
+                "Use the executable Ardur Personal Native Messaging host file. Empty values, "
+                "directories, missing files, and non-executable files are rejected before "
+                "manifest emission."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_manifest_generation",
+            "command": (
+                "ardur personal-native-manifest --host-path <native-host-path> "
+                "--extension-id <extension-id> --browser <browser>"
+            ),
+            "detail": (
+                "Regenerate the Native Messaging manifest locally after selecting a runnable "
+                "host file. This is setup guidance only; it does not prove browser-store "
+                "deployment or native-host installation."
+            ),
+        },
+    ]
+
+
 def native_host_manifest_extension_id_failure_response(browser: str) -> dict[str, Any]:
     """Return structured manifest-id validation guidance without echoing raw input."""
     condition = "personal_native_manifest_extension_id_invalid"
@@ -83,6 +113,23 @@ def native_host_manifest_extension_id_failure_response(browser: str) -> dict[str
     }
 
 
+def native_host_manifest_host_path_failure_response() -> dict[str, Any]:
+    """Return structured host-path validation guidance without echoing raw input."""
+    condition = "personal_native_manifest_host_path_invalid"
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Native Messaging manifest host path is not a runnable host file.",
+        "detail": (
+            "The host path must identify an existing executable file for the Ardur Personal "
+            "Native Messaging host. Empty values, directories, missing files, and "
+            "non-executable files fail closed before a manifest is emitted."
+        ),
+        "next_steps": _native_host_manifest_host_path_next_steps(),
+    }
+
+
 def validate_native_host_manifest_extension_id(extension_id: str, browser: str) -> None:
     """Fail closed before emitting browser-rejected Native Messaging manifests."""
     browser_key = browser.strip().lower()
@@ -99,6 +146,22 @@ def validate_native_host_manifest_extension_id(extension_id: str, browser: str) 
         )
 
 
+def validate_native_host_manifest_host_path(host_path: str | Path) -> Path:
+    """Return a resolved runnable host file path or fail closed before manifest emission."""
+    raw_host_path = str(host_path)
+    if not raw_host_path.strip():
+        raise NativeHostManifestValidationError(native_host_manifest_host_path_failure_response())
+
+    try:
+        path = Path(raw_host_path).expanduser().resolve()
+    except (OSError, RuntimeError):
+        raise NativeHostManifestValidationError(native_host_manifest_host_path_failure_response()) from None
+
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise NativeHostManifestValidationError(native_host_manifest_host_path_failure_response())
+    return path
+
+
 def build_native_host_manifest(
     host_path: str | Path,
     extension_id: str,
@@ -106,7 +169,7 @@ def build_native_host_manifest(
     browser: str = "chrome",
 ) -> dict[str, Any]:
     validate_native_host_manifest_extension_id(extension_id, browser)
-    path = str(Path(host_path).expanduser().resolve())
+    path = str(validate_native_host_manifest_host_path(host_path))
     if browser == "firefox":
         return {
             "name": NATIVE_HOST_NAME,

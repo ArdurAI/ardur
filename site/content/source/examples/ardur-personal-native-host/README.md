@@ -2,7 +2,7 @@
 title: "Ardur Personal Native Messaging Bridge"
 description: "The preferred browser path is direct loopback HTTP to the local Hub. This"
 source_path: "examples/ardur-personal-native-host/README.md"
-source_sha256: "281e168602b02aaa28918b73f4ec408db842e2d622df770e26578393aa694093"
+source_sha256: "948fb992694ae26d3b4a54a5ff7c3bc52c9e945fbe70bc5b2db876e2668647d2"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["integration"]
@@ -30,6 +30,13 @@ PYTHONPATH=python python3 -m vibap.cli personal-native-manifest \
   --extension-id <extension-id> \
   --browser chrome
 ```
+
+`--host-path` must point to an existing executable Native Messaging host file,
+not an empty value, directory, missing path, or non-executable file. Invalid host
+paths and invalid extension ids fail closed with parseable JSON on stdout,
+placeholder-only `next_steps`, a non-zero exit, and empty stderr. This validates
+local/no-key manifest inputs only; it is not browser-store deployment proof or
+Native Messaging installation proof.
 
 Install the generated JSON at:
 
