@@ -9,6 +9,7 @@ the same Hub API instead of issuing an independent receipt format.
 from __future__ import annotations
 
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -18,6 +19,84 @@ from .personal_hub import DEFAULT_HUB_URL, hub_request, _hub_setup_failure_flags
 
 HOST_OBSERVATION_TYPE = "ardur.personal.host_observation.v0.1"
 NATIVE_HOST_NAME = "dev.ardur.personal"
+_CHROME_EXTENSION_ID_RE = re.compile(r"^[a-p]{32}$")
+
+
+class NativeHostManifestValidationError(ValueError):
+    """Raised when manifest generation would emit a browser-rejected manifest."""
+
+    def __init__(self, response: dict[str, Any]):
+        super().__init__(str(response.get("message", "native host manifest input invalid")))
+        self.response = response
+
+
+def _native_host_manifest_extension_id_next_steps() -> list[dict[str, str]]:
+    condition = "personal_native_manifest_extension_id_invalid"
+    return [
+        {
+            "condition": condition,
+            "action": "check_browser_extension_id",
+            "command": (
+                "ardur personal-native-manifest --host-path <native-host-path> "
+                "--extension-id <extension-id> --browser <browser>"
+            ),
+            "detail": (
+                "Use the installed browser extension id: Chrome-family ids are 32 lowercase "
+                "characters from a-p; Firefox add-on ids must be non-empty. Keep local host "
+                "paths and private development ids out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_manifest_generation",
+            "command": (
+                "ardur personal-native-manifest --host-path <native-host-path> "
+                "--extension-id <extension-id> --browser <browser>"
+            ),
+            "detail": (
+                "Regenerate the Native Messaging manifest locally after correcting the id. "
+                "This is setup guidance only; it does not prove browser-store deployment "
+                "or native-host installation."
+            ),
+        },
+    ]
+
+
+def native_host_manifest_extension_id_failure_response(browser: str) -> dict[str, Any]:
+    """Return structured manifest-id validation guidance without echoing raw input."""
+    condition = "personal_native_manifest_extension_id_invalid"
+    browser_key = browser.strip().lower()
+    if browser_key == "firefox":
+        detail = "Firefox Native Messaging extension ids must be non-empty after trimming whitespace."
+    else:
+        detail = (
+            "Chrome-family Native Messaging extension ids must be exactly 32 lowercase "
+            "characters using only letters a through p."
+        )
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Native Messaging manifest extension id is invalid for the selected browser.",
+        "detail": detail,
+        "next_steps": _native_host_manifest_extension_id_next_steps(),
+    }
+
+
+def validate_native_host_manifest_extension_id(extension_id: str, browser: str) -> None:
+    """Fail closed before emitting browser-rejected Native Messaging manifests."""
+    browser_key = browser.strip().lower()
+    if browser_key == "firefox":
+        if not extension_id.strip():
+            raise NativeHostManifestValidationError(
+                native_host_manifest_extension_id_failure_response(browser)
+            )
+        return
+
+    if not _CHROME_EXTENSION_ID_RE.fullmatch(extension_id):
+        raise NativeHostManifestValidationError(
+            native_host_manifest_extension_id_failure_response(browser)
+        )
 
 
 def build_native_host_manifest(
@@ -26,6 +105,7 @@ def build_native_host_manifest(
     *,
     browser: str = "chrome",
 ) -> dict[str, Any]:
+    validate_native_host_manifest_extension_id(extension_id, browser)
     path = str(Path(host_path).expanduser().resolve())
     if browser == "firefox":
         return {

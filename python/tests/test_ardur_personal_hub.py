@@ -1113,6 +1113,88 @@ def test_native_host_success_preserves_hub_response_shape(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("browser", "extension_id"),
+    [
+        ("chrome", "not a valid extension id"),
+        ("chrome-for-testing", "abcdefghijklmnopabcdefghijklmnopa"),
+        ("chromium", "q" * 32),
+        ("edge", "   "),
+        ("firefox", ""),
+        ("firefox", "   "),
+    ],
+)
+def test_personal_native_manifest_extension_id_errors_are_structured(
+    tmp_path,
+    capsys,
+    browser,
+    extension_id,
+):
+    from vibap import cli as cli_module
+
+    rc = cli_module.cmd_personal_native_manifest(
+        Namespace(host_path=tmp_path / "host.py", extension_id=extension_id, browser=browser)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_manifest_extension_id_invalid"
+    assert response["condition"] == "personal_native_manifest_extension_id_invalid"
+    assert response["next_steps"]
+    assert "ardur personal-native-manifest" in encoded
+    assert "<native-host-path>" in encoded
+    assert "<extension-id>" in encoded
+    assert "<browser>" in encoded
+    assert str(tmp_path) not in combined
+    assert "Traceback" not in combined
+    assert "<ABSOLUTE_PATH:" not in combined
+    if extension_id.strip():
+        assert extension_id not in combined
+
+
+@pytest.mark.parametrize(
+    ("browser", "extension_id", "manifest_field", "expected_value"),
+    [
+        (
+            "chrome",
+            "abcdefghijklmnopabcdefghijklmnop",
+            "allowed_origins",
+            ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
+        ),
+        ("firefox", "ardur@example.com", "allowed_extensions", ["ardur@example.com"]),
+    ],
+)
+def test_personal_native_manifest_preserves_valid_success_output(
+    tmp_path,
+    capsys,
+    browser,
+    extension_id,
+    manifest_field,
+    expected_value,
+):
+    from vibap import cli as cli_module
+
+    host_path = tmp_path / "host.py"
+
+    rc = cli_module.cmd_personal_native_manifest(
+        Namespace(host_path=host_path, extension_id=extension_id, browser=browser)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 0
+    assert captured.err == ""
+    assert response["name"] == native_host.NATIVE_HOST_NAME
+    assert response["path"] == str(host_path.resolve())
+    assert response[manifest_field] == expected_value
+    assert "ok" not in response
+
+
+@pytest.mark.parametrize(
     ("payload", "condition"),
     [
         ("{not-json", "personal_native_host_once_json_malformed"),

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b04bba64a46e8d56a709a41bc4704b3c0893068ee44866eb705241fa7e0d56cf"
+source_sha256: "e26909be237af775677bf71a233822a2feb3506170c4ebc0d937a706796778e2"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -302,6 +302,17 @@ browser's `NativeMessagingHosts/` directory.
 ardur personal-native-manifest --host-path PATH --extension-id ID
                                [--browser chrome|chrome-for-testing|chromium|edge|firefox]
 ```
+
+For Chrome-family browsers (`chrome`, `chrome-for-testing`, `chromium`, and
+`edge`), `--extension-id` must be exactly 32 lowercase characters using only
+letters `a` through `p`. For Firefox, the add-on id must be non-empty; Ardur does
+not otherwise constrain legitimate non-empty Firefox ids. Invalid ids fail closed
+before a manifest is emitted with parseable JSON on stdout: `ok: false`,
+`error`/`condition: "personal_native_manifest_extension_id_invalid"`, concise
+non-secret `message`/`detail`, placeholder-only `next_steps`, a non-zero exit,
+and empty stderr. This is local/no-key setup validation only; it does not prove
+browser-store deployment, Native Messaging installation, live provider/API
+behavior, or release readiness.
 
 ### `ardur profile init`
 

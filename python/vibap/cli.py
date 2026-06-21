@@ -18,6 +18,7 @@ import jwt
 from . import __version__
 from .ardur_profile import PROFILE_TEMPLATES, ArdurProfile, load_ardur_profile, write_profile_template
 from .ardur_personal_native_host import (
+    NativeHostManifestValidationError,
     build_native_host_manifest,
     handle_native_host_message,
     run_native_host,
@@ -818,13 +819,16 @@ def cmd_personal_native_host(args: argparse.Namespace) -> int:
 
 
 def cmd_personal_native_manifest(args: argparse.Namespace) -> int:
-    _print_json(
-        build_native_host_manifest(
+    try:
+        manifest = build_native_host_manifest(
             args.host_path,
             args.extension_id,
             browser=args.browser,
         )
-    )
+    except NativeHostManifestValidationError as exc:
+        _print_json(exc.response)
+        return 1
+    _print_json(manifest)
     return 0
 
 
