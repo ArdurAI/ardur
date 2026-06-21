@@ -1206,7 +1206,32 @@ def desktop_observe_response_with_next_steps(response: dict[str, Any]) -> dict[s
     return {**response, "next_steps": steps}
 
 
+def _desktop_observe_invalid_hub_url_next_steps() -> list[dict[str, str]]:
+    return [
+        _hub_url_invalid_next_step(),
+        {
+            "condition": "hub_url_invalid",
+            "action": "rerun_desktop_observe_or_doctor",
+            "command": (
+                "ardur desktop-observe --app <app-name> --title <window-title> "
+                "--home <ardur-home> --hub-url <hub-url>"
+            ),
+            "detail": (
+                "After correcting the Hub URL, re-run local desktop observation or "
+                "use ardur doctor --home <ardur-home> --hub-url <hub-url> for setup "
+                "diagnostics. Add --text <visible-text> only when you intentionally "
+                "want that visible text recorded. This guidance is local/no-key "
+                "recovery only; it does not call live providers or prove "
+                "provider-hidden actions."
+            ),
+        },
+    ]
+
+
 def _desktop_observe_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    if _hub_failure_condition(response) == "hub_url_invalid":
+        return _desktop_observe_invalid_hub_url_next_steps()
+
     hub_unavailable, token_problem = _hub_setup_failure_flags(response)
     if not hub_unavailable and not token_problem:
         return []

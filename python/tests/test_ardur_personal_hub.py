@@ -864,6 +864,61 @@ def test_desktop_observe_unavailable_hub_reports_placeholder_next_steps_without_
     assert str(tmp_path) not in next_steps_json
 
 
+@pytest.mark.parametrize(
+    "hub_url",
+    [
+        "ftp://127.0.0.1:8765",
+        "file:///tmp/ardur-hub",
+        "http:///missing-host",
+        "http://[",
+        "http://127.0.0.1:bad",
+    ],
+)
+def test_desktop_observe_invalid_hub_url_reports_placeholder_next_steps(
+    tmp_path,
+    capsys,
+    hub_url,
+):
+    from vibap import cli as cli_module
+
+    observation_text = "intentional visible observation placeholder"
+
+    rc = cli_module.cmd_desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=observation_text,
+            session_id=None,
+            hub_url=hub_url,
+            hub_token=None,
+            home=tmp_path,
+        )
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_url_invalid"
+    assert result["error_code"] == "hub_url_invalid"
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"check_hub_url", "rerun_desktop_observe_or_doctor"} <= actions
+    commands = [step["command"] for step in result["next_steps"]]
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in commands
+    assert any(command.startswith("ardur desktop-observe ") for command in commands)
+    encoded = json.dumps(result)
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert "<app-name>" in encoded
+    assert "<window-title>" in encoded
+    assert hub_url not in encoded
+    assert str(tmp_path) not in encoded
+    assert "/tmp/ardur-hub" not in encoded
+    assert observation_text not in encoded
+    assert "Traceback" not in encoded
+
+
 def test_desktop_observe_auth_failure_reports_token_next_steps_without_raw_secret(
     tmp_path,
     monkeypatch,
