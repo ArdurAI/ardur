@@ -23,20 +23,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .claude_code_daemon_client import (
-    DAEMON_ENABLE_ENV_VAR,
-    DAEMON_SOCKET_ENV_VAR,
-    DAEMON_TIMEOUT_MS_ENV_VAR,
-    _daemon_timeout_seconds,
-    _read_json_line,
-    _vibap_home_dir,
-    _write_json_line,
-    daemon_enabled,
-    dispatch_pre_tool_use,
-    extract_valid_pre_tool_use_output,
-    is_valid_pre_tool_use_output,
-    resolve_daemon_socket_path,
-)
+from . import claude_code_daemon_client as _daemon_client
+
+DAEMON_ENABLE_ENV_VAR = _daemon_client.DAEMON_ENABLE_ENV_VAR
+DAEMON_SOCKET_ENV_VAR = _daemon_client.DAEMON_SOCKET_ENV_VAR
+DAEMON_TIMEOUT_MS_ENV_VAR = _daemon_client.DAEMON_TIMEOUT_MS_ENV_VAR
+_daemon_timeout_seconds = _daemon_client._daemon_timeout_seconds
+_read_json_line = _daemon_client._read_json_line
+_vibap_home_dir = _daemon_client._vibap_home_dir
+_write_json_line = _daemon_client._write_json_line
+daemon_enabled = _daemon_client.daemon_enabled
+dispatch_pre_tool_use = _daemon_client.dispatch_pre_tool_use
+extract_valid_pre_tool_use_output = _daemon_client.extract_valid_pre_tool_use_output
+is_valid_pre_tool_use_output = _daemon_client.is_valid_pre_tool_use_output
+resolve_daemon_socket_path = _daemon_client.resolve_daemon_socket_path
 
 _PRIVATE_SOCKET_DIR_MODE = 0o700
 _PRIVATE_SOCKET_MODE = 0o600

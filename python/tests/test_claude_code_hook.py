@@ -1098,15 +1098,45 @@ def test_claude_daemon_hook_import_topology_is_acyclic():
     for module_name in modules:
         tree = ast.parse((package_root / f"{module_name}.py").read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module in modules:
+            if not isinstance(node, ast.ImportFrom) or node.level != 1:
+                continue
+            if node.module in modules:
                 edges.add((module_name, node.module))
+            elif node.module is None:
+                for alias in node.names:
+                    if alias.name in modules:
+                        edges.add((module_name, alias.name))
 
     assert ("claude_code_daemon", "claude_code_hook") in edges
+    assert ("claude_code_daemon", "claude_code_daemon_client") in edges
     assert ("claude_code_hook", "claude_code_daemon_client") in edges
     assert ("claude_code_hook", "claude_code_daemon") not in edges
 
     cycle_edges = [edge for edge in edges if (edge[1], edge[0]) in edges]
     assert cycle_edges == []
+
+
+def test_claude_daemon_preserves_client_compatibility_exports():
+    from vibap import claude_code_daemon as daemon_module
+    from vibap import claude_code_daemon_client as client_module
+
+    constants = (
+        "DAEMON_ENABLE_ENV_VAR",
+        "DAEMON_SOCKET_ENV_VAR",
+        "DAEMON_TIMEOUT_MS_ENV_VAR",
+    )
+    for name in constants:
+        assert getattr(daemon_module, name) == getattr(client_module, name)
+
+    functions = (
+        "daemon_enabled",
+        "dispatch_pre_tool_use",
+        "extract_valid_pre_tool_use_output",
+        "is_valid_pre_tool_use_output",
+        "resolve_daemon_socket_path",
+    )
+    for name in functions:
+        assert getattr(daemon_module, name) is getattr(client_module, name)
 
 
 def test_daemon_benchmark_helper_returns_duration_samples(tmp_path, monkeypatch):
