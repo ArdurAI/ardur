@@ -2,7 +2,7 @@
 title: "Ardur Personal Native Messaging Bridge"
 description: "The preferred browser path is direct loopback HTTP to the local Hub. This"
 source_path: "examples/ardur-personal-native-host/README.md"
-source_sha256: "948fb992694ae26d3b4a54a5ff7c3bc52c9e945fbe70bc5b2db876e2668647d2"
+source_sha256: "481ba667a2afdbfa531fd4dff47bc98fe085827a8b8173bd86302f3b62e6642f"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["integration"]
@@ -65,6 +65,19 @@ framing. Hub-unavailable or Hub-token/setup failures return deterministic local
 `next_steps` in that JSON response. These hints are local/no-key recovery
 guidance only and use placeholders such as `<ardur-home>`, `<hub-url>`,
 `<hub-token>`, and `<native-message.json>`.
+
+Malformed or unsupported `--hub-url` setup inputs fail closed before forwarding
+with parseable JSON for `--once-json` and the same payload inside Native
+Messaging framing: `ok: false`, `error_code`/`condition: "hub_url_invalid"`,
+deterministic placeholder-only `next_steps`, a non-zero exit, and empty stderr
+without traceback text. The response does not echo raw invalid URL strings, URL
+credentials, local paths, Hub tokens, or native payloads. This is distinct from
+syntactically valid HTTP(S) Hub URLs where the loopback Hub is unavailable,
+which remain `hub_unavailable` recovery states. This documents local/no-key
+recovery behavior only; it is not browser-store deployment proof, native-host
+installation proof, live provider/API behavior, provider-hidden action
+visibility, release readiness, package publishing, main promotion, or public
+metadata/social readiness.
 
 Placeholder-safe smoke form:
 

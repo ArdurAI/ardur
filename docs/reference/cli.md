@@ -264,6 +264,20 @@ length-prefix framing with `ok: false`, a stable `condition`, concise
 non-secret detail, and placeholder-only `next_steps` guidance. The response does
 not echo raw malformed payload bytes, raw Hub tokens, or local filesystem paths.
 
+Malformed or unsupported Hub URL setup inputs supplied with `--hub-url` fail
+closed before any Hub forwarding with parseable JSON for `--once-json` and the
+same payload inside Native Messaging framing: `ok: false`, `error_code` /
+`condition: "hub_url_invalid"`, deterministic placeholder-only `next_steps`, a
+non-zero exit, and empty stderr without Python/urllib traceback text. This
+validation does not echo raw invalid URL strings, URL credentials, local paths,
+Hub tokens, or native-message payloads. It is distinct from syntactically valid
+HTTP(S) Hub URLs where the loopback Hub is unavailable or rejects local auth;
+those remain `hub_unavailable` or Hub token/setup responses with their own local
+recovery guidance. This is local/no-key setup validation only and does not prove
+browser-store deployment, native-host installation, live provider/API behavior,
+provider-hidden action visibility, release readiness, package publishing, main
+promotion, or public metadata/social readiness.
+
 When the local Hub cannot be reached or returns a local token/auth setup error,
 `personal-native-host` preserves the failing `ok: false` / `error_code` response
 and adds a deterministic `next_steps` array. The hints are local/no-key recovery

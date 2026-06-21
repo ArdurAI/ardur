@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "203a517926e66ea799a22f4ca3655089331f346fa10d6b75b7365f54cdf02d9d"
+source_sha256: "8196936d2109a5b8fd64f3d3c2017f117b7dfcf50335a9c910596e3c1803e04f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -280,6 +280,20 @@ Malformed Native Messaging framed input is also answered inside the same
 length-prefix framing with `ok: false`, a stable `condition`, concise
 non-secret detail, and placeholder-only `next_steps` guidance. The response does
 not echo raw malformed payload bytes, raw Hub tokens, or local filesystem paths.
+
+Malformed or unsupported Hub URL setup inputs supplied with `--hub-url` fail
+closed before any Hub forwarding with parseable JSON for `--once-json` and the
+same payload inside Native Messaging framing: `ok: false`, `error_code` /
+`condition: "hub_url_invalid"`, deterministic placeholder-only `next_steps`, a
+non-zero exit, and empty stderr without Python/urllib traceback text. This
+validation does not echo raw invalid URL strings, URL credentials, local paths,
+Hub tokens, or native-message payloads. It is distinct from syntactically valid
+HTTP(S) Hub URLs where the loopback Hub is unavailable or rejects local auth;
+those remain `hub_unavailable` or Hub token/setup responses with their own local
+recovery guidance. This is local/no-key setup validation only and does not prove
+browser-store deployment, native-host installation, live provider/API behavior,
+provider-hidden action visibility, release readiness, package publishing, main
+promotion, or public metadata/social readiness.
 
 When the local Hub cannot be reached or returns a local token/auth setup error,
 `personal-native-host` preserves the failing `ok: false` / `error_code` response

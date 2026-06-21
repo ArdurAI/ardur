@@ -49,6 +49,19 @@ framing. Hub-unavailable or Hub-token/setup failures return deterministic local
 guidance only and use placeholders such as `<ardur-home>`, `<hub-url>`,
 `<hub-token>`, and `<native-message.json>`.
 
+Malformed or unsupported `--hub-url` setup inputs fail closed before forwarding
+with parseable JSON for `--once-json` and the same payload inside Native
+Messaging framing: `ok: false`, `error_code`/`condition: "hub_url_invalid"`,
+deterministic placeholder-only `next_steps`, a non-zero exit, and empty stderr
+without traceback text. The response does not echo raw invalid URL strings, URL
+credentials, local paths, Hub tokens, or native payloads. This is distinct from
+syntactically valid HTTP(S) Hub URLs where the loopback Hub is unavailable,
+which remain `hub_unavailable` recovery states. This documents local/no-key
+recovery behavior only; it is not browser-store deployment proof, native-host
+installation proof, live provider/API behavior, provider-hidden action
+visibility, release readiness, package publishing, main promotion, or public
+metadata/social readiness.
+
 Placeholder-safe smoke form:
 
 ```bash
