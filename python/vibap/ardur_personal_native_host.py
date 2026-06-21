@@ -92,6 +92,50 @@ def _native_host_manifest_host_path_next_steps() -> list[dict[str, str]]:
     ]
 
 
+def _native_host_unsupported_message_type_next_steps() -> list[dict[str, str]]:
+    condition = "personal_native_host_message_type_unsupported"
+    return [
+        {
+            "condition": condition,
+            "action": "create_supported_native_message",
+            "command": "ardur personal-native-host --once-json <native-message.json> --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Create a local Native Messaging JSON object with the supported Ardur "
+                "Personal host observation type before sending it through --once-json or "
+                "browser Native Messaging. Keep raw payloads, local paths, and Hub tokens "
+                "out of shared logs and reports."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_personal_native_host_or_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "After the message type is supported, check local Ardur Personal setup with "
+                "doctor or rerun ardur personal-native-host --once-json <native-message.json>. "
+                "This guidance is local/no-key input recovery only; it does not prove "
+                "browser-store deployment or Native Messaging installation."
+            ),
+        },
+    ]
+
+
+def native_host_unsupported_message_type_failure_response() -> dict[str, Any]:
+    """Return stable guidance for unsupported native messages without echoing payloads."""
+    condition = "personal_native_host_message_type_unsupported"
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Native Messaging message type is not supported by the Ardur Personal host.",
+        "detail": (
+            f"Native host messages must use type {HOST_OBSERVATION_TYPE}; unsupported "
+            "message types fail closed before any Hub forwarding."
+        ),
+        "next_steps": _native_host_unsupported_message_type_next_steps(),
+    }
+
+
 def native_host_manifest_extension_id_failure_response(browser: str) -> dict[str, Any]:
     """Return structured manifest-id validation guidance without echoing raw input."""
     condition = "personal_native_manifest_extension_id_invalid"
@@ -199,7 +243,7 @@ def handle_native_host_message(
 ) -> dict[str, Any]:
     del storage_dir, keys_dir, caller_origin
     if message.get("type") != HOST_OBSERVATION_TYPE:
-        return {"ok": False, "error": "unsupported native message type"}
+        return native_host_unsupported_message_type_failure_response()
     payload = message.get("hub_event")
     if not isinstance(payload, dict):
         receipt = message.get("browser_receipt") or {}

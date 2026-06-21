@@ -1112,6 +1112,43 @@ def test_native_host_success_preserves_hub_response_shape(monkeypatch):
     assert "next_steps" not in result
 
 
+def test_native_host_unsupported_message_type_reports_placeholder_next_steps_without_payload_leaks(
+    tmp_path,
+):
+    raw_token = "example-native-host-unsupported-token-placeholder"
+    raw_type = "example.unsupported.native.message"
+    response = native_host.handle_native_host_message(
+        {
+            "type": raw_type,
+            "hub_event": {
+                "path": str(tmp_path / "private-native-message.json"),
+                "token": raw_token,
+            },
+        },
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_host_message_type_unsupported"
+    assert response["condition"] == "personal_native_host_message_type_unsupported"
+    assert response["message"]
+    assert response["detail"]
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"create_supported_native_message", "rerun_personal_native_host_or_doctor"} <= actions
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_type not in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in encoded
+    assert "<ABSOLUTE_PATH:" not in encoded
+
+
 @pytest.mark.parametrize(
     ("browser", "extension_id"),
     [
@@ -1437,6 +1474,52 @@ def test_run_native_host_binary_framing_input_errors_are_structured(
     assert payload.decode("utf-8", errors="ignore") not in encoded
     assert "Traceback" not in encoded
     assert "Expecting value" not in response["error"]
+
+
+def test_run_native_host_binary_framing_unsupported_message_type_is_structured(tmp_path):
+    raw_token = "example-native-host-framed-unsupported-token-placeholder"
+    raw_type = "example.unsupported.native.message"
+    payload = json.dumps(
+        {
+            "type": raw_type,
+            "hub_event": {
+                "path": str(tmp_path / "private-native-message.json"),
+                "token": raw_token,
+            },
+        }
+    ).encode("utf-8")
+    stdin = io.BytesIO(struct.pack("<I", len(payload)) + payload)
+    stdout = io.BytesIO()
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_host_message_type_unsupported"
+    assert response["condition"] == "personal_native_host_message_type_unsupported"
+    assert response["message"]
+    assert response["detail"]
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_type not in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in encoded
 
 
 def test_run_under_hub_missing_command_reports_placeholder_next_steps(
