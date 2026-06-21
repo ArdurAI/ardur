@@ -25,6 +25,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from http import client as httpclient
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -996,6 +997,20 @@ def serve_hub(
     server.serve_forever()
 
 
+def _hub_url_invalid_response() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": "hub_url_invalid",
+        "error_code": "hub_url_invalid",
+        "condition": "hub_url_invalid",
+        "message": "Ardur Personal Hub URL is invalid.",
+        "detail": (
+            "The configured Hub URL could not be parsed. Use a complete loopback "
+            "HTTP or HTTPS endpoint such as http://127.0.0.1:8765."
+        ),
+    }
+
+
 def hub_request(
     method: str,
     path: str,
@@ -1014,10 +1029,15 @@ def hub_request(
     if token:
         headers["authorization"] = f"Bearer {token}"
         headers[HUB_TOKEN_HEADER] = token
-    req = urlrequest.Request(hub_url.rstrip("/") + path, data=data, method=method, headers=headers)
+    try:
+        req = urlrequest.Request(hub_url.rstrip("/") + path, data=data, method=method, headers=headers)
+    except ValueError:
+        return _hub_url_invalid_response()
     try:
         with urlrequest.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode("utf-8"))
+    except httpclient.InvalidURL:
+        return _hub_url_invalid_response()
     except urlerror.HTTPError as exc:
         try:
             return json.loads(exc.read().decode("utf-8"))

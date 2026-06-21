@@ -137,6 +137,34 @@ def native_host_unsupported_message_type_failure_response() -> dict[str, Any]:
     }
 
 
+def _native_host_invalid_hub_url_next_steps() -> list[dict[str, str]]:
+    condition = "hub_url_invalid"
+    return [
+        {
+            "condition": condition,
+            "action": "check_hub_url",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "Use a complete local Hub endpoint such as http://127.0.0.1:8765. "
+                "Keep raw local paths, Hub tokens, and message payloads out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_personal_native_host",
+            "command": (
+                "ardur personal-native-host --once-json <native-message.json> "
+                "--home <ardur-home> --hub-url <hub-url>"
+            ),
+            "detail": (
+                "After correcting the Hub URL, rerun the local Native Messaging message. "
+                "This guidance is local/no-key setup recovery only; it does not prove "
+                "browser-store deployment or Native Messaging installation."
+            ),
+        },
+    ]
+
+
 def native_host_manifest_extension_id_failure_response(browser: str) -> dict[str, Any]:
     """Return structured manifest-id validation guidance without echoing raw input."""
     condition = "personal_native_manifest_extension_id_invalid"
@@ -284,6 +312,11 @@ def native_host_response_with_next_steps(response: dict[str, Any]) -> dict[str, 
 
 
 def _native_host_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    error_code = str(response.get("error_code") or "").strip().lower()
+    condition = str(response.get("condition") or "").strip().lower()
+    if error_code == "hub_url_invalid" or condition == "hub_url_invalid":
+        return _native_host_invalid_hub_url_next_steps()
+
     hub_unavailable, token_problem = _hub_setup_failure_flags(response)
     if not hub_unavailable and not token_problem:
         return []

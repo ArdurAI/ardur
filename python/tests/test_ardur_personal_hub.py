@@ -1386,6 +1386,67 @@ def test_personal_native_host_once_json_preserves_valid_hub_failure_next_steps(
     assert str(tmp_path) not in encoded
 
 
+@pytest.mark.parametrize(
+    ("hub_url", "exception_text"),
+    [
+        ("http://[", "Invalid IPv6 URL"),
+        ("http://127.0.0.1:bad", "nonnumeric port"),
+    ],
+)
+def test_personal_native_host_once_json_invalid_hub_url_is_structured(
+    tmp_path,
+    capsys,
+    hub_url,
+    exception_text,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-native-host-invalid-hub-url-token-placeholder"
+    message_path = tmp_path / "valid-native-message.json"
+    message_path.write_text(
+        json.dumps(
+            {
+                "type": HOST_OBSERVATION_TYPE,
+                "hub_event": _browser_payload("valid once-json invalid hub url"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli_module.cmd_personal_native_host(
+        Namespace(
+            once_json=message_path,
+            hub_url=hub_url,
+            hub_token=raw_token,
+            home=tmp_path / "ardur-home",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "hub_url_invalid"
+    assert response["condition"] == "hub_url_invalid"
+    assert response["message"]
+    assert response["detail"]
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_token not in combined
+    assert hub_url not in combined
+    assert str(tmp_path) not in combined
+    assert "Traceback" not in combined
+    assert exception_text not in combined
+    assert "InvalidURL" not in combined
+    assert "ValueError" not in combined
+
+
 def test_run_native_host_binary_framing_includes_next_steps_on_hub_setup_failure(
     tmp_path,
     monkeypatch,
