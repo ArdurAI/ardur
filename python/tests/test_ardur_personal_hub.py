@@ -1391,6 +1391,9 @@ def test_personal_native_host_once_json_preserves_valid_hub_failure_next_steps(
     [
         ("http://[", "Invalid IPv6 URL"),
         ("http://127.0.0.1:bad", "nonnumeric port"),
+        ("ftp://127.0.0.1:8765", "urlopen error"),
+        ("file:///tmp/ardur-hub", "/tmp/ardur-hub"),
+        ("http:///missing-host", "no host given"),
     ],
 )
 def test_personal_native_host_once_json_invalid_hub_url_is_structured(

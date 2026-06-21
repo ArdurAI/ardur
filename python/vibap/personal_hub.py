@@ -61,6 +61,7 @@ MAX_OBSERVATIONS_PER_REVIEW = 240
 HUB_TOKEN_ENV_VAR = "ARDUR_PERSONAL_HUB_TOKEN"
 HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
+_ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
 _QUERY_TOKEN_LOG_RE = re.compile(r"([?&]token=)[^\s&\"']+")
 _SHA256_DIGEST_RE = re.compile(r"^sha-256:[0-9a-f]{64}$")
 _SENSITIVE_TARGET_RE = re.compile(r"\b(password|secret|token|api[-_ ]?key|ssn)\b", re.I)
@@ -1011,6 +1012,21 @@ def _hub_url_invalid_response() -> dict[str, Any]:
     }
 
 
+def _validated_hub_request_url(hub_url: str, path: str) -> str | None:
+    """Return a request URL only for complete HTTP(S) Hub endpoints."""
+    base_url = str(hub_url).strip()
+    try:
+        parsed = urlparse.urlsplit(base_url)
+        if parsed.scheme.lower() not in _ALLOWED_HUB_URL_SCHEMES:
+            return None
+        if not parsed.netloc or not parsed.hostname:
+            return None
+        _ = parsed.port
+    except ValueError:
+        return None
+    return base_url.rstrip("/") + path
+
+
 def hub_request(
     method: str,
     path: str,
@@ -1029,8 +1045,11 @@ def hub_request(
     if token:
         headers["authorization"] = f"Bearer {token}"
         headers[HUB_TOKEN_HEADER] = token
+    request_url = _validated_hub_request_url(hub_url, path)
+    if request_url is None:
+        return _hub_url_invalid_response()
     try:
-        req = urlrequest.Request(hub_url.rstrip("/") + path, data=data, method=method, headers=headers)
+        req = urlrequest.Request(request_url, data=data, method=method, headers=headers)
     except ValueError:
         return _hub_url_invalid_response()
     try:
@@ -1043,8 +1062,8 @@ def hub_request(
             return json.loads(exc.read().decode("utf-8"))
         except Exception:
             return {"ok": False, "error": str(exc), "status": exc.code}
-    except OSError as exc:
-        return {"ok": False, "error": str(exc), "error_code": "hub_unavailable"}
+    except OSError:
+        return {"ok": False, "error": "hub_unavailable", "error_code": "hub_unavailable"}
 
 
 def status_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
