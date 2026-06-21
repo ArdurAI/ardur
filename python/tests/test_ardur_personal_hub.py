@@ -483,6 +483,41 @@ def test_doctor_reports_hub_next_steps_when_configured_hub_is_unavailable(tmp_pa
     assert str(tmp_path) not in next_steps_json
 
 
+@pytest.mark.parametrize(
+    "hub_url",
+    [
+        "ftp://127.0.0.1:8765",
+        "file:///tmp/ardur-hub",
+        "http:///missing-host",
+        "http://[",
+        "http://127.0.0.1:bad",
+    ],
+)
+def test_doctor_invalid_hub_url_reports_specific_placeholder_next_steps(tmp_path, capsys, hub_url):
+    from vibap import cli as cli_module
+
+    missing_home = tmp_path / "missing-home"
+
+    rc = cli_module.cmd_doctor(Namespace(home=missing_home, hub_url=hub_url, hub_token=None))
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert checks_by_name["hub"]["detail"] == "hub_url_invalid"
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"run_setup", "supply_or_rotate_hub_token", "check_hub_url", "rerun_doctor"} <= actions
+    assert "start_personal_hub" not in actions
+    encoded = json.dumps(result)
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert hub_url not in encoded
+    assert str(tmp_path) not in encoded
+    assert "/tmp/ardur-hub" not in encoded
+
+
 def test_doctor_healthy_core_setup_has_empty_next_steps(tmp_path):
     with _running_hub(tmp_path) as (_, base_url):
         result = personal_hub.doctor_personal(
@@ -521,6 +556,37 @@ def test_status_reports_next_steps_for_unavailable_hub_without_path_leaks(tmp_pa
     assert "<hub-url>" in next_steps_json
     assert "<hub-token>" in next_steps_json
     assert str(tmp_path) not in next_steps_json
+
+
+@pytest.mark.parametrize(
+    "hub_url",
+    [
+        "ftp://127.0.0.1:8765",
+        "file:///tmp/ardur-hub",
+        "http:///missing-host",
+        "http://[",
+        "http://127.0.0.1:bad",
+    ],
+)
+def test_status_invalid_hub_url_reports_placeholder_next_steps(tmp_path, capsys, hub_url):
+    from vibap import cli as cli_module
+
+    rc = cli_module.cmd_status(Namespace(home=tmp_path, hub_url=hub_url, hub_token=None))
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_url_invalid"
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"check_hub_url", "rerun_status_or_doctor"} <= actions
+    encoded = json.dumps(result)
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert hub_url not in encoded
+    assert str(tmp_path) not in encoded
+    assert "/tmp/ardur-hub" not in encoded
 
 
 def test_status_reports_token_next_steps_without_raw_secret(monkeypatch, capsys):

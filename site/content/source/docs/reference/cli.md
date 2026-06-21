@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "8196936d2109a5b8fd64f3d3c2017f117b7dfcf50335a9c910596e3c1803e04f"
+source_sha256: "29c7bd84874b8adf0415432273cbc318b39121d9cae6cbc829eccc35350d2c6d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -145,14 +145,16 @@ Show Hub status — current sessions, latest receipt, adapter availability.
 ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR]
 ```
 
-When the local Hub cannot be reached or returns a local token/auth setup error,
-the JSON output keeps the failing status response and adds a deterministic
-`next_steps` array. These hints are local-only setup guidance: run setup if
-needed, start the loopback Hub, supply or rotate the Hub token, then re-run
-`ardur status` or `ardur doctor`. They use placeholders such as
-`<ardur-home>`, `<hub-url>`, and `<hub-token>` and do not claim live provider
-behavior, provider-hidden action visibility, or release readiness. Healthy Hub
-responses preserve the existing response shape and omit actionable remediation.
+When the local Hub cannot be reached, returns a local token/auth setup error, or
+the supplied `--hub-url` is malformed/unsupported, the JSON output keeps the
+failing status response and adds a deterministic `next_steps` array. These hints
+are local-only setup guidance: correct the `<hub-url>` when the condition is
+`hub_url_invalid`, run setup if needed, start the loopback Hub, supply or rotate
+the Hub token, then re-run `ardur status` or `ardur doctor`. They use
+placeholders such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` and do not
+copy raw invalid file URLs, local paths, tokens, or provider data into shared
+logs. Healthy Hub responses preserve the existing response shape and omit
+actionable remediation.
 
 ### `ardur doctor`
 
@@ -165,10 +167,12 @@ ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
 
 The JSON output preserves the `ok` and `checks` fields and includes a
 machine-readable `next_steps` array when core setup checks fail. These local
-remediation hints cover missing setup/config/token state, starting or checking
-the loopback Hub, and re-running `ardur doctor`; they use placeholders such as
-`<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw local
-paths or tokens. When the core setup is healthy, `next_steps` is an empty array.
+remediation hints cover missing setup/config/token state, malformed or
+unsupported `--hub-url` values reported as `hub_url_invalid`, starting or
+checking the loopback Hub, and re-running `ardur doctor`; they use placeholders
+such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw
+local paths, invalid file URLs, or tokens. When the core setup is healthy,
+`next_steps` is an empty array.
 
 ### `ardur doctor-claude-code`
 

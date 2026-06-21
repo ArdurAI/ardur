@@ -1098,7 +1098,44 @@ def _hub_setup_failure_flags(response: dict[str, Any]) -> tuple[bool, bool]:
     return hub_unavailable, token_problem
 
 
+def _hub_failure_condition(response: dict[str, Any]) -> str:
+    """Return a normalized local Hub failure condition without echoing raw input."""
+    for key in ("condition", "error_code", "error"):
+        value = str(response.get(key) or "").strip().lower()
+        if value:
+            return value
+    return ""
+
+
+def _hub_url_invalid_next_step() -> dict[str, str]:
+    return {
+        "condition": "hub_url_invalid",
+        "action": "check_hub_url",
+        "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+        "detail": (
+            "Use a complete local Hub endpoint such as http://127.0.0.1:8765. "
+            "Keep raw local paths, invalid file URLs, Hub tokens, and payloads out "
+            "of shared logs."
+        ),
+    }
+
+
 def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+    if _hub_failure_condition(response) == "hub_url_invalid":
+        return [
+            _hub_url_invalid_next_step(),
+            {
+                "condition": "hub_url_invalid",
+                "action": "rerun_status_or_doctor",
+                "command": "ardur status --home <ardur-home> --hub-url <hub-url>",
+                "detail": (
+                    "After correcting the Hub URL, rerun local status or use doctor for "
+                    "setup diagnostics. This guidance is local/no-key recovery only; it "
+                    "does not call live providers or prove provider-hidden actions."
+                ),
+            },
+        ]
+
     hub_unavailable, token_problem = _hub_setup_failure_flags(response)
 
     if not hub_unavailable and not token_problem:
@@ -1417,6 +1454,7 @@ def _doctor_personal_next_steps(
     config_ok: bool,
     hub_token_ok: bool,
     hub_ok: bool,
+    hub_condition: str = "",
 ) -> list[dict[str, str]]:
     """Return deterministic local remediation hints for ``ardur doctor``.
 
@@ -1455,7 +1493,9 @@ def _doctor_personal_next_steps(
             }
         )
 
-    if not hub_ok:
+    if not hub_ok and hub_condition == "hub_url_invalid":
+        steps.append(_hub_url_invalid_next_step())
+    elif not hub_ok:
         steps.append(
             {
                 "condition": "hub_unavailable",
@@ -1510,6 +1550,7 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
             config_ok=config_ok,
             hub_token_ok=hub_token_ok,
             hub_ok=hub_ok,
+            hub_condition=_hub_failure_condition(hub),
         ),
     }
 
