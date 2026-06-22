@@ -19,6 +19,17 @@ type ringbufSampleReader interface {
 	ReadSample() ([]byte, error)
 }
 
+func closeRingbufHandles(readerClose, mapClose func() error) error {
+	var closeErr error
+	if readerClose != nil {
+		closeErr = errors.Join(closeErr, readerClose())
+	}
+	if mapClose != nil {
+		closeErr = errors.Join(closeErr, mapClose())
+	}
+	return closeErr
+}
+
 func nextRingbufProcessEvent(ctx context.Context, reader ringbufSampleReader, scope SessionScope, pollInterval time.Duration) (ProcessEvent, bool, error) {
 	if reader == nil {
 		return ProcessEvent{}, false, errors.New("ringbuf source is not initialized")

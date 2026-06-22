@@ -96,16 +96,24 @@ def test_browser_observation_uses_standard_ardur_receipt(tmp_path):
     assert claims["tool"] == "browser_observe"
 
 
-def test_cli_dangerous_command_is_blocked_and_receipted(tmp_path):
+@pytest.mark.parametrize(
+    ("process", "command"),
+    [
+        ("sudo rm -rf /", ["sudo", "rm", "-rf", "/"]),
+        ("rm --recursive --force /", ["rm", "--recursive", "--force", "/"]),
+        ("dd if=/tmp/source of=/tmp/target", ["dd", "if=/tmp/source", "of=/tmp/target"]),
+    ],
+)
+def test_cli_dangerous_command_is_blocked_and_receipted(tmp_path, process, command):
     hub = PersonalHub(tmp_path)
     payload = {
-        "source": {"type": "cli", "app": "sh", "process": "sudo rm -rf /"},
-        "session": {"id": "cli:test", "title": "sudo rm -rf /"},
+        "source": {"type": "cli", "app": "sh", "process": process},
+        "session": {"id": "cli:test", "title": process},
         "event": {
             "kind": "cli_command",
             "action_class": "observe",
             "target": "sh",
-            "command": ["sudo", "rm", "-rf", "/"],
+            "command": command,
             "raw_content_included": False,
         },
     }
@@ -123,6 +131,25 @@ def test_cli_dangerous_command_is_blocked_and_receipted(tmp_path):
     )
     assert claims["verdict"] == "violation"
     assert claims["tool"] == "cli_blocked_action"
+
+
+@pytest.mark.parametrize("target", ["my_password_field", "user_secret_config", "api_key"])
+def test_sensitive_write_targets_block_underscore_compounds(tmp_path, target):
+    hub = PersonalHub(tmp_path)
+    payload = _browser_payload()
+    payload["event"].update(
+        {
+            "kind": "browser_action",
+            "action_class": "write",
+            "target": target,
+            "text_snapshot_included": False,
+        }
+    )
+
+    policy = hub.check_policy(payload)
+
+    assert policy["verdict"] == "blocked"
+    assert "sensitive target" in policy["reason"]
 
 
 def test_visible_text_requires_explicit_consent(tmp_path):
@@ -1140,13 +1167,14 @@ def test_hub_query_token_only_authorizes_dashboard_get(tmp_path):
 
 
 def test_hub_log_redacts_full_query_token():
-    message = 'GET /dashboard?token=abcsefg123&next=/ HTTP/1.1'
+    message = 'GET /dashboard?token=abcsefg123&api_key=secret123&next=/ HTTP/1.1'
 
     redacted = _redact_url_tokens(message)
 
     assert "abcsefg123" not in redacted
     assert "sefg123" not in redacted
-    assert "?token=<redacted>&next=/" in redacted
+    assert "secret123" not in redacted
+    assert "?token=<redacted>&api_key=<redacted>&next=/" in redacted
 
 
 def test_hub_auth_uses_fixed_width_token_compare_material(monkeypatch):

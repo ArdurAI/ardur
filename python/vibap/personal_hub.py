@@ -62,12 +62,20 @@ HUB_TOKEN_ENV_VAR = "ARDUR_PERSONAL_HUB_TOKEN"
 HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
-_QUERY_TOKEN_LOG_RE = re.compile(r"([?&]token=)[^\s&\"']+")
+_QUERY_TOKEN_LOG_RE = re.compile(
+    r"([?&](?:access[-_]?token|api[-_]?key|auth|key|password|secret|token)=)[^\s&\"']+",
+    re.I,
+)
 _SHA256_DIGEST_RE = re.compile(r"^sha-256:[0-9a-f]{64}$")
-_SENSITIVE_TARGET_RE = re.compile(r"\b(password|secret|token|api[-_ ]?key|ssn)\b", re.I)
+_SENSITIVE_TARGET_RE = re.compile(
+    r"(?<![A-Za-z0-9])(password|secret|token|api[-_ ]?key|ssn)(?![A-Za-z0-9])",
+    re.I,
+)
 _DANGEROUS_CLI_RE = re.compile(
-    r"(^|\s)(sudo|su|rm\s+-[^\n]*[rf]|mkfs|diskutil|dd\s+if=|security\s+find|"
-    r"launchctl\s+bootout|curl\s+[^|\n]*\|\s*(sh|bash)|wget\s+[^|\n]*\|\s*(sh|bash))\b",
+    r"(^|\s)(sudo|su|rm\s+(?=[^\n]*(?:-[^\n]*[rf]|--recursive\b|--force\b))[^\n]*|"
+    r"mkfs|diskutil|dd\s+if=\S*|security\s+find|"
+    r"launchctl\s+bootout|curl\s+[^|\n]*\|\s*(sh|bash)|wget\s+[^|\n]*\|\s*(sh|bash))"
+    r"(?=$|\s|[;&|])",
     re.I,
 )
 

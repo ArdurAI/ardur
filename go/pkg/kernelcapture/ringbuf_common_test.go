@@ -34,6 +34,45 @@ func (r *scriptedRingbufReader) ReadSample() ([]byte, error) {
 	return current.sample, current.err
 }
 
+func TestCloseRingbufHandlesClosesReaderAndMap(t *testing.T) {
+	t.Parallel()
+
+	closed := []string{}
+	err := closeRingbufHandles(
+		func() error {
+			closed = append(closed, "reader")
+			return nil
+		},
+		func() error {
+			closed = append(closed, "map")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("closeRingbufHandles error: %v", err)
+	}
+	if len(closed) != 2 || closed[0] != "reader" || closed[1] != "map" {
+		t.Fatalf("closed = %#v, want reader then map", closed)
+	}
+}
+
+func TestCloseRingbufHandlesReturnsReaderAndMapErrors(t *testing.T) {
+	t.Parallel()
+
+	readerErr := errors.New("reader close failed")
+	mapErr := errors.New("map close failed")
+	err := closeRingbufHandles(
+		func() error { return readerErr },
+		func() error { return mapErr },
+	)
+	if !errors.Is(err, readerErr) {
+		t.Fatalf("expected reader error in %v", err)
+	}
+	if !errors.Is(err, mapErr) {
+		t.Fatalf("expected map error in %v", err)
+	}
+}
+
 func TestNextRingbufProcessEventContextCanceledWithoutDeadline(t *testing.T) {
 	t.Parallel()
 
