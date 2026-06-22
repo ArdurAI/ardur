@@ -50,6 +50,11 @@ dev = [
     "python-multipart>=0.0.26,<1",
 ]
 
+[tool.pytest.ini_options]
+# Emit stack traces during CI hangs before GitHub's 15-minute pytest step
+# timeout. This is diagnostics-only; it does not change pytest pass/fail logic.
+faulthandler_timeout = "120"
+
 [project.scripts]
 ardur = "vibap.cli:main"
 # Deprecated alias retained for one release cycle to ease migration
