@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "29c7bd84874b8adf0415432273cbc318b39121d9cae6cbc829eccc35350d2c6d"
+source_sha256: "31720f9e254d0c834ae2b39d694820a4b3b4921a8d579743bc749cb4a362b631"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -370,6 +370,9 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
                           [--mission TEXT]
                           [--max-tool-calls N] [--max-duration-s N]
                           [--ttl-s N]
+                          [--forbid-rules FILE]
+                          [--cedar-policy FILE]
+                          [--cedar-entities FILE]
 ```
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown
@@ -389,6 +392,18 @@ placeholder-only `next_steps` such as
 `ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>`;
 human output prints the same recovery guidance without a Python traceback or raw
 local temp paths.
+
+Policy input flags are local setup inputs for additional policy backends:
+`--forbid-rules FILE` loads forbid-rules JSON, `--cedar-policy FILE` loads a
+Cedar policy, and `--cedar-entities FILE` optionally loads Cedar entities JSON.
+If any policy input is missing, unreadable, or invalid, `ardur protect
+claude-code` fails closed before generating or writing an active passport. JSON
+output uses `ok: false`, `error: "protect_policy_input_invalid"`, stable
+`condition` and `policy_input` fields, and placeholder-only `next_steps`; human
+output prints the same recovery guidance under "Next steps". stderr stays empty
+with no traceback, and Ardur does not echo raw temp paths, local homes, tokens,
+or policy contents. This validates local/no-key setup only; it is not live
+Claude or provider proof.
 
 ### `ardur claude-code-hook`
 
