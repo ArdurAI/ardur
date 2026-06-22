@@ -1457,11 +1457,49 @@ def _profile_init_existing_profile_response() -> dict[str, object]:
     }
 
 
+def _profile_init_path_failure_response(exc: OSError) -> dict[str, object]:
+    if isinstance(exc, IsADirectoryError):
+        condition = "profile_path_invalid"
+        detail = "The supplied --path points to a directory; choose a Markdown file path such as ARDUR.md."
+    else:
+        condition = "profile_path_unwritable"
+        detail = f"Writing the supplied --path failed with {exc.__class__.__name__}."
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Profile path is not a writable Markdown file.",
+        "detail": detail,
+        "next_steps": [
+            {
+                "action": "choose_profile_file",
+                "command": "ardur profile init --path <profile-file> --force",
+                "detail": "Use a writable Markdown file path, not a directory or protected location.",
+            },
+            {
+                "action": "use_profile_file",
+                "command": "ardur protect claude-code --profile <profile-file>",
+                "detail": "Use the created editable profile when configuring Claude Code protection.",
+            },
+        ],
+    }
+
+
 def cmd_profile_init(args: argparse.Namespace) -> int:
     try:
         path = write_profile_template(args.path, template=args.template, force=args.force)
     except FileExistsError:
         result = _profile_init_existing_profile_response()
+        if args.json:
+            _print_json(result)
+        else:
+            print("Ardur profile was not created.")
+            print(str(result["message"]))
+            print(str(result["detail"]))
+            _print_report_next_steps(result)
+        return 1
+    except (IsADirectoryError, PermissionError, OSError) as exc:
+        result = _profile_init_path_failure_response(exc)
         if args.json:
             _print_json(result)
         else:

@@ -398,6 +398,83 @@ def test_profile_init_existing_profile_human_has_next_steps(tmp_path, capsys):
     assert str(tmp_path) not in captured.out
 
 
+def test_profile_init_directory_without_force_json_preserves_existing_profile_response(tmp_path, capsys):
+    profile_dir = tmp_path / "ARDUR.md"
+    profile_dir.mkdir()
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile_dir,
+            force=False,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_exists"
+    assert response["condition"] == "profile_exists"
+    assert str(tmp_path) not in captured.out
+
+
+def test_profile_init_forced_directory_path_json_has_next_steps(tmp_path, capsys):
+    profile_dir = tmp_path / "ARDUR.md"
+    profile_dir.mkdir()
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile_dir,
+            force=True,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_path_invalid"
+    assert response["condition"] == "profile_path_invalid"
+    assert "directory" in response["detail"]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur profile init --path <profile-file> --force" in commands
+    assert "ardur protect claude-code --profile <profile-file>" in commands
+    assert str(tmp_path) not in captured.out
+
+
+def test_profile_init_forced_directory_path_human_has_next_steps(tmp_path, capsys):
+    profile_dir = tmp_path / "ARDUR.md"
+    profile_dir.mkdir()
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile_dir,
+            force=True,
+            json=False,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur profile was not created." in captured.out
+    assert "Profile path is not a writable Markdown file." in captured.out
+    assert "Next steps:" in captured.out
+    assert "ardur profile init --path <profile-file> --force" in captured.out
+    assert "ardur protect claude-code --profile <profile-file>" in captured.out
+    assert str(tmp_path) not in captured.out
+
+
 def test_protect_claude_code_missing_plugin_json_has_next_steps(tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()
