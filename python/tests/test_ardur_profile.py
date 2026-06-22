@@ -46,6 +46,60 @@ def _protect_args(**overrides):
     return argparse.Namespace(**values)
 
 
+def test_protect_claude_code_missing_profile_json_has_next_steps(tmp_path, capsys):
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            profile=tmp_path / "missing-profile.md",
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin-is-not-checked-before-profile",
+        )
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_missing"
+    assert response["condition"] == "profile_missing"
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur profile init --template safe-coding --path <profile-file>" in commands
+    assert "ardur protect claude-code --profile <profile-file>" in commands
+    assert "ardur protect claude-code --scope <your-project>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_missing_profile_human_has_next_steps(tmp_path, capsys):
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            profile=tmp_path / "missing-profile.md",
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            plugin_dir=tmp_path / "missing-plugin-is-not-checked-before-profile",
+        )
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur Claude Code protection was not configured." in captured.out
+    assert "Ardur profile file could not be loaded." in captured.out
+    assert "Next steps:" in captured.out
+    assert "ardur profile init --template safe-coding --path <profile-file>" in captured.out
+    assert "ardur protect claude-code --profile <profile-file>" in captured.out
+    assert "ardur protect claude-code --scope <your-project>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
 def test_protect_claude_code_missing_scope_json_has_next_steps(tmp_path, capsys):
     exit_code = cmd_protect_claude_code(
         _protect_args(

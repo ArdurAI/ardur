@@ -1321,8 +1321,39 @@ def _protect_claude_code_missing_scope_response(profile_present: bool) -> dict[s
     }
 
 
+def _protect_claude_code_missing_profile_response() -> dict[str, object]:
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "profile_missing",
+        "condition": "profile_missing",
+        "message": "Ardur profile file could not be loaded.",
+        "detail": "The supplied --profile file was not found.",
+        "next_steps": [
+            {
+                "action": "create_profile",
+                "command": "ardur profile init --template safe-coding --path <profile-file>",
+                "detail": "Create an editable profile before using --profile.",
+            },
+            {
+                "action": "use_profile",
+                "command": "ardur protect claude-code --profile <profile-file>",
+                "detail": "Rerun protection with the profile file after it exists.",
+            },
+            {
+                "action": "pass_scope",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Or configure protection directly for a project folder without a profile.",
+            },
+        ],
+    }
+
+
 def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
-    profile = load_ardur_profile(args.profile) if args.profile else None
+    try:
+        profile = load_ardur_profile(args.profile) if args.profile else None
+    except FileNotFoundError:
+        return _protect_claude_code_missing_profile_response()
     mode_name = _normalize_protect_mode(args.mode or (profile.mode if profile and profile.mode else "safe-coding"))
     if mode_name not in CLAUDE_CODE_PROTECT_MODES:
         raise ValueError(f"unsupported Claude Code protection mode: {mode_name}")
