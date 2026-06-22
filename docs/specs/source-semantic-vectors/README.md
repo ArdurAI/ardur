@@ -1,6 +1,6 @@
 # Host adoption/governance source-semantic vectors
 
-These vectors are no-key, source-semantic fixtures. They encode what Ardur can safely carry from current host adoption and governance source signals without running Codex, Claude Code, Gemini CLI, ToolHive, MCP proxies, GitHub Actions, or any live provider.
+These vectors are no-key, source-semantic fixtures. They encode what Ardur can safely carry from current host adoption and governance source signals without running Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, ToolHive, MCP proxies, GitHub Actions, or any live provider.
 
 Each JSONL row is a bounded evidence example:
 
@@ -9,6 +9,7 @@ Each JSONL row is a bounded evidence example:
 - `host_runtime_event` for host-semantic events such as import, delete, and `@` file-reference resolution requests.
 - `cloud_agent_run` for GitHub Action invocation/config surfaces and output digests.
 - `deployment_context` for MCP/control-plane proxy/auth topology and limits.
+- `sdk_output_metadata` for SDK-only tool-output metadata that is source-semantically distinct from model-visible output.
 - `unknown` for anything not proved by Ardur-owned capture or this no-key fixture.
 
 The fixture deliberately does not prove live host behavior, provider-hidden behavior, action-runner side effects, live file reads, credentials, attachment contents, ToolHive/MCP enforcement, universal CLI capture, or public readiness. It is a reviewable bridge from the private source matrix into schema-backed public-safe example rows.

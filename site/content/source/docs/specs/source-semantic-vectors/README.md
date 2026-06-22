@@ -2,7 +2,7 @@
 title: "Host adoption/governance source-semantic vectors"
 description: "These vectors are no-key, source-semantic fixtures. They encode what Ardur can safely carry from current host adoption and governance source signals without running Codex, Claude C"
 source_path: "docs/specs/source-semantic-vectors/README.md"
-source_sha256: "bf77af83db78cddb0619f95c9a3ec569b5660d18ecb1310738f6418a3207ed57"
+source_sha256: "758b1e3ee87d30e6527860a57f394d254816b4ef46887eaaa1562afc0fa050cb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -17,7 +17,7 @@ evidence_levels: ["spec"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-These vectors are no-key, source-semantic fixtures. They encode what Ardur can safely carry from current host adoption and governance source signals without running Codex, Claude Code, Gemini CLI, ToolHive, MCP proxies, GitHub Actions, or any live provider.
+These vectors are no-key, source-semantic fixtures. They encode what Ardur can safely carry from current host adoption and governance source signals without running Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, ToolHive, MCP proxies, GitHub Actions, or any live provider.
 
 Each JSONL row is a bounded evidence example:
 
@@ -26,6 +26,7 @@ Each JSONL row is a bounded evidence example:
 - `host_runtime_event` for host-semantic events such as import, delete, and `@` file-reference resolution requests.
 - `cloud_agent_run` for GitHub Action invocation/config surfaces and output digests.
 - `deployment_context` for MCP/control-plane proxy/auth topology and limits.
+- `sdk_output_metadata` for SDK-only tool-output metadata that is source-semantically distinct from model-visible output.
 - `unknown` for anything not proved by Ardur-owned capture or this no-key fixture.
 
 The fixture deliberately does not prove live host behavior, provider-hidden behavior, action-runner side effects, live file reads, credentials, attachment contents, ToolHive/MCP enforcement, universal CLI capture, or public readiness. It is a reviewable bridge from the private source matrix into schema-backed public-safe example rows.

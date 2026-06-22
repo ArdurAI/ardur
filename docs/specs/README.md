@@ -22,7 +22,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](./mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](./execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
-| [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, and ToolHive source-semantic rows; explicitly not live-host proof. |
+| [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
 

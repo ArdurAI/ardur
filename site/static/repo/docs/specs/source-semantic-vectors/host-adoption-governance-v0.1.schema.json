@@ -33,6 +33,7 @@
         "claude-code",
         "claude-code-action",
         "gemini-cli",
+        "openai-agents-sdk",
         "toolhive"
       ]
     },
@@ -68,6 +69,7 @@
           "host_runtime_event",
           "cloud_agent_run",
           "deployment_context",
+          "sdk_output_metadata",
           "unknown"
         ]
       }
