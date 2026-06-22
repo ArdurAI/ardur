@@ -638,6 +638,78 @@ def test_status_success_preserves_hub_response_shape(monkeypatch, capsys):
     assert "next_steps" not in result
 
 
+@pytest.mark.parametrize(
+    "proxy_url",
+    [
+        "http://[",
+        "http://127.0.0.1:notaport",
+        "file:///tmp/ardur-proxy",
+        "http:///missing-host",
+        "ftp://127.0.0.1:8765",
+    ],
+)
+def test_kill_switch_invalid_proxy_url_reports_placeholder_next_steps_without_raw_input(
+    monkeypatch,
+    capsys,
+    proxy_url,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-proxy-api-token-placeholder"
+
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("invalid kill-switch proxy URL should fail before urlopen")
+
+    monkeypatch.setattr(urlrequest, "urlopen", fail_if_called)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url=proxy_url, api_token=raw_token)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "proxy_url_invalid"
+    assert response["error_code"] == "proxy_url_invalid"
+    assert response["condition"] == "proxy_url_invalid"
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"check_proxy_url", "start_or_check_governance_proxy"} <= actions
+    encoded = json.dumps(response)
+    assert "<proxy-url>" in encoded
+    assert "<proxy-port>" in encoded
+    assert "<api-token>" in encoded
+    assert proxy_url not in encoded
+    assert raw_token not in encoded
+    assert "/tmp/ardur-proxy" not in encoded
+    assert "notaport" not in encoded
+    assert "Invalid IPv6 URL" not in encoded
+    assert "urlopen error" not in encoded
+
+
+def test_kill_switch_valid_loopback_proxy_unavailable_keeps_proxy_unavailable_guidance(
+    monkeypatch,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    def raise_unavailable(*_args, **_kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_unavailable)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="http://127.0.0.1:18765", api_token=None)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert response["ok"] is False
+    assert response["error"] != "proxy_url_invalid"
+    assert any(step["condition"] == "proxy_unavailable" for step in response["next_steps"])
+
+
 def test_kill_switch_unavailable_proxy_reports_placeholder_next_steps_without_token_leaks(
     monkeypatch,
     capsys,

@@ -519,6 +519,30 @@ def cmd_hub(args: argparse.Namespace) -> int:
     return 0
 
 
+def _kill_switch_invalid_proxy_url_next_steps() -> list[dict[str, str]]:
+    return [
+        {
+            "condition": "proxy_url_invalid",
+            "action": "check_proxy_url",
+            "command": "ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>",
+            "detail": (
+                "Use a complete HTTP or HTTPS governance proxy endpoint such as "
+                "https://127.0.0.1:<proxy-port>. Keep raw local paths, malformed URLs, "
+                "URL credentials, and tokens out of shared logs."
+            ),
+        },
+        {
+            "condition": "proxy_url_invalid",
+            "action": "start_or_check_governance_proxy",
+            "command": "VIBAP_API_TOKEN=<api-token> ardur start --host 127.0.0.1 --port <proxy-port>",
+            "detail": (
+                "If the proxy is not running, start the local loopback governance proxy "
+                "and copy only its scheme, host, and port into <proxy-url>."
+            ),
+        },
+    ]
+
+
 def _kill_switch_next_steps_for_failure(
     error: str,
     *,
@@ -527,6 +551,9 @@ def _kill_switch_next_steps_for_failure(
     """Return placeholder-only remediation hints for kill-switch setup failures."""
     normalized_error = error.strip().lower().replace("_", " ")
     status_text = str(status or "").strip()
+
+    if normalized_error == "proxy url invalid":
+        return _kill_switch_invalid_proxy_url_next_steps()
 
     proxy_unavailable = any(
         marker in normalized_error
@@ -630,11 +657,46 @@ def _kill_switch_failure_response(error: str, *, status: int | None = None) -> d
     return response
 
 
+def _kill_switch_invalid_proxy_url_response() -> dict:
+    return {
+        "ok": False,
+        "error": "proxy_url_invalid",
+        "error_code": "proxy_url_invalid",
+        "condition": "proxy_url_invalid",
+        "message": "Ardur governance proxy URL is invalid.",
+        "detail": (
+            "The proxy URL could not be parsed as a complete HTTP or HTTPS endpoint. "
+            "Use a loopback URL such as https://127.0.0.1:<proxy-port>."
+        ),
+        "next_steps": _kill_switch_invalid_proxy_url_next_steps(),
+    }
+
+
+def _validated_kill_switch_proxy_base_url(proxy_url: str) -> str | None:
+    """Return a request base URL only for complete HTTP(S) kill-switch endpoints."""
+    from urllib.parse import urlsplit
+
+    base_url = str(proxy_url).strip()
+    try:
+        parsed = urlsplit(base_url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return None
+        if not parsed.netloc or not parsed.hostname:
+            return None
+        _ = parsed.port
+    except ValueError:
+        return None
+    return base_url.rstrip("/")
+
+
 def _kill_switch_proxy_host_is_loopback(proxy_url: str) -> bool:
     import ipaddress
     from urllib.parse import urlparse
 
-    host = urlparse(proxy_url).hostname
+    try:
+        host = urlparse(proxy_url).hostname
+    except ValueError:
+        return False
     if not host:
         return False
     normalized_host = host.strip().lower()
@@ -669,14 +731,18 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
         or os.environ.get("ARDUR_PROXY_URL")
         or "https://127.0.0.1:8443"
     )
+    proxy_base_url = _validated_kill_switch_proxy_base_url(proxy_url)
+    if proxy_base_url is None:
+        _print_json(_kill_switch_invalid_proxy_url_response())
+        return 1
     api_token = args.api_token or os.environ.get("ARDUR_API_TOKEN", "")
     payload = json.dumps({"deactivate": args.deactivate}).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_token}",
     }
-    req = urlreq.Request(f"{proxy_url.rstrip('/')}/admin/kill-switch", data=payload, headers=headers)
-    ctx = _kill_switch_ssl_context(proxy_url)
+    req = urlreq.Request(f"{proxy_base_url}/admin/kill-switch", data=payload, headers=headers)
+    ctx = _kill_switch_ssl_context(proxy_base_url)
     try:
         with urlreq.urlopen(req, timeout=5, context=ctx) as resp:
             result = json.loads(resp.read().decode("utf-8"))
