@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "31720f9e254d0c834ae2b39d694820a4b3b4921a8d579743bc749cb4a362b631"
+source_sha256: "c5081e8645f5767357d4c4baca890a613a2d042af8ab8abf9e5fedabcdcd4197"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -355,6 +355,19 @@ deterministic `next_steps`; human output prints the same recovery guidance under
 `ardur profile init --path ARDUR.md --force` when you intend to replace the
 profile, or `ardur protect claude-code --profile ARDUR.md` to use the existing
 profile.
+
+If `--force` is supplied but `--path` is not a writable Markdown file, the
+command still fails closed before writing a profile. Directory targets return
+JSON with `ok: false`, `error: "profile_path_invalid"`,
+`condition: "profile_path_invalid"`, and the message `Profile path is not a
+writable Markdown file.` Other protected or unwritable targets use the same
+placeholder-only recovery shape with a path-write failure condition. Human
+output prints the same guidance under "Next steps". The local recovery commands
+use placeholders only: `ardur profile init --path <profile-file> --force` to
+choose a writable Markdown profile path, then
+`ardur protect claude-code --profile <profile-file>` to use that profile. This
+is local/no-key setup recovery guidance; it does not prove live Claude/provider
+behavior, release readiness, or universal filesystem validation.
 
 ### `ardur protect claude-code`
 

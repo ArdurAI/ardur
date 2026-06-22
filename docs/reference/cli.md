@@ -339,6 +339,19 @@ deterministic `next_steps`; human output prints the same recovery guidance under
 profile, or `ardur protect claude-code --profile ARDUR.md` to use the existing
 profile.
 
+If `--force` is supplied but `--path` is not a writable Markdown file, the
+command still fails closed before writing a profile. Directory targets return
+JSON with `ok: false`, `error: "profile_path_invalid"`,
+`condition: "profile_path_invalid"`, and the message `Profile path is not a
+writable Markdown file.` Other protected or unwritable targets use the same
+placeholder-only recovery shape with a path-write failure condition. Human
+output prints the same guidance under "Next steps". The local recovery commands
+use placeholders only: `ardur profile init --path <profile-file> --force` to
+choose a writable Markdown profile path, then
+`ardur protect claude-code --profile <profile-file>` to use that profile. This
+is local/no-key setup recovery guidance; it does not prove live Claude/provider
+behavior, release readiness, or universal filesystem validation.
+
 ### `ardur protect claude-code`
 
 Compile a Mission Passport (from an `ARDUR.md` profile or from CLI flags) and
