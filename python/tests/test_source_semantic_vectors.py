@@ -33,7 +33,7 @@ REQUIRED_VECTOR_CLASSES = {
         "unknown",
     },
     "claude-permission-grammar-nested-precedence": {"policy_input", "session_context", "unknown"},
-    "claude-2186-mcp-directory-resource-listing": {
+    "claude-code-mcp-directory-resource-listing-v2186": {
         "host_runtime_event",
         "session_context",
         "deployment_context",
@@ -268,7 +268,7 @@ def test_claude_2186_mcp_directory_vector_preserves_placeholder_boundaries() -> 
 
     rows = _read_jsonl(VECTORS_PATH)
     row = next(
-        item for item in rows if item["vector_id"] == "claude-2186-mcp-directory-resource-listing"
+        item for item in rows if item["vector_id"] == "claude-code-mcp-directory-resource-listing-v2186"
     )
 
     assert row["source_family"] == "claude-code"
