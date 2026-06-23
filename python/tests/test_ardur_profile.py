@@ -820,6 +820,109 @@ def test_protect_claude_code_missing_cedar_policy_json_has_next_steps(tmp_path, 
     assert not (tmp_path / "home" / "active_mission.jwt").exists()
 
 
+def test_protect_claude_code_unreadable_cedar_policy_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy_dir = tmp_path / "policy-directory.cedar"
+    cedar_policy_dir.mkdir()
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=cedar_policy_dir,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_unreadable"
+    assert response["policy_input"] == "--cedar-policy"
+    assert response["detail"] == "Could not load --cedar-policy: reading the file failed with IsADirectoryError."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "test -r <policy.cedar>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_missing_cedar_entities_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "policy.cedar"
+    cedar_policy.write_text("permit(principal, action, resource);\n", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=cedar_policy,
+            cedar_entities=tmp_path / "missing-entities.json",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_missing"
+    assert response["policy_input"] == "--cedar-entities"
+    assert response["detail"] == "Could not load --cedar-entities: the file was not found."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "python -m json.tool <cedar-entities.json>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_unreadable_cedar_entities_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "policy.cedar"
+    cedar_policy.write_text("permit(principal, action, resource);\n", encoding="utf-8")
+    cedar_entities_dir = tmp_path / "entities-directory.json"
+    cedar_entities_dir.mkdir()
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=cedar_policy,
+            cedar_entities=cedar_entities_dir,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_unreadable"
+    assert response["policy_input"] == "--cedar-entities"
+    assert response["detail"] == "Could not load --cedar-entities: reading the file failed with IsADirectoryError."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "python -m json.tool <cedar-entities.json>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
 def test_claude_code_doctor_reports_missing_plugin_files(tmp_path):
     response = claude_code_doctor(plugin_dir=tmp_path / "missing", home=tmp_path / "home")
 
