@@ -1167,6 +1167,30 @@ def _read_protect_policy_text(path: Path, option: str) -> str:
         ) from exc
 
 
+def _validate_protect_cedar_policy_syntax(policy_src: str, option: str = "--cedar-policy") -> None:
+    try:
+        import cedarpy  # type: ignore[import-not-found]
+    except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated install
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_validator_unavailable",
+            "Could not load --cedar-policy: Cedar syntax validator is unavailable.",
+        ) from exc
+
+    try:
+        # Use Cedar's policy serializer as a quiet syntax parser. The
+        # authorization API can emit parse diagnostics directly to stdout for
+        # malformed policies, which would corrupt `--json` output before this
+        # setup-time failure response is printed.
+        cedarpy.policies_to_json_str(policy_src)
+    except ValueError as exc:
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_malformed",
+            "Could not load --cedar-policy: invalid Cedar policy syntax.",
+        ) from exc
+
+
 def _read_protect_policy_json(path: Path, option: str) -> object:
     text = _read_protect_policy_text(path, option)
     try:
@@ -1339,6 +1363,7 @@ def _resolve_protect_policies(
         })
     if getattr(args, "cedar_policy", None) is not None:
         policy_src = _read_protect_policy_text(Path(args.cedar_policy), "--cedar-policy")
+        _validate_protect_cedar_policy_syntax(policy_src)
         entities: object = []
         if getattr(args, "cedar_entities", None) is not None:
             entities = _read_protect_policy_json(Path(args.cedar_entities), "--cedar-entities")

@@ -853,6 +853,69 @@ def test_protect_claude_code_unreadable_cedar_policy_json_has_next_steps(tmp_pat
     assert not (tmp_path / "home" / "active_mission.jwt").exists()
 
 
+def test_protect_claude_code_malformed_cedar_policy_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "bad-policy.cedar"
+    cedar_policy.write_text("this is not valid cedar syntax ::: {{{", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=cedar_policy,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "protect_policy_input_invalid"
+    assert response["condition"] == "protect_policy_input_malformed"
+    assert response["policy_input"] == "--cedar-policy"
+    assert response["detail"] == "Could not load --cedar-policy: invalid Cedar policy syntax."
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "test -r <policy.cedar>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar>" in commands
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_malformed_cedar_policy_human_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "bad-policy.cedar"
+    cedar_policy.write_text("this is not valid cedar syntax ::: {{{", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            scope=project,
+            home=tmp_path / "home",
+            keys_dir=tmp_path / "keys",
+            cedar_policy=cedar_policy,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur Claude Code protection was not configured." in captured.out
+    assert "Policy input file could not be loaded." in captured.out
+    assert "Could not load --cedar-policy: invalid Cedar policy syntax." in captured.out
+    assert "Next steps:" in captured.out
+    assert "test -r <policy.cedar>" in captured.out
+    assert "--cedar-policy <policy.cedar>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
 def test_protect_claude_code_missing_cedar_entities_json_has_next_steps(tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()
