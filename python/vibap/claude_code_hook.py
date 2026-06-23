@@ -962,34 +962,35 @@ def _summarize_child_receipts_unverified(
     tools: dict[str, int] = {}
     violations = 0
     receipt_count = 0
-    for line in state.file.read_text(encoding="utf-8").splitlines():
-        token = line.strip()
-        if not token:
-            continue
-        claims = _decode_claims_unverified(token)
-        if not claims:
-            continue
-        if str(claims.get("tool", "")) in {"SubagentStart", "SubagentStop"}:
-            continue
-        meta = (
-            dict(claims.get("measurements", {}) or {})
-            .get("claude_code", {})
-        )
-        if not isinstance(meta, dict):
-            continue
-        if agent_id and meta.get("claude_agent_id") == agent_id:
-            matched = True
-        elif agent_transcript_path and meta.get("transcript_path") == agent_transcript_path:
-            matched = True
-        else:
-            matched = False
-        if not matched:
-            continue
-        receipt_count += 1
-        tool = str(claims.get("tool", ""))
-        tools[tool] = tools.get(tool, 0) + 1
-        if claims.get("verdict") == "violation":
-            violations += 1
+    with state.file.open("r", encoding="utf-8") as receipt_lines:
+        for line in receipt_lines:
+            token = line.strip()
+            if not token:
+                continue
+            claims = _decode_claims_unverified(token)
+            if not claims:
+                continue
+            if str(claims.get("tool", "")) in {"SubagentStart", "SubagentStop"}:
+                continue
+            meta = (
+                dict(claims.get("measurements", {}) or {})
+                .get("claude_code", {})
+            )
+            if not isinstance(meta, dict):
+                continue
+            if agent_id and meta.get("claude_agent_id") == agent_id:
+                matched = True
+            elif agent_transcript_path and meta.get("transcript_path") == agent_transcript_path:
+                matched = True
+            else:
+                matched = False
+            if not matched:
+                continue
+            receipt_count += 1
+            tool = str(claims.get("tool", ""))
+            tools[tool] = tools.get(tool, 0) + 1
+            if claims.get("verdict") == "violation":
+                violations += 1
     return {"receipt_count": receipt_count, "tools": dict(sorted(tools.items())), "violations": violations}
 
 

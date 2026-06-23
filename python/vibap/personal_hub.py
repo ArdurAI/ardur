@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from http import client as httpclient
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib import error as urlerror
 from urllib import parse as urlparse
 from urllib import request as urlrequest
@@ -732,30 +732,37 @@ class PersonalHub:
             f"Latest: {latest}"
         )
 
-    def _receipt_entries(self) -> list[dict[str, Any]]:
+    def _iter_receipt_entries(self) -> Iterator[dict[str, Any]]:
         try:
-            lines = self.paths.receipts_log.read_text(encoding="utf-8").splitlines()
+            receipt_lines = self.paths.receipts_log.open("r", encoding="utf-8")
         except FileNotFoundError:
-            return []
-        entries = []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return entries
+            return
+        with receipt_lines:
+            for line in receipt_lines:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(entry, dict):
+                    yield entry
+
+    def _receipt_entries(self) -> list[dict[str, Any]]:
+        return list(self._iter_receipt_entries())
 
     def _latest_receipt(self, session_id: str | None = None) -> dict[str, Any] | None:
-        for entry in reversed(self._receipt_entries()):
+        latest: dict[str, Any] | None = None
+        for entry in self._iter_receipt_entries():
             if session_id is None or entry.get("session_id") == session_id:
-                result = dict(entry)
-                jwt_value = str(result.get("jwt") or "")
-                if jwt_value:
-                    result["receipt_hash"] = hashlib.sha256(jwt_value.encode("ascii")).hexdigest()
-                return result
-        return None
+                latest = entry
+        if latest is None:
+            return None
+        result = dict(latest)
+        jwt_value = str(result.get("jwt") or "")
+        if jwt_value:
+            result["receipt_hash"] = hashlib.sha256(jwt_value.encode("ascii")).hexdigest()
+        return result
 
 
 class _HubRequestHandler(BaseHTTPRequestHandler):

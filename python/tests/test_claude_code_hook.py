@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -18,6 +19,7 @@ from vibap.claude_code_hook import (
     load_active_passport,
     MissionLoadError,
     previous_receipt_hash,
+    _summarize_child_receipts_unverified,
 )
 from vibap.passport import (
     MissionPassport,
@@ -251,6 +253,57 @@ def test_chain_per_trace_does_not_collide(tmp_path):
     append_receipt(state_b, "b-only.jwt")
     assert previous_receipt_hash(state_a) == "sha-256:" + hashlib.sha256("a-only.jwt".encode()).hexdigest()
     assert previous_receipt_hash(state_b) == "sha-256:" + hashlib.sha256("b-only.jwt".encode()).hexdigest()
+
+
+def test_child_receipt_summary_streams_chain_file(tmp_path, monkeypatch):
+    state = ChainState(chain_dir=tmp_path, trace_id="trace-stream")
+    state.trace_dir.mkdir(parents=True)
+
+    def unsigned_jwt(claims: dict[str, Any]) -> str:
+        def encode(segment: dict[str, Any]) -> str:
+            encoded = base64.urlsafe_b64encode(
+                json.dumps(segment, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            )
+            return encoded.rstrip(b"=").decode("ascii")
+
+        return f"{encode({'alg': 'none', 'typ': 'JWT'})}.{encode(claims)}."
+
+    matching = unsigned_jwt(
+        {
+            "tool": "Read",
+            "verdict": "compliant",
+            "measurements": {
+                "claude_code": {
+                    "claude_agent_id": "agent-child-1",
+                    "transcript_path": "/tmp/child-transcript.jsonl",
+                }
+            },
+        }
+    )
+    ignored_lifecycle = unsigned_jwt(
+        {
+            "tool": "SubagentStop",
+            "measurements": {"claude_code": {"claude_agent_id": "agent-child-1"}},
+        }
+    )
+    state.file.write_text(f"{matching}\n{ignored_lifecycle}\n", encoding="utf-8")
+
+    original_read_text = Path.read_text
+
+    def fail_read_text(self, *args, **kwargs):
+        if self == state.file:
+            raise AssertionError("child receipt summary must stream the chain file")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    summary = _summarize_child_receipts_unverified(
+        state=state,
+        agent_id="agent-child-1",
+        agent_transcript_path="/tmp/child-transcript.jsonl",
+    )
+
+    assert summary == {"receipt_count": 1, "tools": {"Read": 1}, "violations": 0}
 
 
 @pytest.mark.parametrize(

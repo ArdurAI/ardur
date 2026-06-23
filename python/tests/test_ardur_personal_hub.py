@@ -172,6 +172,31 @@ def test_export_includes_session_reviews_and_receipts(tmp_path):
     assert exported["receipts"]
 
 
+def test_receipt_readers_stream_without_reading_whole_log(tmp_path, monkeypatch):
+    hub = PersonalHub(tmp_path)
+    first = hub.observe(_browser_payload("first answer"))
+    second = hub.observe(_browser_payload("second answer"))
+
+    def fail_read_text(self, *args, **kwargs):
+        if self == hub.paths.receipts_log:
+            raise AssertionError("receipt log must be streamed, not read as one string")
+        return original_read_text(self, *args, **kwargs)
+
+    original_read_text = personal_hub.Path.read_text
+    monkeypatch.setattr(personal_hub.Path, "read_text", fail_read_text)
+
+    entries = hub._receipt_entries()
+    latest = hub._latest_receipt()
+
+    assert [entry["session_id"] for entry in entries] == [
+        first["ardur_session_id"],
+        second["ardur_session_id"],
+    ]
+    assert latest is not None
+    assert latest["session_id"] == second["ardur_session_id"]
+    assert latest["receipt_hash"]
+
+
 def test_status_reports_configured_hub_url(tmp_path):
     hub = PersonalHub(tmp_path, hub_url="http://127.0.0.1:18765")
 
