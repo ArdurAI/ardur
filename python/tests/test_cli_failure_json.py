@@ -136,6 +136,49 @@ def test_issue_invalid_budget_returns_safe_json_failure(tmp_path, capsys, budget
     assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
 
 
+@pytest.mark.parametrize(
+    ("budget_args", "condition"),
+    [
+        (["--max-tool-calls", "abc"], "issue_budget_max_tool_calls_invalid"),
+        (["--max-duration-s", "abc"], "issue_budget_max_duration_invalid"),
+        (
+            ["--delegation-allowed", "--max-delegation-depth", "abc"],
+            "issue_budget_max_delegation_depth_invalid",
+        ),
+    ],
+)
+def test_issue_non_integer_budget_returns_safe_json_usage_failure(tmp_path, capsys, budget_args, condition):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "agent",
+            "--mission",
+            "mission",
+            *budget_args,
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 2
+    assert payload["ok"] is False
+    assert payload["condition"] == condition
+    assert payload["error"] == condition
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "invalid int value" not in rendered
+    assert "abc" not in rendered
+    assert "token" not in payload
+    assert str(tmp_path) not in rendered
+    assert not (keys_dir / "passport_private.pem").exists()
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+
+
 def test_issue_zero_tool_call_budget_remains_valid(tmp_path, capsys):
     rc, payload = _run_cli_and_read_json(
         [

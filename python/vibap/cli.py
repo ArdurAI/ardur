@@ -142,30 +142,66 @@ def _issue_budget_failure_response(condition: str, detail: str) -> dict:
     }
 
 
-def _issue_budget_failure(args: argparse.Namespace) -> dict | None:
+def _issue_budget_int(value: str | int, condition: str, detail: str) -> tuple[int | None, tuple[dict, int] | None]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None, (_issue_budget_failure_response(condition, detail), 2)
+    return parsed, None
+
+
+def _issue_budget_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
+    max_duration_s, failure = _issue_budget_int(
+        args.max_duration_s,
+        "issue_budget_max_duration_invalid",
+        "--max-duration-s must be a positive integer number of seconds.",
+    )
+    if failure is not None:
+        return failure
+    assert max_duration_s is not None
+    args.max_duration_s = max_duration_s
+    max_tool_calls, failure = _issue_budget_int(
+        args.max_tool_calls,
+        "issue_budget_max_tool_calls_invalid",
+        "--max-tool-calls must be zero or a positive integer.",
+    )
+    if failure is not None:
+        return failure
+    assert max_tool_calls is not None
+    args.max_tool_calls = max_tool_calls
+    max_delegation_depth, failure = _issue_budget_int(
+        args.max_delegation_depth,
+        "issue_budget_max_delegation_depth_invalid",
+        "--max-delegation-depth must be zero or a positive integer.",
+    )
+    if failure is not None:
+        return failure
+    assert max_delegation_depth is not None
+    args.max_delegation_depth = max_delegation_depth
     if args.max_duration_s <= 0:
         return _issue_budget_failure_response(
             "issue_budget_max_duration_invalid",
             "--max-duration-s must be a positive integer number of seconds.",
-        )
+        ), 1
     if args.max_tool_calls < 0:
         return _issue_budget_failure_response(
             "issue_budget_max_tool_calls_invalid",
             "--max-tool-calls must be zero or a positive integer.",
-        )
+        ), 1
     if args.max_delegation_depth < 0:
         return _issue_budget_failure_response(
             "issue_budget_max_delegation_depth_invalid",
             "--max-delegation-depth must be zero or a positive integer.",
-        )
+        ), 1
     return None
 
 
 def cmd_issue(args: argparse.Namespace) -> int:
     issue_budget_failure = _issue_budget_failure(args)
     if issue_budget_failure is not None:
-        _print_json(issue_budget_failure)
-        return 1
+        response, exit_code = issue_budget_failure
+        _print_json(response)
+        return exit_code
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     mission = MissionPassport(
         agent_id=args.agent_id,
@@ -1651,10 +1687,10 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--allowed-tools", nargs="*", default=[], help="allowed tool names")
     issue.add_argument("--forbidden-tools", nargs="*", default=[], help="forbidden tool names")
     issue.add_argument("--resource-scope", nargs="*", default=[], help="resource scope patterns")
-    issue.add_argument("--max-tool-calls", type=int, default=50, help="max permitted tool calls")
-    issue.add_argument("--max-duration-s", type=int, default=600, help="max mission duration in seconds")
+    issue.add_argument("--max-tool-calls", default=50, help="max permitted tool calls")
+    issue.add_argument("--max-duration-s", default=600, help="max mission duration in seconds")
     issue.add_argument("--delegation-allowed", action="store_true", help="allow one-step delegation")
-    issue.add_argument("--max-delegation-depth", type=int, default=0, help="delegation depth budget")
+    issue.add_argument("--max-delegation-depth", default=0, help="delegation depth budget")
     issue.add_argument("--ttl-s", type=int, help="override token TTL in seconds")
     issue.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
     issue.set_defaults(func=cmd_issue)

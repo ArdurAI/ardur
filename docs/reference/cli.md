@@ -73,10 +73,11 @@ ardur issue --agent-id ID --mission TEXT
 Prints `{"token": "...", "claims": {...}}` to stdout.
 
 Invalid budget flags fail closed before key generation or signing:
-`--max-duration-s` must be positive, `--max-tool-calls` must be zero or
-positive, and `--max-delegation-depth` must be zero or positive. Invalid
+`--max-duration-s` must be a positive integer, `--max-tool-calls` must be zero
+or a positive integer, and `--max-delegation-depth` must be zero or a positive
+integer. Non-integer budget values and invalid numeric ranges such as
 `--max-duration-s <= 0`, `--max-tool-calls < 0`, or
-`--max-delegation-depth < 0` exits non-zero and writes stdout JSON with
+`--max-delegation-depth < 0` exit non-zero and write stdout JSON with
 `ok: false`, stable `condition`/`error` values, a message, a detail, and
 placeholder-only `next_steps`. The stable conditions are
 `issue_budget_max_duration_invalid`, `issue_budget_max_tool_calls_invalid`, and
