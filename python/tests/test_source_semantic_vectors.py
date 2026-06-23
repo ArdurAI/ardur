@@ -26,7 +26,19 @@ ALLOWED_EVIDENCE_CLASSES = {
 REQUIRED_VECTOR_CLASSES = {
     "codex-import-claude-code-context": {"policy_input", "session_context", "unknown"},
     "codex-deletion-retained-ardur-receipts": {"host_runtime_event", "policy_input", "unknown"},
+    "codex-142-rollout-budget-multiagent-websearch-time": {
+        "policy_input",
+        "session_context",
+        "host_runtime_event",
+        "unknown",
+    },
     "claude-permission-grammar-nested-precedence": {"policy_input", "session_context", "unknown"},
+    "claude-2186-mcp-directory-resource-listing": {
+        "host_runtime_event",
+        "session_context",
+        "deployment_context",
+        "unknown",
+    },
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "gemini-at-file-placeholder-redaction": {"host_runtime_event", "session_context", "unknown"},
     "gemini-tools-core-config-migration": {"policy_input", "session_context", "unknown"},
@@ -194,3 +206,112 @@ def test_openai_agents_sdk_0176_vector_preserves_source_semantic_boundaries() ->
     ):
         assert phrase in not_claimed
     assert "not prove live openai" in row["claim_boundary"].lower()
+
+
+def test_codex_142_vector_preserves_source_governance_boundaries() -> None:
+    """Codex v0.142 governance/control semantics must stay source-only and bounded."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item for item in rows if item["vector_id"] == "codex-142-rollout-budget-multiagent-websearch-time"
+    )
+
+    assert row["source_family"] == "codex"
+    assert row["source_pin"]["kind"] == "release"
+    assert "rust-v0.142.0" in row["source_pin"]["value"]
+    assert "fe64939a212da5d9bea2fa3f3b7aa55c4a173f0b298c3be597de3d521788fdd1" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "742c3f9a6da3726eb25446d94570910d7aa88da660b6e711430a53f162aa4f6c"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "3b0962096849f80c68636842cbe002fa848613ec5648ccdbf218cdc18c2bfd9d"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "5c7fa3bf3ac986eaa811d771dcffd525f133c60615ea77bc03fc78b4263795fb"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in ("rollout token budgets", "multi-agent mode", "indexed web-search", "current-time"):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_governance_context"
+    assert mapping["release_body_sha256"] == (
+        "fe64939a212da5d9bea2fa3f3b7aa55c4a173f0b298c3be597de3d521788fdd1"
+    )
+    assert mapping["policy_material"] == "rollout_budget_multiagent_mode_and_indexed_web_search_policy_digest"
+    assert mapping["session_material"] == "time_context_and_reminder_surface_digest"
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_codex_cli_behavior",
+            "provider_hidden_behavior",
+            "server_side_tool_calls",
+            "live_web_search_results",
+            "network_side_effects",
+            "clock_source_accuracy",
+            "runtime_kernel_side_effects",
+            "plugin_execution",
+            "credentials",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in ("no live codex", "provider-hidden", "search result contents", "runtime/kernel"):
+        assert phrase in not_claimed
+    assert "does not prove live codex" in row["claim_boundary"].lower()
+
+
+def test_claude_2186_mcp_directory_vector_preserves_placeholder_boundaries() -> None:
+    """Claude Code MCP directory resource listing must not become raw content proof."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item for item in rows if item["vector_id"] == "claude-2186-mcp-directory-resource-listing"
+    )
+
+    assert row["source_family"] == "claude-code"
+    assert row["source_pin"]["kind"] == "package"
+    assert "@anthropic-ai/claude-code@2.1.186" in row["source_pin"]["value"]
+    assert "70522e2891269edd035b5f0e97f262d371957420ae3692c44004276f73d56667" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "742c3f9a6da3726eb25446d94570910d7aa88da660b6e711430a53f162aa4f6c"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "3b0962096849f80c68636842cbe002fa848613ec5648ccdbf218cdc18c2bfd9d"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "5c7fa3bf3ac986eaa811d771dcffd525f133c60615ea77bc03fc78b4263795fb"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in ("ReadMcpResourceDirInput", "ReadMcpResourceDirOutput", "mimeType", "error"):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_mcp_resource_listing_context"
+    assert mapping["resource_identifier_material"] == "placeholder_uri_and_digest_only"
+    assert mapping["child_resource_metadata"] == "uri_name_optional_mimetype_without_raw_contents"
+    assert mapping["package_shasum"] == "1db1b0a986c733f147d7f030b1b7a555384d674e"
+    assert mapping["tarball_sha256"] == "b39db8b69e2b4b751f26b9b77f19bf1155339132ca5ede4795247331b5a7f992"
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_claude_code_behavior",
+            "live_mcp_server_behavior",
+            "raw_resource_contents",
+            "directory_traversal_completeness",
+            "provider_hidden_behavior",
+            "credentials",
+            "local_filesystem_side_effects",
+            "network_side_effects",
+            "action_runner_side_effects",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in ("no live claude code", "raw mcp resource contents", "filesystem effects"):
+        assert phrase in not_claimed
+    assert "does not prove live claude code" in row["claim_boundary"].lower()
