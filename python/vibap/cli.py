@@ -114,7 +114,58 @@ def cmd_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def _issue_budget_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "rerun_issue_with_valid_budget",
+            "command": (
+                "ardur issue --agent-id <agent-id> --mission <mission> "
+                "--max-duration-s <seconds> --keys-dir <keys-dir>"
+            ),
+            "detail": (
+                "Use a positive duration, a non-negative max tool-call budget, "
+                "and a non-negative delegation-depth budget before issuing a passport."
+            ),
+        }
+    ]
+
+
+def _issue_budget_failure_response(condition: str, detail: str) -> dict:
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Mission Passport issue budget is invalid.",
+        "detail": detail,
+        "next_steps": _issue_budget_failure_next_steps(condition),
+    }
+
+
+def _issue_budget_failure(args: argparse.Namespace) -> dict | None:
+    if args.max_duration_s <= 0:
+        return _issue_budget_failure_response(
+            "issue_budget_max_duration_invalid",
+            "--max-duration-s must be a positive integer number of seconds.",
+        )
+    if args.max_tool_calls < 0:
+        return _issue_budget_failure_response(
+            "issue_budget_max_tool_calls_invalid",
+            "--max-tool-calls must be zero or a positive integer.",
+        )
+    if args.max_delegation_depth < 0:
+        return _issue_budget_failure_response(
+            "issue_budget_max_delegation_depth_invalid",
+            "--max-delegation-depth must be zero or a positive integer.",
+        )
+    return None
+
+
 def cmd_issue(args: argparse.Namespace) -> int:
+    issue_budget_failure = _issue_budget_failure(args)
+    if issue_budget_failure is not None:
+        _print_json(issue_budget_failure)
+        return 1
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     mission = MissionPassport(
         agent_id=args.agent_id,
