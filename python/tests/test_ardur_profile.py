@@ -728,6 +728,126 @@ def test_protect_claude_code_bad_cedar_entities_json_has_next_steps(tmp_path, ca
     assert not (tmp_path / "home" / "active_mission.jwt").exists()
 
 
+def test_protect_claude_code_invalid_cedar_entities_content_json_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "policy.cedar"
+    cedar_policy.write_text("permit(principal, action, resource);\n", encoding="utf-8")
+    invalid_cases = {
+        "object": "{\"not\": \"cedar-entities-list\"}\n",
+        "number": "123\n",
+        "string": "\"not cedar entity json\"\n",
+    }
+
+    for name, entities_text in invalid_cases.items():
+        case_root = tmp_path / name
+        home = case_root / "home"
+        keys = case_root / "keys"
+        cedar_entities = case_root / "entities.json"
+        cedar_entities.parent.mkdir(parents=True)
+        cedar_entities.write_text(entities_text, encoding="utf-8")
+
+        exit_code = cmd_protect_claude_code(
+            _protect_args(
+                json=True,
+                scope=project,
+                home=home,
+                keys_dir=keys,
+                cedar_policy=cedar_policy,
+                cedar_entities=cedar_entities,
+            )
+        )
+
+        captured = capsys.readouterr()
+        assert exit_code == 1
+        assert "Traceback" not in captured.err
+        assert captured.err == ""
+        response = json.loads(captured.out)
+        assert response["ok"] is False
+        assert response["error"] == "protect_policy_input_invalid"
+        assert response["condition"] == "protect_policy_input_malformed"
+        assert response["policy_input"] == "--cedar-entities"
+        assert response["detail"] == "Could not load --cedar-entities: invalid Cedar entities content."
+        commands = [step["command"] for step in response["next_steps"]]
+        assert "python -m json.tool <cedar-entities.json>" in commands
+        assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin> --cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>" in commands
+        assert str(tmp_path) not in captured.out
+        assert entities_text.strip() not in captured.out
+        assert not (home / "active_mission.jwt").exists()
+        assert not keys.exists()
+        assert not (home / "policies").exists()
+
+
+def test_protect_claude_code_invalid_cedar_entities_content_human_has_next_steps(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "policy.cedar"
+    cedar_policy.write_text("permit(principal, action, resource);\n", encoding="utf-8")
+    cedar_entities = tmp_path / "entities.json"
+    cedar_entities.write_text("\"not cedar entity json\"\n", encoding="utf-8")
+    home = tmp_path / "home"
+    keys = tmp_path / "keys"
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            scope=project,
+            home=home,
+            keys_dir=keys,
+            cedar_policy=cedar_policy,
+            cedar_entities=cedar_entities,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur Claude Code protection was not configured." in captured.out
+    assert "Policy input file could not be loaded." in captured.out
+    assert "Could not load --cedar-entities: invalid Cedar entities content." in captured.out
+    assert "Next steps:" in captured.out
+    assert "python -m json.tool <cedar-entities.json>" in captured.out
+    assert "--cedar-entities <cedar-entities.json>" in captured.out
+    assert str(tmp_path) not in captured.out
+    assert "not cedar entity json" not in captured.out
+    assert not (home / "active_mission.jwt").exists()
+    assert not keys.exists()
+    assert not (home / "policies").exists()
+
+
+def test_protect_claude_code_valid_empty_cedar_entities_still_succeeds(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    cedar_policy = tmp_path / "policy.cedar"
+    cedar_policy.write_text("permit(principal, action, resource);\n", encoding="utf-8")
+    cedar_entities = tmp_path / "entities.json"
+    cedar_entities.write_text("[]\n", encoding="utf-8")
+
+    no_entities_result = protect_claude_code(
+        _protect_args(
+            scope=project,
+            home=tmp_path / "no-entities-home",
+            keys_dir=tmp_path / "no-entities-keys",
+            cedar_policy=cedar_policy,
+        )
+    )
+    empty_entities_result = protect_claude_code(
+        _protect_args(
+            scope=project,
+            home=tmp_path / "empty-entities-home",
+            keys_dir=tmp_path / "empty-entities-keys",
+            cedar_policy=cedar_policy,
+            cedar_entities=cedar_entities,
+        )
+    )
+
+    assert no_entities_result["ok"] is True
+    assert empty_entities_result["ok"] is True
+    assert Path(str(no_entities_result["active_passport"])).exists()
+    assert Path(str(empty_entities_result["active_passport"])).exists()
+
+
 def test_protect_claude_code_malformed_forbid_rules_human_has_next_steps(tmp_path, capsys):
     project = tmp_path / "project"
     project.mkdir()

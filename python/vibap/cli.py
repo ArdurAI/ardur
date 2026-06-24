@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 import shlex
@@ -1191,6 +1193,55 @@ def _validate_protect_cedar_policy_syntax(policy_src: str, option: str = "--ceda
         ) from exc
 
 
+def _validate_protect_cedar_entities(entities: object, option: str = "--cedar-entities") -> None:
+    try:
+        import cedarpy  # type: ignore[import-not-found]
+    except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated install
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_validator_unavailable",
+            "Could not load --cedar-entities: Cedar entities validator is unavailable.",
+        ) from exc
+
+    if not isinstance(entities, (list, str)):
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_malformed",
+            "Could not load --cedar-entities: invalid Cedar entities content.",
+        )
+
+    request = {
+        "principal": 'User::"ardur-setup-validator"',
+        "action": 'Action::"validate"',
+        "resource": 'Resource::"ardur-setup"',
+        "context": {},
+    }
+    try:
+        # `is_authorized` is the cedarpy surface that parses entity payloads.
+        # Keep this setup-time parser probe quiet so malformed local files
+        # cannot corrupt `--json` output with validator diagnostics.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = cedarpy.is_authorized(
+                request=request,
+                policies="permit(principal, action, resource);\n",
+                entities=entities,
+            )
+    except Exception as exc:
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_malformed",
+            "Could not load --cedar-entities: invalid Cedar entities content.",
+        ) from exc
+    diagnostics = getattr(result, "diagnostics", None)
+    errors = list(getattr(diagnostics, "errors", []) or []) if diagnostics else []
+    if errors:
+        raise _ProtectPolicyInputError(
+            option,
+            "protect_policy_input_malformed",
+            "Could not load --cedar-entities: invalid Cedar entities content.",
+        )
+
+
 def _read_protect_policy_json(path: Path, option: str) -> object:
     text = _read_protect_policy_text(path, option)
     try:
@@ -1367,6 +1418,7 @@ def _resolve_protect_policies(
         entities: object = []
         if getattr(args, "cedar_entities", None) is not None:
             entities = _read_protect_policy_json(Path(args.cedar_entities), "--cedar-entities")
+            _validate_protect_cedar_entities(entities)
         policies.append({
             "backend": "cedar",
             "label": "cli-cedar-policy",
