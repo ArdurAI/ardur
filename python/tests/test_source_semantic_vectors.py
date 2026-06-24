@@ -48,7 +48,21 @@ REQUIRED_VECTOR_CLASSES = {
         "sdk_output_metadata",
         "unknown",
     },
+    "openai-agents-sdk-0177-streaming-output-approval-sandbox": {
+        "host_runtime_event",
+        "policy_input",
+        "session_context",
+        "sdk_output_metadata",
+        "unknown",
+    },
     "toolhive-mcpauthz-no-client-auth-remote-proxy": {"deployment_context", "policy_input", "unknown"},
+    "toolhive-0301-network-authz-obo-events": {
+        "deployment_context",
+        "policy_input",
+        "session_context",
+        "host_runtime_event",
+        "unknown",
+    },
 }
 
 REQUIRED_UNKNOWN_BOUNDARIES = {
@@ -206,6 +220,139 @@ def test_openai_agents_sdk_0176_vector_preserves_source_semantic_boundaries() ->
     ):
         assert phrase in not_claimed
     assert "not prove live openai" in row["claim_boundary"].lower()
+
+
+def test_openai_agents_sdk_0177_vector_preserves_source_only_runtime_boundaries() -> None:
+    """OpenAI Agents SDK 0.17.7 source deltas must not become live-provider claims."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "openai-agents-sdk-0177-streaming-output-approval-sandbox"
+    )
+
+    assert row["source_family"] == "openai-agents-sdk"
+    assert row["source_pin"]["kind"] == "package-release"
+    assert "openai-agents==0.17.7" in row["source_pin"]["value"]
+    assert "openai-agents-python v0.17.7" in row["source_pin"]["value"]
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "45ac104d707c39537de9c8e2edaff0b665eb225619cef7ae5dfd2ca9cf22175f"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "a855bd8d906908c11f098ddbcecbd4a8d2279375db63c49426814772f8fbcdc1"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "2e68a3b5e175242e2d9854e1ecf7d3c74a44b667f536422d1b3dde193c8fce2b"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "buffered Chat Completions tool-call streaming",
+        "empty list/tuple tool output",
+        "needs_approval_checker",
+        "sandbox sink buffering",
+        "PTY output collection",
+    ):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_runtime_metadata_only"
+    assert mapping["streaming_tool_calls"] == "buffered_chat_completions_tool_call_streaming"
+    assert mapping["tool_output_preservation"] == "empty_list_tuple_output_model_visible_metadata"
+    assert mapping["approval_lifecycle"] == "needs_approval_checker_guardrail_resolution_context"
+    assert mapping["sandbox_output_collection"] == "sandbox_sink_and_pty_output_buffering_context"
+    assert mapping["fixture_boundary"] == "does_not_change_openai_no_key_fixture_receipt_count"
+    assert mapping["release_body_sha256"] == (
+        "37d1c3575bb729f6f2ace552466c2ab14d0acdfc8f5d0cd5854a584ea6ee66b3"
+    )
+    assert mapping["compare_sha256"] == (
+        "07c5f33cea6838638e649dc3c8ea33d99face4d5d9aad988ad74f0253adbbe32"
+    )
+    assert mapping["pypi_wheel_sha256"] == (
+        "51b5ae43756eea37032e430f95979ba3999af6b1ade397df6c0ffeaf1939646a"
+    )
+    assert mapping["pypi_sdist_sha256"] == (
+        "ca76e7f882c9d8f06e3dfb8064cc33bcb5a5f34a29816cb9af863f395964ff0c"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_provider_behavior",
+            "provider_hidden_behavior",
+            "server_side_tool_calls",
+            "runtime_kernel_side_effects",
+            "live_enforcement",
+            "provider_api_calls",
+            "live_streaming_behavior",
+            "live_sandbox_execution",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in ("no live openai", "server-side", "provider-hidden", "sandbox", "receipt_count"):
+        assert phrase in not_claimed
+    assert "does not prove live openai" in row["claim_boundary"].lower()
+    assert "toolhive" not in row["claim_boundary"].lower()
+
+
+def test_toolhive_0301_vector_preserves_deployment_only_boundaries() -> None:
+    """ToolHive 0.30.1 source deltas must stay deployment context, not runtime proof."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(item for item in rows if item["vector_id"] == "toolhive-0301-network-authz-obo-events")
+
+    assert row["source_family"] == "toolhive"
+    assert row["source_pin"]["kind"] == "release"
+    assert row["source_pin"]["value"] == "v0.30.1"
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "45ac104d707c39537de9c8e2edaff0b665eb225619cef7ae5dfd2ca9cf22175f"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "a855bd8d906908c11f098ddbcecbd4a8d2279375db63c49426814772f8fbcdc1"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "2e68a3b5e175242e2d9854e1ecf7d3c74a44b667f536422d1b3dde193c8fce2b"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "network isolation",
+        "authzConfigRef",
+        "OBO SecretEnvVars",
+        "config-controller events",
+    ):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "deployment_context_only"
+    assert mapping["network_policy"] == "default_network_isolation_for_local_mcp_servers"
+    assert mapping["authz_reference"] == "authz_config_ref_enforcement_context"
+    assert mapping["secret_material"] == "obo_secret_env_vars_presence_digest_only"
+    assert mapping["event_material"] == "config_controller_event_metadata_only"
+    assert mapping["release_body_sha256"] == (
+        "f0f1bf098d7e82efa99bea938051b3b4fd82dfb536ba75d3d75943c3b628ce9d"
+    )
+    assert mapping["compare_sha256"] == (
+        "6f8620ff51491411ad6132a2ef50d2e42898c2061b0a71d5a1ed004b1e868988"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "toolhive_mcp_enforcement",
+            "actual_client_identity",
+            "live_deployment_configuration",
+            "credentials",
+            "live_toolhive_execution",
+            "kubernetes_runtime_behavior",
+            "mcp_authorization_effectiveness",
+            "secret_values",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in ("no live toolhive", "kubernetes", "secret values", "runtime enforcement"):
+        assert phrase in not_claimed
+    assert "does not prove live toolhive" in row["claim_boundary"].lower()
+    assert "openai" not in row["claim_boundary"].lower()
 
 
 def test_codex_142_vector_preserves_source_governance_boundaries() -> None:
