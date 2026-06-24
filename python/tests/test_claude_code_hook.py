@@ -431,6 +431,12 @@ def test_allow_path_returns_continue_true_and_chains_receipt(tmp_path, monkeypat
     # the Post receipt for the same call.
     assert claims.get("step_id", "").endswith(":pre")
 
+    # C3: the signed receipt preserves the actual backend decision reason,
+    # rather than falling back to a synthetic hook-level summary.
+    assert claims.get("policy_decisions") == [
+        {"backend": "native", "decision": "Allow", "reason": "within scope"}
+    ]
+
 
 def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(tmp_path, monkeypatch):
     private_key, _public_key = generate_keypair(keys_dir=tmp_path)
@@ -879,6 +885,13 @@ def test_deny_path_returns_continue_false_with_stop_reason(tmp_path, monkeypatch
     import jwt as pyjwt
     claims = pyjwt.decode(lines[0].strip(), options={"verify_signature": False})
     assert claims.get("verdict") == "violation"
+    assert claims.get("policy_decisions") == [
+        {
+            "backend": "native",
+            "decision": "Deny",
+            "reason": "tool 'Bash' is in forbidden_tools",
+        }
+    ]
 
 
 def test_post_tool_use_chains_to_pre_and_records_result_hash(tmp_path, monkeypatch):

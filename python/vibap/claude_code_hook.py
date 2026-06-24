@@ -569,6 +569,17 @@ def _evaluate_native_policy(
     return final, decisions
 
 
+def _policy_decision_dicts(decisions: list[Any]) -> list[dict[str, Any]]:
+    """Return receipt-normalisable per-backend decision dictionaries."""
+    result: list[dict[str, Any]] = []
+    for item in decisions:
+        if hasattr(item, "to_dict"):
+            result.append(dict(item.to_dict()))
+        elif isinstance(item, Mapping):
+            result.append(dict(item))
+    return result
+
+
 def _strip_hash_prefix(hash_value: str | None) -> str | None:
     """Strip the ``sha-256:`` prefix that ``previous_receipt_hash`` prepends.
 
@@ -615,14 +626,17 @@ def _emit_chained_receipt(
         # the same time; a split read/sign/append lets several receipts become
         # independent roots and breaks chain verification.
         parent_hash = _strip_hash_prefix(_previous_receipt_hash_unlocked(state))
+        if decisions:
+            event.policy_decisions = _policy_decision_dicts(decisions)
         receipt_obj = build_receipt(
             decision_enum,
             event,
             parent_hash,
             # Pass None so build_receipt calls _signed_policy_decisions internally,
-            # which normalises to the schema-valid {"backend","decision","reason"}
-            # shape. The raw PolicyDecision.to_dict() output carries extra fields
-            # ("label", "reasons") that fail the receipt schema validator.
+            # which normalises event.policy_decisions to the schema-valid
+            # {"backend","decision","reason"} shape. Raw PolicyDecision.to_dict()
+            # output carries extra fields ("label", "reasons") that fail the
+            # receipt schema validator if passed through directly.
             policy_decisions=None,
             reason=reason,
         )
