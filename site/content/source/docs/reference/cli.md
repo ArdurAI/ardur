@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "da2aadfdb900ad9da144464496207cb561e75534b39286b8c27ca96b546a6a47"
+source_sha256: "b5efb58babb27a2f4b86a1c12544a3f8a9c4f400ee23f9abd8c18a8418bd3f53"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -90,18 +90,18 @@ ardur issue --agent-id ID --mission TEXT
 Prints `{"token": "...", "claims": {...}}` to stdout.
 
 Invalid budget flags fail closed before key generation or signing:
-`--max-duration-s` must be a positive integer, `--max-tool-calls` must be zero
-or a positive integer, and `--max-delegation-depth` must be zero or a positive
-integer. Non-integer budget values and invalid numeric ranges such as
-`--max-duration-s <= 0`, `--max-tool-calls < 0`, or
-`--max-delegation-depth < 0` exit non-zero and write stdout JSON with
-`ok: false`, stable `condition`/`error` values, a message, a detail, and
-placeholder-only `next_steps`. The stable conditions are
-`issue_budget_max_duration_invalid`, `issue_budget_max_tool_calls_invalid`, and
-`issue_budget_max_delegation_depth_invalid`. The failure path keeps stderr
-empty, emits no traceback, does not create or print a token or private key, and
-does not copy local paths or secret material. `--max-tool-calls 0` remains
-valid.
+`--max-duration-s` and `--ttl-s` must be positive integers,
+`--max-tool-calls` must be zero or a positive integer, and
+`--max-delegation-depth` must be zero or a positive integer. Non-integer budget
+values and invalid numeric ranges such as `--max-duration-s <= 0`,
+`--ttl-s <= 0`, `--max-tool-calls < 0`, or `--max-delegation-depth < 0` exit
+non-zero and write stdout JSON with `ok: false`, stable `condition`/`error`
+values, a message, a detail, and placeholder-only `next_steps`. The stable
+conditions are `issue_budget_max_duration_invalid`,
+`issue_budget_max_tool_calls_invalid`, `issue_budget_max_delegation_depth_invalid`,
+and `issue_budget_ttl_invalid`. The failure path keeps stderr empty, emits no
+traceback, does not create or print a token or private key, and does not copy
+local paths or secret material. `--max-tool-calls 0` remains valid.
 
 ### `ardur verify`
 
