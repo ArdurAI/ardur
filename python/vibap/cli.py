@@ -42,15 +42,19 @@ from .personal_hub import (
 from .claude_code_report import build_claude_code_report
 from .claude_code_hook import main as claude_code_hook_main
 from .gemini_cli_hook import (
+    FixtureProjectDirError as GeminiFixtureProjectDirError,
     build_local_fixture as build_gemini_local_fixture,
     build_shareable_context as build_gemini_shareable_context,
     build_shareable_report as build_gemini_shareable_report,
+    fixture_project_dir_failure_response as gemini_fixture_project_dir_failure_response,
     main as gemini_cli_hook_main,
 )
 from .codex_app_server_fixture import (
+    FixtureProjectDirError as CodexFixtureProjectDirError,
     build_local_fixture as build_codex_local_fixture,
     build_shareable_context as build_codex_shareable_context,
     build_shareable_report as build_codex_shareable_report,
+    fixture_project_dir_failure_response as codex_fixture_project_dir_failure_response,
     handle_host_event as handle_codex_host_event,
 )
 from .posture_index import build_posture_index, format_posture_report
@@ -387,12 +391,16 @@ def cmd_gemini_cli_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
-    fixture = build_gemini_local_fixture(
-        home=args.home,
-        project_dir=args.project_dir,
-        chain_dir=args.chain_dir,
-        keys_dir=args.keys_dir,
-    )
+    try:
+        fixture = build_gemini_local_fixture(
+            home=args.home,
+            project_dir=args.project_dir,
+            chain_dir=args.chain_dir,
+            keys_dir=args.keys_dir,
+        )
+    except GeminiFixtureProjectDirError:
+        _print_json(gemini_fixture_project_dir_failure_response())
+        return 1
     _print_json(build_gemini_shareable_context(fixture))
     return 0
 
@@ -485,12 +493,16 @@ def cmd_codex_app_server_event(args: argparse.Namespace) -> int:
 
 
 def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
-    fixture = build_codex_local_fixture(
-        home=args.home,
-        project_dir=args.project_dir,
-        chain_dir=args.chain_dir,
-        keys_dir=args.keys_dir,
-    )
+    try:
+        fixture = build_codex_local_fixture(
+            home=args.home,
+            project_dir=args.project_dir,
+            chain_dir=args.chain_dir,
+            keys_dir=args.keys_dir,
+        )
+    except CodexFixtureProjectDirError:
+        _print_json(codex_fixture_project_dir_failure_response())
+        return 1
     _print_json(build_codex_shareable_context(fixture))
     return 0
 

@@ -119,6 +119,63 @@ def test_gemini_fixture_default_does_not_write_callers_global_gemini_home(tmp_pa
     assert output["claim_boundary"]["scope"] == "local_fixture_only"
 
 
+def test_gemini_fixture_cli_rejects_file_project_dir_without_partial_writes(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    project_file = tmp_path / "not-a-dir"
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    project_file.write_text("not a directory\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vibap.cli",
+            "gemini-cli-fixture",
+            "--home",
+            str(fixture_home),
+            "--project-dir",
+            str(project_file),
+            "--chain-dir",
+            str(chain_dir),
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+        cwd=repo_root,
+        timeout=20,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_project_dir_not_directory"
+    assert output["condition"] == "gemini_cli_fixture_project_dir_not_directory"
+    assert "existing non-directory" in output["detail"]
+    assert "ardur gemini-cli-fixture --project-dir <your-project>" in output_text
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not chain_dir.exists()
+    assert not keys_dir.exists()
+    assert project_file.is_file()
+
+
 def test_gemini_shell_denied_by_read_only_side_effect_policy(tmp_path, monkeypatch):
     from vibap.gemini_cli_hook import handle_pre_tool_call
 

@@ -61,6 +61,10 @@ class ChainState:
         return self.chain_dir / self.trace_dir_id / ".lock"
 
 
+class FixtureProjectDirError(ValueError):
+    """Raised when a fixture project path cannot safely receive context files."""
+
+
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -229,6 +233,33 @@ def _write_private_text(path: Path, content: str) -> None:
         pass
 
 
+def _validate_fixture_project_dir(project: Path) -> None:
+    if project.exists() and not project.is_dir():
+        raise FixtureProjectDirError("fixture project directory must be a directory")
+
+
+def fixture_project_dir_failure_response() -> dict[str, Any]:
+    condition = "gemini_cli_fixture_project_dir_not_directory"
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Gemini CLI fixture project directory is not a directory.",
+        "detail": (
+            "The --project-dir argument points at an existing non-directory. "
+            "Use an existing project directory or a new directory path that Ardur can create."
+        ),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_gemini_fixture_with_project_directory",
+                "command": "ardur gemini-cli-fixture --project-dir <your-project>",
+                "detail": "Replace <your-project> with a directory path, not a regular file.",
+            }
+        ],
+    }
+
+
 def build_local_fixture(
     *,
     home: Path | None = None,
@@ -245,6 +276,7 @@ def build_local_fixture(
     gemini_home = Path(home or _default_gemini_fixture_home()).expanduser().resolve(strict=False)
     project = Path(project_dir or Path.cwd()).expanduser().resolve(strict=False)
     ardur_chain = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser().resolve(strict=False)
+    _validate_fixture_project_dir(project)
     signing_keys = resolve_keys_dir(keys_dir)
 
     settings_path = gemini_home / "settings.json"
@@ -960,12 +992,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_json(output)
         return 2 if output.get("block") else 0
     if phase == "fixture":
-        fixture = build_local_fixture(
-            home=args.home,
-            project_dir=args.project_dir,
-            chain_dir=args.chain_dir,
-            keys_dir=args.keys_dir,
-        )
+        try:
+            fixture = build_local_fixture(
+                home=args.home,
+                project_dir=args.project_dir,
+                chain_dir=args.chain_dir,
+                keys_dir=args.keys_dir,
+            )
+        except FixtureProjectDirError:
+            _print_json(fixture_project_dir_failure_response())
+            return 1
         _print_json(build_shareable_context(fixture))
         return 0
     if phase == "report":
