@@ -63,6 +63,13 @@ REQUIRED_VECTOR_CLASSES = {
         "host_runtime_event",
         "unknown",
     },
+    "toolhive-0310-oidc-vmcp-authz-chain-governance": {
+        "deployment_context",
+        "policy_input",
+        "session_context",
+        "host_runtime_event",
+        "unknown",
+    },
 }
 
 REQUIRED_UNKNOWN_BOUNDARIES = {
@@ -352,6 +359,88 @@ def test_toolhive_0301_vector_preserves_deployment_only_boundaries() -> None:
     for phrase in ("no live toolhive", "kubernetes", "secret values", "runtime enforcement"):
         assert phrase in not_claimed
     assert "does not prove live toolhive" in row["claim_boundary"].lower()
+    assert "openai" not in row["claim_boundary"].lower()
+
+
+def test_toolhive_0310_vector_preserves_source_only_governance_boundaries() -> None:
+    """ToolHive 0.31.0 source deltas must stay no-key deployment context."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "toolhive-0310-oidc-vmcp-authz-chain-governance"
+    )
+
+    assert row["source_family"] == "toolhive"
+    assert row["source_pin"]["kind"] == "release"
+    assert "v0.31.0" in row["source_pin"]["value"]
+    assert "ac1f5b499212b03da4b7eb3c5d75d796e2ba580f3aa8eedb4e8e29319ff24445" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "ae6e8916f1828b7c758bc9800d91bede9b6a802012478ea3252a695009a2cd2c"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "5554a51be706bf157372f29b03ceafe29d7b9cbc296cf03451c7e986610c03d2"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "988a18bc74cf0bbb5e3274cd2dae6c210d8bf689d26bbc41dad9fb61062649c7"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "MCPOIDCConfig",
+        "level-triggered operator reconciliation",
+        "embedded auth server",
+        "private IPs",
+        "multi-upstream authorization chain",
+    ):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "deployment_context_only"
+    assert mapping["oidc_oauth_config_context"] == "mcpoidcconfig_referencing_workload_indexes"
+    assert mapping["operator_reconciliation"] == "level_triggered_reconciliation_rules_source_context"
+    assert mapping["vmcp_auth_update_loop"] == "embedded_auth_server_update_loop_source_context"
+    assert mapping["private_ip_upstream_allowance"] == "in_cluster_oidc_oauth_private_ip_source_context"
+    assert mapping["multi_upstream_authorization_chain"] == "multi_upstream_authorization_chain_flow_fix_context"
+    assert mapping["release_body_sha256"] == (
+        "ac1f5b499212b03da4b7eb3c5d75d796e2ba580f3aa8eedb4e8e29319ff24445"
+    )
+    assert mapping["compare_sha256"] == (
+        "a119ff354e989b8f375879f2ba307abcebf394e0c0a07b76d57a558f1ea67e59"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_toolhive_execution",
+            "kubernetes_runtime_behavior",
+            "mcp_authorization_effectiveness",
+            "oidc_oauth_provider_behavior",
+            "private_ip_upstream_reachability",
+            "multi_upstream_authorization_effectiveness",
+            "credentials",
+            "secret_values",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "live toolhive",
+        "oidc/oauth provider behavior",
+        "mcp authorization enforcement",
+        "kubernetes runtime behavior",
+        "private-ip reachability",
+        "credential validity",
+        "runtime proof",
+    ):
+        assert phrase in not_claimed
+    assert row["claim_boundary"].startswith("Source-semantic no-key vector only;")
+    assert "does not prove live toolhive" in row["claim_boundary"].lower()
+    assert "oidc/oauth provider behavior" in row["claim_boundary"].lower()
+    assert "mcp authorization enforcement" in row["claim_boundary"].lower()
+    assert "private-ip reachability" in row["claim_boundary"].lower()
+    assert "runtime proof" in row["claim_boundary"].lower()
     assert "openai" not in row["claim_boundary"].lower()
 
 
