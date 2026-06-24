@@ -127,11 +127,12 @@ def _issue_budget_failure_next_steps(condition: str) -> list[dict[str, str]]:
             "action": "rerun_issue_with_valid_budget",
             "command": (
                 "ardur issue --agent-id <agent-id> --mission <mission> "
-                "--max-duration-s <seconds> --keys-dir <keys-dir>"
+                "--max-duration-s <seconds> --ttl-s <seconds> --keys-dir <keys-dir>"
             ),
             "detail": (
                 "Use a positive duration, a non-negative max tool-call budget, "
-                "and a non-negative delegation-depth budget before issuing a passport."
+                "a non-negative delegation-depth budget, and a positive TTL override "
+                "when provided before issuing a passport."
             ),
         }
     ]
@@ -184,6 +185,16 @@ def _issue_budget_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
         return failure
     assert max_delegation_depth is not None
     args.max_delegation_depth = max_delegation_depth
+    if args.ttl_s is not None:
+        ttl_s, failure = _issue_budget_int(
+            args.ttl_s,
+            "issue_budget_ttl_invalid",
+            "--ttl-s must be a positive integer number of seconds.",
+        )
+        if failure is not None:
+            return failure
+        assert ttl_s is not None
+        args.ttl_s = ttl_s
     if args.max_duration_s <= 0:
         return _issue_budget_failure_response(
             "issue_budget_max_duration_invalid",
@@ -198,6 +209,11 @@ def _issue_budget_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
         return _issue_budget_failure_response(
             "issue_budget_max_delegation_depth_invalid",
             "--max-delegation-depth must be zero or a positive integer.",
+        ), 1
+    if args.ttl_s is not None and args.ttl_s <= 0:
+        return _issue_budget_failure_response(
+            "issue_budget_ttl_invalid",
+            "--ttl-s must be a positive integer number of seconds.",
         ), 1
     return None
 
@@ -1780,7 +1796,7 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--max-duration-s", default=600, help="max mission duration in seconds")
     issue.add_argument("--delegation-allowed", action="store_true", help="allow one-step delegation")
     issue.add_argument("--max-delegation-depth", default=0, help="delegation depth budget")
-    issue.add_argument("--ttl-s", type=int, help="override token TTL in seconds")
+    issue.add_argument("--ttl-s", help="override token TTL in seconds")
     issue.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
     issue.set_defaults(func=cmd_issue)
 

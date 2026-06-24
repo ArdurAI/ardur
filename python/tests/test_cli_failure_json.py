@@ -100,6 +100,8 @@ def test_attest_missing_session_returns_safe_json_failure(tmp_path, capsys):
         (["--max-tool-calls", "-1"], "issue_budget_max_tool_calls_invalid"),
         (["--max-duration-s", "0"], "issue_budget_max_duration_invalid"),
         (["--max-duration-s", "-1"], "issue_budget_max_duration_invalid"),
+        (["--ttl-s", "0"], "issue_budget_ttl_invalid"),
+        (["--ttl-s", "-5"], "issue_budget_ttl_invalid"),
         (
             ["--delegation-allowed", "--max-delegation-depth", "-1"],
             "issue_budget_max_delegation_depth_invalid",
@@ -141,6 +143,7 @@ def test_issue_invalid_budget_returns_safe_json_failure(tmp_path, capsys, budget
     [
         (["--max-tool-calls", "abc"], "issue_budget_max_tool_calls_invalid"),
         (["--max-duration-s", "abc"], "issue_budget_max_duration_invalid"),
+        (["--ttl-s", "abc"], "issue_budget_ttl_invalid"),
         (
             ["--delegation-allowed", "--max-delegation-depth", "abc"],
             "issue_budget_max_delegation_depth_invalid",
@@ -198,4 +201,27 @@ def test_issue_zero_tool_call_budget_remains_valid(tmp_path, capsys):
     assert rc == 0
     assert "token" in payload
     assert payload["claims"]["max_tool_calls"] == 0
+    assert payload["claims"]["max_duration_s"] == 600
+
+
+def test_issue_positive_ttl_override_remains_valid(tmp_path, capsys):
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "agent",
+            "--mission",
+            "mission",
+            "--ttl-s",
+            "60",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["exp"] - payload["claims"]["iat"] == 60
+    assert payload["claims"]["max_tool_calls"] == 50
     assert payload["claims"]["max_duration_s"] == 600
