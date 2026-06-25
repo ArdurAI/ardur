@@ -3,7 +3,9 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +30,7 @@ func main() {
 	var (
 		metricsAddr          string
 		healthProbeAddr      string
+		telemetryAddr        string
 		enableLeaderElection bool
 		signingKeyPath       string
 		issuerURI            string
@@ -36,6 +39,7 @@ func main() {
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics endpoint bind address.")
 	flag.StringVar(&healthProbeAddr, "health-probe-bind-address", ":8081", "Health probe bind address.")
+	flag.StringVar(&telemetryAddr, "telemetry-bind-address", ":8082", "Telemetry signal ingestion address. POST /telemetry/signal")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for HA.")
 	flag.StringVar(&signingKeyPath, "signing-key", "", "Path to Ed25519 signing key (JWK). Required in production.")
 	flag.StringVar(&issuerURI, "issuer-uri", "https://vibap.ardur.dev", "Credential issuer URI.")
@@ -89,6 +93,25 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+
+	// Telemetry ingestor: Tetragon/Kubescape/verifiers POST signals to
+	// /telemetry/signal; on tier change the NetworkPolicy is re-applied.
+	//
+	// REQUIRES_CLUSTER: applyPolicy calls the K8s API; fails gracefully
+	// without a cluster (score update still persists).
+	telemetryMux := http.NewServeMux()
+	ingestor := NewTelemetryIngestor(reconciler.trustAgg, func(ctx context.Context, namespace, tier string) error {
+		return reconciler.applyNetworkPolicyForTier(ctx, namespace, tier)
+	})
+	telemetryMux.Handle("/telemetry/signal", ingestor)
+
+	go func() {
+		setupLog.Info("starting telemetry ingestor", "addr", telemetryAddr)
+		srv := &http.Server{Addr: telemetryAddr, Handler: telemetryMux}
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			setupLog.Error(err, "telemetry server exited")
+		}
+	}()
 
 	setupLog.Info("starting VIBAP operator")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
