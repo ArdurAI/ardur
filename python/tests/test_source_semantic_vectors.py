@@ -32,6 +32,12 @@ REQUIRED_VECTOR_CLASSES = {
         "host_runtime_event",
         "unknown",
     },
+    "codex-1422-mcp-tool-search-proxy-context": {
+        "policy_input",
+        "session_context",
+        "deployment_context",
+        "unknown",
+    },
     "claude-permission-grammar-nested-precedence": {"policy_input", "session_context", "unknown"},
     "claude-code-mcp-directory-resource-listing-v2186": {
         "host_runtime_event",
@@ -502,6 +508,95 @@ def test_codex_142_vector_preserves_source_governance_boundaries() -> None:
     for phrase in ("no live codex", "provider-hidden", "search result contents", "runtime/kernel"):
         assert phrase in not_claimed
     assert "does not prove live codex" in row["claim_boundary"].lower()
+
+
+def test_codex_1422_mcp_proxy_vector_preserves_source_only_boundaries() -> None:
+    """Codex 0.142.2 MCP/proxy context must stay source-semantic and non-live."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item for item in rows if item["vector_id"] == "codex-1422-mcp-tool-search-proxy-context"
+    )
+
+    assert row["source_family"] == "codex"
+    assert row["source_pin"]["kind"] == "release"
+    assert "rust-v0.142.2" in row["source_pin"]["value"]
+    assert "7fda5587a0f79e004d899960fbc9b910f7028c6d34b04789765e36223887a564" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "7f7953775b321ec6fa513de82452d0c1d550dd9bb6ed4b215540f2466836e801"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "21567d29050b0c90d29566100adec6601199cb43127398a2a378effb70b40df6"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "8265f3f80b4a40816c2542dcbfd3b91442fce88b9f40494b175f8b2cebcabe69"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "MCP tools use tool search by default",
+        "respect_system_proxy",
+        "system proxy",
+        "PAC",
+        "WPAD",
+        "dark-mode logos",
+        "safety-buffering",
+        "faster-model metadata",
+    ):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_mcp_proxy_context"
+    assert mapping["mcp_tool_search_default"] == "host_managed_tool_search_default_when_supported"
+    assert mapping["tool_discovery_context"] == "mcp_tool_discovery_policy_context_only"
+    assert mapping["proxy_policy_context"] == "respect_system_proxy_pac_wpad_placeholder_and_digest_only"
+    assert mapping["plugin_catalog_context"] == "dark_mode_logo_and_catalog_display_metadata_only"
+    assert mapping["safety_ui_context"] == (
+        "server_provided_visibility_and_faster_model_metadata_ui_session_context_only"
+    )
+    assert mapping["release_body_sha256"] == (
+        "7fda5587a0f79e004d899960fbc9b910f7028c6d34b04789765e36223887a564"
+    )
+    assert mapping["matrix_review_boundary"] == "no_runtime_fixture_or_live_codex_mcp_proxy_validation"
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_codex_cli_behavior",
+            "provider_hidden_behavior",
+            "server_side_tool_calls",
+            "live_mcp_server_behavior",
+            "mcp_tool_catalog_completeness",
+            "live_tool_search_behavior",
+            "actual_proxy_resolution",
+            "pac_wpad_network_behavior",
+            "proxy_credentials",
+            "plugin_catalog_fetch_contents",
+            "plugin_execution",
+            "live_ui_visibility_behavior",
+            "faster_model_selection_effects",
+            "network_side_effects",
+            "runtime_kernel_side_effects",
+            "credentials",
+        }
+    )
+    assert "sdk_output_metadata" not in row["evidence_classes"]
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live codex",
+        "provider-hidden",
+        "tool catalog completeness",
+        "proxy routing",
+        "pac/wpad",
+        "plugin catalog",
+        "safety-buffering",
+        "runtime/kernel",
+    ):
+        assert phrase in not_claimed
+    assert "does not prove live codex" in row["claim_boundary"].lower()
+    assert "tool catalog completeness" in row["claim_boundary"].lower()
+    assert "actual proxy/pac/wpad routing" in row["claim_boundary"].lower()
 
 
 def test_claude_2186_mcp_directory_vector_preserves_placeholder_boundaries() -> None:
