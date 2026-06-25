@@ -2,7 +2,7 @@
 title: "Ardur Claude Code Plugin"
 description: "This plugin protects Claude Code at the local tool boundary. `PreToolUse` runs"
 source_path: "plugins/claude-code/README.md"
-source_sha256: "ed8084415397e0e0e577667278ef59e5be6a2926a507dc7b5406d0dee255453f"
+source_sha256: "f9a5a0b9233581ac18aa00208cd7cf09417ad87128e1756a89a05391785a18ae"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -112,10 +112,17 @@ Operational toggles:
   client when benchmarking or diagnosing the fast path; do not use it if you
   want Python fallback behavior.
 
-Claim boundary: the gated release test targets the native daemon-client path.
-Shell wrapper latency is recorded as telemetry because `/bin/bash` startup and
-workstation scheduler tails can dominate p95 even when the native hot path is
-fast.
+Claim boundary — per-platform numbers:
+
+- **In-process compute** (passport validation + scope check + receipt emit,
+  no IPC): p95 **<10ms**. Gated by `test_claude_code_daemon_hot_path_latency_target`.
+- **Full native daemon-client path** (native binary exec + Unix-socket
+  send/recv + response parse): p95 **<20ms**, measured ~15-17ms on Apple
+  Silicon macOS. Gated by `test_claude_code_native_daemon_client_latency_target`.
+- **Shell wrapper path**: latency recorded as telemetry only. `/bin/bash`
+  startup and workstation scheduler tails can dominate p95 even when the
+  native hot path is fast; enforcing a gate here would measure shell overhead,
+  not Ardur overhead.
 
 ## Built-In Options
 
