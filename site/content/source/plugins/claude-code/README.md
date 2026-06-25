@@ -2,7 +2,7 @@
 title: "Ardur Claude Code Plugin"
 description: "This plugin protects Claude Code at the local tool boundary. `PreToolUse` runs"
 source_path: "plugins/claude-code/README.md"
-source_sha256: "ed8084415397e0e0e577667278ef59e5be6a2926a507dc7b5406d0dee255453f"
+source_sha256: "f9a5a0b9233581ac18aa00208cd7cf09417ad87128e1756a89a05391785a18ae"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
