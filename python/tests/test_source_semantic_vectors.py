@@ -39,6 +39,11 @@ REQUIRED_VECTOR_CLASSES = {
         "deployment_context",
         "unknown",
     },
+    "claude-code-glob-count-notebook-old-source-v2191": {
+        "host_runtime_event",
+        "sdk_output_metadata",
+        "unknown",
+    },
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "gemini-at-file-placeholder-redaction": {"host_runtime_event", "session_context", "unknown"},
     "gemini-tools-core-config-migration": {"policy_input", "session_context", "unknown"},
@@ -551,3 +556,95 @@ def test_claude_2186_mcp_directory_vector_preserves_placeholder_boundaries() -> 
     for phrase in ("no live claude code", "raw mcp resource contents", "filesystem effects"):
         assert phrase in not_claimed
     assert "does not prove live claude code" in row["claim_boundary"].lower()
+
+
+def test_claude_2191_glob_notebook_vector_preserves_count_and_source_boundaries() -> None:
+    """Claude Code 2.1.191 Glob/Notebook output metadata must stay source-only."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "claude-code-glob-count-notebook-old-source-v2191"
+    )
+
+    assert row["source_family"] == "claude-code"
+    assert row["source_pin"]["kind"] == "package"
+    assert "@anthropic-ai/claude-code@2.1.191" in row["source_pin"]["value"]
+    assert "12afc4ea26757be14f01cd58eacc9d64353a4ffe0d318e36146497bcab297f14" in (
+        row["source_pin"]["value"]
+    )
+    assert "4f06a2ce5a4f1ef1764db0d42ec9db9d530c0279ed9b0fdbca008c236535062a" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "26fcaec2cbf1f0a5d094d9e59842107c475452a9fb4cc2b6349b92f5bfc58410"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "443f6d7950bd90dd31d78272ba33096c753c738ca808a69b0341b42c937dfcdc"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "a942b91a17e3f7412b7b6c3b94c858fe0c9b8142efda72cd8d44a4e708ee54d4"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "GlobOutput.numFiles",
+        "returned file paths after truncation",
+        "totalMatches",
+        "countIsComplete",
+        "older persisted results",
+        "NotebookEditOutput.old_source",
+        "previous-cell source",
+    ):
+        assert phrase in signal
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_output_metadata_boundary"
+    assert mapping["glob_num_files"] == "returned_paths_after_truncation"
+    assert mapping["glob_total_matches"] == "exact_or_lower_bound_depending_on_count_is_complete"
+    assert mapping["legacy_glob_count_metadata"] == (
+        "total_matches_and_count_is_complete_may_be_absent_on_older_persisted_results"
+    )
+    assert mapping["notebook_old_source"] == "previous_cell_source_digest_or_placeholder_only"
+    assert mapping["runtime_receipt_boundary"] == (
+        "posttooluse_result_hash_without_raw_response_field_expansion"
+    )
+    assert mapping["sdk_tools_d_ts_sha256"] == (
+        "12afc4ea26757be14f01cd58eacc9d64353a4ffe0d318e36146497bcab297f14"
+    )
+    assert mapping["tarball_sha256"] == (
+        "4f06a2ce5a4f1ef1764db0d42ec9db9d530c0279ed9b0fdbca008c236535062a"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_claude_code_behavior",
+            "raw_search_results",
+            "exact_result_completeness_when_count_is_complete_absent_or_false",
+            "raw_notebook_cell_source",
+            "provider_hidden_behavior",
+            "local_filesystem_side_effects",
+            "runtime_kernel_side_effects",
+            "credentials",
+            "action_runner_side_effects",
+            "universal_cli_capture",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live claude code",
+        "raw search results",
+        "exact live result completeness",
+        "raw notebook cell",
+        "provider-hidden",
+        "filesystem side effects",
+        "runtime/ebpf",
+        "universal cli",
+        "codex rust-v0.142.1 proxy/auth",
+    ):
+        assert phrase in not_claimed
+    assert "does not prove live claude code" in row["claim_boundary"].lower()
+    assert "raw search results" in row["claim_boundary"].lower()
+    assert "countiscomplete is absent or false" in row["claim_boundary"].lower()
+    assert "codex proxy/auth" in row["claim_boundary"].lower()
