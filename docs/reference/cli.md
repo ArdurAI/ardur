@@ -39,6 +39,16 @@ hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
 
+Mission-file input failures fail closed before the proxy starts. A missing
+mission file returns `start_mission_file_missing`; malformed JSON or invalid
+UTF-8 JSON returns `start_mission_file_malformed_json`; unreadable files return
+`start_mission_file_unreadable`; and directories or mission JSON that does not
+match the schema return `start_mission_file_invalid`. These failures exit
+non-zero and write stdout JSON with `ok: false`, stable `condition`/`error`
+values, a message, a detail, and placeholder-only `next_steps`. The failure path
+keeps stderr empty, emits no traceback, and does not echo raw local paths or file
+contents. Valid mission-file session-start behavior remains unchanged.
+
 ### `ardur kill-switch`
 
 Activate or deactivate the emergency kill switch on a running governance proxy.

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b5efb58babb27a2f4b86a1c12544a3f8a9c4f400ee23f9abd8c18a8418bd3f53"
+source_sha256: "2a76fef0f70291c240f70d24fc69173f0ad88c732257f2fa5b5c0bdb3a2aa83c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -55,6 +55,16 @@ sessions and passport state can contain bearer credentials, including parent
 hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
+
+Mission-file input failures fail closed before the proxy starts. A missing
+mission file returns `start_mission_file_missing`; malformed JSON or invalid
+UTF-8 JSON returns `start_mission_file_malformed_json`; unreadable files return
+`start_mission_file_unreadable`; and directories or mission JSON that does not
+match the schema return `start_mission_file_invalid`. These failures exit
+non-zero and write stdout JSON with `ok: false`, stable `condition`/`error`
+values, a message, a detail, and placeholder-only `next_steps`. The failure path
+keeps stderr empty, emits no traceback, and does not echo raw local paths or file
+contents. Valid mission-file session-start behavior remains unchanged.
 
 ### `ardur kill-switch`
 
