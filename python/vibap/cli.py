@@ -60,6 +60,7 @@ from .codex_app_server_fixture import (
 from .posture_index import build_posture_index, format_posture_report
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
 from .proxy import GovernanceProxy, serve_proxy
+from .shareable_redaction import path_aliases, redact_local_path_text
 
 
 def _print_json(payload: dict) -> None:
@@ -1117,6 +1118,31 @@ def _claude_code_plugin_detail(kind: str, suffix: str = "") -> str:
     return f"expected {kind} at {target}"
 
 
+def _claude_code_doctor_path_placeholder(_value: str) -> str:
+    return "<local-path>"
+
+
+def _claude_code_doctor_file_uri_placeholder(_value: str) -> str:
+    return "<local-file-uri>"
+
+
+def _claude_code_plugin_validation_detail(raw_detail: str, *, plugin: Path, home: Path) -> str:
+    detail = raw_detail.strip()
+    if not detail:
+        return "Claude Code plugin validation failed; inspect the validation output."
+    root_pairs: list[tuple[str, str]] = []
+    for alias in path_aliases(plugin):
+        root_pairs.append((alias, _CLAUDE_CODE_PLUGIN_PLACEHOLDER))
+    for alias in path_aliases(home):
+        root_pairs.append((alias, _ARDUR_HOME_PLACEHOLDER))
+    return redact_local_path_text(
+        detail,
+        root_pairs=root_pairs,
+        absolute_replacement=_claude_code_doctor_path_placeholder,
+        file_uri_replacement=_claude_code_doctor_file_uri_placeholder,
+    )
+
+
 def _default_claude_plugin_dir() -> Path:
     cwd_candidate = Path.cwd() / "plugins" / "claude-code"
     if cwd_candidate.exists():
@@ -1481,7 +1507,11 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
         checks.append({
             "name": "plugin_validate",
             "ok": result.returncode == 0,
-            "detail": result.stdout.strip() or result.stderr.strip(),
+            "detail": _claude_code_plugin_validation_detail(
+                result.stdout.strip() or result.stderr.strip(),
+                plugin=plugin,
+                home=active_passport.parent,
+            ),
         })
     else:
         checks.append({

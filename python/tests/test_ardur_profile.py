@@ -1246,3 +1246,77 @@ def test_claude_code_doctor_reports_plugin_validate_failure(tmp_path, monkeypatc
     assert step_checks["plugin_validate"]["action"] == "validate_plugin"
     assert "claude plugin validate" in step_checks["plugin_validate"]["command"]
     assert "deterministic plugin validation failure" in step_checks["plugin_validate"]["detail"]
+
+
+def test_claude_code_doctor_sanitizes_plugin_validate_local_paths(tmp_path, monkeypatch):
+    plugin_dir = tmp_path / "private-plugin"
+    plugin_dir.mkdir()
+    manifest_dir = plugin_dir / ".claude-plugin"
+    manifest_dir.mkdir()
+    manifest = manifest_dir / "plugin.json"
+    manifest.write_text("{}")
+    hooks_dir = plugin_dir / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text("{}")
+    for hook_name in ("pre_tool_use", "post_tool_use", "subagent_start", "subagent_stop"):
+        (hooks_dir / hook_name).write_text("#!/bin/sh\ntrue\n")
+        (hooks_dir / hook_name).chmod(0o755)
+    home = tmp_path / "private-home"
+    home.mkdir()
+    (home / "active_mission.jwt").write_text("eyJhbG...fake")
+
+    import shutil as _shutil
+    _orig_which = _shutil.which
+
+    def _fake_which(cmd, **kw):
+        if cmd == "claude":
+            return "/fake/claude"
+        return _orig_which(cmd, **kw)
+
+    monkeypatch.setattr(_shutil, "which", _fake_which)
+
+    import subprocess as _sp
+    _orig_run = _sp.run
+
+    validation_output = (
+        f"Validating plugin manifest: {manifest.resolve()}\n\n"
+        "✘ Found 1 error:\n\n"
+        "  ❯ json: Invalid JSON syntax: JSON Parse error: Expected '}'\n\n"
+        "✘ Validation failed"
+    )
+
+    def _fake_run(cmd, **kw):
+        expected = ["/fake/claude", "plugin", "validate", str(plugin_dir.resolve())]
+        if cmd == expected:
+            return _sp.CompletedProcess(
+                args=cmd,
+                returncode=1,
+                stdout=validation_output,
+                stderr="",
+            )
+        return _orig_run(cmd, **kw)
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+
+    response = claude_code_doctor(plugin_dir=plugin_dir, home=home)
+
+    assert response["ok"] is False
+    serialized = json.dumps(response, sort_keys=True)
+    for marker in (str(tmp_path), str(plugin_dir), str(manifest), "/Users/", "/private/", "/tmp/"):
+        assert marker not in serialized
+
+    checks_payload = response["checks"]
+    assert isinstance(checks_payload, list)
+    checks = {check["name"]: check for check in checks_payload if isinstance(check, dict)}
+    detail = str(checks["plugin_validate"]["detail"])
+    assert "Validating plugin manifest: <claude-code-plugin>/.claude-plugin/plugin.json" in detail
+    assert "Invalid JSON syntax" in detail
+    assert "Validation failed" in detail
+
+    steps_payload = response["next_steps"]
+    assert isinstance(steps_payload, list)
+    step_checks = {step["check"]: step for step in steps_payload if isinstance(step, dict)}
+    validate_step = step_checks["plugin_validate"]
+    assert validate_step["command"] == "claude plugin validate <claude-code-plugin>"
+    assert "<claude-code-plugin>/.claude-plugin/plugin.json" in validate_step["detail"]
+    assert str(manifest) not in validate_step["detail"]
