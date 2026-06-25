@@ -1105,6 +1105,17 @@ CLAUDE_CODE_PROTECT_MODES = {
     },
 }
 
+_ARDUR_HOME_PLACEHOLDER = "<ardur-home>"
+_CLAUDE_CODE_PLUGIN_PLACEHOLDER = "<claude-code-plugin>"
+_PROJECT_PLACEHOLDER = "<your-project>"
+
+
+def _claude_code_plugin_detail(kind: str, suffix: str = "") -> str:
+    target = _CLAUDE_CODE_PLUGIN_PLACEHOLDER
+    if suffix:
+        target = f"{target}/{suffix}"
+    return f"expected {kind} at {target}"
+
 
 def _default_claude_plugin_dir() -> Path:
     cwd_candidate = Path.cwd() / "plugins" / "claude-code"
@@ -1123,37 +1134,37 @@ def _claude_code_plugin_checks(plugin_dir: Path) -> list[dict[str, object]]:
         {
             "name": "plugin_dir",
             "ok": plugin_dir.exists() and plugin_dir.is_dir(),
-            "detail": str(plugin_dir),
+            "detail": _claude_code_plugin_detail("directory"),
         },
         {
             "name": "plugin_manifest",
             "ok": (plugin_dir / ".claude-plugin" / "plugin.json").is_file(),
-            "detail": str(plugin_dir / ".claude-plugin" / "plugin.json"),
+            "detail": _claude_code_plugin_detail("file", ".claude-plugin/plugin.json"),
         },
         {
             "name": "plugin_hooks",
             "ok": (plugin_dir / "hooks" / "hooks.json").is_file(),
-            "detail": str(plugin_dir / "hooks" / "hooks.json"),
+            "detail": _claude_code_plugin_detail("file", "hooks/hooks.json"),
         },
         {
             "name": "pre_tool_use",
             "ok": (plugin_dir / "hooks" / "pre_tool_use").is_file(),
-            "detail": str(plugin_dir / "hooks" / "pre_tool_use"),
+            "detail": _claude_code_plugin_detail("file", "hooks/pre_tool_use"),
         },
         {
             "name": "post_tool_use",
             "ok": (plugin_dir / "hooks" / "post_tool_use").is_file(),
-            "detail": str(plugin_dir / "hooks" / "post_tool_use"),
+            "detail": _claude_code_plugin_detail("file", "hooks/post_tool_use"),
         },
         {
             "name": "subagent_start",
             "ok": (plugin_dir / "hooks" / "subagent_start").is_file(),
-            "detail": str(plugin_dir / "hooks" / "subagent_start"),
+            "detail": _claude_code_plugin_detail("file", "hooks/subagent_start"),
         },
         {
             "name": "subagent_stop",
             "ok": (plugin_dir / "hooks" / "subagent_stop").is_file(),
-            "detail": str(plugin_dir / "hooks" / "subagent_stop"),
+            "detail": _claude_code_plugin_detail("file", "hooks/subagent_stop"),
         },
     ]
 
@@ -1372,11 +1383,7 @@ def _write_private_text(path: Path, text: str) -> None:
             os.close(fd)
 
 
-def _claude_code_doctor_next_steps(
-    checks: list[dict[str, object]],
-    plugin: Path,
-    active_passport: Path,
-) -> list[dict[str, str]]:
+def _claude_code_doctor_next_steps(checks: list[dict[str, object]]) -> list[dict[str, str]]:
     by_name = {str(check["name"]): check for check in checks}
     steps: list[dict[str, str]] = []
     plugin_check_names = [
@@ -1396,7 +1403,10 @@ def _claude_code_doctor_next_steps(
             {
                 "check": "plugin_files",
                 "action": "repair_plugin_path",
-                "command": shlex.join(["ardur", "doctor-claude-code", "--plugin-dir", str(plugin)]),
+                "command": (
+                    "ardur doctor-claude-code --plugin-dir "
+                    f"{_CLAUDE_CODE_PLUGIN_PLACEHOLDER} --home {_ARDUR_HOME_PLACEHOLDER}"
+                ),
                 "detail": "Missing Claude Code plugin checks: " + ", ".join(missing_plugin_checks),
             }
         )
@@ -1418,18 +1428,10 @@ def _claude_code_doctor_next_steps(
             {
                 "check": "active_passport",
                 "action": "run_protect_claude_code",
-                "command": shlex.join(
-                    [
-                        "ardur",
-                        "protect",
-                        "claude-code",
-                        "--scope",
-                        "<your-project>",
-                        "--home",
-                        str(active_passport.parent),
-                        "--plugin-dir",
-                        str(plugin),
-                    ]
+                "command": (
+                    "ardur protect claude-code --scope "
+                    f"{_PROJECT_PLACEHOLDER} --home {_ARDUR_HOME_PLACEHOLDER} "
+                    f"--plugin-dir {_CLAUDE_CODE_PLUGIN_PLACEHOLDER}"
                 ),
                 "detail": "Create an active Mission Passport for the local Claude Code plugin.",
             }
@@ -1445,7 +1447,7 @@ def _claude_code_doctor_next_steps(
             {
                 "check": "plugin_validate",
                 "action": "validate_plugin",
-                "command": shlex.join(["claude", "plugin", "validate", str(plugin)]),
+                "command": f"claude plugin validate {_CLAUDE_CODE_PLUGIN_PLACEHOLDER}",
                 "detail": str(
                     plugin_validate_check.get("detail")
                     or "Claude Code plugin validation failed; inspect the validation output."
@@ -1462,13 +1464,13 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
     checks.append({
         "name": "claude_binary",
         "ok": bool(claude_binary),
-        "detail": claude_binary or "claude not found on PATH",
+        "detail": "claude found on PATH" if claude_binary else "claude not found on PATH",
     })
     active_passport = (home.expanduser() if home else DEFAULT_HOME) / "active_mission.jwt"
     checks.append({
         "name": "active_passport",
         "ok": active_passport.is_file(),
-        "detail": str(active_passport),
+        "detail": f"expected file at {_ARDUR_HOME_PLACEHOLDER}/active_mission.jwt",
     })
     if claude_binary and all(check["ok"] for check in checks[:5]):
         result = subprocess.run(
@@ -1491,7 +1493,7 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
     return {
         "ok": ok,
         "checks": checks,
-        "next_steps": [] if ok else _claude_code_doctor_next_steps(checks, plugin, active_passport),
+        "next_steps": [] if ok else _claude_code_doctor_next_steps(checks),
     }
 
 

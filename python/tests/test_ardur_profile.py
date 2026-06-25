@@ -1123,6 +1123,31 @@ def test_claude_code_doctor_reports_missing_plugin_files(tmp_path):
     assert "ardur doctor-claude-code" in step_checks["plugin_files"]["command"]
 
 
+def test_claude_code_doctor_missing_setup_uses_placeholder_only_diagnostics(tmp_path):
+    private_home = tmp_path / "private-home"
+    private_plugin = tmp_path / "private-plugin"
+
+    response = claude_code_doctor(plugin_dir=private_plugin, home=private_home)
+
+    assert response["ok"] is False
+    serialized = json.dumps(response, sort_keys=True)
+    for marker in (str(tmp_path), str(private_home), str(private_plugin), "/Users/", "/private/", "/tmp/"):
+        assert marker not in serialized
+
+    checks_payload = response["checks"]
+    assert isinstance(checks_payload, list)
+    checks = {check["name"]: check for check in checks_payload if isinstance(check, dict)}
+    assert "<claude-code-plugin>" in str(checks["plugin_dir"]["detail"])
+    assert "<claude-code-plugin>" in str(checks["plugin_manifest"]["detail"])
+    assert "<ardur-home>" in str(checks["active_passport"]["detail"])
+
+    steps_payload = response["next_steps"]
+    assert isinstance(steps_payload, list)
+    commands = [step["command"] for step in steps_payload if isinstance(step, dict)]
+    assert "ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in commands
+
+
 def test_claude_code_doctor_omits_next_steps_when_setup_is_healthy(tmp_path, monkeypatch):
     plugin_dir = tmp_path / "healthy-plugin"
     plugin_dir.mkdir()
