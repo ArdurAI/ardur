@@ -872,7 +872,20 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _read_payload(self) -> dict[str, Any]:
-        length = int(self.headers.get("content-length") or "0")
+        try:
+            length = int(self.headers.get("content-length") or "0")
+        except (TypeError, ValueError) as exc:
+            raise HubError(
+                "content-length must be a non-negative integer",
+                status=400,
+                code="invalid_content_length",
+            ) from exc
+        if length < 0:
+            raise HubError(
+                "content-length must be a non-negative integer",
+                status=400,
+                code="invalid_content_length",
+            )
         if length > MAX_BODY_BYTES:
             raise HubError("request body too large", status=413, code="body_too_large")
         raw = self.rfile.read(length)

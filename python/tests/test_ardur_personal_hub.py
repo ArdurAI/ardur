@@ -226,6 +226,25 @@ def test_hub_cors_origin_is_normalized_and_rejects_header_splitting():
     assert handler._allowed_cors_origin() is None
 
 
+@pytest.mark.parametrize("content_length", ["-1", "not-an-integer"])
+def test_hub_rejects_invalid_content_length_before_body_read(content_length):
+    handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "headers", {"content-length": content_length})
+
+    class ReadMustNotRun:
+        def read(self, length=-1):
+            raise AssertionError("invalid Content-Length must fail before body read")
+
+    setattr(handler, "rfile", ReadMustNotRun())
+
+    with pytest.raises(HubError) as excinfo:
+        handler._read_payload()
+
+    assert excinfo.value.status == 400
+    assert excinfo.value.code == "invalid_content_length"
+    assert "non-negative integer" in str(excinfo.value)
+
+
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
 
