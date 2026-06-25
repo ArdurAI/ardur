@@ -79,6 +79,68 @@ def _print_report_next_steps(report: dict) -> None:
             print(f"   {detail}")
 
 
+def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "fix_mission_file_and_restart",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Replace <mission.json> with a readable JSON object containing "
+                "agent_id, mission, and any intended mission constraints. Keep raw "
+                "local paths and file contents out of shared logs."
+            ),
+        }
+    ]
+
+
+def _start_mission_file_failure_condition(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, FileNotFoundError):
+        return (
+            "start_mission_file_missing",
+            "The --mission file could not be found. Provide an existing mission JSON file before starting Ardur.",
+        )
+    if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError)):
+        return (
+            "start_mission_file_malformed_json",
+            "The --mission file must be valid UTF-8 JSON containing a mission object.",
+        )
+    if isinstance(exc, PermissionError):
+        return (
+            "start_mission_file_unreadable",
+            "The --mission file could not be read. Check file permissions and retry with a readable mission JSON file.",
+        )
+    if isinstance(exc, IsADirectoryError):
+        return (
+            "start_mission_file_invalid",
+            "The --mission input must point to a mission JSON file, not a directory.",
+        )
+    if isinstance(exc, OSError):
+        return (
+            "start_mission_file_unreadable",
+            "The --mission file could not be read. Retry with a readable mission JSON file.",
+        )
+    return (
+        "start_mission_file_invalid",
+        "The --mission JSON object does not match Ardur's mission schema. Include required fields and valid values.",
+    )
+
+
+def _start_mission_file_failure_response(exc: Exception) -> dict:
+    condition, detail = _start_mission_file_failure_condition(exc)
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Ardur start could not load the mission file.",
+        "detail": detail,
+        "next_steps": _start_mission_file_failure_next_steps(condition),
+    }
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     proxy = GovernanceProxy(
@@ -90,7 +152,22 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     initial_session_id = None
     if args.mission:
-        mission, ttl_s, _ = load_mission_file(args.mission)
+        try:
+            mission, ttl_s, _ = load_mission_file(args.mission)
+        except (
+            FileNotFoundError,
+            PermissionError,
+            IsADirectoryError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            _print_json(_start_mission_file_failure_response(exc))
+            return 1
         token = issue_passport(mission, private_key, ttl_s=ttl_s)
         session = proxy.start_session(token)
         initial_session_id = session.jti
