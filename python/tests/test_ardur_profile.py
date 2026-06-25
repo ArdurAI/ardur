@@ -24,6 +24,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CLAUDE_CODE_PLUGIN_DIR = REPO_ROOT / "plugins" / "claude-code"
 
 
+def _copy_claude_code_plugin(tmp_path, name="claude-code-plugin"):
+    plugin_dir = tmp_path / name
+    shutil.copytree(CLAUDE_CODE_PLUGIN_DIR, plugin_dir)
+    return plugin_dir
+
+
+def _assert_no_protect_setup_artifacts(home, keys_dir):
+    assert not (home / "active_mission.jwt").exists()
+    assert not (home / "keys").exists()
+    assert not keys_dir.exists()
+    assert not (home / "claude-code-hook-python").exists()
+    assert not (home / "claude-code-pre_tool_use").exists()
+    assert not (home / "claude-code-pre_tool_use.sha256").exists()
+    assert not (home / "policies").exists()
+
+
 def _protect_args(**overrides):
     values = {
         "scope": None,
@@ -595,6 +611,101 @@ def test_protect_claude_code_missing_plugin_human_has_next_steps(tmp_path, capsy
     assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in captured.out
     assert str(tmp_path) not in captured.out
     assert not (tmp_path / "home" / "active_mission.jwt").exists()
+
+
+def test_protect_claude_code_invalid_plugin_manifest_json_fails_closed(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    keys_dir = tmp_path / "keys"
+    plugin_dir = _copy_claude_code_plugin(tmp_path, "invalid-manifest-plugin")
+    (plugin_dir / ".claude-plugin" / "plugin.json").write_text(
+        "{not valid plugin json",
+        encoding="utf-8",
+    )
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=True,
+            scope=project,
+            home=home,
+            keys_dir=keys_dir,
+            plugin_dir=plugin_dir,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "claude_code_plugin_invalid"
+    assert response["condition"] == "claude_code_plugin_invalid"
+    assert response["invalid_checks"] == ["plugin_manifest"]
+    assert "Invalid Claude Code plugin checks: plugin_manifest" in response["detail"]
+    assert "invalid JSON" in response["detail"]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "claude plugin validate <claude-code-plugin>" in commands
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in commands
+    assert str(tmp_path) not in captured.out
+    assert "{not valid plugin json" not in captured.out
+    _assert_no_protect_setup_artifacts(home, keys_dir)
+
+
+def test_protect_claude_code_invalid_plugin_hooks_human_fails_closed(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    keys_dir = tmp_path / "keys"
+    plugin_dir = _copy_claude_code_plugin(tmp_path, "invalid-hooks-plugin")
+    (plugin_dir / "hooks" / "hooks.json").write_text("{}", encoding="utf-8")
+
+    exit_code = cmd_protect_claude_code(
+        _protect_args(
+            json=False,
+            scope=project,
+            home=home,
+            keys_dir=keys_dir,
+            plugin_dir=plugin_dir,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    assert "Ardur Claude Code protection was not configured." in captured.out
+    assert "Claude Code plugin content is invalid." in captured.out
+    assert "Invalid Claude Code plugin checks: plugin_hooks" in captured.out
+    assert "Next steps:" in captured.out
+    assert "claude plugin validate <claude-code-plugin>" in captured.out
+    assert "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>" in captured.out
+    assert str(tmp_path) not in captured.out
+    _assert_no_protect_setup_artifacts(home, keys_dir)
+
+
+def test_protect_claude_code_valid_plugin_content_still_succeeds(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    keys_dir = tmp_path / "keys"
+    plugin_dir = _copy_claude_code_plugin(tmp_path, "valid-plugin")
+
+    result = protect_claude_code(
+        _protect_args(
+            scope=project,
+            home=home,
+            keys_dir=keys_dir,
+            plugin_dir=plugin_dir,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["plugin_dir"] == str(plugin_dir.resolve())
+    assert Path(str(result["active_passport"])).exists()
+    assert keys_dir.exists()
+    assert (home / "claude-code-hook-python").exists()
 
 
 def test_protect_claude_code_malformed_forbid_rules_json_has_next_steps(tmp_path, capsys):

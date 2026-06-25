@@ -1229,6 +1229,137 @@ def _protect_claude_code_plugin_incomplete_response(
     }
 
 
+_CLAUDE_CODE_REQUIRED_HOOK_EVENTS = (
+    "PreToolUse",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+)
+
+
+def _claude_code_plugin_json_object_check(path: Path, check_name: str, label: str) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    try:
+        raw = path.read_text("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, {
+            "name": check_name,
+            "detail": f"{label} could not be read as UTF-8 JSON ({exc.__class__.__name__}).",
+        }
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, {
+            "name": check_name,
+            "detail": f"{label} contains invalid JSON at line {exc.lineno}, column {exc.colno}.",
+        }
+    if not isinstance(parsed, dict):
+        return None, {
+            "name": check_name,
+            "detail": f"{label} must be a JSON object.",
+        }
+    return parsed, None
+
+
+def _claude_code_hooks_manifest_valid(hooks_manifest: dict[str, object]) -> bool:
+    hooks = hooks_manifest.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    for event_name in _CLAUDE_CODE_REQUIRED_HOOK_EVENTS:
+        event_entries = hooks.get(event_name)
+        if not isinstance(event_entries, list) or not event_entries:
+            return False
+        for event_entry in event_entries:
+            if not isinstance(event_entry, dict):
+                return False
+            command_hooks = event_entry.get("hooks")
+            if not isinstance(command_hooks, list) or not command_hooks:
+                return False
+            has_command_hook = False
+            for command_hook in command_hooks:
+                if not isinstance(command_hook, dict):
+                    return False
+                if (
+                    command_hook.get("type") == "command"
+                    and isinstance(command_hook.get("command"), str)
+                    and command_hook["command"].strip()
+                ):
+                    has_command_hook = True
+            if not has_command_hook:
+                return False
+    return True
+
+
+def _claude_code_plugin_content_checks(plugin_dir: Path) -> list[dict[str, object]]:
+    failures: list[dict[str, object]] = []
+    manifest, manifest_failure = _claude_code_plugin_json_object_check(
+        plugin_dir / ".claude-plugin" / "plugin.json",
+        "plugin_manifest",
+        "Claude Code plugin manifest",
+    )
+    if manifest_failure:
+        failures.append(manifest_failure)
+    elif manifest is not None:
+        missing_manifest_fields: list[str] = []
+        for field_name in ("name", "version"):
+            field_value = manifest.get(field_name)
+            if not isinstance(field_value, str) or not field_value.strip():
+                missing_manifest_fields.append(field_name)
+        if missing_manifest_fields:
+            failures.append({
+                "name": "plugin_manifest",
+                "detail": "Claude Code plugin manifest is missing non-empty fields: " + ", ".join(missing_manifest_fields) + ".",
+            })
+
+    hooks_manifest, hooks_failure = _claude_code_plugin_json_object_check(
+        plugin_dir / "hooks" / "hooks.json",
+        "plugin_hooks",
+        "Claude Code hooks manifest",
+    )
+    if hooks_failure:
+        failures.append(hooks_failure)
+    elif hooks_manifest is not None and not _claude_code_hooks_manifest_valid(hooks_manifest):
+        failures.append({
+            "name": "plugin_hooks",
+            "detail": (
+                "Claude Code hooks manifest must define command hooks for "
+                + ", ".join(_CLAUDE_CODE_REQUIRED_HOOK_EVENTS)
+                + "."
+            ),
+        })
+    return failures
+
+
+def _protect_claude_code_plugin_invalid_response(
+    failed_checks: list[dict[str, object]],
+) -> dict[str, object]:
+    invalid_checks = [str(check["name"]) for check in failed_checks]
+    details = [str(check.get("detail", "")).strip() for check in failed_checks if str(check.get("detail", "")).strip()]
+    detail = "Invalid Claude Code plugin checks: " + ", ".join(invalid_checks)
+    if details:
+        detail += ". " + " ".join(details)
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "claude_code_plugin_invalid",
+        "condition": "claude_code_plugin_invalid",
+        "message": "Claude Code plugin content is invalid.",
+        "detail": detail,
+        "invalid_checks": invalid_checks,
+        "next_steps": [
+            {
+                "action": "validate_plugin",
+                "command": "claude plugin validate <claude-code-plugin>",
+                "detail": "Validate the local Claude Code plugin manifest and hook schema before configuring protection.",
+            },
+            {
+                "action": "rerun_protect",
+                "command": "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>",
+                "detail": "After the plugin content is corrected, rerun protection for the project folder.",
+            },
+        ],
+    }
+
+
 class _ProtectPolicyInputError(ValueError):
     def __init__(self, option: str, condition: str, detail: str) -> None:
         super().__init__(detail)
@@ -1675,6 +1806,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
     if failed_plugin_checks:
         return _protect_claude_code_plugin_incomplete_response(failed_plugin_checks)
+    invalid_plugin_checks = _claude_code_plugin_content_checks(plugin_dir)
+    if invalid_plugin_checks:
+        return _protect_claude_code_plugin_invalid_response(invalid_plugin_checks)
     # Validate policy input files before issuing keys/tokens so setup failures
     # remain local, structured, and free of unnecessary generated artifacts.
     try:
