@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur is the runtime governance and evidence layer for AI agents."
 source_path: "README.md"
-source_sha256: "ed71d4f4400c5d61e3847e47e66eae4cf3d22764309991b65380edcbb759b99b"
+source_sha256: "ec39877b990fa4c65d23ff265d7b5b37a7b60653922ead9cd1b9c1304ab910a5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
