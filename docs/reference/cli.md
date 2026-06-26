@@ -513,6 +513,18 @@ They do not call Gemini, contact a provider, claim visibility into
 provider-hidden actions, or require copying raw tokens or local private paths
 into shared logs.
 
+If stdin is a valid JSON object but no active Mission Passport is available,
+the command also fails closed with exit code `2` and stdout JSON containing
+`status: "deny"`, `block: true`, matching `condition`/`error` fields set to
+`gemini_cli_hook_missing_active_passport`, and a `claim_boundary` stating that
+no receipt was emitted because no valid Mission Passport was available. The
+response emits no receipt before a valid passport exists, keeps stderr empty,
+emits no traceback, and includes placeholder-only `next_steps` for issuing a
+local Mission Passport, setting `ARDUR_MISSION_PASSPORT`, and rerunning
+`ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>`.
+This missing-passport recovery path is local/no-key guidance only; it does not
+call Gemini, contact a provider, or claim provider-hidden visibility.
+
 `status=allow` means Ardur recorded evidence and left Gemini/user permission
 flow authoritative. `status=deny` and `status=unknown` return a blocking result
 for wrappers that fail closed. Unknown results are used for unmapped Gemini tool
@@ -564,6 +576,19 @@ and print a JSON result.
 ```text
 ardur codex-app-server-event [--keys-dir DIR]
 ```
+
+If stdin is a valid JSON object but no active Mission Passport is available,
+the command fails closed with exit code `2` and stdout JSON containing
+`status: "deny"`, `block: true`, matching `condition`/`error` fields set to
+`codex_app_server_event_missing_active_passport`, and a `claim_boundary` stating
+that no receipt was emitted because no valid Mission Passport was available. The
+response emits no receipt before a valid passport exists, keeps stderr empty,
+emits no traceback, and includes placeholder-only `next_steps` for issuing a
+local Mission Passport, setting `ARDUR_MISSION_PASSPORT`, and rerunning
+`ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>`. This
+missing-passport recovery path is local/no-key guidance only; it does not call
+Codex, contact a provider, prove live Codex cloud behavior, or claim
+provider-hidden visibility.
 
 `status=allow` means Ardur recorded local evidence and left Codex/user
 permission flow authoritative. `status=deny` and `status=unknown` return a
