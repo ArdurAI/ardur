@@ -51,6 +51,12 @@ REQUIRED_VECTOR_CLASSES = {
         "unknown",
     },
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
+    "claude-action-token-cleanup-timeout-best-effort": {
+        "cloud_agent_run",
+        "session_context",
+        "deployment_context",
+        "unknown",
+    },
     "gemini-at-file-placeholder-redaction": {"host_runtime_event", "session_context", "unknown"},
     "gemini-tools-core-config-migration": {"policy_input", "session_context", "unknown"},
     "gemini-cli-tool-output-trust-governance-v0490": {
@@ -184,6 +190,117 @@ def test_host_adoption_vectors_preserve_unknown_boundaries_and_redaction() -> No
 
     codex_delete = next(row for row in rows if row["vector_id"] == "codex-deletion-retained-ardur-receipts")
     assert codex_delete["ardur_mapping"]["receipt_policy"] == "retain_ardur_receipts_after_host_delete_request"
+
+
+def test_claude_action_token_cleanup_vector_preserves_source_only_boundaries() -> None:
+    """Claude Code Action token cleanup semantics must stay no-key and non-live."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "claude-action-token-cleanup-timeout-best-effort"
+    )
+
+    assert row["source_family"] == "claude-code-action"
+    assert row["source_pin"]["kind"] == "action-manifest-blob"
+    assert "b18daa77b5805daf4872269eaa6c74a07c3d8236" in row["source_pin"]["value"]
+    assert "f48353f08afa8cfd0c19a0727e1b27574f6a6f5b" in row["source_pin"]["value"]
+    assert "87ca609725e2a8dbbffa82c3610b6ff741d7fcabf54c74d69a7a11c0123bdbde" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "ad35c62e9c295b49c27510a494ed37973865641b87fc226a97eaefc8cc5492cb"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "605235355115e21676cd2695aabf87d89a4748479a7be5336f4df0fbae2f0476"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "f0efe920244a37ac3ffabe3926d68ecb4c20cc3149678db8874daa92fff6757c"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "GitHub installation-token cleanup",
+        "--connect-timeout 5",
+        "--max-time 10",
+        "${GITHUB_API_URL:-https://api.github.com}/installation/token",
+        "best-effort via || true",
+    ):
+        assert phrase in signal
+
+    assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[
+        "claude-action-token-cleanup-timeout-best-effort"
+    ]
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_cloud_agent_cleanup_context"
+    assert mapping["cloud_cleanup_surface"] == "github_installation_token_delete_manifest_step"
+    assert mapping["timeout_policy"] == "curl_connect_timeout_5_and_max_time_10"
+    assert mapping["failure_semantics"] == "best_effort_delete_failure_ignored_via_or_true"
+    assert mapping["token_material"] == "placeholder_and_digest_only_no_token_values"
+    assert mapping["previous_action_yml_blob"] == "b18daa77b5805daf4872269eaa6c74a07c3d8236"
+    assert mapping["previous_action_yml_sha256"] == (
+        "2763fabf777e37a40bf06cc93b544dfe12d7d1144a450d6331a4a009f151b501"
+    )
+    assert mapping["current_action_yml_blob"] == "f48353f08afa8cfd0c19a0727e1b27574f6a6f5b"
+    assert mapping["current_action_yml_sha256"] == (
+        "87ca609725e2a8dbbffa82c3610b6ff741d7fcabf54c74d69a7a11c0123bdbde"
+    )
+    assert mapping["focused_probe_sha256"] == (
+        "d4b7945aec4f9ee7b92462316de9a98ab8fc7f137960f3df4222bfc5e67e69bf"
+    )
+    assert mapping["source_index_sha256"] == (
+        "ea26c3607f4d282547dc6f09e166d6467d8b86200b91975f8028682fef2a8e08"
+    )
+    assert mapping["matrix_review_boundary"] == "no_live_claude_action_or_token_revocation_validation"
+
+    serialized = json.dumps(row, sort_keys=True)
+    for forbidden in ("Bearer", "github_pat_", "raw-secret-value"):
+        assert forbidden not in serialized
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_claude_action_execution",
+            "actual_github_token_deletion",
+            "actual_token_revocation",
+            "provider_hidden_behavior",
+            "server_side_actions",
+            "workflow_network_behavior",
+            "token_value_handling",
+            "retry_backoff_behavior_beyond_manifest",
+            "runtime_kernel_side_effects",
+            "live_policy_enforcement",
+            "public_readiness",
+            "growth_proof",
+            "action_metadata_trust_root",
+            "credentials",
+        }
+    )
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live claude code action",
+        "actual github token deletion",
+        "token revocation",
+        "provider-hidden/server-side",
+        "workflow network",
+        "runtime/kernel",
+        "live policy enforcement",
+        "public readiness",
+        "growth proof",
+        "ardur trust root",
+        "credential or token value",
+    ):
+        assert phrase in not_claimed
+    claim_boundary = row["claim_boundary"].lower()
+    assert "does not prove live claude code action" in claim_boundary
+    assert "actual github token deletion/revocation" in claim_boundary
+    assert "provider-hidden/server-side" in claim_boundary
+    assert "workflow network behavior" in claim_boundary
+    assert "runtime/kernel side effects" in claim_boundary
+    assert "public readiness/growth proof" in claim_boundary
+    assert "ardur trust root" in claim_boundary
+    assert "credential/token handling" in claim_boundary
 
 
 def test_gemini_cli_0490_tool_output_trust_governance_vector_preserves_source_boundaries() -> None:
