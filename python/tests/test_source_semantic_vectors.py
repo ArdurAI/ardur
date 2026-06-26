@@ -53,6 +53,14 @@ REQUIRED_VECTOR_CLASSES = {
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "gemini-at-file-placeholder-redaction": {"host_runtime_event", "session_context", "unknown"},
     "gemini-tools-core-config-migration": {"policy_input", "session_context", "unknown"},
+    "gemini-cli-tool-output-trust-governance-v0490": {
+        "policy_input",
+        "session_context",
+        "host_runtime_event",
+        "deployment_context",
+        "sdk_output_metadata",
+        "unknown",
+    },
     "openai-agents-sdk-0176-preapproval-custom-data": {
         "host_runtime_event",
         "policy_input",
@@ -176,6 +184,137 @@ def test_host_adoption_vectors_preserve_unknown_boundaries_and_redaction() -> No
 
     codex_delete = next(row for row in rows if row["vector_id"] == "codex-deletion-retained-ardur-receipts")
     assert codex_delete["ardur_mapping"]["receipt_policy"] == "retain_ardur_receipts_after_host_delete_request"
+
+
+def test_gemini_cli_0490_tool_output_trust_governance_vector_preserves_source_boundaries() -> None:
+    """Gemini CLI 0.49.0 governance/output context must stay source-semantic only."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "gemini-cli-tool-output-trust-governance-v0490"
+    )
+
+    assert row["source_family"] == "gemini-cli"
+    assert row["source_pin"]["kind"] == "package-release"
+    assert "@google/gemini-cli@0.49.0" in row["source_pin"]["value"]
+    assert "release v0.49.0" in row["source_pin"]["value"]
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "ad35c62e9c295b49c27510a494ed37973865641b87fc226a97eaefc8cc5492cb"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "29d0f2b1d7b846d2e770acb9a7cf85a4d46599137e2b0eec3a1a7b11c1e23729"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "ac6e8494a85fc444752ba4232978545a22fb6de74a2b7f97827fa40f3b485032"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "standardized tool output formatting",
+        "workflow/policy configuration",
+        "zero-quota fail-fast",
+        "shell-wrapper normalization",
+        "skill-install path traversal prevention",
+        "pending tools/trust overrides",
+        "GDC air-gapped Service Identity",
+        "tmux/background detection",
+        "static eval source analyzer",
+        "eval inventory JSON output",
+    ):
+        assert phrase in signal
+
+    assert "tool_output_metadata" not in row["evidence_classes"]
+    assert "sdk_output_metadata" in row["evidence_classes"]
+    assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[
+        "gemini-cli-tool-output-trust-governance-v0490"
+    ]
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_governance_output_context_only"
+    assert mapping["output_metadata"] == (
+        "standardized_tool_output_formatting_and_eval_inventory_json_output_source_context"
+    )
+    assert mapping["policy_material"] == (
+        "workflow_policy_configuration_pending_tools_and_trust_overrides_source_context"
+    )
+    assert mapping["runtime_event_context"] == (
+        "zero_quota_fail_fast_shell_wrapper_tmux_background_and_skill_install_source_signals"
+    )
+    assert mapping["deployment_context"] == "gdc_air_gapped_service_identity_source_context"
+    assert mapping["eval_context"] == "static_eval_source_analyzer_and_inventory_output_metadata"
+    assert mapping["release_body_sha256"] == (
+        "6c360acafbd49f4a1aff37ed816905f2316ef522fabeb27887c9f535652ceac5"
+    )
+    assert mapping["npm_integrity"] == (
+        "sha512-S0b6nfAf+lHbSPMKRuQziU1/710a7f/Jag2mZ7N1J1b48qxoCmjwNCJJ7XPEv/ropvDqkCjJupE32qcw+ym3jQ=="
+    )
+    assert mapping["npm_shasum"] == "14e8295a8eb31188402f09747116161b63a8353e"
+    assert mapping["tarball_sha256"] == (
+        "ce07c3ab62de761efa92c0cd16b5efcb869a16ce0cb04befed8f1f22b1d1379a"
+    )
+    assert mapping["focused_probe_sha256"] == (
+        "88d598100f907bd74862d0f95a25ba57e6ec71f78bf1549322c6b3b8d0779a0f"
+    )
+    assert mapping["source_index_sha256"] == (
+        "a89787881e0b1f2382fc0b9911c8fddbc2fa564f2b68cb5c9ae262b6d67abd31"
+    )
+    assert mapping["matrix_review_boundary"] == "no_live_gemini_fixture_or_provider_behavior_change"
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_gemini_cli_behavior",
+            "live_gemini_account_behavior",
+            "live_provider_behavior",
+            "provider_hidden_behavior",
+            "server_side_tool_calls",
+            "actual_shell_behavior",
+            "path_traversal_exploitability",
+            "live_tool_behavior",
+            "live_mcp_behavior",
+            "auth_service_identity_behavior",
+            "quota_behavior",
+            "network_side_effects",
+            "runtime_side_effects",
+            "live_policy_enforcement",
+            "live_eval_execution",
+            "benchmark_public_readiness",
+            "growth_proof",
+            "ebpf_kernel_capture",
+            "universal_cli_capture",
+            "credentials",
+            "gemini_settings_trust_root",
+        }
+    )
+
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live gemini cli",
+        "provider-hidden",
+        "server-side tool calls",
+        "path traversal",
+        "tool/mcp behavior",
+        "service identity",
+        "quota",
+        "network/runtime side effects",
+        "policy enforcement",
+        "eval execution",
+        "public readiness",
+        "growth proof",
+        "ebpf/kernel",
+        "universal cli",
+        "trust root",
+    ):
+        assert phrase in not_claimed
+
+    claim_boundary = row["claim_boundary"].lower()
+    assert "does not prove live gemini cli" in claim_boundary
+    assert "provider-hidden/server-side" in claim_boundary
+    assert "shell/path traversal/tool/mcp/auth/quota/network/runtime/policy/eval" in claim_boundary
+    assert "public readiness/growth" in claim_boundary
+    assert "ebpf/kernel/universal cli" in claim_boundary
+    assert "trust overrides as ardur trust root" in claim_boundary
 
 
 def test_openai_agents_sdk_0176_vector_preserves_source_semantic_boundaries() -> None:
