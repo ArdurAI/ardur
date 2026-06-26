@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "2a76fef0f70291c240f70d24fc69173f0ad88c732257f2fa5b5c0bdb3a2aa83c"
+source_sha256: "c74e0d2d6ec937d0aa62f45aabdefd409f52dfd53133b07c298253f8dbfea471"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -429,6 +429,16 @@ placeholder-only `next_steps` such as
 `ardur doctor-claude-code --plugin-dir <claude-code-plugin> --home <ardur-home>`;
 human output prints the same recovery guidance without a Python traceback or raw
 local temp paths.
+
+If the selected plugin directory is present but local plugin-content validation
+fails, the command exits nonzero before writing `active_mission.jwt`, keys, or
+hook artifacts. JSON output includes `ok: false`,
+`error: "claude_code_plugin_invalid"`,
+`condition: "claude_code_plugin_invalid"`, stable `invalid_checks` such as
+`plugin_manifest`, and placeholder-only `next_steps`; human output prints the
+same recovery guidance without a traceback or raw local temp paths. This is
+local/no-key validation of the supplied plugin directory only; it does not prove
+live Claude provider behavior or complete plugin schema parity.
 
 Policy input flags are local setup inputs for additional policy backends:
 `--forbid-rules FILE` loads forbid-rules JSON, `--cedar-policy FILE` loads a
