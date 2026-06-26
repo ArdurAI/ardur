@@ -38,6 +38,13 @@ REQUIRED_VECTOR_CLASSES = {
         "deployment_context",
         "unknown",
     },
+    "codex-action-user-sandbox-policy-context": {
+        "cloud_agent_run",
+        "policy_input",
+        "session_context",
+        "deployment_context",
+        "unknown",
+    },
     "claude-permission-grammar-nested-precedence": {"policy_input", "session_context", "unknown"},
     "claude-code-mcp-directory-resource-listing-v2186": {
         "host_runtime_event",
@@ -53,6 +60,13 @@ REQUIRED_VECTOR_CLASSES = {
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "claude-action-token-cleanup-timeout-best-effort": {
         "cloud_agent_run",
+        "session_context",
+        "deployment_context",
+        "unknown",
+    },
+    "claude-action-actor-plugin-policy-context": {
+        "cloud_agent_run",
+        "policy_input",
         "session_context",
         "deployment_context",
         "unknown",
@@ -301,6 +315,167 @@ def test_claude_action_token_cleanup_vector_preserves_source_only_boundaries() -
     assert "public readiness/growth proof" in claim_boundary
     assert "ardur trust root" in claim_boundary
     assert "credential/token handling" in claim_boundary
+
+
+def test_action_manifest_actor_plugin_policy_vectors_preserve_source_boundaries() -> None:
+    """Action manifest actor/plugin/user policy context must stay no-key and non-live."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    by_id = {str(row["vector_id"]): row for row in rows}
+    common_unknowns = {
+        "live_github_action_execution",
+        "actual_actor_identity",
+        "permission_enforcement",
+        "repository_write_permission_state",
+        "token_values",
+        "credential_values",
+        "workflow_secret_values",
+        "network_side_effects",
+        "provider_hidden_behavior",
+        "server_side_actions",
+        "runtime_kernel_side_effects",
+        "action_runner_side_effects",
+        "public_readiness",
+        "growth_proof",
+        "action_metadata_trust_root",
+    }
+    expected = {
+        "claude-action-actor-plugin-policy-context": {
+            "source_family": "claude-code-action",
+            "blob": "f48353f08afa8cfd0c19a0727e1b27574f6a6f5b",
+            "content_sha256": "87ca609725e2a8dbbffa82c3610b6ff741d7fcabf54c74d69a7a11c0123bdbde",
+            "proof_role": "source_semantic_cloud_action_policy_context",
+            "terms": {
+                "allowed_bots",
+                "allowed_non_write_users",
+                "include_comments_by_actor",
+                "exclude_comments_by_actor",
+                "trigger_phrase",
+                "assignee_trigger",
+                "label_trigger",
+                "plugins",
+                "plugin_marketplaces",
+                "path_to_claude_code_executable",
+                "path_to_bun_executable",
+                "execution_file",
+                "branch_name",
+                "structured_output",
+                "session_id",
+                "output-boundary context",
+            },
+            "unknowns": {
+                "live_claude_action_execution",
+                "actual_comment_author_identity",
+                "plugin_marketplace_fetch_contents",
+                "plugin_execution",
+            },
+            "not_claimed_phrases": {
+                "no live github action",
+                "claude code action",
+                "comment-author identity",
+                "plugin marketplace",
+                "plugin execution",
+                "trust root",
+            },
+            "boundary_phrases": {
+                "does not prove live claude code action",
+                "plugin marketplace contents/execution",
+                "action metadata as ardur trust root",
+            },
+        },
+        "codex-action-user-sandbox-policy-context": {
+            "source_family": "codex",
+            "blob": "da0cef2e1b64267612b860993cae3680fff08dd1",
+            "content_sha256": "100645601a99d1c432997b3f656d4dba11b7af66e79e269c5d7fac38ed4c3a66",
+            "proof_role": "source_semantic_codex_action_policy_context",
+            "terms": {
+                "codex-user",
+                "allow-users",
+                "allow-bots",
+                "allow-bot-users",
+                "sandbox",
+                "safety-strategy",
+                "output-schema",
+                "output-schema-file",
+                "codex-home",
+                "working-directory",
+                "responses-api-endpoint",
+                "prompt",
+                "prompt-file",
+                "output-file",
+                "final-message",
+                "output-boundary context",
+            },
+            "unknowns": {
+                "live_codex_action_execution",
+                "live_sandbox_enforcement",
+                "live_output_schema_validation",
+                "universal_cli_capture",
+            },
+            "not_claimed_phrases": {
+                "no live github action",
+                "codex action",
+                "sandbox enforcement",
+                "output-schema validation",
+                "universal cli",
+                "trust root",
+            },
+            "boundary_phrases": {
+                "does not prove live codex action",
+                "sandbox or output-schema enforcement",
+                "package/release readiness",
+                "action metadata as ardur trust root",
+            },
+        },
+    }
+
+    for vector_id, expected_values in expected.items():
+        row = by_id[vector_id]
+        assert row["source_family"] == expected_values["source_family"]
+        assert row["source_pin"]["kind"] == "action-manifest-blob"
+        assert expected_values["blob"] in row["source_pin"]["value"]
+        assert expected_values["content_sha256"] in row["source_pin"]["value"]
+        assert row["source_pin"]["source_snapshot_sha256"] == (
+            "3e116a585fca2d28c0ec676ec1f0aaf23d4c34f9dd4df6468d7761552771afe6"
+        )
+        assert row["source_pin"]["source_matrix_sha256"] == (
+            "be6971e4ec5dbccd194c05ccedbf2a4cc00aaa8d01bf03a786f69a922f4e4d9f"
+        )
+        assert row["source_pin"]["review_sha256"] == (
+            "aa6cd8737f37df61488ba2521597eca795cb46f0000a179db38c26badf18e212"
+        )
+        assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[vector_id]
+
+        serialized = json.dumps(row, sort_keys=True)
+        for term in expected_values["terms"]:
+            assert term in serialized
+        mapping = row["ardur_mapping"]
+        assert mapping["proof_role"] == expected_values["proof_role"]
+        assert mapping["source_index_sha256"] == (
+            "3e116a585fca2d28c0ec676ec1f0aaf23d4c34f9dd4df6468d7761552771afe6"
+        )
+        assert mapping["parent_matrix_sha256"] == (
+            "be6971e4ec5dbccd194c05ccedbf2a4cc00aaa8d01bf03a786f69a922f4e4d9f"
+        )
+        assert mapping["review_sha256"] == (
+            "aa6cd8737f37df61488ba2521597eca795cb46f0000a179db38c26badf18e212"
+        )
+        assert "not_live" in mapping["output_material"] or "not_live" in mapping["matrix_review_boundary"]
+        assert mapping["credential_material"] == "field_names_or_placeholders_only_no_secret_values"
+        assert set(row["unknown_boundaries"]).issuperset(
+            common_unknowns | expected_values["unknowns"]
+        )
+        not_claimed = " ".join(row["not_claimed"]).lower()
+        for phrase in (
+            expected_values["not_claimed_phrases"]
+            | {"actor identity", "permission enforcement", "token", "credential", "workflow-secret"}
+        ):
+            assert phrase in not_claimed
+        claim_boundary = row["claim_boundary"].lower()
+        for phrase in expected_values["boundary_phrases"]:
+            assert phrase in claim_boundary
+        for forbidden in ("Bearer", "github_pat_", "raw-secret-value"):
+            assert forbidden not in serialized
 
 
 def test_gemini_cli_0490_tool_output_trust_governance_vector_preserves_source_boundaries() -> None:
