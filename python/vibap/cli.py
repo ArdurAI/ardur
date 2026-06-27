@@ -69,7 +69,12 @@ from .shareable_redaction import path_aliases, redact_local_path_text
 def _print_json(payload: dict) -> None:
     """Emit a structured CLI response to stdout without using a logging sink."""
 
-    sys.stdout.write(json.dumps(payload, indent=2))
+    # This is a command response, not an application log. Some CLI commands
+    # intentionally return freshly generated local tokens to the invoking user,
+    # while setup/hub recovery paths return non-secret condition codes such as
+    # ``personal_home_not_directory``. Keep stdout explicit and suppress CodeQL's
+    # clear-text-logging false positive at the response sink.
+    sys.stdout.write(json.dumps(payload, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
     sys.stdout.write("\n")
 
 
