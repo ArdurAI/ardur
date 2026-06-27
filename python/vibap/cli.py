@@ -79,7 +79,7 @@ def _personal_home_error_code() -> str:
 
 
 def _home_not_directory_condition() -> str:
-    return "home_not_directory"
+    return "path_not_directory"
 
 
 def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
@@ -87,28 +87,28 @@ def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
         {
             "condition": condition,
             "action": "choose_personal_home_directory",
-            "command": "ardur setup --home <ardur-home>",
+            "command": "ardur setup --home <ardur-dir>",
             "detail": (
-                "Choose a directory path for the local Ardur Personal home. If the "
-                "selected path is an existing file, move it aside or pick a different "
+                "Choose a directory path for local Ardur state. If the selected "
+                "path is an existing file, move it aside or pick a different "
                 "directory before setup."
             ),
         },
         {
             "condition": condition,
             "action": "start_personal_hub_after_setup",
-            "command": "ardur hub --home <ardur-home>",
+            "command": "ardur hub --home <ardur-dir>",
             "detail": (
-                "Start the loopback Hub only after the selected home path is a directory. "
+                "Start the loopback Hub only after the selected path is a directory. "
                 "Keep raw local paths, tokens, and receipt locations out of shared logs."
             ),
         },
         {
             "condition": condition,
             "action": "rerun_doctor",
-            "command": "ardur doctor --home <ardur-home>",
+            "command": "ardur doctor --home <ardur-dir>",
             "detail": (
-                "Re-run local setup diagnostics after choosing a valid home directory. "
+                "Re-run local setup diagnostics after choosing a valid directory. "
                 "This guidance is local/no-key recovery only."
             ),
         },
@@ -122,9 +122,9 @@ def _home_not_directory_response() -> dict:
         "error": condition,
         "error_code": condition,
         "condition": condition,
-        "message": "Ardur home must be a directory.",
+        "message": "Ardur setup path must be a directory.",
         "detail": (
-            "The selected Ardur home path already exists as a file or other "
+            "The selected Ardur setup path already exists as a file or other "
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
         "next_steps": _home_not_directory_next_steps(condition),

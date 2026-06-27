@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f241c1c75e1335161cd5a4563738084aeff45d54ac84e8e1ce09542bbe06ce5d"
+source_sha256: "410eee344448b01967bbb4175caa54e6363fcb4e3949d41cd093de9fe9c305f7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -144,8 +144,8 @@ ardur hub [--host HOST] [--port PORT] [--home DIR]
 If `--home` points to an existing file instead of a directory, `ardur hub`
 fails closed before starting a server. The command exits `1` and writes
 parseable stdout JSON with `ok: false`, stable `condition`/`error` values, and
-`error_code: home_not_directory`; stderr stays empty, no traceback is
-emitted, `next_steps` uses placeholders such as `<ardur-home>`, and the failure
+`error_code: path_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
 
 See [Personal Hub HTTP API](/__ardur_internal__/source/docs/reference/personal-hub-api/) for the endpoints exposed.
@@ -172,8 +172,8 @@ If `--home` points to an existing file instead of a directory, `ardur setup`
 fails closed before writing setup state, generating or printing a token, or
 installing launch files. The command exits `1` and writes parseable stdout JSON
 with `ok: false`, stable `condition`/`error` values, and
-`error_code: home_not_directory`; stderr stays empty, no traceback is
-emitted, `next_steps` uses placeholders such as `<ardur-home>`, and the failure
+`error_code: path_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
 
 ### `ardur status`
