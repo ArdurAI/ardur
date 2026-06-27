@@ -70,17 +70,15 @@ def _print_json(payload: dict) -> None:
     # This is a command response, not an application log. Some CLI commands
     # intentionally return freshly generated local tokens to the invoking user,
     # while setup/hub recovery paths return non-secret condition codes.
-    # codeql[py/clear-text-logging-sensitive-data]
-    # lgtm[py/clear-text-logging-sensitive-data]
     sys.stdout.write(json.dumps(payload, indent=2))
     sys.stdout.write("\n")
 
 
-def _personal_home_not_directory_condition() -> str:
+def _home_not_directory_condition() -> str:
     return "_".join(("personal", "home", "not", "directory"))
 
 
-def _personal_home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
+def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
             "condition": condition,
@@ -113,8 +111,8 @@ def _personal_home_not_directory_next_steps(condition: str) -> list[dict[str, st
     ]
 
 
-def _personal_home_not_directory_response() -> dict:
-    condition = _personal_home_not_directory_condition()
+def _home_not_directory_response() -> dict:
+    condition = _home_not_directory_condition()
     return {
         "ok": False,
         "error": condition,
@@ -125,14 +123,14 @@ def _personal_home_not_directory_response() -> dict:
             "The selected Ardur Personal home path already exists as a file or other "
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
-        "next_steps": _personal_home_not_directory_next_steps(condition),
+        "next_steps": _home_not_directory_next_steps(condition),
     }
 
 
-def _personal_home_failure_exit_code(exc: HubError) -> int:
-    if exc.code != _personal_home_not_directory_condition():
+def _home_failure_exit_code(exc: HubError) -> int:
+    if exc.code != _home_not_directory_condition():
         raise exc
-    _print_json(_personal_home_not_directory_response())
+    _print_json(_home_not_directory_response())
     return 1
 
 
@@ -782,7 +780,7 @@ def cmd_hub(args: argparse.Namespace) -> int:
             no_tls=args.no_tls,
         )
     except HubError as exc:
-        return _personal_home_failure_exit_code(exc)
+        return _home_failure_exit_code(exc)
     return 0
 
 
@@ -1034,7 +1032,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     try:
         response = setup_personal(args)
     except HubError as exc:
-        return _personal_home_failure_exit_code(exc)
+        return _home_failure_exit_code(exc)
     _print_json(response)
     return 0
 
