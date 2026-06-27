@@ -278,8 +278,8 @@ def test_setup_existing_file_home_fails_closed_without_path_leak(tmp_path, capsy
     assert rc == 1
     assert captured.err == ""
     assert result["ok"] is False
-    assert result["condition"] == "personal_home_not_directory"
-    assert result["error_code"] == "personal_home_not_directory"
+    assert result["condition"] == "home_not_directory"
+    assert result["error_code"] == "home_not_directory"
     assert result["next_steps"]
     next_steps_json = json.dumps(result["next_steps"])
     assert "ardur setup --home <ardur-home>" in next_steps_json
@@ -327,8 +327,8 @@ def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_lea
     assert rc == 1
     assert captured.err == ""
     assert result["ok"] is False
-    assert result["condition"] == "personal_home_not_directory"
-    assert result["error_code"] == "personal_home_not_directory"
+    assert result["condition"] == "home_not_directory"
+    assert result["error_code"] == "home_not_directory"
     next_steps_json = json.dumps(result["next_steps"])
     assert "ardur hub --home <ardur-home>" in next_steps_json
     assert "ardur setup --home <ardur-home>" in next_steps_json

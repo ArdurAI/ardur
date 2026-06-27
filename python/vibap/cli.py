@@ -74,8 +74,12 @@ def _print_json(payload: dict) -> None:
     sys.stdout.write("\n")
 
 
-def _home_not_directory_condition() -> str:
+def _personal_home_error_code() -> str:
     return "_".join(("personal", "home", "not", "directory"))
+
+
+def _home_not_directory_condition() -> str:
+    return "home_not_directory"
 
 
 def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
@@ -95,8 +99,8 @@ def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
             "action": "start_personal_hub_after_setup",
             "command": "ardur hub --home <ardur-home>",
             "detail": (
-                "Start the loopback Hub only after the Personal home path is a directory. "
-                "Keep raw local paths, Hub tokens, and receipt locations out of shared logs."
+                "Start the loopback Hub only after the selected home path is a directory. "
+                "Keep raw local paths, tokens, and receipt locations out of shared logs."
             ),
         },
         {
@@ -118,9 +122,9 @@ def _home_not_directory_response() -> dict:
         "error": condition,
         "error_code": condition,
         "condition": condition,
-        "message": "Ardur Personal home must be a directory.",
+        "message": "Ardur home must be a directory.",
         "detail": (
-            "The selected Ardur Personal home path already exists as a file or other "
+            "The selected Ardur home path already exists as a file or other "
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
         "next_steps": _home_not_directory_next_steps(condition),
@@ -128,7 +132,7 @@ def _home_not_directory_response() -> dict:
 
 
 def _home_failure_exit_code(exc: HubError) -> int:
-    if exc.code != _home_not_directory_condition():
+    if exc.code != _personal_home_error_code():
         raise exc
     _print_json(_home_not_directory_response())
     return 1
