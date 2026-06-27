@@ -15,6 +15,23 @@ def _run_cli_and_read_json(argv: list[str], capsys) -> tuple[int, dict]:
     return rc, json.loads(captured.out)
 
 
+def _write_valid_mission_file(path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "agent_id": "log-path-test-agent",
+                "mission": "exercise log path validation",
+                "allowed_tools": ["read_file"],
+                "forbidden_tools": ["delete_file"],
+                "resource_scope": [],
+                "max_tool_calls": 5,
+                "max_duration_s": 60,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_print_json_uses_stdout_write_instead_of_print(monkeypatch, capsys):
     def fail_if_print_is_used(*_args, **_kwargs):
         raise AssertionError("_print_json must not use print/logging sinks for CLI JSON responses")
@@ -198,6 +215,92 @@ def test_core_passport_commands_fail_closed_for_existing_file_state_dir(tmp_path
     assert "token" not in payload
     assert str(tmp_path) not in rendered
     assert str(state_file) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
+def test_start_with_mission_fails_closed_for_existing_directory_log_path(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    mission_file = tmp_path / "mission.json"
+    audit_dir = tmp_path / "audit-dir"
+    audit_dir.mkdir()
+    _write_valid_mission_file(mission_file)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--mission",
+            str(mission_file),
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_dir),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "log_path_not_file"
+    assert payload["error"] == "log_path_not_file"
+    assert payload["error_code"] == "log_path_not_file"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert str(tmp_path) not in rendered
+    assert str(audit_dir) not in rendered
+    assert not state_dir.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
+def test_attest_fails_closed_for_existing_directory_log_path(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_dir = tmp_path / "audit-dir"
+    audit_dir.mkdir()
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "attest",
+            "--session",
+            "not-a-uuid",
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_dir),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "log_path_not_file"
+    assert payload["error"] == "log_path_not_file"
+    assert payload["error_code"] == "log_path_not_file"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert str(tmp_path) not in rendered
+    assert str(audit_dir) not in rendered
+    assert not state_dir.exists()
     assert all(
         "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
     )

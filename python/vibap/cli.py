@@ -278,6 +278,72 @@ def _state_dir_failure_exit_code(path: Path | None) -> int | None:
     return 1
 
 
+def _log_path_failure_condition() -> str:
+    return "log_path_not_file"
+
+
+def _log_path_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_audit_log_file",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Choose a JSONL audit-log file path. If the selected path is an "
+                "existing directory or other non-file, move it aside or use a file path."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "attest_with_valid_audit_log_file",
+            "command": (
+                "ardur attest --session <session-id> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Retry attestation only after selecting a writable audit-log file path. "
+                "Keep raw local paths, tokens, and private-key material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _log_path_failure_response() -> dict:
+    condition = _log_path_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport audit log path must be a file path.",
+        "detail": (
+            "The selected Mission Passport audit log path already exists as a directory "
+            "or other non-file. Choose a JSONL file path before starting or attesting a session."
+        ),
+        "next_steps": _log_path_failure_next_steps(condition),
+    }
+
+
+def _log_path_points_to_existing_non_file(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        return candidate.exists() and not candidate.is_file()
+    except OSError:
+        return False
+
+
+def _log_path_failure_exit_code(path: Path | None) -> int | None:
+    if not _log_path_points_to_existing_non_file(path):
+        return None
+    _print_json(_log_path_failure_response())
+    return 1
+
+
 def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -349,6 +415,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
         return state_dir_failure
+    log_path_failure = _log_path_failure_exit_code(args.log_path)
+    if log_path_failure is not None:
+        return log_path_failure
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
@@ -641,6 +710,9 @@ def cmd_attest(args: argparse.Namespace) -> int:
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
         return state_dir_failure
+    log_path_failure = _log_path_failure_exit_code(args.log_path)
+    if log_path_failure is not None:
+        return log_path_failure
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
