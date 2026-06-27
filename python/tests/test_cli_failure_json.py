@@ -161,6 +161,49 @@ def test_core_passport_commands_fail_closed_for_existing_file_keys_dir(tmp_path,
 
 
 @pytest.mark.parametrize(
+    "argv",
+    [
+        ["start"],
+        ["attest", "--session", "not-a-uuid"],
+    ],
+)
+def test_core_passport_commands_fail_closed_for_existing_file_state_dir(tmp_path, capsys, argv):
+    keys_dir = tmp_path / "keys"
+    state_file = tmp_path / "state-file"
+    state_file.write_text("not a directory", encoding="utf-8")
+    audit_log = tmp_path / "audit.jsonl"
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            *argv,
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_file),
+            "--log-path",
+            str(audit_log),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "state_dir_not_directory"
+    assert payload["error"] == "state_dir_not_directory"
+    assert payload["error_code"] == "state_dir_not_directory"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert str(tmp_path) not in rendered
+    assert str(state_file) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
+@pytest.mark.parametrize(
     ("budget_args", "condition"),
     [
         (["--max-tool-calls", "-1"], "issue_budget_max_tool_calls_invalid"),

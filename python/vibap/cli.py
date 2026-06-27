@@ -212,6 +212,72 @@ def _keys_dir_failure_response(exc: KeyDirectoryError) -> dict:
     }
 
 
+def _state_dir_failure_condition() -> str:
+    return "state_dir_not_directory"
+
+
+def _state_dir_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_state_directory",
+            "command": (
+                "ardur start --keys-dir <keys-dir> --state-dir <state-dir> "
+                "--log-path <audit-log>"
+            ),
+            "detail": (
+                "Choose a directory path for persisted Mission Passport state. If the selected "
+                "path is an existing file, move it aside or use a different directory."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "attest_with_valid_state_directory",
+            "command": (
+                "ardur attest --session <session-id> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Retry attestation only after selecting a real state directory that contains "
+                "the governed session records."
+            ),
+        },
+    ]
+
+
+def _state_dir_failure_response() -> dict:
+    condition = _state_dir_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport state directory must be a directory.",
+        "detail": (
+            "The selected Mission Passport state path already exists as a file or other "
+            "non-directory. Choose a directory path before starting or attesting a session."
+        ),
+        "next_steps": _state_dir_failure_next_steps(condition),
+    }
+
+
+def _state_dir_points_to_existing_non_directory(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        return candidate.exists() and not candidate.is_dir()
+    except OSError:
+        return False
+
+
+def _state_dir_failure_exit_code(path: Path | None) -> int | None:
+    if not _state_dir_points_to_existing_non_directory(path):
+        return None
+    _print_json(_state_dir_failure_response())
+    return 1
+
+
 def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -280,6 +346,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
+    if state_dir_failure is not None:
+        return state_dir_failure
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
@@ -569,6 +638,9 @@ def cmd_attest(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
+    if state_dir_failure is not None:
+        return state_dir_failure
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
