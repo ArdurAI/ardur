@@ -25,7 +25,15 @@ from .ardur_personal_native_host import (
     handle_native_host_message,
     run_native_host,
 )
-from .passport import DEFAULT_HOME, MissionPassport, generate_keypair, issue_passport, load_mission_file, verify_passport
+from .passport import (
+    DEFAULT_HOME,
+    KeyDirectoryError,
+    MissionPassport,
+    generate_keypair,
+    issue_passport,
+    load_mission_file,
+    verify_passport,
+)
 from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
@@ -151,6 +159,59 @@ def _print_report_next_steps(report: dict) -> None:
             print(f"   {detail}")
 
 
+def _keys_dir_failure_condition(exc: KeyDirectoryError) -> str:
+    return getattr(exc, "condition", "keys_dir_not_directory")
+
+
+def _keys_dir_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_keys_directory",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": (
+                "Choose a directory path for Mission Passport signing keys. If the selected "
+                "path is an existing file, move it aside or use a different directory."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "verify_with_valid_keys_directory",
+            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "detail": (
+                "Use the same key directory that issued the Mission Passport. Keep raw tokens, "
+                "private keys, and local paths out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "attest_with_valid_keys_directory",
+            "command": (
+                "ardur attest --session <session-id> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Retry attestation only after selecting a real key directory and the matching "
+                "local state/log locations."
+            ),
+        },
+    ]
+
+
+def _keys_dir_failure_response(exc: KeyDirectoryError) -> dict:
+    condition = _keys_dir_failure_condition(exc)
+    detail = getattr(exc, "detail", "The selected Mission Passport key path is not a directory.")
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport key directory must be a directory.",
+        "detail": detail,
+        "next_steps": _keys_dir_failure_next_steps(condition),
+    }
+
+
 def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -214,7 +275,11 @@ def _start_mission_file_failure_response(exc: Exception) -> dict:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
@@ -373,7 +438,11 @@ def cmd_issue(args: argparse.Namespace) -> int:
         response, exit_code = issue_budget_failure
         _print_json(response)
         return exit_code
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     mission = MissionPassport(
         agent_id=args.agent_id,
         mission=args.mission,
@@ -425,7 +494,11 @@ def _verify_failure_response(exc: Exception) -> dict:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    _, public_key = generate_keypair(keys_dir=args.keys_dir)
+    try:
+        _, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     try:
         claims = verify_passport(args.token, public_key)
     except (jwt.PyJWTError, PermissionError, ValueError) as exc:
@@ -491,7 +564,11 @@ def _attest_failure_response(exc: Exception) -> dict:
 
 
 def cmd_attest(args: argparse.Namespace) -> int:
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,

@@ -127,6 +127,22 @@ DEFAULT_HOME = _default_home_dir()
 DEFAULT_KEYS_DIR = Path(os.environ.get("VIBAP_KEYS_DIR", DEFAULT_HOME / "keys")).expanduser()
 
 
+class KeyDirectoryError(ValueError):
+    """Fail-closed error for invalid Mission Passport key directory inputs."""
+
+    def __init__(
+        self,
+        detail: str = (
+            "The selected Mission Passport key path already exists as a file or other non-directory."
+        ),
+        *,
+        condition: str = "keys_dir_not_directory",
+    ) -> None:
+        super().__init__(detail)
+        self.condition = condition
+        self.detail = detail
+
+
 def _normalize_cwd(value: str | None) -> str | None:
     """Validate + canonicalize an optional ``cwd`` claim.
 
@@ -319,7 +335,14 @@ class MissionPassport:
 
 def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
     target = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
-    target.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not target.is_dir():
+        raise KeyDirectoryError()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError) as exc:
+        raise KeyDirectoryError() from exc
+    if not target.is_dir():
+        raise KeyDirectoryError()
     return target
 
 
