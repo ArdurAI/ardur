@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "0404ce9b0746ed297a8f0b867b14406d7ce6283c4f1029017fb4ec1abf0b6b05"
+source_sha256: "ee304da7202acf29b7bc72ed8e8ac295ef0a19344f11cec493aaa873d295a282"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -141,6 +141,13 @@ Start the local Ardur Personal Hub HTTP service.
 ardur hub [--host HOST] [--port PORT] [--home DIR]
 ```
 
+If `--home` points to an existing file instead of a directory, `ardur hub`
+fails closed before starting a server. The command exits `1` and writes
+parseable stdout JSON with `ok: false`, stable `condition`/`error` values, and
+`error_code: personal_home_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-home>`, and the failure
+does not copy raw local paths or tokens into the output.
+
 See [Personal Hub HTTP API](/__ardur_internal__/source/docs/reference/personal-hub-api/) for the endpoints exposed.
 
 ### `ardur setup`
@@ -160,6 +167,14 @@ ardur setup [--host HOST] [--port PORT] [--home DIR]
 `--rotate-token` forces a new token even if one already exists.
 `--extension-path` selects which browser-extension directory the setup output
 points users to (default: `examples/ardur-personal-extension`).
+
+If `--home` points to an existing file instead of a directory, `ardur setup`
+fails closed before writing setup state, generating or printing a token, or
+installing launch files. The command exits `1` and writes parseable stdout JSON
+with `ok: false`, stable `condition`/`error` values, and
+`error_code: personal_home_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-home>`, and the failure
+does not copy raw local paths or tokens into the output.
 
 ### `ardur status`
 

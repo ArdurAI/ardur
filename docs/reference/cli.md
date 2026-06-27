@@ -124,6 +124,13 @@ Start the local Ardur Personal Hub HTTP service.
 ardur hub [--host HOST] [--port PORT] [--home DIR]
 ```
 
+If `--home` points to an existing file instead of a directory, `ardur hub`
+fails closed before starting a server. The command exits `1` and writes
+parseable stdout JSON with `ok: false`, stable `condition`/`error` values, and
+`error_code: personal_home_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-home>`, and the failure
+does not copy raw local paths or tokens into the output.
+
 See [Personal Hub HTTP API](personal-hub-api.md) for the endpoints exposed.
 
 ### `ardur setup`
@@ -143,6 +150,14 @@ ardur setup [--host HOST] [--port PORT] [--home DIR]
 `--rotate-token` forces a new token even if one already exists.
 `--extension-path` selects which browser-extension directory the setup output
 points users to (default: `examples/ardur-personal-extension`).
+
+If `--home` points to an existing file instead of a directory, `ardur setup`
+fails closed before writing setup state, generating or printing a token, or
+installing launch files. The command exits `1` and writes parseable stdout JSON
+with `ok: false`, stable `condition`/`error` values, and
+`error_code: personal_home_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-home>`, and the failure
+does not copy raw local paths or tokens into the output.
 
 ### `ardur status`
 
