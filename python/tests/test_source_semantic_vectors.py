@@ -57,6 +57,12 @@ REQUIRED_VECTOR_CLASSES = {
         "sdk_output_metadata",
         "unknown",
     },
+    "claude-code-watchsource-websocket-stream-v2195": {
+        "policy_input",
+        "session_context",
+        "host_runtime_event",
+        "unknown",
+    },
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "claude-action-token-cleanup-timeout-best-effort": {
         "cloud_agent_run",
@@ -1174,3 +1180,126 @@ def test_claude_2191_glob_notebook_vector_preserves_count_and_source_boundaries(
     assert "raw search results" in row["claim_boundary"].lower()
     assert "countiscomplete is absent or false" in row["claim_boundary"].lower()
     assert "codex proxy/auth" in row["claim_boundary"].lower()
+
+
+def test_claude_2195_watchsource_websocket_vector_preserves_source_only_boundaries() -> None:
+    """Claude Code WatchSource WebSocket semantics must stay no-key and non-live."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "claude-code-watchsource-websocket-stream-v2195"
+    )
+
+    assert row["source_family"] == "claude-code"
+    assert row["source_pin"]["kind"] == "package"
+    assert "@anthropic-ai/claude-code@2.1.195" in row["source_pin"]["value"]
+    assert "a7b63ca639f1691c4e8eb92d7e12a9267c5eb96f9352765b5f5acdbea2a8ffea" in (
+        row["source_pin"]["value"]
+    )
+    assert "a531d520e9ef0844c9883765aa7b4f83ea2f8fe914a7392accd4c249e1aec9e5" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "95379be46a5d091a80617507a94b0a7f66d047ff5cd30dd092643de3d58e3ffe"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "d9c0e3a31d836fb4d5cd7a98668d457314baa94445b436ed5c5a3de015bba010"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "ae838af8b0b66b081035ddfa3dae1b42e1adf0caee04b55064021a42677accf9"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "WatchSource.command",
+        "optional",
+        "WatchSource.ws",
+        "protocols",
+        "WebSocket text frames are events",
+        "binary frames are emitted as placeholder lines",
+        "socket close ends the watch",
+        "ws cannot be combined with command",
+    ):
+        assert phrase in signal
+
+    assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[
+        "claude-code-watchsource-websocket-stream-v2195"
+    ]
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_watchsource_stream_context"
+    assert mapping["source_selection_policy"] == "watch_source_command_or_websocket_mutual_exclusion"
+    assert mapping["command_source_context"] == "optional_command_source_config_digest_only"
+    assert mapping["websocket_source_context"] == "placeholder_url_and_protocols_digest_only"
+    assert mapping["text_frame_event_boundary"] == (
+        "text_frames_as_source_level_events_without_payload_persistence"
+    )
+    assert mapping["binary_frame_boundary"] == (
+        "binary_frames_as_placeholder_lines_without_binary_payloads"
+    )
+    assert mapping["stream_termination_boundary"] == "socket_close_as_watch_end_source_semantics_only"
+    assert mapping["sdk_tools_d_ts_sha256"] == (
+        "a7b63ca639f1691c4e8eb92d7e12a9267c5eb96f9352765b5f5acdbea2a8ffea"
+    )
+    assert mapping["tarball_sha256"] == (
+        "a531d520e9ef0844c9883765aa7b4f83ea2f8fe914a7392accd4c249e1aec9e5"
+    )
+    assert mapping["source_index_sha256"] == (
+        "95379be46a5d091a80617507a94b0a7f66d047ff5cd30dd092643de3d58e3ffe"
+    )
+    assert mapping["parent_matrix_sha256"] == (
+        "d9c0e3a31d836fb4d5cd7a98668d457314baa94445b436ed5c5a3de015bba010"
+    )
+    assert mapping["review_sha256"] == (
+        "ae838af8b0b66b081035ddfa3dae1b42e1adf0caee04b55064021a42677accf9"
+    )
+    assert mapping["matrix_review_boundary"] == "no_live_claude_websocket_network_or_provider_validation"
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_claude_code_behavior",
+            "live_websocket_connection",
+            "websocket_network_side_effects",
+            "websocket_endpoint_identity",
+            "websocket_protocol_negotiation",
+            "text_frame_payloads",
+            "binary_frame_contents",
+            "frame_delivery_completeness",
+            "socket_close_timing",
+            "provider_hidden_behavior",
+            "runtime_kernel_side_effects",
+            "credentials",
+            "public_readiness",
+            "universal_cli_capture",
+        }
+    )
+
+    serialized = json.dumps(row, sort_keys=True)
+    for forbidden in ("Bearer", "github_pat_", "raw-secret-value", "ws://", "wss://"):
+        assert forbidden not in serialized
+
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live claude code",
+        "no live websocket",
+        "provider-hidden/server-side",
+        "websocket endpoint identity",
+        "runtime/ebpf",
+        "public readiness",
+        "universal cli",
+        "credential values",
+        "frame payloads",
+    ):
+        assert phrase in not_claimed
+
+    claim_boundary = row["claim_boundary"].lower()
+    assert "does not prove live claude code" in claim_boundary
+    assert "live websocket connection/capture" in claim_boundary
+    assert "provider-hidden/server-side" in claim_boundary
+    assert "websocket network side effects" in claim_boundary
+    assert "runtime/ebpf" in claim_boundary
+    assert "public readiness/growth" in claim_boundary
+    assert "universal cli" in claim_boundary
+    assert "credential/endpoint/frame-payload handling" in claim_boundary
