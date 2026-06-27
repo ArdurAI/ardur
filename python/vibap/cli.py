@@ -67,7 +67,10 @@ from .shareable_redaction import path_aliases, redact_local_path_text
 
 
 def _print_json(payload: dict) -> None:
-    print(json.dumps(payload, indent=2))
+    """Emit a structured CLI response to stdout without using a logging sink."""
+
+    sys.stdout.write(json.dumps(payload, indent=2))
+    sys.stdout.write("\n")
 
 
 def _personal_home_failure_exit_code(exc: HubError) -> int:

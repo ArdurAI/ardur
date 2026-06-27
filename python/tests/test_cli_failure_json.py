@@ -15,6 +15,19 @@ def _run_cli_and_read_json(argv: list[str], capsys) -> tuple[int, dict]:
     return rc, json.loads(captured.out)
 
 
+def test_print_json_uses_stdout_write_instead_of_print(monkeypatch, capsys):
+    def fail_if_print_is_used(*_args, **_kwargs):
+        raise AssertionError("_print_json must not use print/logging sinks for CLI JSON responses")
+
+    monkeypatch.setattr("builtins.print", fail_if_print_is_used)
+
+    cli._print_json({"ok": False, "condition": "personal_home_not_directory"})
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {"ok": False, "condition": "personal_home_not_directory"}
+
+
 def test_verify_invalid_token_returns_safe_json_failure(tmp_path, capsys):
     raw_token = "not-a-jwt"
 
