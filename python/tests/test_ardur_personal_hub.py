@@ -346,6 +346,113 @@ def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_lea
         assert marker not in combined_output
 
 
+def _assert_personal_home_not_directory_response(
+    *,
+    rc: int,
+    stdout: str,
+    stderr: str,
+    existing_file_home,
+    tmp_path,
+) -> dict:
+    result = json.loads(stdout)
+
+    assert rc == 1
+    assert stderr == ""
+    assert result["ok"] is False
+    assert result["condition"] == personal_hub.PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    assert result["error_code"] == personal_hub.PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur setup --home <ardur-home>" in next_steps_json
+    assert "ardur hub --home <ardur-home>" in next_steps_json
+    assert "ardur doctor --home <ardur-home>" in next_steps_json
+    combined_output = stdout + stderr
+    for marker in (
+        "Traceback",
+        "NotADirectoryError",
+        "FileExistsError",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+    return result
+
+
+@pytest.mark.parametrize(
+    "command_args",
+    [
+        ["doctor", "--hub-url", "http://127.0.0.1:9"],
+        ["status", "--hub-url", "http://127.0.0.1:9"],
+        [
+            "desktop-observe",
+            "--hub-url",
+            "http://127.0.0.1:9",
+            "--app",
+            "SmokeApp",
+            "--title",
+            "SmokeWindow",
+        ],
+    ],
+)
+def test_personal_json_commands_existing_file_home_fail_closed_without_path_leak(
+    tmp_path,
+    capsys,
+    command_args,
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main([command_args[0], "--home", str(existing_file_home), *command_args[1:]])
+    captured = capsys.readouterr()
+
+    _assert_personal_home_not_directory_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        existing_file_home=existing_file_home,
+        tmp_path=tmp_path,
+    )
+
+
+def test_run_existing_file_home_fails_closed_before_child_execution_without_path_leak(
+    tmp_path,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+    child_marker = tmp_path / "child-executed"
+
+    rc = cli_module.main(
+        [
+            "run",
+            "--home",
+            str(existing_file_home),
+            "--hub-url",
+            "http://127.0.0.1:9",
+            "--",
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(child_marker)!r}).write_text('ran', encoding='utf-8')",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    _assert_personal_home_not_directory_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        existing_file_home=existing_file_home,
+        tmp_path=tmp_path,
+    )
+    assert not child_marker.exists()
+
+
 def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
     tmp_path, monkeypatch, capsys
 ):

@@ -189,6 +189,15 @@ def personal_home_failure_response() -> dict[str, Any]:
     }
 
 
+def _is_personal_home_not_directory_error(exc: HubError) -> bool:
+    return exc.code == PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+
+
+def _print_json_response(payload: dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(payload, indent=2))
+    sys.stdout.write("\n")
+
+
 def _utc_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -343,6 +352,7 @@ def _redact_url_for_user_output(value: str) -> str:
 
 
 def _load_hub_config(paths: HubPaths) -> dict[str, Any]:
+    validate_personal_home_directory(paths)
     return _dict(_read_json(paths.config, {}))
 
 
@@ -378,14 +388,18 @@ def resolve_hub_token(
     home: str | Path | None = None,
     explicit: str | None = None,
 ) -> str | None:
+    paths = HubPaths.from_home(home)
+    validate_personal_home_directory(paths)
     if explicit:
         return explicit
     env_token = os.environ.get(HUB_TOKEN_ENV_VAR, "").strip()
     if env_token:
         return env_token
     try:
-        token = _load_hub_config(HubPaths.from_home(home)).get("hub_token")
-    except HubError:
+        token = _load_hub_config(paths).get("hub_token")
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            raise
         return None
     return str(token) if token else None
 
@@ -1147,7 +1161,12 @@ def hub_request(
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["content-type"] = "application/json"
-    token = resolve_hub_token(home=home, explicit=hub_token)
+    try:
+        token = resolve_hub_token(home=home, explicit=hub_token)
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            return personal_home_failure_response()
+        raise
     if token:
         headers["authorization"] = f"Bearer {token}"
         headers[HUB_TOKEN_HEADER] = token
@@ -1656,7 +1675,12 @@ def _doctor_personal_next_steps(
 
 def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
-    token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
+    try:
+        token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            return personal_home_failure_response()
+        raise
     hub = hub_request("GET", "/v1/status", hub_url=args.hub_url, hub_token=token, home=args.home)
     home_ok = paths.home.exists()
     config_ok = paths.config.exists()
@@ -1791,7 +1815,13 @@ def run_under_hub(args: argparse.Namespace) -> int:
         "source": {"type": "cli", "app": command[0], "process": " ".join(command)},
         "session": {"id": session_id, "title": " ".join(command)},
     }
-    token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    try:
+        token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            _print_json_response(personal_home_failure_response())
+            return 1
+        raise
     start = hub_request("POST", "/v1/sessions/start", start_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not start.get("ok"):
         print(f"Ardur Hub unavailable: {start.get('error')}", file=sys.stderr)
@@ -1879,7 +1909,12 @@ def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
             "hidden_provider_activity": True,
         },
     }
-    token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    try:
+        token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            return personal_home_failure_response()
+        raise
     response = hub_request("POST", "/v1/events/observe", payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     response = desktop_observe_response_with_next_steps(response)
     if permission_note:
