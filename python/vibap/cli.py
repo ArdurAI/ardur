@@ -30,9 +30,12 @@ from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
+    PERSONAL_HOME_NOT_DIRECTORY_CONDITION,
+    HubError,
     desktop_observe,
     doctor_personal,
     hub_request,
+    personal_home_failure_response,
     run_under_hub,
     serve_hub,
     setup_personal,
@@ -65,6 +68,13 @@ from .shareable_redaction import path_aliases, redact_local_path_text
 
 def _print_json(payload: dict) -> None:
     print(json.dumps(payload, indent=2))
+
+
+def _personal_home_failure_exit_code(exc: HubError) -> int:
+    if exc.code != PERSONAL_HOME_NOT_DIRECTORY_CONDITION:
+        raise exc
+    _print_json(personal_home_failure_response())
+    return 1
 
 
 def _print_report_next_steps(report: dict) -> None:
@@ -703,14 +713,17 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
 
 
 def cmd_hub(args: argparse.Namespace) -> int:
-    serve_hub(
-        host=args.host,
-        port=args.port,
-        home=args.home,
-        tls_cert=args.tls_cert,
-        tls_key=args.tls_key,
-        no_tls=args.no_tls,
-    )
+    try:
+        serve_hub(
+            host=args.host,
+            port=args.port,
+            home=args.home,
+            tls_cert=args.tls_cert,
+            tls_key=args.tls_key,
+            no_tls=args.no_tls,
+        )
+    except HubError as exc:
+        return _personal_home_failure_exit_code(exc)
     return 0
 
 
@@ -959,7 +972,11 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    _print_json(setup_personal(args))
+    try:
+        response = setup_personal(args)
+    except HubError as exc:
+        return _personal_home_failure_exit_code(exc)
+    _print_json(response)
     return 0
 
 

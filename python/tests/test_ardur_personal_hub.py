@@ -265,6 +265,87 @@ def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
+def test_setup_existing_file_home_fails_closed_without_path_leak(tmp_path, capsys):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main(["setup", "--home", str(existing_file_home)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "personal_home_not_directory"
+    assert result["error_code"] == "personal_home_not_directory"
+    assert result["next_steps"]
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur setup --home <ardur-home>" in next_steps_json
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "FileExistsError",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+
+
+def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_leak(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --home before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        [
+            "hub",
+            "--home",
+            str(existing_file_home),
+            "--no-tls",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "personal_home_not_directory"
+    assert result["error_code"] == "personal_home_not_directory"
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur hub --home <ardur-home>" in next_steps_json
+    assert "ardur setup --home <ardur-home>" in next_steps_json
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "FileExistsError",
+        "[tls] WARNING",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+
+
 def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
     tmp_path, monkeypatch, capsys
 ):

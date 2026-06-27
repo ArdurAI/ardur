@@ -62,6 +62,7 @@ HUB_TOKEN_ENV_VAR = "ARDUR_PERSONAL_HUB_TOKEN"
 HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
+PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
 _QUERY_TOKEN_LOG_RE = re.compile(
     r"([?&](?:access[-_]?token|api[-_]?key|auth|key|password|secret|token)=)[^\s&\"']+",
     re.I,
@@ -111,6 +112,81 @@ class HubPaths:
             reviews=root / "session_reviews.json",
             config=root / "config.json",
         )
+
+
+def _personal_home_not_directory_error() -> HubError:
+    return HubError(
+        "Ardur Personal home exists but is not a directory.",
+        status=400,
+        code=PERSONAL_HOME_NOT_DIRECTORY_CONDITION,
+    )
+
+
+def validate_personal_home_directory(paths: HubPaths) -> None:
+    """Fail closed when the configured Personal home is an existing non-directory."""
+
+    if (paths.home.exists() or paths.home.is_symlink()) and not paths.home.is_dir():
+        raise _personal_home_not_directory_error()
+
+
+def _ensure_personal_home_directory(paths: HubPaths) -> None:
+    validate_personal_home_directory(paths)
+    try:
+        paths.home.mkdir(parents=True, exist_ok=True)
+    except FileExistsError as exc:
+        if (paths.home.exists() or paths.home.is_symlink()) and not paths.home.is_dir():
+            raise _personal_home_not_directory_error() from exc
+        raise
+
+
+def personal_home_failure_next_steps() -> list[dict[str, str]]:
+    condition = PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "choose_personal_home_directory",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "Choose a directory path for the local Ardur Personal home. If the "
+                "selected path is an existing file, move it aside or pick a different "
+                "directory before setup."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "Start the loopback Hub only after the Personal home path is a directory. "
+                "Keep raw local paths, Hub tokens, and receipt locations out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_doctor",
+            "command": "ardur doctor --home <ardur-home>",
+            "detail": (
+                "Re-run local setup diagnostics after choosing a valid home directory. "
+                "This guidance is local/no-key recovery only."
+            ),
+        },
+    ]
+
+
+def personal_home_failure_response() -> dict[str, Any]:
+    condition = PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal home must be a directory.",
+        "detail": (
+            "The selected Ardur Personal home path already exists as a file or other "
+            "non-directory. Choose a directory path before running setup or starting the Hub."
+        ),
+        "next_steps": personal_home_failure_next_steps(),
+    }
 
 
 def _utc_now() -> str:
@@ -341,7 +417,7 @@ class PersonalHub:
 
     def __init__(self, home: str | Path | None = None, *, hub_url: str | None = None) -> None:
         self.paths = HubPaths.from_home(home)
-        self.paths.home.mkdir(parents=True, exist_ok=True)
+        _ensure_personal_home_directory(self.paths)
         self.config = _ensure_hub_config(self.paths, hub_url=hub_url)
         self.hub_url = str(self.config.get("hub_url") or hub_url or DEFAULT_HUB_URL)
         self.hub_token = str(self.config["hub_token"])
@@ -1005,12 +1081,14 @@ def serve_hub(
     tls_key: str | Path | None = None,
     no_tls: bool = False,
 ) -> None:
+    paths = HubPaths.from_home(home)
+    validate_personal_home_directory(paths)
     server = ThreadingHTTPServer((host, port), _HubRequestHandler)
     server.rate_limiter = RateLimiter()  # type: ignore[attr-defined]
 
     tls_active = False
     if not no_tls:
-        tls_result = resolve_tls_paths(tls_cert, tls_key, home=Path(home) if home else None, hostname=host)
+        tls_result = resolve_tls_paths(tls_cert, tls_key, home=paths.home, hostname=host)
         if tls_result:
             cert_path, key_path, cert_fingerprint = tls_result
             ssl_ctx = create_ssl_context(cert_path, key_path)
@@ -1021,7 +1099,7 @@ def serve_hub(
         print("[tls] WARNING: TLS disabled — plain HTTP only", file=sys.stderr)
 
     scheme = "https" if tls_active else "http"
-    server.hub = PersonalHub(home, hub_url=f"{scheme}://{host}:{port}")  # type: ignore[attr-defined]
+    server.hub = PersonalHub(paths.home, hub_url=f"{scheme}://{host}:{port}")  # type: ignore[attr-defined]
     print(f"Ardur Personal Hub listening on {scheme}://{host}:{port}", file=sys.stderr)
     server.serve_forever()
 
@@ -1450,7 +1528,7 @@ def _print_run_missing_command_next_steps() -> None:
 
 def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
-    paths.home.mkdir(parents=True, exist_ok=True)
+    _ensure_personal_home_directory(paths)
     config = _ensure_hub_config(
         paths,
         hub_url=f"http://{args.host}:{args.port}",
