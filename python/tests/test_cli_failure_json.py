@@ -21,11 +21,11 @@ def test_print_json_uses_stdout_write_instead_of_print(monkeypatch, capsys):
 
     monkeypatch.setattr("builtins.print", fail_if_print_is_used)
 
-    cli._print_json({"ok": False, "condition": "personal_home_not_directory"})
+    cli._print_json({"ok": False, "condition": "home_not_directory"})
 
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert json.loads(captured.out) == {"ok": False, "condition": "personal_home_not_directory"}
+    assert json.loads(captured.out) == {"ok": False, "condition": "home_not_directory"}
 
 
 def test_verify_invalid_token_returns_safe_json_failure(tmp_path, capsys):

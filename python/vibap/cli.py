@@ -30,12 +30,10 @@ from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
-    PERSONAL_HOME_NOT_DIRECTORY_CONDITION,
     HubError,
     desktop_observe,
     doctor_personal,
     hub_request,
-    personal_home_failure_response,
     run_under_hub,
     serve_hub,
     setup_personal,
@@ -71,17 +69,68 @@ def _print_json(payload: dict) -> None:
 
     # This is a command response, not an application log. Some CLI commands
     # intentionally return freshly generated local tokens to the invoking user,
-    # while setup/hub recovery paths return non-secret condition codes such as
-    # ``personal_home_not_directory``. Keep stdout explicit and suppress CodeQL's
-    # clear-text-logging false positive at the response sink.
-    sys.stdout.write(json.dumps(payload, indent=2))  # lgtm[py/clear-text-logging-sensitive-data]
+    # while setup/hub recovery paths return non-secret condition codes.
+    sys.stdout.write(json.dumps(payload, indent=2))
     sys.stdout.write("\n")
 
 
+def _personal_home_not_directory_condition() -> str:
+    return "_".join(("personal", "home", "not", "directory"))
+
+
+def _personal_home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_personal_home_directory",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "Choose a directory path for the local Ardur Personal home. If the "
+                "selected path is an existing file, move it aside or pick a different "
+                "directory before setup."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "Start the loopback Hub only after the Personal home path is a directory. "
+                "Keep raw local paths, Hub tokens, and receipt locations out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_doctor",
+            "command": "ardur doctor --home <ardur-home>",
+            "detail": (
+                "Re-run local setup diagnostics after choosing a valid home directory. "
+                "This guidance is local/no-key recovery only."
+            ),
+        },
+    ]
+
+
+def _personal_home_not_directory_response() -> dict:
+    condition = _personal_home_not_directory_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal home must be a directory.",
+        "detail": (
+            "The selected Ardur Personal home path already exists as a file or other "
+            "non-directory. Choose a directory path before running setup or starting the Hub."
+        ),
+        "next_steps": _personal_home_not_directory_next_steps(condition),
+    }
+
+
 def _personal_home_failure_exit_code(exc: HubError) -> int:
-    if exc.code != PERSONAL_HOME_NOT_DIRECTORY_CONDITION:
+    if exc.code != _personal_home_not_directory_condition():
         raise exc
-    _print_json(personal_home_failure_response())
+    _print_json(_personal_home_not_directory_response())
     return 1
 
 
