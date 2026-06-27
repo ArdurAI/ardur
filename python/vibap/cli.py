@@ -70,6 +70,8 @@ def _print_json(payload: dict) -> None:
     # This is a command response, not an application log. Some CLI commands
     # intentionally return freshly generated local tokens to the invoking user,
     # while setup/hub recovery paths return non-secret condition codes.
+    # codeql[py/clear-text-logging-sensitive-data]
+    # lgtm[py/clear-text-logging-sensitive-data]
     sys.stdout.write(json.dumps(payload, indent=2))
     sys.stdout.write("\n")
 
