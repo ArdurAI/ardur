@@ -74,15 +74,15 @@ def _print_json(payload: dict) -> None:
     sys.stdout.write("\n")
 
 
-def _personal_home_error_code() -> str:
+def _hub_path_error_code() -> str:
     return "_".join(("personal", "home", "not", "directory"))
 
 
-def _home_not_directory_condition() -> str:
+def _path_not_directory_condition() -> str:
     return "path_not_directory"
 
 
-def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
+def _path_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
             "condition": condition,
@@ -115,8 +115,8 @@ def _home_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
     ]
 
 
-def _home_not_directory_response() -> dict:
-    condition = _home_not_directory_condition()
+def _path_not_directory_response() -> dict:
+    condition = _path_not_directory_condition()
     return {
         "ok": False,
         "error": condition,
@@ -127,14 +127,14 @@ def _home_not_directory_response() -> dict:
             "The selected Ardur setup path already exists as a file or other "
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
-        "next_steps": _home_not_directory_next_steps(condition),
+        "next_steps": _path_not_directory_next_steps(condition),
     }
 
 
-def _home_failure_exit_code(exc: HubError) -> int:
-    if exc.code != _personal_home_error_code():
+def _path_failure_exit_code(exc: HubError) -> int:
+    if exc.code != _hub_path_error_code():
         raise exc
-    _print_json(_home_not_directory_response())
+    _print_json(_path_not_directory_response())
     return 1
 
 
@@ -784,7 +784,7 @@ def cmd_hub(args: argparse.Namespace) -> int:
             no_tls=args.no_tls,
         )
     except HubError as exc:
-        return _home_failure_exit_code(exc)
+        return _path_failure_exit_code(exc)
     return 0
 
 
@@ -1036,7 +1036,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     try:
         response = setup_personal(args)
     except HubError as exc:
-        return _home_failure_exit_code(exc)
+        return _path_failure_exit_code(exc)
     _print_json(response)
     return 0
 
