@@ -43,7 +43,7 @@ func nextRingbufProcessEvent(ctx context.Context, reader ringbufSampleReader, sc
 
 	for {
 		deadline := time.Now().Add(pollInterval)
-		if ctxDeadline, ok := ctx.Deadline(); ok {
+		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
 		reader.SetDeadline(deadline)
