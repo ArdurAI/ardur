@@ -60,6 +60,17 @@ key, state, log, or session artifacts behind. Valid `--port 0` remains the
 ephemeral-port path, where the operating system chooses an available local port;
 it is not a standalone server-readiness claim.
 
+Invalid `--host` values fail closed after port range validation and before TLS,
+key, state, audit log, session, or proxy startup work begins. Host values must
+be plain bindable host names or IP addresses; empty or whitespace-only values,
+URL-shaped values, values with schemes, ports, paths, queries, fragments, or
+hosts that cannot be bound locally return parseable stdout JSON with `ok: false`
+and stable `condition`/`error`/`error_code` values of `start_host_invalid`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, malformed URLs, socket errors, or secrets, and leaves no key, state, log,
+or session artifacts behind. If `--port` and `--host` are both invalid, the
+existing `start_port_invalid` contract remains the first failure.
+
 State directory security: `--state-dir` is local secret state. Persisted
 sessions and passport state can contain bearer credentials, including parent
 `passport_token` values and delegated child replay tokens. The proxy creates or

@@ -371,6 +371,105 @@ def test_start_invalid_port_returns_safe_json_before_side_effects(tmp_path, caps
     )
 
 
+@pytest.mark.parametrize("host", ["http://127.0.0.1", "ftp://127.0.0.1", "   "])
+def test_start_invalid_host_returns_safe_json_before_side_effects(
+    tmp_path, capsys, monkeypatch, host
+):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    missing_mission_file = tmp_path / "missing-mission.json"
+
+    def fail_if_key_material_is_generated(*_args, **_kwargs):
+        raise AssertionError("invalid start host must fail before key generation")
+
+    monkeypatch.setattr(cli, "generate_keypair", fail_if_key_material_is_generated)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--mission",
+            str(missing_mission_file),
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+            "--host",
+            host,
+            "--port",
+            "0",
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_host_invalid"
+    assert payload["error"] == "start_host_invalid"
+    assert payload["error_code"] == "start_host_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "session_id" not in payload
+    assert "Traceback" not in rendered
+    assert "socket" not in rendered.lower()
+    assert "gaierror" not in rendered.lower()
+    if host.strip():
+        assert host.strip() not in rendered
+    assert str(tmp_path) not in rendered
+    assert str(missing_mission_file) not in rendered
+    assert not keys_dir.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
+def test_start_invalid_port_still_takes_precedence_over_invalid_host(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    missing_mission_file = tmp_path / "missing-mission.json"
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--mission",
+            str(missing_mission_file),
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+            "--host",
+            "http://127.0.0.1",
+            "--port",
+            "-1",
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["condition"] == "start_port_invalid"
+    assert payload["error"] == "start_port_invalid"
+    assert "start_host_invalid" not in rendered
+    assert "http://127.0.0.1" not in rendered
+    assert not keys_dir.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+
+
 @pytest.mark.parametrize("case", ["missing_cert_key", "cert_directory", "key_directory"])
 def test_start_invalid_tls_material_returns_safe_json_before_side_effects(
     tmp_path, capsys, monkeypatch, case

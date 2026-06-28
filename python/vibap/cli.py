@@ -400,6 +400,107 @@ def _start_port_failure_exit_code(port: int) -> int | None:
     return 1
 
 
+def _start_host_failure_condition() -> str:
+    return "start_host_invalid"
+
+
+def _start_host_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_bindable_start_host",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Pass only a host name or IP address that this machine can bind. "
+                "Do not include URL schemes, ports, paths, credentials, or empty values."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_loopback_host",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host 127.0.0.1 --port <valid-port>"
+            ),
+            "detail": (
+                "For local setup checks, use a loopback host such as 127.0.0.1 or "
+                "localhost with --port 0. Keep raw local paths, URLs, tokens, and key "
+                "material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _start_host_failure_response() -> dict:
+    condition = _start_host_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start host must be a bindable host name or IP address.",
+        "detail": (
+            "Choose a host value that can be bound locally before starting Ardur. "
+            "Use --port for the port; do not include a URL scheme, path, or empty host."
+        ),
+        "next_steps": _start_host_failure_next_steps(condition),
+    }
+
+
+def _start_host_has_url_shape(host: str) -> bool:
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(host)
+    except ValueError:
+        return True
+    return bool(
+        "://" in host
+        or host.startswith("//")
+        or "/" in host
+        or "?" in host
+        or "#" in host
+        or (parsed.scheme and not host.startswith("["))
+        or parsed.netloc
+    )
+
+
+def _start_host_is_bindable(host: str) -> bool:
+    import socket
+
+    try:
+        candidates = socket.getaddrinfo(host, 0, socket.AF_INET, socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    for family, socktype, proto, _canonname, sockaddr in candidates:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.bind(sockaddr)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _start_host_failure_exit_code(host: str) -> int | None:
+    host_value = str(host)
+    stripped = host_value.strip()
+    if (
+        not stripped
+        or stripped != host_value
+        or _start_host_has_url_shape(stripped)
+        or not _start_host_is_bindable(stripped)
+    ):
+        _print_json(_start_host_failure_response())
+        return 1
+    return None
+
+
 def _start_tls_material_failure_condition() -> str:
     return "start_tls_material_invalid"
 
@@ -539,6 +640,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     port_failure = _start_port_failure_exit_code(args.port)
     if port_failure is not None:
         return port_failure
+    host_failure = _start_host_failure_exit_code(args.host)
+    if host_failure is not None:
+        return host_failure
     tls_material_failure = _start_tls_material_failure_exit_code(args)
     if tls_material_failure is not None:
         return tls_material_failure

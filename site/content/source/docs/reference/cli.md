@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f7cc73fb8a8b783b3ef0ffc771e8b1ef5d682b0c83dcf5563d2834b42c5ce81f"
+source_sha256: "ae714903c9b2e8c33df13c53587f1d430979ac8b483eaa1f8d8196117907cd7f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -76,6 +76,17 @@ emits no traceback, does not echo raw local paths or secrets, and leaves no
 key, state, log, or session artifacts behind. Valid `--port 0` remains the
 ephemeral-port path, where the operating system chooses an available local port;
 it is not a standalone server-readiness claim.
+
+Invalid `--host` values fail closed after port range validation and before TLS,
+key, state, audit log, session, or proxy startup work begins. Host values must
+be plain bindable host names or IP addresses; empty or whitespace-only values,
+URL-shaped values, values with schemes, ports, paths, queries, fragments, or
+hosts that cannot be bound locally return parseable stdout JSON with `ok: false`
+and stable `condition`/`error`/`error_code` values of `start_host_invalid`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, malformed URLs, socket errors, or secrets, and leaves no key, state, log,
+or session artifacts behind. If `--port` and `--host` are both invalid, the
+existing `start_port_invalid` contract remains the first failure.
 
 State directory security: `--state-dir` is local secret state. Persisted
 sessions and passport state can contain bearer credentials, including parent
