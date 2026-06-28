@@ -28,9 +28,27 @@ Passport from a JSON mission file and start a session immediately.
 ardur start [--host HOST] [--port PORT] [--mission FILE]
             [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
             [--require-auth | --no-require-auth]
+            [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
 
 Defaults: bind `127.0.0.1:8080`. Auth required by default.
+
+TLS setup is local loopback proxy configuration. By default Ardur can create
+local self-signed TLS material; `--tls-cert` and `--tls-key` select explicit
+certificate and private-key PEM files, and `--no-tls` disables TLS only for
+plain-HTTP loopback development. This is not a production TLS, release, or
+hosted-website visibility claim.
+
+Invalid explicit TLS material fails closed before keys, state files, audit logs,
+sessions, or the proxy startup path are created. If either `--tls-cert` or
+`--tls-key` is provided, both values must point to existing files unless TLS is
+disabled for loopback development with `--no-tls`. Missing paths, one-sided
+cert/key inputs, or directory inputs exit non-zero and write parseable stdout
+JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`start_tls_material_invalid`, a message, a detail, and placeholder-only
+`next_steps`. The failure path keeps stderr empty, emits no traceback, does not
+echo raw local paths, JWTs, private keys, or certificate material, and leaves no
+key, state, log, or session artifacts behind.
 
 Invalid `--port` values outside the TCP range `0..65535` fail closed before
 keys, state files, audit logs, sessions, or the proxy startup path are created.
