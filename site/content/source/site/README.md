@@ -2,7 +2,7 @@
 title: "Ardur Public Evidence Site"
 description: "This Hugo project renders Ardur's public evidence and documentation surface."
 source_path: "site/README.md"
-source_sha256: "8173550c7af3a9d6506914ca2d9e3647ee84a98131a4af9bc60b61043ad1b857"
+source_sha256: "cfbb9a9a37992119d8c1363ae4fc45b6bfa56fb3e03b5f22c41a2a87f63bc5e6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -20,6 +20,16 @@ This page is generated from the public repository source file. Edit the source f
 This Hugo project renders Ardur's public evidence and documentation surface.
 It is a publishing layer over the root repo, not a replacement for the source
 docs.
+
+## Published-site freshness
+
+The hosted GitHub Pages site reflects the last public Pages deployment, not
+necessarily the latest `dev` commit. Pushes to `dev` validate and build the site
+in CI, but the current workflow only uploads and deploys the Pages artifact from
+`main`. Treat the source-link commit shown on each hosted page as the freshness
+boundary: if it points at an older commit, use a clean source checkout or local
+Hugo build for newer `dev` documentation until a reviewed public deploy or main
+promotion happens.
 
 ## Local preview
 
