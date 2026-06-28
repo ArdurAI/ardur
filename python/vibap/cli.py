@@ -629,6 +629,7 @@ def _start_mission_file_failure_response(exc: Exception) -> dict:
     return {
         "ok": False,
         "error": condition,
+        "error_code": condition,
         "condition": condition,
         "message": "Ardur start could not load the mission file.",
         "detail": detail,
@@ -646,6 +647,25 @@ def cmd_start(args: argparse.Namespace) -> int:
     tls_material_failure = _start_tls_material_failure_exit_code(args)
     if tls_material_failure is not None:
         return tls_material_failure
+    mission = None
+    ttl_s = None
+    if args.mission:
+        try:
+            mission, ttl_s, _ = load_mission_file(args.mission)
+        except (
+            FileNotFoundError,
+            PermissionError,
+            IsADirectoryError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            _print_json(_start_mission_file_failure_response(exc))
+            return 1
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
@@ -665,23 +685,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     )
 
     initial_session_id = None
-    if args.mission:
-        try:
-            mission, ttl_s, _ = load_mission_file(args.mission)
-        except (
-            FileNotFoundError,
-            PermissionError,
-            IsADirectoryError,
-            OSError,
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-            ValueError,
-            KeyError,
-            TypeError,
-            AttributeError,
-        ) as exc:
-            _print_json(_start_mission_file_failure_response(exc))
-            return 1
+    if mission is not None:
         token = issue_passport(mission, private_key, ttl_s=ttl_s)
         session = proxy.start_session(token)
         initial_session_id = session.jti

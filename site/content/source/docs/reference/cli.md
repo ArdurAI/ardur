@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "ae714903c9b2e8c33df13c53587f1d430979ac8b483eaa1f8d8196117907cd7f"
+source_sha256: "ff9d67065b4350c93aab976829312c1593290da7e58278005421c81c4fc5c18e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -95,15 +95,18 @@ hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
 
-Mission-file input failures fail closed before the proxy starts. A missing
-mission file returns `start_mission_file_missing`; malformed JSON or invalid
-UTF-8 JSON returns `start_mission_file_malformed_json`; unreadable files return
-`start_mission_file_unreadable`; and directories or mission JSON that does not
-match the schema return `start_mission_file_invalid`. These failures exit
-non-zero and write stdout JSON with `ok: false`, stable `condition`/`error`
-values, a message, a detail, and placeholder-only `next_steps`. The failure path
-keeps stderr empty, emits no traceback, and does not echo raw local paths or file
-contents. Valid mission-file session-start behavior remains unchanged.
+Mission-file input failures fail closed after port, host, and TLS material
+validation but before key, state, audit log, session, or proxy startup work
+begins. A missing mission file returns `start_mission_file_missing`; malformed
+JSON or invalid UTF-8 JSON returns `start_mission_file_malformed_json`;
+unreadable files return `start_mission_file_unreadable`; and directories or
+mission JSON that does not match the schema return `start_mission_file_invalid`.
+These failures exit non-zero and write stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values, a message, a detail, and
+placeholder-only `next_steps`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or file contents, and leaves no key,
+state, log, or session artifacts behind. Valid mission-file session-start
+behavior remains unchanged.
 
 ### `ardur kill-switch`
 

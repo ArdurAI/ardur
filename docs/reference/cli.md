@@ -78,15 +78,18 @@ hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
 
-Mission-file input failures fail closed before the proxy starts. A missing
-mission file returns `start_mission_file_missing`; malformed JSON or invalid
-UTF-8 JSON returns `start_mission_file_malformed_json`; unreadable files return
-`start_mission_file_unreadable`; and directories or mission JSON that does not
-match the schema return `start_mission_file_invalid`. These failures exit
-non-zero and write stdout JSON with `ok: false`, stable `condition`/`error`
-values, a message, a detail, and placeholder-only `next_steps`. The failure path
-keeps stderr empty, emits no traceback, and does not echo raw local paths or file
-contents. Valid mission-file session-start behavior remains unchanged.
+Mission-file input failures fail closed after port, host, and TLS material
+validation but before key, state, audit log, session, or proxy startup work
+begins. A missing mission file returns `start_mission_file_missing`; malformed
+JSON or invalid UTF-8 JSON returns `start_mission_file_malformed_json`;
+unreadable files return `start_mission_file_unreadable`; and directories or
+mission JSON that does not match the schema return `start_mission_file_invalid`.
+These failures exit non-zero and write stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values, a message, a detail, and
+placeholder-only `next_steps`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or file contents, and leaves no key,
+state, log, or session artifacts behind. Valid mission-file session-start
+behavior remains unchanged.
 
 ### `ardur kill-switch`
 

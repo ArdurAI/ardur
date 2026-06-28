@@ -281,6 +281,89 @@ def test_start_with_mission_fails_closed_for_existing_directory_log_path(tmp_pat
     )
 
 
+def _invalid_start_mission_input(tmp_path, case: str):
+    mission_file = tmp_path / f"{case}-mission.json"
+    if case == "missing":
+        return mission_file, ""
+    if case == "malformed_json":
+        leaked_text = "raw-secret-do-not-leak"
+        mission_file.write_text("{raw-secret-do-not-leak", encoding="utf-8")
+        return mission_file, leaked_text
+    if case == "invalid_utf8":
+        mission_file.write_bytes(b"\xff\xfe\x00raw-secret-do-not-leak")
+        return mission_file, "raw-secret-do-not-leak"
+    if case == "directory":
+        mission_file.mkdir()
+        return mission_file, ""
+    if case == "wrong_shape":
+        mission_file.write_text(json.dumps([]), encoding="utf-8")
+        return mission_file, ""
+    raise AssertionError(f"unknown invalid mission input case: {case}")
+
+
+@pytest.mark.parametrize(
+    ("case", "condition"),
+    [
+        ("missing", "start_mission_file_missing"),
+        ("malformed_json", "start_mission_file_malformed_json"),
+        ("invalid_utf8", "start_mission_file_malformed_json"),
+        ("directory", "start_mission_file_invalid"),
+        ("wrong_shape", "start_mission_file_invalid"),
+    ],
+)
+def test_start_invalid_mission_file_returns_safe_json_before_artifacts(
+    tmp_path, capsys, case, condition
+):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    mission_input, leaked_text = _invalid_start_mission_input(tmp_path, case)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--mission",
+            str(mission_input),
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == condition
+    assert payload["error"] == condition
+    assert payload["error_code"] == condition
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "session_id" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    assert str(mission_input) not in rendered
+    if leaked_text:
+        assert leaked_text not in rendered
+    assert not keys_dir.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
 def test_attest_fails_closed_for_existing_directory_log_path(tmp_path, capsys):
     keys_dir = tmp_path / "keys"
     state_dir = tmp_path / "state"
