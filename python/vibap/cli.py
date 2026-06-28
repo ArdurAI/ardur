@@ -344,6 +344,62 @@ def _log_path_failure_exit_code(path: Path | None) -> int | None:
     return 1
 
 
+def _start_port_failure_condition() -> str:
+    return "start_port_invalid"
+
+
+def _start_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_start_port",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Use an integer TCP port from 0 through 65535. Use 0 when you "
+                "want the operating system to choose an available local port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_ephemeral_port",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <valid-port>"
+            ),
+            "detail": (
+                "For local setup checks, --port 0 avoids collisions and stays within "
+                "the valid TCP port range. Keep raw local paths, tokens, and key "
+                "material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _start_port_failure_response() -> dict:
+    condition = _start_port_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start port must be within the valid TCP port range.",
+        "detail": "Choose an integer port from 0 through 65535 before starting Ardur.",
+        "next_steps": _start_port_failure_next_steps(condition),
+    }
+
+
+def _start_port_failure_exit_code(port: int) -> int | None:
+    if 0 <= port <= 65535:
+        return None
+    _print_json(_start_port_failure_response())
+    return 1
+
+
 def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -407,6 +463,9 @@ def _start_mission_file_failure_response(exc: Exception) -> dict:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
+    port_failure = _start_port_failure_exit_code(args.port)
+    if port_failure is not None:
+        return port_failure
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:

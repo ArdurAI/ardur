@@ -306,6 +306,57 @@ def test_attest_fails_closed_for_existing_directory_log_path(tmp_path, capsys):
     )
 
 
+@pytest.mark.parametrize("port", ["-1", "65536"])
+def test_start_invalid_port_returns_safe_json_before_side_effects(tmp_path, capsys, port):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    missing_mission_file = tmp_path / "missing-mission.json"
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--mission",
+            str(missing_mission_file),
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            port,
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_port_invalid"
+    assert payload["error"] == "start_port_invalid"
+    assert payload["error_code"] == "start_port_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "session_id" not in payload
+    assert "Traceback" not in rendered
+    assert port not in rendered
+    assert str(tmp_path) not in rendered
+    assert str(missing_mission_file) not in rendered
+    assert not keys_dir.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
 @pytest.mark.parametrize(
     ("budget_args", "condition"),
     [
