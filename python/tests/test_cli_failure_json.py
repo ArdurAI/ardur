@@ -357,6 +357,71 @@ def test_start_invalid_port_returns_safe_json_before_side_effects(tmp_path, caps
     )
 
 
+@pytest.mark.parametrize("case", ["missing_cert_key", "cert_directory", "key_directory"])
+def test_start_invalid_tls_material_returns_safe_json_before_side_effects(
+    tmp_path, capsys, monkeypatch, case
+):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+
+    if case == "cert_directory":
+        cert_path.mkdir()
+        key_path.write_text("not a private key", encoding="utf-8")
+    elif case == "key_directory":
+        cert_path.write_text("not a certificate", encoding="utf-8")
+        key_path.mkdir()
+
+    def fail_if_key_material_is_generated(*_args, **_kwargs):
+        raise AssertionError("invalid explicit TLS material must fail before key generation")
+
+    monkeypatch.setattr(cli, "generate_keypair", fail_if_key_material_is_generated)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--require-auth",
+            "--tls-cert",
+            str(cert_path),
+            "--tls-key",
+            str(key_path),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_tls_material_invalid"
+    assert payload["error"] == "start_tls_material_invalid"
+    assert payload["error_code"] == "start_tls_material_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "session_id" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    assert str(cert_path) not in rendered
+    assert str(key_path) not in rendered
+    assert not keys_dir.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+
+
 @pytest.mark.parametrize(
     ("budget_args", "condition"),
     [

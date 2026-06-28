@@ -400,6 +400,79 @@ def _start_port_failure_exit_code(port: int) -> int | None:
     return 1
 
 
+def _start_tls_material_failure_condition() -> str:
+    return "start_tls_material_invalid"
+
+
+def _start_tls_material_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_readable_tls_files",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port> "
+                "--tls-cert <tls-cert.pem> --tls-key <tls-key.pem>"
+            ),
+            "detail": (
+                "Use existing certificate and private-key files when providing explicit TLS "
+                "material. Keep raw local paths, tokens, and private-key material out of "
+                "shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "use_local_auto_tls_or_no_tls",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Omit --tls-cert/--tls-key to let Ardur create local self-signed TLS, "
+                "or add --no-tls only for loopback development when plain HTTP is intended."
+            ),
+        },
+    ]
+
+
+def _start_tls_material_failure_response() -> dict:
+    condition = _start_tls_material_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start TLS material is invalid.",
+        "detail": (
+            "Explicit --tls-cert and --tls-key values must both point to existing files "
+            "before Ardur starts the local governance proxy."
+        ),
+        "next_steps": _start_tls_material_failure_next_steps(condition),
+    }
+
+
+def _start_tls_material_invalid(args: argparse.Namespace) -> bool:
+    if args.no_tls:
+        return False
+    if args.tls_cert is None and args.tls_key is None:
+        return False
+    if args.tls_cert is None or args.tls_key is None:
+        return True
+    try:
+        return not Path(args.tls_cert).expanduser().is_file() or not Path(args.tls_key).expanduser().is_file()
+    except OSError:
+        return True
+
+
+def _start_tls_material_failure_exit_code(args: argparse.Namespace) -> int | None:
+    if not _start_tls_material_invalid(args):
+        return None
+    _print_json(_start_tls_material_failure_response())
+    return 1
+
+
 def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -466,6 +539,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     port_failure = _start_port_failure_exit_code(args.port)
     if port_failure is not None:
         return port_failure
+    tls_material_failure = _start_tls_material_failure_exit_code(args)
+    if tls_material_failure is not None:
+        return tls_material_failure
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
