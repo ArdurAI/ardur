@@ -32,6 +32,16 @@ ardur start [--host HOST] [--port PORT] [--mission FILE]
 
 Defaults: bind `127.0.0.1:8080`. Auth required by default.
 
+Invalid `--port` values outside the TCP range `0..65535` fail closed before
+keys, state files, audit logs, sessions, or the proxy startup path are created.
+They exit non-zero and write parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `start_port_invalid`, a message, a
+detail, and placeholder-only `next_steps`. The failure path keeps stderr empty,
+emits no traceback, does not echo raw local paths or secrets, and leaves no
+key, state, log, or session artifacts behind. Valid `--port 0` remains the
+ephemeral-port path, where the operating system chooses an available local port;
+it is not a standalone server-readiness claim.
+
 State directory security: `--state-dir` is local secret state. Persisted
 sessions and passport state can contain bearer credentials, including parent
 `passport_token` values and delegated child replay tokens. The proxy creates or

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "410eee344448b01967bbb4175caa54e6363fcb4e3949d41cd093de9fe9c305f7"
+source_sha256: "2db18b0bcb6681232e047c60b85ca17c17adcc30bed6bc9705dc6c8dd18a4f2b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -48,6 +48,16 @@ ardur start [--host HOST] [--port PORT] [--mission FILE]
 ```
 
 Defaults: bind `127.0.0.1:8080`. Auth required by default.
+
+Invalid `--port` values outside the TCP range `0..65535` fail closed before
+keys, state files, audit logs, sessions, or the proxy startup path are created.
+They exit non-zero and write parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `start_port_invalid`, a message, a
+detail, and placeholder-only `next_steps`. The failure path keeps stderr empty,
+emits no traceback, does not echo raw local paths or secrets, and leaves no
+key, state, log, or session artifacts behind. Valid `--port 0` remains the
+ephemeral-port path, where the operating system chooses an available local port;
+it is not a standalone server-readiness claim.
 
 State directory security: `--state-dir` is local secret state. Persisted
 sessions and passport state can contain bearer credentials, including parent
