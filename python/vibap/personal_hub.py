@@ -194,8 +194,85 @@ def _is_personal_home_not_directory_error(exc: HubError) -> bool:
 
 
 def _print_json_response(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, indent=2))
+    json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
+
+
+_RUN_SUPPORT_CONDITIONS = {
+    "hub_auth_required",
+    "hub_token_missing",
+    "hub_unavailable",
+    "hub_url_invalid",
+    "unauthorized",
+}
+_RUN_TOKEN_CONDITIONS = {
+    "hub_auth_required",
+    "hub_token_missing",
+    "unauthorized",
+}
+_RUN_FAILURE_SUMMARY_LINES = {
+    ("session_start", "hub_token_required"): "Ardur Hub unavailable: hub_token_required",
+    ("session_start", "hub_unavailable"): "Ardur Hub unavailable: hub_unavailable",
+    ("session_start", "hub_url_invalid"): "Ardur Hub unavailable: hub_url_invalid",
+    ("session_start", "run_session_start_failed"): "Ardur Hub unavailable: run_session_start_failed",
+    ("policy_check", "hub_token_required"): "Ardur policy check failed: hub_token_required",
+    ("policy_check", "hub_unavailable"): "Ardur policy check failed: hub_unavailable",
+    ("policy_check", "hub_url_invalid"): "Ardur policy check failed: hub_url_invalid",
+    ("policy_check", "run_policy_check_failed"): "Ardur policy check failed: run_policy_check_failed",
+}
+_RECEIPT_REFERENCE_RE = re.compile(r"^receipt:[0-9a-f]{32}$")
+
+
+def _normalized_run_support_condition(value: Any) -> str:
+    condition = re.sub(
+        r"[^a-z0-9_]+",
+        "_",
+        str(value or "").strip().lower(),
+    ).strip("_")
+    if condition in _RUN_TOKEN_CONDITIONS:
+        return "hub_token_required"
+    if condition in _RUN_SUPPORT_CONDITIONS:
+        return condition
+    return ""
+
+
+def _run_failure_support_condition(response: dict[str, Any], *, phase: str) -> str:
+    """Return a support-safe condition without echoing raw Hub error text."""
+
+    for key in ("condition", "error_code"):
+        condition = _normalized_run_support_condition(response.get(key))
+        if condition:
+            return condition
+    hub_unavailable, token_problem = _hub_setup_failure_flags(response)
+    if token_problem:
+        return "hub_token_required"
+    if hub_unavailable:
+        return "hub_unavailable"
+    return f"run_{phase}_failed"
+
+
+def _run_failure_summary_line(response: dict[str, Any], *, phase: str) -> str:
+    condition = _run_failure_support_condition(response, phase=phase)
+    fallback = f"run_{phase}_failed"
+    return _RUN_FAILURE_SUMMARY_LINES.get(
+        (phase, condition),
+        _RUN_FAILURE_SUMMARY_LINES.get((phase, fallback), "Ardur run failed: run_failed"),
+    )
+
+
+def _blocked_command_summary_line(_policy: dict[str, Any]) -> str:
+    """Return a support-safe blocked-command line without echoing policy reasons."""
+
+    return "Ardur blocked command: policy_blocked"
+
+
+def _run_audit_reference_for_user_output(response: dict[str, Any]) -> str:
+    reference = str(_dict(response.get("receipt")).get("receipt_id") or "").strip()
+    if not reference:
+        return ""
+    if _RECEIPT_REFERENCE_RE.fullmatch(reference) and not _SENSITIVE_TARGET_RE.search(reference):
+        return reference
+    return "<receipt>"
 
 
 def _utc_now() -> str:
@@ -1824,7 +1901,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
         raise
     start = hub_request("POST", "/v1/sessions/start", start_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not start.get("ok"):
-        print(f"Ardur Hub unavailable: {start.get('error')}", file=sys.stderr)
+        print(_run_failure_summary_line(start, phase="session_start"), file=sys.stderr)
         _print_run_recovery_next_steps(start, phase="session_start")
         return 127
     check_payload = {
@@ -1839,15 +1916,16 @@ def run_under_hub(args: argparse.Namespace) -> int:
     }
     check = hub_request("POST", "/v1/policy/check", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not check.get("ok"):
-        print(f"Ardur policy check failed: {check.get('error')}", file=sys.stderr)
+        print(_run_failure_summary_line(check, phase="policy_check"), file=sys.stderr)
         _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
     policy = _dict(check.get("policy"))
     if policy.get("verdict") == "blocked":
         observe = hub_request("POST", "/v1/events/observe", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
-        print(f"Ardur blocked command: {policy.get('reason')}", file=sys.stderr)
-        if observe.get("receipt", {}).get("receipt_id"):
-            print(f"receipt: {observe['receipt']['receipt_id']}", file=sys.stderr)
+        print(_blocked_command_summary_line(policy), file=sys.stderr)
+        audit_reference = _run_audit_reference_for_user_output(observe)
+        if audit_reference:
+            print(f"receipt: {audit_reference}", file=sys.stderr)
         return 126
 
     started = time.time()

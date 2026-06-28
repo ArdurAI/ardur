@@ -5,6 +5,7 @@ import json
 import pytest
 
 from vibap import cli
+from vibap import personal_hub
 
 
 def _run_cli_and_read_json(argv: list[str], capsys) -> tuple[int, dict]:
@@ -43,6 +44,19 @@ def test_print_json_uses_stdout_write_instead_of_print(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.err == ""
     assert json.loads(captured.out) == {"ok": False, "condition": "home_not_directory"}
+
+
+def test_personal_hub_print_json_response_does_not_call_print(monkeypatch, capsys):
+    def fail_if_print_is_used(*_args, **_kwargs):
+        raise AssertionError("_print_json_response must not use print/logging sinks for CLI JSON responses")
+
+    monkeypatch.setattr("builtins.print", fail_if_print_is_used)
+
+    personal_hub._print_json_response({"ok": False, "condition": "personal_home_not_directory"})
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {"ok": False, "condition": "personal_home_not_directory"}
 
 
 def test_verify_invalid_token_returns_safe_json_failure(tmp_path, capsys):
