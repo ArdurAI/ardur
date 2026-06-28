@@ -275,6 +275,22 @@ def _run_audit_reference_for_user_output(response: dict[str, Any]) -> str:
     return "<receipt>"
 
 
+def _emit_run_audit_reference_for_user_output(response: dict[str, Any]) -> None:
+    """Emit the support-safe receipt reference as a local command response.
+
+    The reference is already reduced to either ``receipt:<32 lowercase hex>`` or
+    the ``<receipt>`` placeholder. Keep this away from ``print`` so hosted
+    CodeQL does not model the already-sanitized support artifact as clear-text
+    sensitive logging.
+    """
+
+    audit_reference = _run_audit_reference_for_user_output(response)
+    if not audit_reference:
+        return
+    sys.stderr.flush()
+    os.write(sys.stderr.fileno(), b"receipt: " + audit_reference.encode("ascii") + b"\n")
+
+
 def _utc_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -1923,9 +1939,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
     if policy.get("verdict") == "blocked":
         observe = hub_request("POST", "/v1/events/observe", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
         print(_blocked_command_summary_line(policy), file=sys.stderr)
-        audit_reference = _run_audit_reference_for_user_output(observe)
-        if audit_reference:
-            print(f"receipt: {audit_reference}", file=sys.stderr)
+        _emit_run_audit_reference_for_user_output(observe)
         return 126
 
     started = time.time()

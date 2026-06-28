@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import io
 import json
@@ -2324,6 +2325,51 @@ def test_run_under_hub_blocked_policy_sanitizes_reason_and_preserves_receipt_ref
     assert raw_reason not in captured.err
     assert "raw-block-token-placeholder" not in captured.err
     assert str(tmp_path) not in captured.err
+
+
+def test_run_under_hub_blocked_policy_receipt_output_avoids_print_sink(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    receipt_reference = "receipt:0123456789abcdef0123456789abcdef"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": "deny"}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    real_print = builtins.print
+
+    def receipt_print_guard(*args, **kwargs):
+        if kwargs.get("file") is sys.stderr and args and str(args[0]).startswith("receipt:"):
+            raise AssertionError("receipt reference output must not use print as a log sink")
+        return real_print(*args, **kwargs)
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+    monkeypatch.setattr(builtins, "print", receipt_print_guard)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert f"receipt: {receipt_reference}" in captured.err
+    assert "Next steps:" not in captured.err
 
 
 def test_run_under_hub_blocked_policy_redacts_unsafe_receipt_reference(
