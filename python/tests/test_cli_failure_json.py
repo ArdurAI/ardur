@@ -33,6 +33,14 @@ def _write_valid_mission_file(path) -> None:
     )
 
 
+def _relative_tree_entries(root) -> list[str]:
+    entries = []
+    for path in root.rglob("*"):
+        suffix = "/" if path.is_dir() else ""
+        entries.append(f"{path.relative_to(root)}{suffix}")
+    return sorted(entries)
+
+
 def test_print_json_uses_stdout_write_instead_of_print(monkeypatch, capsys):
     def fail_if_print_is_used(*_args, **_kwargs):
         raise AssertionError("_print_json must not use print/logging sinks for CLI JSON responses")
@@ -136,6 +144,64 @@ def test_attest_missing_session_returns_safe_json_failure(tmp_path, capsys):
     assert payload["next_steps"]
     assert missing_session not in rendered
     assert str(tmp_path) not in rendered
+
+
+@pytest.mark.parametrize(
+    ("session_id", "condition", "precreate_session_dir"),
+    [
+        ("not-a-uuid", "invalid_session_id", False),
+        ("", "invalid_session_id", False),
+        ("00000000-0000-0000-0000-000000000000", "session_not_found", True),
+    ],
+)
+def test_attest_invalid_or_missing_session_fails_before_local_artifacts(
+    tmp_path, capsys, session_id, condition, precreate_session_dir
+):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    if precreate_session_dir:
+        (state_dir / "sessions").mkdir(parents=True)
+    before_entries = _relative_tree_entries(tmp_path)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "attest",
+            "--session",
+            session_id,
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == condition
+    assert payload["error"] == condition
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "Traceback" not in rendered
+    if session_id:
+        assert session_id not in rendered
+    assert str(tmp_path) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(tmp_path) == before_entries
+    assert not keys_dir.exists()
+    assert not audit_log.exists()
+    assert not (state_dir / "passport_state.lock").exists()
+    assert not (state_dir / "replay_cache.json").exists()
+    assert not (state_dir / "revoked.json").exists()
+    assert not (state_dir / "lineage_hashes.json").exists()
+    assert not (state_dir / "sessions" / f"{session_id}.lock").exists()
 
 
 @pytest.mark.parametrize(

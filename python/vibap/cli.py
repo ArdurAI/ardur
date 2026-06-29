@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -27,6 +28,7 @@ from .ardur_personal_native_host import (
 )
 from .passport import (
     DEFAULT_HOME,
+    DEFAULT_KEYS_DIR,
     KeyDirectoryError,
     MissionPassport,
     generate_keypair,
@@ -68,8 +70,14 @@ from .codex_app_server_fixture import (
 )
 from .posture_index import build_posture_index, format_posture_report
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
-from .proxy import GovernanceProxy, serve_proxy
+from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, serve_proxy
 from .shareable_redaction import path_aliases, redact_local_path_text
+
+
+_ATTEST_SESSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def _print_json(payload: dict) -> None:
@@ -210,6 +218,32 @@ def _keys_dir_failure_response(exc: KeyDirectoryError) -> dict:
         "detail": detail,
         "next_steps": _keys_dir_failure_next_steps(condition),
     }
+
+
+def _path_points_to_existing_non_directory(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        candidate.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    try:
+        return not candidate.is_dir()
+    except OSError:
+        return True
+
+
+def _keys_dir_failure_exit_code(path: Path | None) -> int | None:
+    candidate = Path(path).expanduser() if path is not None else DEFAULT_KEYS_DIR
+    if not _path_points_to_existing_non_directory(
+        candidate
+    ) and not _path_has_existing_non_directory_parent(candidate):
+        return None
+    _print_json(_keys_dir_failure_response(KeyDirectoryError()))
+    return 1
 
 
 def _state_dir_failure_condition() -> str:
@@ -1022,6 +1056,25 @@ def _attest_failure_response(exc: Exception) -> dict:
     }
 
 
+def _attest_session_file_path(session_id: str, state_dir: Path | None) -> Path:
+    root = Path(state_dir).expanduser() if state_dir is not None else DEFAULT_STATE_DIR
+    return root / "sessions" / f"{session_id}.json"
+
+
+def _attest_session_failure_exit_code(session_id: str, state_dir: Path | None) -> int | None:
+    if not _ATTEST_SESSION_ID_RE.match(session_id):
+        _print_json(_attest_failure_response(ValueError("invalid session ID format: must be UUID")))
+        return 1
+    try:
+        session_exists = _attest_session_file_path(session_id, state_dir).exists()
+    except OSError:
+        session_exists = False
+    if session_exists:
+        return None
+    _print_json(_attest_failure_response(ValueError("unknown session '<session-id>'")))
+    return 1
+
+
 def cmd_attest(args: argparse.Namespace) -> int:
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
@@ -1035,6 +1088,12 @@ def cmd_attest(args: argparse.Namespace) -> int:
     log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
     if log_path_parent_failure is not None:
         return log_path_parent_failure
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    session_failure = _attest_session_failure_exit_code(args.session, args.state_dir)
+    if session_failure is not None:
+        return session_failure
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
