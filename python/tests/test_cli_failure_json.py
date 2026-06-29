@@ -234,6 +234,56 @@ def test_core_passport_commands_fail_closed_for_existing_file_state_dir(tmp_path
     )
 
 
+def test_start_existing_file_state_dir_fails_before_artifacts(
+    tmp_path, capsys, monkeypatch
+):
+    keys_dir = tmp_path / "keys"
+    state_file = tmp_path / "state-file"
+    state_file.write_text("not a directory", encoding="utf-8")
+    audit_log = tmp_path / "audit.jsonl"
+
+    def fail_if_proxy_starts(*_args, **_kwargs):  # pragma: no cover - assertion path
+        raise AssertionError("invalid start state-dir must fail before proxy startup")
+
+    monkeypatch.setattr(cli, "serve_proxy", fail_if_proxy_starts)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_file),
+            "--log-path",
+            str(audit_log),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "state_dir_not_directory"
+    assert payload["error"] == "state_dir_not_directory"
+    assert payload["error_code"] == "state_dir_not_directory"
+    assert "token" not in payload
+    assert "session_id" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    assert str(state_file) not in rendered
+    assert not keys_dir.exists()
+    assert not (keys_dir / "passport_private.pem").exists()
+    assert not (keys_dir / "passport_public.pem").exists()
+    assert state_file.read_text(encoding="utf-8") == "not a directory"
+    assert not audit_log.exists()
+
+
 def test_start_with_mission_fails_closed_for_existing_directory_log_path(tmp_path, capsys):
     keys_dir = tmp_path / "keys"
     state_dir = tmp_path / "state"
@@ -275,7 +325,11 @@ def test_start_with_mission_fails_closed_for_existing_directory_log_path(tmp_pat
     assert "token" not in payload
     assert str(tmp_path) not in rendered
     assert str(audit_dir) not in rendered
+    assert not keys_dir.exists()
+    assert not (keys_dir / "passport_private.pem").exists()
+    assert not (keys_dir / "passport_public.pem").exists()
     assert not state_dir.exists()
+    assert list(audit_dir.iterdir()) == []
     assert all(
         "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
     )
@@ -362,6 +416,66 @@ def test_start_invalid_mission_file_returns_safe_json_before_artifacts(
     assert all(
         "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
     )
+
+
+@pytest.mark.parametrize(
+    "write_target_args",
+    [
+        ["--state-dir", "<state-file>", "--log-path", "<audit-log>"],
+        ["--state-dir", "<state-dir>", "--log-path", "<audit-dir>"],
+    ],
+)
+def test_start_invalid_mission_precedes_invalid_write_targets(
+    tmp_path, capsys, write_target_args
+):
+    keys_dir = tmp_path / "keys"
+    state_file = tmp_path / "state-file"
+    state_file.write_text("not a directory", encoding="utf-8")
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    audit_dir = tmp_path / "audit-dir"
+    audit_dir.mkdir()
+    missing_mission_file = tmp_path / "missing-mission.json"
+    replacements = {
+        "<state-file>": str(state_file),
+        "<state-dir>": str(state_dir),
+        "<audit-log>": str(audit_log),
+        "<audit-dir>": str(audit_dir),
+    }
+    resolved_write_target_args = [
+        replacements[value] if value in replacements else value
+        for value in write_target_args
+    ]
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--mission",
+            str(missing_mission_file),
+            "--keys-dir",
+            str(keys_dir),
+            *resolved_write_target_args,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--no-tls",
+            "--no-require-auth",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_mission_file_missing"
+    assert "state_dir_not_directory" not in rendered
+    assert "log_path_not_file" not in rendered
+    assert str(tmp_path) not in rendered
+    assert not keys_dir.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+    assert list(audit_dir.iterdir()) == []
 
 
 def test_attest_fails_closed_for_existing_directory_log_path(tmp_path, capsys):

@@ -666,17 +666,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         ) as exc:
             _print_json(_start_mission_file_failure_response(exc))
             return 1
-    try:
-        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
-    except KeyDirectoryError as exc:
-        _print_json(_keys_dir_failure_response(exc))
-        return 1
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
         return state_dir_failure
     log_path_failure = _log_path_failure_exit_code(args.log_path)
     if log_path_failure is not None:
         return log_path_failure
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "ff9d67065b4350c93aab976829312c1593290da7e58278005421c81c4fc5c18e"
+source_sha256: "ba3c00eafe18e4ec3b974c0d7d1a0fa9470f1e1057d325b5eba9a7b95058587c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -107,6 +107,16 @@ placeholder-only `next_steps`. The failure path keeps stderr empty, emits no
 traceback, does not echo raw local paths or file contents, and leaves no key,
 state, log, or session artifacts behind. Valid mission-file session-start
 behavior remains unchanged.
+
+Invalid start write targets fail closed after port, host, TLS material, and
+mission-file validation but before key generation, state initialization, audit
+log creation, session creation, or proxy startup. An existing non-directory
+`--state-dir` returns `state_dir_not_directory`; an existing non-file
+`--log-path` returns `log_path_not_file`. These failures keep stdout parseable
+as JSON with `ok: false`, stable `condition`/`error`/`error_code` values, and
+placeholder-only `next_steps`, keep stderr empty, emit no traceback, do not echo
+raw local paths or secrets, and leave no Mission Passport signing keys, state,
+log, or session artifacts behind.
 
 ### `ardur kill-switch`
 

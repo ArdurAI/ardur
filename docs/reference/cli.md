@@ -91,6 +91,16 @@ traceback, does not echo raw local paths or file contents, and leaves no key,
 state, log, or session artifacts behind. Valid mission-file session-start
 behavior remains unchanged.
 
+Invalid start write targets fail closed after port, host, TLS material, and
+mission-file validation but before key generation, state initialization, audit
+log creation, session creation, or proxy startup. An existing non-directory
+`--state-dir` returns `state_dir_not_directory`; an existing non-file
+`--log-path` returns `log_path_not_file`. These failures keep stdout parseable
+as JSON with `ok: false`, stable `condition`/`error`/`error_code` values, and
+placeholder-only `next_steps`, keep stderr empty, emit no traceback, do not echo
+raw local paths or secrets, and leave no Mission Passport signing keys, state,
+log, or session artifacts behind.
+
 ### `ardur kill-switch`
 
 Activate or deactivate the emergency kill switch on a running governance proxy.
