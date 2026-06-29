@@ -40,6 +40,8 @@ resolve_daemon_socket_path = _daemon_client.resolve_daemon_socket_path
 
 _PRIVATE_SOCKET_DIR_MODE = 0o700
 _PRIVATE_SOCKET_MODE = 0o600
+_ACTIVE_SOCKET_STARTUP_GRACE_S = 0.05
+_ACTIVE_SOCKET_PROBE_INTERVAL_S = 0.01
 
 # Installed native fast path command for Claude Code PreToolUse hooks.
 _NATIVE_PRE_TOOL_USE_COMMAND_BASENAME = "claude-code-pre_tool_use"
@@ -805,19 +807,27 @@ def _ensure_private_socket_parent(path: Path) -> None:
 
 
 def _socket_path_is_active(path: Path, *, timeout_s: float) -> bool:
-    """Return True when a Unix socket path is currently accepting connections."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
-        probe.settimeout(max(timeout_s, 0.001))
-        try:
-            probe.connect(str(path))
-        except (FileNotFoundError, ConnectionRefusedError):
-            return False
-        except TimeoutError:
-            # Treat timeout as active/contended to avoid unlinking a live socket.
-            return True
-        except OSError:
-            return False
-    return True
+    """Return True when a Unix socket path is active or still starting."""
+    deadline = time.monotonic() + max(timeout_s, _ACTIVE_SOCKET_STARTUP_GRACE_S)
+    while True:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            remaining = max(deadline - time.monotonic(), 0.001)
+            probe.settimeout(max(min(timeout_s, remaining), 0.001))
+            try:
+                probe.connect(str(path))
+            except FileNotFoundError:
+                return False
+            except ConnectionRefusedError:
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(min(_ACTIVE_SOCKET_PROBE_INTERVAL_S, remaining))
+                continue
+            except TimeoutError:
+                # Treat timeout as active/contended to avoid unlinking a live socket.
+                return True
+            except OSError:
+                return False
+        return True
 
 
 def _cleanup_stale_socket(path: Path, *, timeout_s: float) -> None:
