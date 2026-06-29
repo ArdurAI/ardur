@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "ba3c00eafe18e4ec3b974c0d7d1a0fa9470f1e1057d325b5eba9a7b95058587c"
+source_sha256: "1bfae893ff1439a6b24491931ec173f212e90bb728f1adf1fa95232a0b32383c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -182,6 +182,22 @@ chain.
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
 ```
+
+Invalid attest state and audit-log write targets fail closed before Mission
+Passport key generation, state/session or log artifacts, and attestation token
+issuance. An existing non-directory `--state-dir` returns
+`state_dir_not_directory`; a `--state-dir` whose parent is an existing
+non-directory, including a dangling symlink, returns
+`state_dir_parent_not_directory`. An existing non-file `--log-path` returns
+`log_path_not_file`; a `--log-path` whose parent is an existing non-directory,
+including a dangling symlink, returns `log_path_parent_not_directory`. These
+local/no-key CLI failures keep stdout parseable as JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values, and placeholder-only `next_steps`, keep
+stderr empty, emit no traceback, do not echo raw local paths or secrets, and
+leave no Mission Passport signing keys, state, session, audit-log, or
+attestation artifacts behind. This documents the local CLI contract only; it is
+not a release, package, public-readiness, hosted-service, or universal capture
+claim.
 
 ## Personal Path
 
