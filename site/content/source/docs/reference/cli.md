@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "1bfae893ff1439a6b24491931ec173f212e90bb728f1adf1fa95232a0b32383c"
+source_sha256: "950dfde645a46f5f99a428e335476f63596ab321b7caca9b025d58a6468c927e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -195,9 +195,21 @@ local/no-key CLI failures keep stdout parseable as JSON with `ok: false`, stable
 `condition`/`error`/`error_code` values, and placeholder-only `next_steps`, keep
 stderr empty, emit no traceback, do not echo raw local paths or secrets, and
 leave no Mission Passport signing keys, state, session, audit-log, or
-attestation artifacts behind. This documents the local CLI contract only; it is
-not a release, package, public-readiness, hosted-service, or universal capture
-claim.
+attestation artifacts behind.
+
+Session validation failures are a separate local/no-key `ardur attest` contract.
+An invalid UUID input fails as `invalid_session_id`; a valid UUID with no
+persisted session fails as `session_not_found`; and an existing persisted session
+file that is malformed JSON, empty, non-object JSON, or schema-invalid fails as
+`session_invalid`. These failures write parseable stdout JSON with `ok: false`
+and `valid: false` where applicable, stable `condition`/`error` values, and
+placeholder-only `next_steps`; stderr stays empty, no traceback is emitted, and
+the output does not echo raw local paths, session contents, tokens, private keys,
+or other secrets. They fail before Mission Passport key generation,
+state/session locks, replay, revocation, lineage, audit-log, receipt-log,
+attestation-token, or other new artifacts are created. This documents the local
+CLI contract on `origin/dev` only; it is not a release, package,
+public-readiness, live-provider/API, hosted-service, or universal-capture claim.
 
 ## Personal Path
 
