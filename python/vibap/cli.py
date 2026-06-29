@@ -261,6 +261,26 @@ def _state_dir_failure_response() -> dict:
     }
 
 
+def _state_dir_parent_failure_condition() -> str:
+    return "state_dir_parent_not_directory"
+
+
+def _state_dir_parent_failure_response() -> dict:
+    condition = _state_dir_parent_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport state directory parent must be a directory.",
+        "detail": (
+            "A parent of the selected Mission Passport state path already exists as a "
+            "file or other non-directory. Choose a state directory whose parents are directories."
+        ),
+        "next_steps": _state_dir_failure_next_steps(condition),
+    }
+
+
 def _state_dir_points_to_existing_non_directory(path: Path | None) -> bool:
     if path is None:
         return False
@@ -271,10 +291,35 @@ def _state_dir_points_to_existing_non_directory(path: Path | None) -> bool:
         return False
 
 
+def _path_has_existing_non_directory_parent(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    for parent in candidate.parents:
+        try:
+            parent.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        try:
+            return not parent.is_dir()
+        except OSError:
+            return True
+    return False
+
+
 def _state_dir_failure_exit_code(path: Path | None) -> int | None:
     if not _state_dir_points_to_existing_non_directory(path):
         return None
     _print_json(_state_dir_failure_response())
+    return 1
+
+
+def _state_dir_parent_failure_exit_code(path: Path | None) -> int | None:
+    if not _path_has_existing_non_directory_parent(path):
+        return None
+    _print_json(_state_dir_parent_failure_response())
     return 1
 
 
@@ -327,6 +372,26 @@ def _log_path_failure_response() -> dict:
     }
 
 
+def _log_path_parent_failure_condition() -> str:
+    return "log_path_parent_not_directory"
+
+
+def _log_path_parent_failure_response() -> dict:
+    condition = _log_path_parent_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport audit log parent must be a directory.",
+        "detail": (
+            "A parent of the selected Mission Passport audit log path already exists as "
+            "a file or other non-directory. Choose an audit-log path whose parents are directories."
+        ),
+        "next_steps": _log_path_failure_next_steps(condition),
+    }
+
+
 def _log_path_points_to_existing_non_file(path: Path | None) -> bool:
     if path is None:
         return False
@@ -341,6 +406,13 @@ def _log_path_failure_exit_code(path: Path | None) -> int | None:
     if not _log_path_points_to_existing_non_file(path):
         return None
     _print_json(_log_path_failure_response())
+    return 1
+
+
+def _log_path_parent_failure_exit_code(path: Path | None) -> int | None:
+    if not _path_has_existing_non_directory_parent(path):
+        return None
+    _print_json(_log_path_parent_failure_response())
     return 1
 
 
@@ -669,9 +741,15 @@ def cmd_start(args: argparse.Namespace) -> int:
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
         return state_dir_failure
+    state_dir_parent_failure = _state_dir_parent_failure_exit_code(args.state_dir)
+    if state_dir_parent_failure is not None:
+        return state_dir_parent_failure
     log_path_failure = _log_path_failure_exit_code(args.log_path)
     if log_path_failure is not None:
         return log_path_failure
+    log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
+    if log_path_parent_failure is not None:
+        return log_path_parent_failure
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
