@@ -205,6 +205,80 @@ def test_attest_invalid_or_missing_session_fails_before_local_artifacts(
 
 
 @pytest.mark.parametrize(
+    ("case_name", "session_content"),
+    [
+        ("malformed_json", "{not json"),
+        ("empty_json", ""),
+        ("array_json", json.dumps([])),
+        ("minimal_object", json.dumps({})),
+        ("schema_invalid_object", json.dumps({"passport_token": "raw-session-content-do-not-leak"})),
+        (
+            "claims_missing_required_fields",
+            json.dumps(
+                {
+                    "passport_token": "raw-session-content-do-not-leak",
+                    "passport_claims": {},
+                }
+            ),
+        ),
+    ],
+)
+def test_attest_corrupt_session_file_fails_before_local_artifacts(
+    tmp_path, capsys, case_name, session_content
+):
+    session_id = "11111111-1111-1111-1111-111111111111"
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    sessions_dir = state_dir / "sessions"
+    audit_log = tmp_path / "audit.jsonl"
+    sessions_dir.mkdir(parents=True)
+    session_file = sessions_dir / f"{session_id}.json"
+    session_file.write_text(session_content, encoding="utf-8")
+    before_entries = _relative_tree_entries(tmp_path)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "attest",
+            "--session",
+            session_id,
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_dir),
+            "--log-path",
+            str(audit_log),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1, case_name
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == "session_invalid"
+    assert payload["error"] == "session_invalid"
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "Traceback" not in rendered
+    assert "raw-session-content-do-not-leak" not in rendered
+    assert "not json" not in rendered
+    assert session_id not in rendered
+    assert str(tmp_path) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(tmp_path) == before_entries
+    assert not keys_dir.exists()
+    assert not audit_log.exists()
+    assert not (state_dir / "passport_state.lock").exists()
+    assert not (state_dir / "replay_cache.json").exists()
+    assert not (state_dir / "revoked.json").exists()
+    assert not (state_dir / "lineage_hashes.json").exists()
+    assert not (state_dir / "lineage_budgets").exists()
+    assert not (sessions_dir / f"{session_id}.lock").exists()
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ["start"],

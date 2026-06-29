@@ -70,7 +70,7 @@ from .codex_app_server_fixture import (
 )
 from .posture_index import build_posture_index, format_posture_report
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
-from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, serve_proxy
+from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
 from .shareable_redaction import path_aliases, redact_local_path_text
 
 
@@ -1013,6 +1013,11 @@ def _attest_failure_condition(exc: Exception) -> tuple[str, str]:
             "session_not_found",
             "No persisted session was found for the supplied session id in the selected state directory.",
         )
+    if "session invalid" in message:
+        return (
+            "session_invalid",
+            "Persisted session data is invalid or corrupt; start or locate a governed session before attesting.",
+        )
     return (
         "attestation_failed",
         "The session could not be loaded or attested from the selected local state.",
@@ -1031,7 +1036,7 @@ def _attest_failure_next_steps(condition: str) -> list[dict[str, str]]:
             ),
         }
     ]
-    if condition in {"invalid_session_id", "session_not_found"}:
+    if condition in {"invalid_session_id", "session_not_found", "session_invalid"}:
         steps.append(
             {
                 "condition": condition,
@@ -1061,16 +1066,40 @@ def _attest_session_file_path(session_id: str, state_dir: Path | None) -> Path:
     return root / "sessions" / f"{session_id}.json"
 
 
+def _attest_session_invalid_error() -> ValueError:
+    return ValueError("session invalid: persisted session file is malformed")
+
+
+def _validate_attest_session_file_before_artifacts(session_path: Path) -> int | None:
+    try:
+        raw_session = session_path.read_text(encoding="utf-8")
+        payload = json.loads(raw_session)
+        if not isinstance(payload, dict):
+            raise ValueError("session file must contain a JSON object")
+        session = GovernanceSession.from_dict(payload)
+        if not isinstance(session.passport_token, str) or not session.passport_token:
+            raise ValueError("session passport token is missing")
+        for claim_name in ("jti", "sub", "mission"):
+            claim_value = session.passport_claims.get(claim_name)
+            if not isinstance(claim_value, str) or not claim_value:
+                raise ValueError("session passport claims are incomplete")
+    except (OSError, TypeError, ValueError, KeyError, AttributeError):
+        _print_json(_attest_failure_response(_attest_session_invalid_error()))
+        return 1
+    return None
+
+
 def _attest_session_failure_exit_code(session_id: str, state_dir: Path | None) -> int | None:
     if not _ATTEST_SESSION_ID_RE.match(session_id):
         _print_json(_attest_failure_response(ValueError("invalid session ID format: must be UUID")))
         return 1
+    session_path = _attest_session_file_path(session_id, state_dir)
     try:
-        session_exists = _attest_session_file_path(session_id, state_dir).exists()
+        session_exists = session_path.exists()
     except OSError:
         session_exists = False
     if session_exists:
-        return None
+        return _validate_attest_session_file_before_artifacts(session_path)
     _print_json(_attest_failure_response(ValueError("unknown session '<session-id>'")))
     return 1
 
