@@ -366,6 +366,84 @@ def test_start_existing_non_directory_parent_for_state_or_log_path_fails_before_
     )
 
 
+@pytest.mark.parametrize(
+    ("write_target", "parent_kind", "condition"),
+    [
+        ("state_dir_parent", "regular_file", "state_dir_parent_not_directory"),
+        ("log_path_parent", "regular_file", "log_path_parent_not_directory"),
+        ("state_dir_parent", "dangling_symlink", "state_dir_parent_not_directory"),
+        ("log_path_parent", "dangling_symlink", "log_path_parent_not_directory"),
+    ],
+)
+def test_attest_existing_non_directory_parent_for_state_or_log_path_fails_before_artifacts(
+    tmp_path, capsys, write_target, parent_kind, condition
+):
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    parent_path = tmp_path / f"attest-parent-{parent_kind}"
+    if parent_kind == "regular_file":
+        parent_path.write_text("not a directory", encoding="utf-8")
+    elif parent_kind == "dangling_symlink":
+        try:
+            parent_path.symlink_to(tmp_path / "missing-target")
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+    else:
+        raise AssertionError(f"unknown parent kind: {parent_kind}")
+    if write_target == "state_dir_parent":
+        state_arg = parent_path / "state"
+        log_arg = audit_log
+    else:
+        state_arg = state_dir
+        log_arg = parent_path / "audit.jsonl"
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "attest",
+            "--session",
+            "00000000-0000-0000-0000-000000000000",
+            "--keys-dir",
+            str(keys_dir),
+            "--state-dir",
+            str(state_arg),
+            "--log-path",
+            str(log_arg),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == condition
+    assert payload["error"] == condition
+    assert payload["error_code"] == condition
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "session_id" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    assert str(parent_path) not in rendered
+    if parent_kind == "regular_file":
+        assert parent_path.read_text(encoding="utf-8") == "not a directory"
+    else:
+        assert parent_path.is_symlink()
+        assert not parent_path.exists()
+    assert not keys_dir.exists()
+    assert not (keys_dir / "passport_private.pem").exists()
+    assert not (keys_dir / "passport_public.pem").exists()
+    assert not state_arg.exists()
+    assert not log_arg.exists()
+    assert not state_dir.exists()
+    assert not audit_log.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
 def test_start_with_mission_fails_closed_for_existing_directory_log_path(tmp_path, capsys):
     keys_dir = tmp_path / "keys"
     state_dir = tmp_path / "state"

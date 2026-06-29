@@ -1023,17 +1023,23 @@ def _attest_failure_response(exc: Exception) -> dict:
 
 
 def cmd_attest(args: argparse.Namespace) -> int:
+    state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
+    if state_dir_failure is not None:
+        return state_dir_failure
+    state_dir_parent_failure = _state_dir_parent_failure_exit_code(args.state_dir)
+    if state_dir_parent_failure is not None:
+        return state_dir_parent_failure
+    log_path_failure = _log_path_failure_exit_code(args.log_path)
+    if log_path_failure is not None:
+        return log_path_failure
+    log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
+    if log_path_parent_failure is not None:
+        return log_path_parent_failure
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
-    state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
-    if state_dir_failure is not None:
-        return state_dir_failure
-    log_path_failure = _log_path_failure_exit_code(args.log_path)
-    if log_path_failure is not None:
-        return log_path_failure
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
