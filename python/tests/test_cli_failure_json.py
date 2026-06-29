@@ -88,6 +88,38 @@ def test_verify_invalid_token_returns_safe_json_failure(tmp_path, capsys):
     assert all("<token>" in step["command"] or "<" in step["command"] for step in payload["next_steps"])
 
 
+@pytest.mark.parametrize("raw_token", ["not-a-jwt", "", "abc.def.ghi"])
+def test_verify_malformed_token_fails_before_key_artifacts(tmp_path, capsys, raw_token):
+    keys_dir = tmp_path / "keys"
+    before_entries = _relative_tree_entries(tmp_path)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--token", raw_token, "--keys-dir", str(keys_dir)],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == "invalid_passport_token"
+    assert payload["error"] == "invalid_passport_token"
+    assert payload.get("error_code") is None
+    assert payload["message"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    if raw_token:
+        assert raw_token not in rendered
+    assert str(tmp_path) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(tmp_path) == before_entries
+    assert not keys_dir.exists()
+    assert not (keys_dir / "passport_private.pem").exists()
+    assert not (keys_dir / "passport_public.pem").exists()
+
+
 def test_attest_invalid_session_id_returns_safe_json_failure(tmp_path, capsys):
     raw_session = "missing-session"
 

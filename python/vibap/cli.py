@@ -986,7 +986,35 @@ def _verify_failure_response(exc: Exception) -> dict:
     }
 
 
+def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
+    try:
+        jwt.get_unverified_header(token)
+        jwt.decode(
+            token,
+            options={
+                "verify_signature": False,
+                "verify_aud": False,
+                "verify_exp": False,
+                "verify_iat": False,
+                "verify_iss": False,
+                "verify_nbf": False,
+            },
+        )
+    except jwt.PyJWTError:
+        _print_json(
+            _verify_failure_response(jwt.DecodeError("Mission Passport token is malformed."))
+        )
+        return 1
+    return None
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    malformed_token_failure = _verify_malformed_token_failure_exit_code(args.token)
+    if malformed_token_failure is not None:
+        return malformed_token_failure
     try:
         _, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
