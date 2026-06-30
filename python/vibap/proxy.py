@@ -4949,6 +4949,9 @@ def serve_proxy(
             return
 
         def _read_json(self) -> dict[str, Any]:
+            transfer_encoding = self.headers.get("Transfer-Encoding")
+            if transfer_encoding and transfer_encoding.strip().lower() != "identity":
+                raise ValueError("unsupported Transfer-Encoding")
             length = int(self.headers.get("Content-Length", "0"))
             if length > MAX_REQUEST_BODY:
                 raise ValueError(f"request body too large ({length} bytes, max {MAX_REQUEST_BODY})")

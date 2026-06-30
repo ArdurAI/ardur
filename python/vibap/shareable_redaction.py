@@ -37,10 +37,13 @@ _SLASH_LIKE_TRANSLATION = str.maketrans(
     }
 )
 # Match direct and repeatedly percent-encoded separator bytes without decoding
-# arbitrary percent escapes in surrounding user text. Examples:
+# arbitrary percent escapes in surrounding user text. Keep the depth aligned
+# with the proxy resource-scope sanitizer's bounded percent-decode loop so a
+# shareable bundle cannot preserve one more encoded local-path separator than
+# governance can recognize. Examples:
 #   %2F, %252F, %25252F -> /
 #   file%3A, file%253A -> file:
-_PERCENT_ENCODED_BYTE_PREFIX = r"%(?:25){0,3}"
+_PERCENT_ENCODED_BYTE_PREFIX = r"%(?:25){0,7}"
 _PERCENT_ENCODED_FILE_SCHEME_RE = re.compile(
     rf"\bfile{_PERCENT_ENCODED_BYTE_PREFIX}3a",
     re.IGNORECASE,
