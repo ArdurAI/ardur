@@ -58,6 +58,21 @@ func TestObserveLinuxUnixPeerCredentialsFromSocketpair(t *testing.T) {
 	if observation.Credentials.PID == 0 {
 		t.Fatalf("pid must be daemon-observed and non-zero")
 	}
+	if observation.Credentials.ProcessStartTimeTicks == 0 {
+		t.Fatalf("process start time ticks must be daemon-observed and non-zero")
+	}
+}
+
+func TestParseLinuxProcStatStartTimeTicks(t *testing.T) {
+	t.Parallel()
+
+	startTime, err := parseLinuxProcStatStartTimeTicks("4321 (worker process) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 987654321\n")
+	if err != nil {
+		t.Fatalf("parseLinuxProcStatStartTimeTicks returned error: %v", err)
+	}
+	if startTime != 987654321 {
+		t.Fatalf("start time ticks = %d, want 987654321", startTime)
+	}
 }
 
 func TestObserveLinuxUnixPeerCredentialsFailsClosed(t *testing.T) {

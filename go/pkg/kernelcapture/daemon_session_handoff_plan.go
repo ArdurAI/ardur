@@ -188,6 +188,9 @@ func validateDaemonSessionHandoffConfig(cfg DaemonSessionHandoffConfig) error {
 	if session.PeerPID == 0 {
 		return daemonSessionHandoffError("daemon-observed peer pid is required")
 	}
+	if session.PeerProcessStartTimeTicks == 0 {
+		return daemonSessionHandoffError("daemon-observed peer process start time is required")
+	}
 	if cleanPath(session.SocketPath) != cleanPath(cfg.CustodyPlan.SocketPath) {
 		return daemonSessionHandoffError("session socket path must match daemon custody plan")
 	}

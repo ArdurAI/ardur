@@ -285,7 +285,8 @@ func containsPrivilegedDaemonProtocolField(value any) bool {
 func isPrivilegedDaemonProtocolMetadataKey(normalizedKey string) bool {
 	switch normalizedKey {
 	case "configpath", "statedir", "rundir", "socketpath", "bpffsdir", "ringbufmappath", "pinnedmappath", "mappath",
-		"peeruid", "peergid", "peerpid", "peercredentials", "sopeercred", "linuxsopeercred", "ucred", "credentialsource":
+		"peeruid", "peergid", "peerpid", "peercredentials", "sopeercred", "linuxsopeercred", "ucred", "credentialsource",
+		"processstarttime", "processstarttimeticks", "peerprocessstarttime", "peerprocessstarttimeticks", "peerstarttime", "peerstarttimeticks":
 		return true
 	default:
 		return false

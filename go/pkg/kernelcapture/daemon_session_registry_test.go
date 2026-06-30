@@ -46,7 +46,7 @@ func TestDaemonSessionRegistryRegistersStatusesAndEndsSession(t *testing.T) {
 	if !record.RegisteredAt.Equal(now) || !record.ExpiresAt.Equal(now.Add(60*time.Second)) || !record.EndedAt.IsZero() {
 		t.Fatalf("record times registered=%s expires=%s ended=%s", record.RegisteredAt, record.ExpiresAt, record.EndedAt)
 	}
-	if record.PeerUID != 501 || record.PeerGID != 20 || record.PeerPID != 4321 || record.CredentialSource != DaemonPeerCredentialSourceLinuxSOPeerCred {
+	if record.PeerUID != 501 || record.PeerGID != 20 || record.PeerPID != 4321 || record.PeerProcessStartTimeTicks != 900001 || record.CredentialSource != DaemonPeerCredentialSourceLinuxSOPeerCred {
 		t.Fatalf("record peer evidence = %#v", record)
 	}
 	if record.SocketPath != "/run/ardur/kernelcapture/control.sock" {
@@ -68,6 +68,13 @@ func TestDaemonSessionRegistryRegistersStatusesAndEndsSession(t *testing.T) {
 	}
 	if record.HandoffMetadata["handoff_source"] != "launch_wrapper" {
 		t.Fatalf("registry retained mutable handoff metadata: %#v", record.HandoffMetadata)
+	}
+	mutatedHandshake := handshake
+	mutatedHandshake.ProcessStartTimeTicks = 0
+	mutatedHandshake.Authorization.ProcessStartTimeTicks = 0
+	record, ok = registry.Session("session-1")
+	if !ok || record.PeerProcessStartTimeTicks != 900001 {
+		t.Fatalf("registry retained mutable handshake process start identity: %#v ok=%t", record, ok)
 	}
 
 	status := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-1"), handshake)
@@ -174,6 +181,68 @@ func TestDaemonSessionRegistryRejectsStatusByDifferentPeer(t *testing.T) {
 	ownerStatus := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-status-owned"), owner)
 	if !ownerStatus.OK || ownerStatus.Status != DaemonSessionStatusActive {
 		t.Fatalf("owner status response = %#v", ownerStatus)
+	}
+}
+
+func TestDaemonSessionRegistryRejectsStatusBySamePIDDifferentProcessStartTime(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 43, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	owner := daemonSessionRegistryTestHandshake("session-status-pid-reuse")
+	register := daemonRegisterSessionRequest("session-status-pid-reuse", 1234, 60)
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+
+	reusedPID := owner
+	reusedPID.ProcessStartTimeTicks = owner.ProcessStartTimeTicks + 1
+	reusedPID.Authorization.ProcessStartTimeTicks = reusedPID.ProcessStartTimeTicks
+	reusedPID.Authorization.Reason = "same pid reused by a different process start time"
+	now = now.Add(5 * time.Second)
+
+	rejected := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-status-pid-reuse"), reusedPID)
+	if rejected.OK || rejected.Status != DaemonSessionStatusActive || !strings.Contains(rejected.Error, "different peer") {
+		t.Fatalf("pid-reuse status response = %#v", rejected)
+	}
+
+	ownerStatus := registry.HandleAuthorizedRequest(context.Background(), daemonSessionStatusRequest("session-status-pid-reuse"), owner)
+	if !ownerStatus.OK || ownerStatus.Status != DaemonSessionStatusActive {
+		t.Fatalf("owner status response = %#v", ownerStatus)
+	}
+}
+
+func TestDaemonSessionRegistryRejectsEndSessionBySamePIDDifferentProcessStartTime(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 2, 12, 44, 0, 0, time.UTC)
+	registry := NewDaemonSessionRegistryWithClock(func() time.Time { return now })
+	owner := daemonSessionRegistryTestHandshake("session-end-pid-reuse")
+	register := daemonRegisterSessionRequest("session-end-pid-reuse", 1234, 60)
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+
+	reusedPID := owner
+	reusedPID.ProcessStartTimeTicks = owner.ProcessStartTimeTicks + 1
+	reusedPID.Authorization.ProcessStartTimeTicks = reusedPID.ProcessStartTimeTicks
+	reusedPID.Authorization.Reason = "same pid reused by a different process start time"
+	now = now.Add(5 * time.Second)
+
+	rejected := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-end-pid-reuse"), reusedPID)
+	if rejected.OK || rejected.Status != DaemonSessionStatusActive || !strings.Contains(rejected.Error, "different peer") {
+		t.Fatalf("pid-reuse end response = %#v", rejected)
+	}
+	record, ok := registry.Session("session-end-pid-reuse")
+	if !ok || record.Status(now) != DaemonSessionStatusActive || !record.EndedAt.IsZero() {
+		t.Fatalf("pid-reuse peer mutated session = %#v ok=%t", record, ok)
+	}
+
+	ended := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-end-pid-reuse"), owner)
+	if !ended.OK || ended.Status != DaemonSessionStatusEnded {
+		t.Fatalf("owner end response = %#v", ended)
 	}
 }
 
@@ -353,7 +422,7 @@ func TestDaemonUnixSocketServerHandlesSessionLifecycleWithRegistry(t *testing.T)
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800003},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -383,18 +452,20 @@ func TestDaemonUnixSocketServerHandlesSessionLifecycleWithRegistry(t *testing.T)
 
 func daemonSessionRegistryTestHandshake(sessionID string) DaemonProtocolPeerHandshake {
 	return DaemonProtocolPeerHandshake{
-		ProtocolVersion:  DaemonProtocolVersion,
-		Method:           DaemonProtocolMethodRegisterSession,
-		SessionID:        sessionID,
-		SocketPath:       "/run/ardur/kernelcapture/control.sock",
-		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProtocolVersion:       DaemonProtocolVersion,
+		Method:                DaemonProtocolMethodRegisterSession,
+		SessionID:             sessionID,
+		SocketPath:            "/run/ardur/kernelcapture/control.sock",
+		CredentialSource:      DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProcessStartTimeTicks: 900001,
 		Authorization: DaemonPeerAuthorization{
-			Verdict: DaemonPeerAuthorizationVerdictAllow,
-			Reason:  "observed peer uid is explicitly allowed",
-			UID:     501,
-			GID:     20,
-			PID:     4321,
-			Matched: "uid",
+			Verdict:               DaemonPeerAuthorizationVerdictAllow,
+			Reason:                "observed peer uid is explicitly allowed",
+			UID:                   501,
+			GID:                   20,
+			PID:                   4321,
+			ProcessStartTimeTicks: 900001,
+			Matched:               "uid",
 		},
 	}
 }

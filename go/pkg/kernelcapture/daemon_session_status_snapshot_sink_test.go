@@ -25,7 +25,7 @@ func TestDaemonSessionStatusSnapshotSinkRetainsDetachedSessionStatusSnapshot(t *
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800004},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -117,7 +117,7 @@ func TestDaemonSessionStatusSnapshotSinkFailsClosedForMissingOrExpiredSession(t 
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800004},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -170,7 +170,7 @@ func TestDaemonSessionStatusSnapshotSinkFailsClosedForInvalidCustodyPlan(t *test
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800004},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -214,7 +214,7 @@ func TestDaemonSessionStatusSnapshotSinkRejectsNonSessionStatusMethod(t *testing
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800004},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -303,7 +303,7 @@ func TestSessionStatusSocketClientSendsAndDecodesOnlyProtocolResponse(t *testing
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800004},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
