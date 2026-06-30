@@ -422,6 +422,29 @@ def load_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePubli
     return serialization.load_pem_public_key(pub_path.read_bytes())
 
 
+def load_existing_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePublicKey:
+    """Load ``passport_public.pem`` without creating key directories or key material."""
+    target_dir = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    try:
+        if target_dir.exists() and not target_dir.is_dir():
+            raise KeyDirectoryError()
+    except OSError as exc:
+        raise KeyDirectoryError() from exc
+    pub_path = target_dir / "passport_public.pem"
+    try:
+        public_bytes = pub_path.read_bytes()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "passport_public.pem is missing from the Mission Passport key directory"
+        ) from exc
+    except NotADirectoryError as exc:
+        raise KeyDirectoryError() from exc
+    public_key = serialization.load_pem_public_key(public_bytes)
+    if not isinstance(public_key, ec.EllipticCurvePublicKey):
+        raise ValueError("passport_public.pem must contain an EC public key")
+    return public_key
+
+
 def derive_mission_id(agent_id: str, mission_text: str) -> str:
     """Stable fallback ``mission_id`` when the MissionPassport doesn't set one.
 

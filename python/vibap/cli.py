@@ -32,6 +32,7 @@ from .passport import (
     KeyDirectoryError,
     MissionPassport,
     generate_keypair,
+    load_existing_public_key,
     issue_passport,
     load_mission_file,
     verify_passport,
@@ -986,6 +987,46 @@ def _verify_failure_response(exc: Exception) -> dict:
     }
 
 
+def _verify_public_key_missing_next_steps() -> list[dict[str, str]]:
+    condition = "passport_public_key_missing"
+    return [
+        {
+            "condition": condition,
+            "action": "verify_with_issuing_key_directory",
+            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "detail": (
+                "Use the key directory that issued this Mission Passport. Keep raw "
+                "tokens, private keys, and local paths out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "issue_a_new_passport_if_needed",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": (
+                "Issue a fresh local Mission Passport when the original public key is unavailable."
+            ),
+        },
+    ]
+
+
+def _verify_public_key_missing_response() -> dict:
+    condition = "passport_public_key_missing"
+    return {
+        "ok": False,
+        "valid": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport public key is required for verification.",
+        "detail": (
+            "The selected key directory does not contain passport_public.pem. "
+            "Verification is read-only and will not create signing keys."
+        ),
+        "next_steps": _verify_public_key_missing_next_steps(),
+    }
+
+
 def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
     try:
         jwt.get_unverified_header(token)
@@ -1016,9 +1057,12 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if malformed_token_failure is not None:
         return malformed_token_failure
     try:
-        _, public_key = generate_keypair(keys_dir=args.keys_dir)
+        public_key = load_existing_public_key(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
+        return 1
+    except FileNotFoundError:
+        _print_json(_verify_public_key_missing_response())
         return 1
     try:
         claims = verify_passport(args.token, public_key)

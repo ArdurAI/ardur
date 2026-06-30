@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -39,6 +40,31 @@ def _relative_tree_entries(root) -> list[str]:
         suffix = "/" if path.is_dir() else ""
         entries.append(f"{path.relative_to(root)}{suffix}")
     return sorted(entries)
+
+
+def _base64url_json(value: dict) -> str:
+    raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _well_formed_invalid_es256_token() -> str:
+    signature = base64.urlsafe_b64encode(b"invalid-signature").rstrip(b"=").decode("ascii")
+    return ".".join(
+        [
+            _base64url_json({"alg": "ES256", "typ": "JWT"}),
+            _base64url_json(
+                {
+                    "iss": "vibap-governance-proxy",
+                    "sub": "well-formed-invalid-token-agent",
+                    "aud": "vibap-proxy",
+                    "iat": 1000000000,
+                    "exp": 4102444800,
+                    "jti": "well-formed-invalid-token-jti",
+                }
+            ),
+            signature,
+        ]
+    )
 
 
 def test_print_json_uses_stdout_write_instead_of_print(monkeypatch, capsys):
@@ -118,6 +144,69 @@ def test_verify_malformed_token_fails_before_key_artifacts(tmp_path, capsys, raw
     assert not keys_dir.exists()
     assert not (keys_dir / "passport_private.pem").exists()
     assert not (keys_dir / "passport_public.pem").exists()
+
+
+@pytest.mark.parametrize("precreate_keys_dir", [False, True])
+def test_verify_well_formed_invalid_token_fails_before_key_artifacts(
+    tmp_path, capsys, precreate_keys_dir
+):
+    raw_token = _well_formed_invalid_es256_token()
+    keys_dir = tmp_path / "keys"
+    if precreate_keys_dir:
+        keys_dir.mkdir()
+    before_entries = _relative_tree_entries(tmp_path)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--token", raw_token, "--keys-dir", str(keys_dir)],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == "passport_public_key_missing"
+    assert payload["error"] == "passport_public_key_missing"
+    assert payload["error_code"] == "passport_public_key_missing"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert raw_token not in rendered
+    assert str(tmp_path) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(tmp_path) == before_entries
+    assert not (keys_dir / "passport_private.pem").exists()
+    assert not (keys_dir / "passport_public.pem").exists()
+
+
+def test_verify_token_issued_by_existing_keys_dir_remains_valid(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    issue_rc, issued = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "verify-agent",
+            "--mission",
+            "exercise verify with existing keys",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+    assert issue_rc == 0
+    assert "token" in issued
+
+    verify_rc, verified = _run_cli_and_read_json(
+        ["verify", "--token", issued["token"], "--keys-dir", str(keys_dir)],
+        capsys,
+    )
+
+    assert verify_rc == 0
+    assert verified["valid"] is True
+    assert verified["claims"]["sub"] == "verify-agent"
 
 
 def test_attest_invalid_session_id_returns_safe_json_failure(tmp_path, capsys):
