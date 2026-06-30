@@ -439,6 +439,8 @@ def load_existing_public_key(keys_dir: str | Path | None = None) -> ec.EllipticC
         ) from exc
     except NotADirectoryError as exc:
         raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise ValueError("passport_public.pem is not a readable EC public key") from exc
     public_key = serialization.load_pem_public_key(public_bytes)
     if not isinstance(public_key, ec.EllipticCurvePublicKey):
         raise ValueError("passport_public.pem must contain an EC public key")

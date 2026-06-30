@@ -233,6 +233,136 @@ def test_verify_corrupt_existing_public_key_returns_safe_json_without_key_artifa
     assert not (corrupt_keys_dir / "passport_private.pem").exists()
 
 
+@pytest.mark.parametrize("path_shape", ["directory", "symlink_to_directory"])
+def test_verify_existing_public_key_path_shape_returns_safe_json_without_key_artifacts(
+    tmp_path, capsys, path_shape
+):
+    issue_keys_dir = tmp_path / "issue-keys"
+    broken_keys_dir = tmp_path / "broken-keys"
+    issue_rc, issued = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            f"public-key-{path_shape}-agent",
+            "--mission",
+            "exercise public key path-shape verification",
+            "--keys-dir",
+            str(issue_keys_dir),
+        ],
+        capsys,
+    )
+    assert issue_rc == 0
+    raw_token = issued["token"]
+    broken_keys_dir.mkdir()
+    public_key_path = broken_keys_dir / "passport_public.pem"
+    if path_shape == "directory":
+        public_key_path.mkdir()
+    elif path_shape == "symlink_to_directory":
+        target_dir = tmp_path / "public-key-directory-target"
+        target_dir.mkdir()
+        try:
+            public_key_path.symlink_to(target_dir, target_is_directory=True)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+    else:  # pragma: no cover - parametrization guard
+        raise AssertionError(f"unknown public key path shape: {path_shape}")
+    before_entries = _relative_tree_entries(broken_keys_dir)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--token", raw_token, "--keys-dir", str(broken_keys_dir)],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == "passport_public_key_invalid"
+    assert payload["error"] == "passport_public_key_invalid"
+    assert payload["error_code"] == "passport_public_key_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert raw_token not in rendered
+    assert str(tmp_path) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"]
+        for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(broken_keys_dir) == before_entries
+    assert public_key_path.exists()
+    assert not (broken_keys_dir / "passport_private.pem").exists()
+
+
+def test_verify_unreadable_existing_public_key_returns_safe_json_without_key_artifacts(
+    tmp_path, capsys
+):
+    issue_keys_dir = tmp_path / "issue-keys"
+    broken_keys_dir = tmp_path / "broken-keys"
+    issue_rc, issued = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "unreadable-public-key-agent",
+            "--mission",
+            "exercise unreadable public key verification",
+            "--keys-dir",
+            str(issue_keys_dir),
+        ],
+        capsys,
+    )
+    assert issue_rc == 0
+    raw_token = issued["token"]
+    broken_keys_dir.mkdir()
+    public_key_path = broken_keys_dir / "passport_public.pem"
+    public_key_path.write_text(
+        "unreadable public key content must not leak\n", encoding="utf-8"
+    )
+    public_key_path.chmod(0)
+    try:
+        try:
+            public_key_path.read_bytes()
+        except OSError:
+            pass
+        else:
+            public_key_path.chmod(0o600)
+            pytest.skip("unreadable public-key file is not reproducible on this filesystem")
+        before_entries = _relative_tree_entries(broken_keys_dir)
+
+        rc, payload = _run_cli_and_read_json(
+            ["verify", "--token", raw_token, "--keys-dir", str(broken_keys_dir)],
+            capsys,
+        )
+    finally:
+        public_key_path.chmod(0o600)
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == "passport_public_key_invalid"
+    assert payload["error"] == "passport_public_key_invalid"
+    assert payload["error_code"] == "passport_public_key_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert raw_token not in rendered
+    assert str(tmp_path) not in rendered
+    assert "unreadable public key content" not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"]
+        for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(broken_keys_dir) == before_entries
+    assert (
+        public_key_path.read_text(encoding="utf-8")
+        == "unreadable public key content must not leak\n"
+    )
+    assert not (broken_keys_dir / "passport_private.pem").exists()
+
+
 def test_verify_token_issued_by_existing_keys_dir_remains_valid(tmp_path, capsys):
     keys_dir = tmp_path / "keys"
     issue_rc, issued = _run_cli_and_read_json(
