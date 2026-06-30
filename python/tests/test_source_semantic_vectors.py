@@ -63,6 +63,12 @@ REQUIRED_VECTOR_CLASSES = {
         "host_runtime_event",
         "unknown",
     },
+    "claude-code-reportfindings-review-output-v2196": {
+        "cloud_agent_run",
+        "host_runtime_event",
+        "sdk_output_metadata",
+        "unknown",
+    },
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "claude-action-token-cleanup-timeout-best-effort": {
         "cloud_agent_run",
@@ -1303,3 +1309,137 @@ def test_claude_2195_watchsource_websocket_vector_preserves_source_only_boundari
     assert "public readiness/growth" in claim_boundary
     assert "universal cli" in claim_boundary
     assert "credential/endpoint/frame-payload handling" in claim_boundary
+
+
+def test_claude_code_reportfindings_vector_preserves_host_reported_boundaries() -> None:
+    """Claude Code ReportFindings labels must stay host-reported source semantics."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "claude-code-reportfindings-review-output-v2196"
+    )
+
+    assert row["source_family"] == "claude-code"
+    assert row["source_pin"]["kind"] == "package"
+    assert "@anthropic-ai/claude-code@2.1.196" in row["source_pin"]["value"]
+    assert "376a93553a539a3c323d2a54846cae30ace4f242f5d6355064c644634603f725" in (
+        row["source_pin"]["value"]
+    )
+    assert "e264ff2991e0d29b2d956bedd842385180e1d41183417b0bb77c8b808beda206" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "cffab7cbde0814528868ff85ac5c8b30a10671c95910f7039d2cacda30404490"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "0c2c6026c6585b23e506ee1ff8caf8bde366eef6ee17885c06f324e3754a27b2"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "a632285f12510810b550270ff065480011071876f006bca50ad38b1fe90a7834"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "ReportFindingsInput",
+        "ReportFindingsOutput",
+        "effort level",
+        "repo-relative finding anchors",
+        "failure_scenario",
+        "host-reported CONFIRMED or PLAUSIBLE",
+        "host-reported fixed/skipped/no_change_needed",
+        "Pretext artifact description",
+    ):
+        assert phrase in signal
+
+    assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[
+        "claude-code-reportfindings-review-output-v2196"
+    ]
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_reviewer_output_metadata_boundary"
+    assert mapping["review_findings_surface"] == "ReportFindingsInput_and_ReportFindingsOutput"
+    assert mapping["host_verdict_boundary"] == "CONFIRMED_or_PLAUSIBLE_are_host_reported_labels_only"
+    assert mapping["host_outcome_boundary"] == (
+        "fixed_skipped_no_change_needed_are_host_reported_labels_only"
+    )
+    assert mapping["sdk_tools_d_ts_sha256"] == (
+        "376a93553a539a3c323d2a54846cae30ace4f242f5d6355064c644634603f725"
+    )
+    assert mapping["tarball_sha256"] == (
+        "e264ff2991e0d29b2d956bedd842385180e1d41183417b0bb77c8b808beda206"
+    )
+    assert mapping["source_index_sha256"] == (
+        "cffab7cbde0814528868ff85ac5c8b30a10671c95910f7039d2cacda30404490"
+    )
+    assert mapping["parent_matrix_sha256"] == (
+        "0c2c6026c6585b23e506ee1ff8caf8bde366eef6ee17885c06f324e3754a27b2"
+    )
+    assert mapping["review_sha256"] == (
+        "a632285f12510810b550270ff065480011071876f006bca50ad38b1fe90a7834"
+    )
+    assert mapping["matrix_review_boundary"] == (
+        "no_live_claude_provider_action_runner_or_independent_fix_validation"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_claude_code_behavior",
+            "live_reportfindings_emission",
+            "provider_hidden_behavior",
+            "action_runner_side_effects",
+            "github_action_runner_side_effects",
+            "runtime_kernel_side_effects",
+            "raw_file_contents",
+            "raw_review_text",
+            "local_absolute_paths",
+            "credentials",
+            "provider_api_calls",
+            "independent_defect_verification",
+            "actual_fix_verification",
+            "public_readiness",
+            "growth_proof",
+            "universal_cli_capture",
+        }
+    )
+
+    serialized = json.dumps(row, sort_keys=True)
+    for forbidden in (
+        "Bearer",
+        "github_pat_",
+        "raw-secret-value",
+        "BEGIN PRIVATE KEY",
+        "/Users/",
+        "raw file content",
+    ):
+        assert forbidden not in serialized
+
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live claude code",
+        "provider call",
+        "github action run",
+        "host-reported confirmed",
+        "do not prove independent ardur defect verification",
+        "do not prove code changed",
+        "raw review text",
+        "local absolute paths",
+        "provider-hidden/server-side",
+        "runtime/kernel",
+        "public readiness",
+        "universal cli",
+    ):
+        assert phrase in not_claimed
+
+    claim_boundary = row["claim_boundary"].lower()
+    assert "does not prove live claude code" in claim_boundary
+    assert "reportfindings emission" in claim_boundary
+    assert "independent defect verification" in claim_boundary
+    assert "actual fix status" in claim_boundary
+    assert "provider-hidden/server-side" in claim_boundary
+    assert "action-runner side effects" in claim_boundary
+    assert "runtime/kernel" in claim_boundary
+    assert "public readiness/growth" in claim_boundary
+    assert "universal cli" in claim_boundary
+    assert "credential/file-body handling" in claim_boundary
