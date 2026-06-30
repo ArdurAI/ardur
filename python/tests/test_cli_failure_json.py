@@ -182,6 +182,57 @@ def test_verify_well_formed_invalid_token_fails_before_key_artifacts(
     assert not (keys_dir / "passport_public.pem").exists()
 
 
+def test_verify_corrupt_existing_public_key_returns_safe_json_without_key_artifacts(
+    tmp_path, capsys
+):
+    issue_keys_dir = tmp_path / "issue-keys"
+    corrupt_keys_dir = tmp_path / "corrupt-keys"
+    issue_rc, issued = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "corrupt-public-key-agent",
+            "--mission",
+            "exercise corrupt public key verification",
+            "--keys-dir",
+            str(issue_keys_dir),
+        ],
+        capsys,
+    )
+    assert issue_rc == 0
+    raw_token = issued["token"]
+    corrupt_keys_dir.mkdir()
+    corrupt_public_key = corrupt_keys_dir / "passport_public.pem"
+    corrupt_public_key.write_text("not a pem public key\n", encoding="utf-8")
+    before_entries = _relative_tree_entries(corrupt_keys_dir)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--token", raw_token, "--keys-dir", str(corrupt_keys_dir)],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["valid"] is False
+    assert payload["condition"] == "passport_public_key_invalid"
+    assert payload["error"] == "passport_public_key_invalid"
+    assert payload["error_code"] == "passport_public_key_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert raw_token not in rendered
+    assert str(tmp_path) not in rendered
+    assert "not a pem public key" not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+    assert _relative_tree_entries(corrupt_keys_dir) == before_entries
+    assert corrupt_public_key.read_text(encoding="utf-8") == "not a pem public key\n"
+    assert not (corrupt_keys_dir / "passport_private.pem").exists()
+
+
 def test_verify_token_issued_by_existing_keys_dir_remains_valid(tmp_path, capsys):
     keys_dir = tmp_path / "keys"
     issue_rc, issued = _run_cli_and_read_json(
