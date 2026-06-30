@@ -326,6 +326,86 @@ func TestDaemonSessionStatusEvidenceLogFilesystemAppendRejectsBadModesAndPathsBe
 	}
 }
 
+func TestDaemonSessionStatusEvidenceLogFilesystemAppendRejectsSymlinkParentBeforeFilesystem(t *testing.T) {
+	t.Parallel()
+
+	state, entry := appendStateAndEntryForTest(t, "filesystem-append-symlink-parent-session", 8192, DefaultDaemonSessionStatusEvidenceLogMaxLogBytes)
+	plan := state.Snapshot().Plan
+	mapped := newMappedEvidenceLogFilesystemForTest(t, plan.EvidenceLogPath)
+	mapped.symlinkLogicalPath(t, filepath.Join(plan.StateDir, "evidence"), t.TempDir())
+
+	_, err := ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(DaemonSessionStatusEvidenceLogFilesystemAppendConfig{State: state, Filesystem: mapped}, entry)
+	if err == nil {
+		t.Fatalf("expected symlink parent prevalidation failure")
+	}
+	if !errors.Is(err, ErrDaemonSessionStatusEvidenceLogFilesystemAppend) || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink parent error = %v", err)
+	}
+	if got := mapped.operations(); len(got) != 0 {
+		t.Fatalf("symlink parent prevalidation touched mutating filesystem surface: %#v", got)
+	}
+	if snapshot := state.Snapshot(); snapshot.EntryCount != 0 || snapshot.TotalBytes != 0 {
+		t.Fatalf("symlink parent failure mutated state: %#v", snapshot)
+	}
+}
+
+func TestDaemonSessionStatusEvidenceLogFilesystemAppendRejectsSymlinkEvidenceLogBeforeFilesystem(t *testing.T) {
+	t.Parallel()
+
+	state, entry := appendStateAndEntryForTest(t, "filesystem-append-symlink-log-session", 8192, DefaultDaemonSessionStatusEvidenceLogMaxLogBytes)
+	plan := state.Snapshot().Plan
+	mapped := newMappedEvidenceLogFilesystemForTest(t, plan.EvidenceLogPath)
+	mapped.symlinkLogicalPath(t, plan.EvidenceLogPath, filepath.Join(t.TempDir(), "escape.evlog"))
+
+	_, err := ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(DaemonSessionStatusEvidenceLogFilesystemAppendConfig{State: state, Filesystem: mapped}, entry)
+	if err == nil {
+		t.Fatalf("expected symlink evidence-log prevalidation failure")
+	}
+	if !errors.Is(err, ErrDaemonSessionStatusEvidenceLogFilesystemAppend) || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink evidence-log error = %v", err)
+	}
+	if got := mapped.operations(); len(got) != 0 {
+		t.Fatalf("symlink evidence-log prevalidation touched mutating filesystem surface: %#v", got)
+	}
+	if snapshot := state.Snapshot(); snapshot.EntryCount != 0 || snapshot.TotalBytes != 0 {
+		t.Fatalf("symlink evidence-log failure mutated state: %#v", snapshot)
+	}
+}
+
+func TestDaemonSessionStatusEvidenceLogFilesystemAppendRejectsSymlinkRotationBeforeFilesystem(t *testing.T) {
+	t.Parallel()
+
+	state, entry := appendStateAndEntryForTest(t, "filesystem-append-symlink-rotation-session", 8192, 8192)
+	mapped := newMappedEvidenceLogFilesystemForTest(t, state.Snapshot().Plan.EvidenceLogPath)
+
+	first, err := ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(DaemonSessionStatusEvidenceLogFilesystemAppendConfig{State: state, Filesystem: mapped}, entry)
+	if err != nil {
+		t.Fatalf("setup append returned error: %v", err)
+	}
+	if first.Decision != DaemonSessionStatusEvidenceLogAppendAccept {
+		t.Fatalf("setup decision = %q", first.Decision)
+	}
+	before := state.Snapshot()
+	rotationPath := first.EvidenceLogPath + ".000001"
+	mapped.symlinkLogicalPath(t, rotationPath, filepath.Join(t.TempDir(), "escape-rotation.evlog"))
+	mapped.resetOperations()
+
+	_, err = ApplyDaemonSessionStatusEvidenceLogFilesystemAppend(DaemonSessionStatusEvidenceLogFilesystemAppendConfig{State: state, Filesystem: mapped}, entry)
+	if err == nil {
+		t.Fatalf("expected symlink rotation prevalidation failure")
+	}
+	if !errors.Is(err, ErrDaemonSessionStatusEvidenceLogFilesystemAppend) || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink rotation error = %v", err)
+	}
+	if got := mapped.operations(); len(got) != 0 {
+		t.Fatalf("symlink rotation prevalidation touched mutating filesystem surface: %#v", got)
+	}
+	after := state.Snapshot()
+	if after.EntryCount != before.EntryCount || after.TotalBytes != before.TotalBytes || after.RotationCount != before.RotationCount {
+		t.Fatalf("symlink rotation failure mutated state: before=%#v after=%#v", before, after)
+	}
+}
+
 func TestDaemonSessionStatusEvidenceLogFilesystemAppendRollbackAfterRotationAppendError(t *testing.T) {
 	t.Parallel()
 
@@ -433,7 +513,7 @@ func newMappedEvidenceLogFilesystemForTest(t *testing.T, evidenceLogPath string)
 	return &mappedEvidenceLogFilesystemForTest{
 		t:           t,
 		root:        t.TempDir(),
-		logicalRoot: filepath.Dir(evidenceLogPath),
+		logicalRoot: filepath.Dir(filepath.Dir(filepath.Dir(evidenceLogPath))),
 	}
 }
 
@@ -472,6 +552,12 @@ func (m *mappedEvidenceLogFilesystemForTest) Rename(oldPath, newPath string) err
 	}
 	m.recordLocked("rename", oldPath+"->"+newPath)
 	return os.Rename(m.physicalPathLocked(oldPath), m.physicalPathLocked(newPath))
+}
+
+func (m *mappedEvidenceLogFilesystemForTest) Lstat(path string) (fs.FileInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return os.Lstat(m.physicalPathLocked(path))
 }
 
 func (m *mappedEvidenceLogFilesystemForTest) readLogicalFile(t *testing.T, logicalPath string) []byte {
@@ -521,6 +607,23 @@ func (m *mappedEvidenceLogFilesystemForTest) operations() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.ops...)
+}
+
+func (m *mappedEvidenceLogFilesystemForTest) resetOperations() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ops = nil
+}
+
+func (m *mappedEvidenceLogFilesystemForTest) symlinkLogicalPath(t *testing.T, logicalPath string, target string) {
+	t.Helper()
+	physical := m.physicalPath(logicalPath)
+	if err := os.MkdirAll(filepath.Dir(physical), 0o700); err != nil {
+		t.Fatalf("MkdirAll(parent(%q)) returned error: %v", logicalPath, err)
+	}
+	if err := os.Symlink(target, physical); err != nil {
+		t.Fatalf("Symlink(%q -> %q) returned error: %v", logicalPath, target, err)
+	}
 }
 
 func (m *mappedEvidenceLogFilesystemForTest) recordLocked(kind, detail string) {

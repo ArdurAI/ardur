@@ -333,6 +333,16 @@ func newMappedEvidenceLogFilesystemUnion(m ...*mappedEvidenceLogFilesystemForTes
 	return &mappedEvidenceLogFilesystemUnion{m: m}
 }
 
+func (mu *mappedEvidenceLogFilesystemUnion) Lstat(path string) (fs.FileInfo, error) {
+	for _, m := range mu.m {
+		if strings.HasPrefix(path+"/", m.logicalRoot+"/") || path == m.logicalRoot {
+			return m.Lstat(path)
+		}
+	}
+	mu.t.Fatalf("Lstat path %q not matched by any union member", path)
+	return nil, nil
+}
+
 func (mu *mappedEvidenceLogFilesystemUnion) MkdirAll(path string, perm fs.FileMode) error {
 	for _, m := range mu.m {
 		if strings.HasPrefix(path+"/", m.logicalRoot+"/") || path == m.logicalRoot {
