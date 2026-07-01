@@ -39,7 +39,7 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 [`/.github/workflows/codeql.yml`](../.github/workflows/codeql.yml)
 
 - A pre-flight job (`detect-languages`) checks whether `python/` or `go/` carries source files. With the current dev tree, the matrix detects Python and Go and runs analysis per language.
-- Pinned to `github/codeql-action@ce64ddcb` (commit-pinned; `v3` is an annotated tag whose tag-object is `865f5f5c...` and whose underlying commit is `ce64ddcb...`). Same pin discipline as the rest of the workflow set.
+- The CodeQL actions (`init`, `autobuild`, and `analyze`) are pinned to full commit SHAs in the workflow file, with the human-readable `v3` series noted in comments. Treat `.github/workflows/codeql.yml` as the authority for the exact pins so this testing guide does not drift when the pin is updated.
 - Pairs with the `code_quality` ruleset rule on `main`: that rule reads from GitHub's code-scanning alerts table, so it passes vacuously while the matrix is empty and substantively once code lands. The CI job name (`codeql`) is intentionally **not** in the required-status-checks list — the ruleset already gates merges via the alerts mechanism.
 
 ### `tests` — Python and Go runtime tests
