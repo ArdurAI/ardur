@@ -1011,25 +1011,28 @@ def test_nonexistent_session_evaluate(proxy_base: str) -> AdvancedTestResult:
 # --- Unicode / Obfuscation Attacks ---
 
 def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestResult:
-    """Null-byte path injection is rejected; U+2024 dot-confusable paths are handled correctly.
+    """Null-byte and dot-confusable path injections are both rejected.
 
-    The check is scoped to the null-byte attack only.  Paths containing
-    U+2024 ONE DOT LEADER (visually similar to ASCII '.') are NOT a scope
-    bypass: fnmatch's '*' matches across '/' boundaries, so
-    "/tmp/safe/[U+2024][U+2024]/etc/passwd" matches the declared
-    "/tmp/safe/*" scope and is correctly PERMIT-ted — the path resolves
-    to a literal file inside /tmp/safe/, not to /etc/passwd.  Requiring
-    DENY for that path was over-strict and caused a reproducible 21/22
-    failure; the gate is removed.  If a future decision is made to fold
-    dot-confusable codepoints in _sanitize_value, this test should be
-    updated to re-add the DENY expectation for d2.
+    Two attack vectors are gated:
+
+    1. Null-byte injection (``/etc/passwd\\x00.txt``) — caught by step-1
+       null-byte check in ``_sanitize_value``; must not be PERMIT.
+
+    2. Dot-confusable traversal (``[U+2024][U+2024]/etc/passwd``) — U+2024
+       ONE DOT LEADER, U+FE52 SMALL FULL STOP, and U+FF0E FULLWIDTH FULL STOP
+       are folded to ASCII ``.`` in ``_sanitize_value`` step-2b, BEFORE the
+       ``..`` segment check (step-3).  NFKC normalisation maps all three to
+       ``.`` (empirically verified), so a tool performing NFKC before path
+       resolution would turn a PERMIT'd ``[U+2024][U+2024]/…`` into a real
+       ``../../…`` traversal.  The proxy now folds these explicitly and must
+       return DENY for this input.
     """
     result = AdvancedTestResult(
         test_id="unicode-confusable",
-        title="null-byte path injection rejected",
+        title="null-byte and dot-confusable path injections rejected",
         category="Input Sanitization",
         passed=False,
-        expected_decision="Null-byte path must not be PERMIT",
+        expected_decision="Both paths must not be PERMIT",
     )
     t0 = time.time()
 
@@ -1049,7 +1052,8 @@ def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestRe
         "tool_name": "read_file",
         "arguments": {"path": "/etc/passwd\x00.txt"},
     })
-    # U+2024 dot-confusable path: recorded as telemetry; not a release gate.
+    # U+2024 dot-confusable traversal: step-2b folds to '../etc/passwd',
+    # which step-3 rejects.  Must be DENY.
     _, decision2, _ = _post_tls(proxy_base, "/evaluate", {
         "session_id": sid,
         "tool_name": "read_file",
@@ -1058,12 +1062,13 @@ def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestRe
 
     d1 = decision1.get("decision", "UNKNOWN")
     d2 = decision2.get("decision", "UNKNOWN")
-    result.actual_decision = f"null-byte: {d1}, unicode-dot-confusable (telemetry): {d2}"
-    # Only the null-byte check gates pass/fail; d2 is informational.
-    result.passed = d1 != "PERMIT"
+    result.actual_decision = f"null-byte: {d1}, dot-confusable: {d2}"
+    result.passed = d1 != "PERMIT" and d2 != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Null-byte path was not rejected: null-byte={d1}"
+        result.details = (
+            f"Path injection not rejected: null-byte={d1}, dot-confusable={d2}"
+        )
     return result
 
 

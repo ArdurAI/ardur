@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from vibap.passport import issue_passport
-from vibap.proxy import Decision
+from vibap.proxy import Decision, _sanitize_value
 
 
 class TestSessionLifecycle:
@@ -101,3 +101,44 @@ class TestSessionCheckAndRecord:
             arguments={"path": "/tmp/test.txt"},
         )
         assert decision != Decision.PERMIT
+
+
+class TestSanitizeValueDotConfusables:
+    """_sanitize_value step-2b: dot-confusable codepoints fold to ASCII '.'."""
+
+    @pytest.mark.parametrize("dot_char", [
+        "․",  # ONE DOT LEADER
+        "﹒",  # SMALL FULL STOP
+        "．",  # FULLWIDTH FULL STOP
+    ])
+    def test_single_dot_confusable_does_not_traverse(self, dot_char):
+        # A single dot-confusable followed by a path: no traversal possible.
+        value, reason = _sanitize_value(f"{dot_char}etc/passwd")
+        # Should NOT raise; single '.' segment is harmless.
+        assert reason is None
+
+    @pytest.mark.parametrize("dot_char", [
+        "․",  # ONE DOT LEADER
+        "﹒",  # SMALL FULL STOP
+        "．",  # FULLWIDTH FULL STOP
+    ])
+    def test_double_dot_confusable_is_denied(self, dot_char):
+        # Two consecutive dot-confusables form a '..' traversal after fold.
+        value, reason = _sanitize_value(f"{dot_char}{dot_char}/etc/passwd")
+        assert reason is not None, (
+            f"Expected DENY for double {repr(dot_char)}, got PERMIT"
+        )
+        assert ".." in reason
+
+    def test_mixed_dot_confusables_traversal_denied(self):
+        # Mixed: U+2024 + U+FF0E → ".." after fold.
+        value, reason = _sanitize_value("․．/etc/passwd")
+        assert reason is not None
+        assert ".." in reason
+
+    def test_absolute_scope_escape_denied(self):
+        # /tmp/safe/[U+2024][U+2024]/etc/passwd — the exact threat scenario.
+        value, reason = _sanitize_value("/tmp/safe/․․/etc/passwd")
+        assert reason is not None, (
+            "Scope-escape via dot-confusable must be caught before PERMIT"
+        )
