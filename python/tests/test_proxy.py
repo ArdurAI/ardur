@@ -142,3 +142,44 @@ class TestSanitizeValueDotConfusables:
         assert reason is not None, (
             "Scope-escape via dot-confusable must be caught before PERMIT"
         )
+
+
+class TestSanitizeValueSingleCodepointDotDot:
+    """_sanitize_value step-2c: single codepoints that NFKC-expand to '..'.
+
+    U+2025 TWO DOT LEADER and U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT
+    LEADER each decompose to a full ``..`` under NFKC in a SINGLE codepoint,
+    so the step-2b per-character '.' fold cannot express them. A tool that
+    NFKC-normalises before ``open()`` would turn a PERMIT'd ``‥/etc/passwd``
+    into a real ``../etc/passwd``. The NFKC-form backstop must DENY these.
+    """
+
+    @pytest.mark.parametrize("dd_char", [
+        "‥",   # U+2025 TWO DOT LEADER
+        "︰",   # U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT LEADER
+    ])
+    def test_single_codepoint_dotdot_is_denied(self, dd_char):
+        # A single two-dot-leader IS a '..' segment after NFKC.
+        _value, reason = _sanitize_value(f"{dd_char}/etc/passwd")
+        assert reason is not None, (
+            f"Expected DENY for single {repr(dd_char)} (NFKC → '..'), got PERMIT"
+        )
+
+    @pytest.mark.parametrize("dd_char", [
+        "‥",   # U+2025 TWO DOT LEADER
+        "︰",   # U+FE30 PRESENTATION FORM FOR VERTICAL TWO DOT LEADER
+    ])
+    def test_single_codepoint_dotdot_scope_escape_denied(self, dd_char):
+        # /tmp/safe/‥/etc/passwd — one codepoint escapes the scope root.
+        _value, reason = _sanitize_value(f"/tmp/safe/{dd_char}/etc/passwd")
+        assert reason is not None, (
+            "Single-codepoint '..' scope-escape must be caught before PERMIT"
+        )
+
+    def test_legitimate_fullwidth_path_still_permitted(self):
+        # Fullwidth letters are valid filenames; the NFKC backstop must not
+        # false-DENY them (it only fires on a literal '..' segment).
+        _value, reason = _sanitize_value("/tmp/safe/ｒｅｐｏｒｔ.txt")
+        assert reason is None, (
+            f"Legit fullwidth path wrongly denied: {reason!r}"
+        )

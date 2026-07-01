@@ -1011,9 +1011,9 @@ def test_nonexistent_session_evaluate(proxy_base: str) -> AdvancedTestResult:
 # --- Unicode / Obfuscation Attacks ---
 
 def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestResult:
-    """Null-byte and dot-confusable path injections are both rejected.
+    """Null-byte and dot-confusable path injections are all rejected.
 
-    Two attack vectors are gated:
+    Three attack vectors are gated:
 
     1. Null-byte injection (``/etc/passwd\\x00.txt``) — caught by step-1
        null-byte check in ``_sanitize_value``; must not be PERMIT.
@@ -1026,13 +1026,19 @@ def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestRe
        resolution would turn a PERMIT'd ``[U+2024][U+2024]/…`` into a real
        ``../../…`` traversal.  The proxy now folds these explicitly and must
        return DENY for this input.
+
+    3. Single-codepoint traversal (``[U+2025]/etc/passwd``) — U+2025 TWO DOT
+       LEADER and U+FE30 VERTICAL TWO DOT LEADER each NFKC-decompose to a
+       full ``..`` in ONE codepoint, which the per-char ``.`` fold in step-2b
+       cannot express.  The step-2c NFKC-form backstop checks the NFKC
+       normalisation of the value for a ``..`` segment and must return DENY.
     """
     result = AdvancedTestResult(
         test_id="unicode-confusable",
         title="null-byte and dot-confusable path injections rejected",
         category="Input Sanitization",
         passed=False,
-        expected_decision="Both paths must not be PERMIT",
+        expected_decision="All three paths must not be PERMIT",
     )
     t0 = time.time()
 
@@ -1059,15 +1065,30 @@ def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestRe
         "tool_name": "read_file",
         "arguments": {"path": "․․/etc/passwd"},
     })
+    # U+2025 TWO DOT LEADER: a SINGLE codepoint that NFKC expands to '..'.
+    # The step-2b per-char '.' fold cannot express it; the step-2c NFKC-form
+    # backstop catches it.  Must be DENY (else a NFKC-normalising tool turns a
+    # PERMIT'd '‥/etc/passwd' into a real '../etc/passwd').
+    _, decision3, _ = _post_tls(proxy_base, "/evaluate", {
+        "session_id": sid,
+        "tool_name": "read_file",
+        "arguments": {"path": "‥/etc/passwd"},
+    })
 
     d1 = decision1.get("decision", "UNKNOWN")
     d2 = decision2.get("decision", "UNKNOWN")
-    result.actual_decision = f"null-byte: {d1}, dot-confusable: {d2}"
-    result.passed = d1 != "PERMIT" and d2 != "PERMIT"
+    d3 = decision3.get("decision", "UNKNOWN")
+    result.actual_decision = (
+        f"null-byte: {d1}, dot-confusable: {d2}, two-dot-leader: {d3}"
+    )
+    result.passed = (
+        d1 != "PERMIT" and d2 != "PERMIT" and d3 != "PERMIT"
+    )
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
         result.details = (
-            f"Path injection not rejected: null-byte={d1}, dot-confusable={d2}"
+            f"Path injection not rejected: null-byte={d1}, "
+            f"dot-confusable={d2}, two-dot-leader={d3}"
         )
     return result
 

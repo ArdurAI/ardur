@@ -445,6 +445,25 @@ def _sanitize_value(value: str) -> tuple[str, str | None]:
         if _dot in value:
             value = value.replace(_dot, ".")
 
+    # 2c. Definitive confusable backstop. The per-character folds in 2a/2b
+    #     canonicalize the *matched* value without NFKC's collateral damage to
+    #     legitimate fullwidth filenames — but on their own they are a fragile
+    #     allowlist. The real invariant is stronger: NO codepoint that a
+    #     downstream tool's NFKC pass could turn into a ``..`` traversal segment
+    #     may be PERMITted. Some confusables do this in a SINGLE codepoint that
+    #     the 2b per-char '.' fold cannot express:
+    #        unicodedata.normalize("NFKC", "‥") == ".."  # TWO DOT LEADER
+    #        unicodedata.normalize("NFKC", "︰") == ".."  # VERT. TWO DOT LEADER
+    #     Rather than chase an ever-growing list, check the NFKC form itself for
+    #     a ``..`` path segment and fail closed. This is a DENY-only check: it
+    #     never widens scope, and legitimate paths (fullwidth letters, URLs,
+    #     drive letters) never contain a ``..`` segment in their NFKC form.
+    _nfkc_form = unicodedata.normalize("NFKC", value)
+    if _nfkc_form != value:
+        for _seg in re.split(r"[\\/]", _nfkc_form):
+            if _seg == "..":
+                return value, "contains '..' segment (NFKC-confusable)"
+
     # 3. Pre-normalization '..' segment check (B7 — lateral escape).
     #    Split on both '/' and '\\' so a Windows-shaped traversal is caught
     #    before we rewrite slashes in step 4.

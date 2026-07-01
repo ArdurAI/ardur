@@ -98,7 +98,7 @@ Single end-to-end test exercising all protocol layers over real TLS with SPIFFE 
 | Budget | 1 | main budget exhausted after max_tool_calls |
 | Session lifecycle | 2 | ended session rejects, multiple sessions coexist |
 | Token validation | 2 | invalid JWT rejected, nonexistent session_id rejected |
-| Input sanitization | 1 | null-byte path injection rejected (unicode dot-confusable paths are correctly permitted — U+2024 is not an ASCII dot, so the resolved path stays inside scope) |
+| Input sanitization | 1 | null-byte and unicode dot-confusable traversal paths rejected (U+2024/U+FE52/U+FF0E folded to ASCII '.', and U+2025/U+FE30 caught via NFKC-form backstop, so a tool that NFKC-normalizes before opening cannot escape scope) |
 | Infrastructure | 1 | health endpoint returns ok |
 
 **22/22 passed. Total: <1s.**
