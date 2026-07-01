@@ -10,6 +10,7 @@ user's ``~/.claude/settings.json``.
 
 from __future__ import annotations
 
+from argparse import Namespace
 import json
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ from vibap.run_bridge import (
     RunContext,
     TransparentInterceptAdapter,
     run_governed,
+    run_governed_cli,
     select_adapter,
 )
 
@@ -174,6 +176,54 @@ def test_run_governed_rejects_unknown_via(tmp_path: Path, monkeypatch: pytest.Mo
     _hermetic_kernel_env(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="unknown --via"):
         run_governed(command=["true"], via="bogus", home=tmp_path / "h")
+
+
+@pytest.mark.parametrize("command", ([], ["--"]))
+def test_run_governed_cli_missing_command_reports_placeholder_next_steps(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    command: list[str],
+) -> None:
+    home = tmp_path / "raw-home-should-not-be-created"
+    sentinel = tmp_path / "child-ran.txt"
+    raw_mission = "cron smoke missing command"
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("missing command must fail before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=command,
+            mission=raw_mission,
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert not home.exists()
+    assert "ardur run requires a command to govern after --" in captured.err
+    assert "usage: ardur run" in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur run --mission <mission> --allowed-tools <tools> -- <command>" in remediation
+    assert "ardur run --home <ardur-home> --mission <mission> --via env -- <command>" in remediation
+    assert "ardur doctor --home <ardur-home>" in remediation
+    assert raw_mission not in remediation
+    assert str(home) not in remediation
+    assert "Traceback" not in remediation
 
 
 # ── adapter unit tests ─────────────────────────────────────────────────────────
