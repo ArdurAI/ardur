@@ -246,6 +246,21 @@ _WINDOWS_UNC_RE = re.compile(r"^\\\\[^\\]+\\")
 # ``\`` has its own dedicated handling (Windows shape + bare-backslash).
 _SLASH_LIKE_CODEPOINTS = frozenset({"/", "\uFF0F", "\u2044", "\u29F8", "\u2215"})
 
+# Dot-confusable codepoints: NFKC maps all three to ASCII ``.`` (U+002E).
+# NFC does NOT fold them, so the step-2 NFC pass alone is insufficient. A
+# tool that applies NFKC normalisation before path resolution would turn
+# ``[U+2024][U+2024]/etc/passwd`` into ``../../etc/passwd``, escaping any
+# ``/tmp/safe/*`` scope constraint the proxy PERMITs.
+#
+# Verified empirically (full set of NFKC \u2192 U+002E codepoints):
+#   unicodedata.normalize("NFKC", "\u2024")  == "."   # ONE DOT LEADER
+#   unicodedata.normalize("NFKC", "\uFE52")  == "."   # SMALL FULL STOP
+#   unicodedata.normalize("NFKC", "\uFF0E")  == "."   # FULLWIDTH FULL STOP
+#
+# We fold explicitly (same pattern as ``_SLASH_LIKE_CODEPOINTS``) so the
+# step-3 pre-normalisation ``..`` check fires before a PERMIT is issued.
+_DOT_LIKE_CODEPOINTS = frozenset({"\u2024", "\uFE52", "\uFF0E"})
+
 
 def _contains_slash_like(s: str) -> bool:
     """True if ``s`` contains any codepoint that renders as ``/`` — ASCII
@@ -426,6 +441,37 @@ def _sanitize_value(value: str) -> tuple[str, str | None]:
             continue  # identity fold; skip to save an O(n) replace
         if _sol in value:
             value = value.replace(_sol, "/")
+
+    # 2b. Fold dot-confusable codepoints to ASCII '.'. NFKC maps U+2024 ONE
+    #     DOT LEADER, U+FE52 SMALL FULL STOP, and U+FF0E FULLWIDTH FULL STOP
+    #     to '.' — empirically verified as the complete set. NFC (step 2) does
+    #     not fold them. A tool that performs NFKC normalisation before opening
+    #     a path would turn a PERMIT'd ``[U+2024][U+2024]/etc/passwd`` into
+    #     ``../../etc/passwd`` and escape scope. Fold here, before the '..'
+    #     segment check (step 3), so the invariant holds regardless of what the
+    #     tool layer does.
+    for _dot in _DOT_LIKE_CODEPOINTS:
+        if _dot in value:
+            value = value.replace(_dot, ".")
+
+    # 2c. Definitive confusable backstop. The per-character folds in 2a/2b
+    #     canonicalize the *matched* value without NFKC's collateral damage to
+    #     legitimate fullwidth filenames — but on their own they are a fragile
+    #     allowlist. The real invariant is stronger: NO codepoint that a
+    #     downstream tool's NFKC pass could turn into a ``..`` traversal segment
+    #     may be PERMITted. Some confusables do this in a SINGLE codepoint that
+    #     the 2b per-char '.' fold cannot express:
+    #        unicodedata.normalize("NFKC", "‥") == ".."  # TWO DOT LEADER
+    #        unicodedata.normalize("NFKC", "︰") == ".."  # VERT. TWO DOT LEADER
+    #     Rather than chase an ever-growing list, check the NFKC form itself for
+    #     a ``..`` path segment and fail closed. This is a DENY-only check: it
+    #     never widens scope, and legitimate paths (fullwidth letters, URLs,
+    #     drive letters) never contain a ``..`` segment in their NFKC form.
+    _nfkc_form = unicodedata.normalize("NFKC", value)
+    if _nfkc_form != value:
+        for _seg in re.split(r"[\\/]", _nfkc_form):
+            if _seg == "..":
+                return value, "contains '..' segment (NFKC-confusable)"
 
     # 3. Pre-normalization '..' segment check (B7 — lateral escape).
     #    Split on both '/' and '\\' so a Windows-shaped traversal is caught
