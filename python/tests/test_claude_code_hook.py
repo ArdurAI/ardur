@@ -1586,15 +1586,22 @@ def test_daemon_creates_private_socket_parent_when_missing(tmp_path, monkeypatch
         assert parent_mode == 0o700
         assert socket_mode == 0o600
 
-        output = daemon_module.dispatch_pre_tool_use(
-            {
-                "session_id": "daemon-private-session",
-                "tool_name": "Read",
-                "tool_input": {"file_path": "/tmp/daemon-private.txt"},
-                "tool_use_id": "daemon-private-call",
-            },
-            keys_dir=tmp_path,
-        )
+        output = None
+        for _ in range(100):
+            output = daemon_module.dispatch_pre_tool_use(
+                {
+                    "session_id": "daemon-private-session",
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": "/tmp/daemon-private.txt"},
+                    "tool_use_id": "daemon-private-call",
+                },
+                keys_dir=tmp_path,
+            )
+            if output is not None:
+                break
+            if failures or not thread.is_alive():
+                break
+            time.sleep(0.01)
         assert output is not None
         assert output["continue"] is True
 
