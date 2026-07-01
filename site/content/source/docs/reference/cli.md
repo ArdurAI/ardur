@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "950dfde645a46f5f99a428e335476f63596ab321b7caca9b025d58a6468c927e"
+source_sha256: "a872f70345cb5d60de21a92a7bab9df6471c5a268ec008c045024c24cce3d833"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -227,6 +227,17 @@ parseable stdout JSON with `ok: false`, stable `condition`/`error` values, and
 `error_code: path_not_directory`; stderr stays empty, no traceback is
 emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
+
+Invalid Hub bind inputs fail closed before starting or exposing the Personal
+Hub service. `--port` must be an integer in the TCP range `0..65535`; invalid
+values return `hub_port_invalid`, while `--port 0` remains the ephemeral local
+bind path. `--host` must be a plain bindable host name or IP address, not a URL,
+empty value, value with a scheme/path/port, or otherwise unbindable host;
+invalid values return `hub_host_invalid`. These failures exit non-zero and write
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values, a message, a detail, and placeholder-only `next_steps`; stderr stays
+empty, no traceback is emitted, no raw local paths or malformed hosts are echoed,
+and no Personal Hub state or service artifacts are created.
 
 See [Personal Hub HTTP API](/__ardur_internal__/source/docs/reference/personal-hub-api/) for the endpoints exposed.
 

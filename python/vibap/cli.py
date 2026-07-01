@@ -608,6 +608,128 @@ def _start_host_failure_exit_code(host: str) -> int | None:
     return None
 
 
+def _hub_port_failure_condition() -> str:
+    return "hub_port_invalid"
+
+
+def _hub_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_hub_port",
+            "command": "ardur hub --host <loopback-host> --port <port> --home <ardur-home>",
+            "detail": (
+                "Use an integer TCP port from 0 through 65535. Use 0 when you "
+                "want the operating system to choose an available local port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_personal_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "After choosing a valid local Hub port, check Ardur Personal setup "
+                "with placeholder-only local diagnostics."
+            ),
+        },
+    ]
+
+
+def _hub_port_failure_response() -> dict:
+    condition = _hub_port_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal Hub port must be within the valid TCP port range.",
+        "detail": "Choose an integer port from 0 through 65535 before starting the Hub.",
+        "next_steps": _hub_port_failure_next_steps(condition),
+    }
+
+
+def _hub_port_failure_exit_code(port: int) -> int | None:
+    if 0 <= port <= 65535:
+        return None
+    _print_json(_hub_port_failure_response())
+    return 1
+
+
+def _hub_host_failure_condition() -> str:
+    return "hub_host_invalid"
+
+
+def _hub_host_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_bindable_hub_host",
+            "command": "ardur hub --host <loopback-host> --port <port> --home <ardur-home>",
+            "detail": (
+                "Pass only a host name or IP address that this machine can bind. "
+                "Do not include URL schemes, ports, paths, credentials, or empty values."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_loopback_host",
+            "command": "ardur hub --host 127.0.0.1 --port <valid-port> --home <ardur-home>",
+            "detail": (
+                "For local setup checks, use a loopback host such as 127.0.0.1, "
+                "::1, or localhost with --port 0. Keep raw local paths, URLs, "
+                "tokens, and key material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _hub_host_failure_response() -> dict:
+    condition = _hub_host_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal Hub host must be a bindable host name or IP address.",
+        "detail": (
+            "Choose a host value that can be bound locally before starting the Hub. "
+            "Use --port for the port; do not include a URL scheme, path, or empty host."
+        ),
+        "next_steps": _hub_host_failure_next_steps(condition),
+    }
+
+
+def _hub_host_is_bindable(host: str) -> bool:
+    import socket
+
+    try:
+        candidates = socket.getaddrinfo(host, 0, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    for family, socktype, proto, _canonname, sockaddr in candidates:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.bind(sockaddr)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _hub_host_failure_exit_code(host: str) -> int | None:
+    host_value = str(host)
+    stripped = host_value.strip()
+    if (
+        not stripped
+        or stripped != host_value
+        or _start_host_has_url_shape(stripped)
+        or not _hub_host_is_bindable(stripped)
+    ):
+        _print_json(_hub_host_failure_response())
+        return 1
+    return None
+
+
 def _start_tls_material_failure_condition() -> str:
     return "start_tls_material_invalid"
 
@@ -1527,6 +1649,12 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
 
 
 def cmd_hub(args: argparse.Namespace) -> int:
+    port_failure = _hub_port_failure_exit_code(args.port)
+    if port_failure is not None:
+        return port_failure
+    host_failure = _hub_host_failure_exit_code(args.host)
+    if host_failure is not None:
+        return host_failure
     try:
         serve_hub(
             host=args.host,

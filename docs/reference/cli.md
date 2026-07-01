@@ -211,6 +211,17 @@ parseable stdout JSON with `ok: false`, stable `condition`/`error` values, and
 emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
 
+Invalid Hub bind inputs fail closed before starting or exposing the Personal
+Hub service. `--port` must be an integer in the TCP range `0..65535`; invalid
+values return `hub_port_invalid`, while `--port 0` remains the ephemeral local
+bind path. `--host` must be a plain bindable host name or IP address, not a URL,
+empty value, value with a scheme/path/port, or otherwise unbindable host;
+invalid values return `hub_host_invalid`. These failures exit non-zero and write
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values, a message, a detail, and placeholder-only `next_steps`; stderr stays
+empty, no traceback is emitted, no raw local paths or malformed hosts are echoed,
+and no Personal Hub state or service artifacts are created.
+
 See [Personal Hub HTTP API](personal-hub-api.md) for the endpoints exposed.
 
 ### `ardur setup`

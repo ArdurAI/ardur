@@ -347,6 +347,131 @@ def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_lea
         assert marker not in combined_output
 
 
+@pytest.mark.parametrize("port", ["-1", "70000"])
+def test_hub_invalid_port_returns_safe_json_before_server_bind_without_artifacts(
+    tmp_path, monkeypatch, capsys, port
+):
+    from vibap import cli as cli_module
+
+    hub_home = tmp_path / "ardur-home"
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --port before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        ["hub", "--home", str(hub_home), "--no-tls", "--host", "127.0.0.1", "--port", port]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_port_invalid"
+    assert result["error"] == "hub_port_invalid"
+    assert result["error_code"] == "hub_port_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert "Traceback" not in rendered
+    assert "OverflowError" not in rendered
+    assert port not in rendered
+    assert str(hub_home) not in rendered
+    assert str(tmp_path) not in rendered
+    assert not hub_home.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+
+
+def test_hub_invalid_host_returns_safe_json_before_server_bind_without_artifacts(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    hub_home = tmp_path / "ardur-home"
+    raw_host = "http://["
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --host before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        ["hub", "--home", str(hub_home), "--no-tls", "--host", raw_host, "--port", "0"]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_host_invalid"
+    assert result["error"] == "hub_host_invalid"
+    assert result["error_code"] == "hub_host_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert "Traceback" not in rendered
+    assert "gaierror" not in rendered.lower()
+    assert "socket" not in rendered.lower()
+    assert raw_host not in rendered
+    assert str(hub_home) not in rendered
+    assert str(tmp_path) not in rendered
+    assert not hub_home.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+
+
+def test_hub_port_zero_reaches_server_without_long_lived_service(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    bound_addresses = []
+    served = []
+
+    class FakeHub:
+        def __init__(self, home, hub_url):
+            self.home = home
+            self.hub_url = hub_url
+
+    class FakeServer:
+        def __init__(self, address, handler):
+            bound_addresses.append((address, handler))
+            self.socket = object()
+
+        def serve_forever(self):
+            served.append(True)
+
+    monkeypatch.setattr(personal_hub, "PersonalHub", FakeHub)
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", FakeServer)
+
+    rc = cli_module.main(
+        [
+            "hub",
+            "--home",
+            str(tmp_path / "ardur-home"),
+            "--no-tls",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.out == ""
+    assert bound_addresses == [(('127.0.0.1', 0), personal_hub._HubRequestHandler)]
+    assert served == [True]
+
+
 def _assert_personal_home_not_directory_response(
     *,
     rc: int,
