@@ -38,6 +38,11 @@ REQUIRED_VECTOR_CLASSES = {
         "deployment_context",
         "unknown",
     },
+    "codex-1425-responses-websocket-trace-redaction": {
+        "host_runtime_event",
+        "session_context",
+        "unknown",
+    },
     "codex-action-user-sandbox-policy-context": {
         "cloud_agent_run",
         "policy_input",
@@ -1040,6 +1045,123 @@ def test_codex_1422_mcp_proxy_vector_preserves_source_only_boundaries() -> None:
     assert "does not prove live codex" in row["claim_boundary"].lower()
     assert "tool catalog completeness" in row["claim_boundary"].lower()
     assert "actual proxy/pac/wpad routing" in row["claim_boundary"].lower()
+
+
+def test_codex_1425_responses_websocket_trace_vector_preserves_source_boundaries() -> None:
+    """Codex 0.142.5 trace-redaction source evidence must stay non-live."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "codex-1425-responses-websocket-trace-redaction"
+    )
+
+    assert row["source_family"] == "codex"
+    assert row["source_pin"]["kind"] == "release"
+    assert "rust-v0.142.5" in row["source_pin"]["value"]
+    assert "4dd58a94844993bbadf09d18f6232b231c573fb0a59cb3ab9a14f9ab0160fcc7" in (
+        row["source_pin"]["value"]
+    )
+    assert "f96df720dd687012ab65ebd852128bd3e81c6404355bf6144334e02647c0f6d4" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "9875b23e408612cf09141c314d5b553da2c6417a5a0c88d55f6a4fec181be3d7"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "6e4d1a7022e72c0243c6a7b7c6f55fb16a0c5f4bc4c63f44fe5ed45b6757e2eb"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "40195d64bc370c2c810fcf1c1afb00bdd294954b35e45b86c401a51b16bd6fe3"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "full Responses WebSocket request payloads",
+        "trace logs",
+        "websocket trace fix",
+        "release/0.142",
+    ):
+        assert phrase in signal
+
+    assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[
+        "codex-1425-responses-websocket-trace-redaction"
+    ]
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_host_trace_redaction_boundary"
+    assert mapping["host_trace_surface"] == "responses_websocket_request_payload_trace_log_redaction"
+    assert mapping["websocket_request_material"] == "payload_digest_or_redacted_placeholder_only"
+    assert mapping["trace_log_material"] == (
+        "host_managed_trace_log_redaction_signal_not_ardur_signed_evidence"
+    )
+    assert mapping["support_artifact_boundary"] == (
+        "host_trace_redaction_is_comparison_context_not_runtime_capture_proof"
+    )
+    assert mapping["release_body_sha256"] == (
+        "4dd58a94844993bbadf09d18f6232b231c573fb0a59cb3ab9a14f9ab0160fcc7"
+    )
+    assert mapping["body_sha256"] == (
+        "f96df720dd687012ab65ebd852128bd3e81c6404355bf6144334e02647c0f6d4"
+    )
+    assert mapping["published_at"] == "2026-07-01T01:15:44Z"
+    assert mapping["release_url"] == "https://github.com/openai/codex/releases/tag/rust-v0.142.5"
+    assert mapping["matrix_review_boundary"] == (
+        "no_live_codex_responses_websocket_or_provider_trace_validation"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_codex_cli_behavior",
+            "live_responses_websocket_behavior",
+            "responses_websocket_payload_contents",
+            "trace_log_completeness",
+            "trace_redaction_effectiveness",
+            "provider_hidden_behavior",
+            "server_side_tool_calls",
+            "provider_trace_storage",
+            "network_side_effects",
+            "runtime_kernel_side_effects",
+            "credentials",
+            "public_readiness",
+            "growth_proof",
+            "universal_cli_capture",
+            "ardur_runtime_capture",
+        }
+    )
+
+    serialized = json.dumps(row, sort_keys=True)
+    for forbidden in (
+        "Bearer",
+        "github_pat_",
+        "raw-secret-value",
+        "/Users/",
+        "request payload contents",
+    ):
+        assert forbidden not in serialized
+
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live codex",
+        "responses websocket",
+        "trace-log completeness",
+        "redaction effectiveness",
+        "provider-hidden/server-side",
+        "ardur runtime capture",
+        "universal cli",
+        "public readiness",
+    ):
+        assert phrase in not_claimed
+
+    claim_boundary = row["claim_boundary"].lower()
+    assert "does not prove live codex" in claim_boundary
+    assert "responses websocket trace-redaction effectiveness" in claim_boundary
+    assert "provider-hidden/server-side" in claim_boundary
+    assert "trace-log completeness" in claim_boundary
+    assert "ardur runtime capture" in claim_boundary
+    assert "universal cli" in claim_boundary
+    assert "public readiness/growth" in claim_boundary
 
 
 def test_claude_2186_mcp_directory_vector_preserves_placeholder_boundaries() -> None:
