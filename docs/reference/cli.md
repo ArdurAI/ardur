@@ -329,24 +329,75 @@ material.
 
 ### `ardur run -- COMMAND ...`
 
-Run a CLI command through the local Hub. Non-interactive only.
+Run a non-interactive CLI command through one of two local Ardur paths.
+
+Legacy Hub streaming remains the default when no governance selector is supplied:
 
 ```text
 ardur run [--hub-url URL] [--hub-token TOKEN] [--home DIR] -- <command>
 ```
 
+The zero-setup governance bridge is selected when `--mission`,
+`--allowed-tools`, `--forbidden-tools`, `--max-tool-calls`, or `--via` is
+supplied. It issues a temporary Mission Passport, starts an embedded loopback
+governance proxy, launches the command, then prints a governance summary to
+stderr when the command exits:
+
+```text
+ardur run [--home DIR]
+          [--mission TEXT]
+          [--allowed-tools NAME[,NAME] ...]
+          [--forbidden-tools NAME[,NAME] ...]
+          [--max-tool-calls N]
+          [--max-duration-s N]
+          [--via auto|claude-code|env|intercept]
+          [--no-kernel-correlation]
+          -- <command>
+```
+
+`--allowed-tools` and `--forbidden-tools` are repeatable and each value may be a
+comma-separated list. `--max-tool-calls` sets the governed tool-call budget
+(default `250` when governing), while `--max-duration-s` sets the wall-clock run
+budget. `--via auto` chooses the adapter automatically, `--via claude-code` uses
+the Claude Code hook path, `--via env` exposes governance details to a
+cooperating command through environment variables, and `--via intercept` is only
+a scaffolded transparent-intercept path today; it fails closed rather than
+claiming universal CLI capture. `--no-kernel-correlation` disables the
+best-effort kernel/cgroup correlation attempt that may be available on suitable
+Linux hosts.
+
+Safe local example:
+
+```bash
+ardur run \
+  --mission "Demonstrate a local governed command without writes" \
+  --allowed-tools Read,Glob,Grep \
+  --forbidden-tools Bash,Write \
+  --max-tool-calls 25 \
+  --max-duration-s 60 \
+  --via env \
+  --no-kernel-correlation \
+  -- python3 -c 'print("hello from an Ardur-governed command")'
+```
+
 If no command is supplied after `--`, `ardur run` exits `2`, leaves stdout empty,
 does not execute a child process, and prints placeholder-safe `Next steps:`
-guidance showing the `ardur run -- <command>` form. If the local Hub cannot be
-reached, or session start/policy setup fails before `<command>` runs because
-local Hub auth/token state is missing or invalid, `ardur run` preserves the
-existing setup-failure exit code (`127`) and prints a placeholder-safe
-`Next steps:` section to stderr. The remediation text points to local setup, Hub
-startup, Hub token supply/rotation, and `ardur doctor` using `<ardur-home>`,
-`<hub-url>`, `<hub-token>`, and `<command>` placeholders rather than copying raw
-temp homes or tokens. Blocked commands still exit `126` with a receipt when
-policy evaluation succeeds; successful commands preserve stdout, stderr, and
-child exit-code streaming without remediation noise.
+guidance showing the `ardur run -- <command>` form. On the legacy Hub path, if
+the local Hub cannot be reached, or session start/policy setup fails before
+`<command>` runs because local Hub auth/token state is missing or invalid,
+`ardur run` preserves the existing setup-failure exit code (`127`) and prints a
+placeholder-safe `Next steps:` section to stderr. The remediation text points to
+local setup, Hub startup, Hub token supply/rotation, and `ardur doctor` using
+`<ardur-home>`, `<hub-url>`, `<hub-token>`, and `<command>` placeholders rather
+than copying raw temp homes or tokens. Blocked legacy commands still exit `126`
+with a receipt when policy evaluation succeeds; successful commands preserve
+stdout, stderr, and child exit-code streaming without remediation noise.
+
+The governance bridge is still local and bounded: the embedded proxy listens on
+loopback only for the launched run, kernel correlation is best effort and may be
+disabled with `--no-kernel-correlation`, and this CLI reference does not claim
+production eBPF/daemon enforcement, service-management readiness, universal CLI
+capture, or provider-hidden action visibility.
 
 ### `ardur desktop-observe`
 
