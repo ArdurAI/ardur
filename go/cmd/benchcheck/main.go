@@ -136,10 +136,10 @@ func printAccuracy(results []live.BenchmarkResult) {
 }
 
 type summary struct {
-	PackDir  string               `json:"pack_dir"`
-	Skipped  int                  `json:"skipped_pairs"`
+	PackDir  string                 `json:"pack_dir"`
+	Skipped  int                    `json:"skipped_pairs"`
 	Results  []live.BenchmarkResult `json:"results"`
-	Accuracy map[string]float64   `json:"arm_accuracy"`
+	Accuracy map[string]float64     `json:"arm_accuracy"`
 }
 
 func writeResults(outDir string, results []live.BenchmarkResult, skipped int, packDir string) error {
