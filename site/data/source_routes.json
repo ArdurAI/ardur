@@ -99,6 +99,7 @@
     "CONTRIBUTING.md": "source/contributing/",
     "MEDIA.md": "source/media-notes/",
     "README.md": "source/readme/",
+    "REPRODUCE.md": "source/reproduce/",
     "RESEARCH.md": "source/research/",
     "ROADMAP.md": "source/roadmap/",
     "SECURITY.md": "source/security/",

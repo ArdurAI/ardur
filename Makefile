@@ -1,5 +1,5 @@
 .PHONY: help demo demo-down test test-python test-go lint lint-python lint-go \
-        build build-proxy build-hub clean cert
+        build build-proxy build-hub clean cert bench
 
 ARDUROOT := $(shell pwd)
 PYDIR   := python
@@ -54,7 +54,15 @@ cert: ## Generate self-signed TLS certs for local dev
 		print(f'cert: {cp}\nkey: {kp}\nfingerprint: {fp}')" 2>/dev/null || \
 	cd $(PYDIR) && python -c "from vibap.tls import resolve_tls_paths; r=resolve_tls_paths(); print(r if r else 'TLS disabled via ARDUR_NO_TLS')"
 
+# ── Benchmark ────────────────────────────────────────────────────────────────
+
+bench: ## Run the AuditBench evaluation harness and write results to bench-results/
+	cd $(GODIR) && go run ./cmd/benchcheck -- ./benchmark/testdata
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+
 clean: ## Remove build artifacts
 	find $(PYDIR) -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find $(PYDIR) -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find $(PYDIR) -type d -name '*.egg-info' -exec rm -rf {} + 2>/dev/null || true
+	rm -rf bench-results
