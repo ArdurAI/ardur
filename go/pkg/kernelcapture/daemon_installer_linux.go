@@ -57,27 +57,20 @@ func InstallDaemonCustody(cfg DaemonCustodyConfig) (*InstallResult, error) {
 	}
 	defer unix.Close(rootFD)
 
-	// Directories to create in order (parents before children).
+	// Directories to create in order (parents before children). Enumerate the
+	// distinct paths we need: /etc/ardur for config, and the state dir and its
+	// parent under /var/lib/ardur.
 	type dirSpec struct {
 		path string
 		mode fs.FileMode
 	}
-	dirs := []dirSpec{
-		{path: "/etc/ardur", mode: 0o700},
-		{path: cfg.StateDir, mode: cfg.StateDirMode},
-		{filepath.Dir(cfg.StateDir), cfg.StateDirMode}, // ensure parent
-		{path: cfg.StateDir, mode: cfg.StateDirMode},
-	}
-	// Deduplicate and flatten: just enumerate the distinct paths we need.
-	etcArdur := "/etc/ardur"
 	stateDirParent := filepath.Dir(cfg.StateDir) // /var/lib/ardur
 
 	distinctDirs := []dirSpec{
-		{path: etcArdur, mode: 0o700},
+		{path: "/etc/ardur", mode: 0o700},
 		{path: stateDirParent, mode: 0o700},
 		{path: cfg.StateDir, mode: cfg.StateDirMode},
 	}
-	_ = dirs // replaced above
 
 	for _, d := range distinctDirs {
 		if err := installerMkdirAll(rootFD, d.path, 0, 0, d.mode); err != nil {
@@ -160,8 +153,15 @@ func installerMkdirAll(rootFD int, absPath string, uid, gid int, mode fs.FileMod
 			continue
 		}
 		// Try to open the component first (it may already exist).
+		//
+		// NOTE: the fd is opened O_DIRECTORY (a real, readable directory fd) —
+		// NOT O_PATH. fchown(2)/fchmod(2) fail with EBADF on an O_PATH fd, so
+		// applying ownership below requires a non-O_PATH handle. The
+		// RESOLVE_NO_SYMLINKS|RESOLVE_BENEATH guarantees are properties of
+		// openat2 resolution and are independent of O_PATH, so dropping O_PATH
+		// does not weaken the TOCTOU/symlink protection.
 		fd, err := unix.Openat2(parentFD, comp, &unix.OpenHow{
-			Flags:   unix.O_PATH | unix.O_DIRECTORY,
+			Flags:   unix.O_DIRECTORY,
 			Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_BENEATH,
 		})
 		if err != nil {
@@ -173,7 +173,7 @@ func installerMkdirAll(rootFD int, absPath string, uid, gid int, mode fs.FileMod
 			}
 			// Now open the freshly-created (or already-existing) directory.
 			fd, err = unix.Openat2(parentFD, comp, &unix.OpenHow{
-				Flags:   unix.O_PATH | unix.O_DIRECTORY,
+				Flags:   unix.O_DIRECTORY,
 				Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_BENEATH,
 			})
 			if err != nil {

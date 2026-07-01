@@ -63,22 +63,21 @@ func readFileAt(t *testing.T, path string) string {
 // TestInstallerMkdirAll_CreatesDirectoryChain verifies that installerMkdirAll
 // creates nested directories with the requested mode.
 func TestInstallerMkdirAll_CreatesDirectoryChain(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("requires root: fchown/fchmod on newly-created paths need UID 0")
-	}
 	t.Parallel()
 
 	tmp := t.TempDir()
 	rootFD := rootFDForDir(t, tmp)
 	defer unix.Close(rootFD)
 
-	target := filepath.Join(tmp, "a", "b", "c")
-	absPath := "/a/b/c"
-
-	if err := installerMkdirAll(rootFD, filepath.Join(tmp, strings.TrimPrefix(absPath, "/")), 0, 0, 0o700); err != nil {
+	// installerMkdirAll resolves absPath relative to rootFD (after stripping the
+	// leading "/"), so pass a root-anchored path — NOT filepath.Join(tmp, ...),
+	// which would be re-walked from the tmpdir and nest incorrectly. Chown to the
+	// current uid/gid so the test exercises the fchown/fchmod path without root.
+	if err := installerMkdirAll(rootFD, "/a/b/c", os.Getuid(), os.Getgid(), 0o700); err != nil {
 		t.Fatalf("installerMkdirAll: %v", err)
 	}
 
+	target := filepath.Join(tmp, "a", "b", "c")
 	info, err := os.Stat(target)
 	if err != nil {
 		t.Fatalf("stat target: %v", err)
@@ -94,22 +93,18 @@ func TestInstallerMkdirAll_CreatesDirectoryChain(t *testing.T) {
 // TestInstallerMkdirAll_IdempotentOnExistingDir verifies that calling
 // installerMkdirAll on an already-existing directory succeeds.
 func TestInstallerMkdirAll_IdempotentOnExistingDir(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("requires root")
-	}
 	t.Parallel()
 
 	tmp := t.TempDir()
 	rootFD := rootFDForDir(t, tmp)
 	defer unix.Close(rootFD)
 
-	target := filepath.Join(tmp, "existing")
-	if err := os.Mkdir(target, 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(tmp, "existing"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	// Second call must not return an error.
-	if err := installerMkdirAll(rootFD, target, 0, 0, 0o700); err != nil {
+	// Second call (on the already-existing dir) must not return an error.
+	if err := installerMkdirAll(rootFD, "/existing", os.Getuid(), os.Getgid(), 0o700); err != nil {
 		t.Fatalf("idempotent call failed: %v", err)
 	}
 }
@@ -119,28 +114,27 @@ func TestInstallerMkdirAll_IdempotentOnExistingDir(t *testing.T) {
 // TestInstallerWriteConfigFile_WritesContent verifies that
 // installerWriteConfigFile creates the file with the expected content and mode.
 func TestInstallerWriteConfigFile_WritesContent(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("requires root")
-	}
 	t.Parallel()
 
 	tmp := t.TempDir()
 	rootFD := rootFDForDir(t, tmp)
 	defer unix.Close(rootFD)
 
-	absPath := filepath.Join(tmp, "config.toml")
 	data := []byte("key = \"value\"\n")
 
-	if err := installerWriteConfigFile(rootFD, absPath, data, 0, 0, 0o600); err != nil {
+	// Path is resolved relative to rootFD (the tmpdir); chown to self so the
+	// test runs without root.
+	if err := installerWriteConfigFile(rootFD, "/config.toml", data, os.Getuid(), os.Getgid(), 0o600); err != nil {
 		t.Fatalf("installerWriteConfigFile: %v", err)
 	}
 
-	got := readFileAt(t, absPath)
+	onDisk := filepath.Join(tmp, "config.toml")
+	got := readFileAt(t, onDisk)
 	if got != string(data) {
 		t.Errorf("content = %q, want %q", got, data)
 	}
 
-	info, err := os.Stat(absPath)
+	info, err := os.Stat(onDisk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,18 +163,21 @@ func TestInstallerWriteConfigFile_RejectsSymlinkTarget(t *testing.T) {
 	rootFD := rootFDForDir(t, tmp)
 	defer unix.Close(rootFD)
 
-	// Attacker places a symlink at the desired config path.
-	configPath := filepath.Join(tmp, "daemon.toml")
+	// Attacker places a symlink at the desired config path (tmp/daemon.toml).
+	// The installer resolves "/daemon.toml" relative to rootFD (the tmpdir), so
+	// it opens "daemon.toml" directly and must hit the symlink — this is what
+	// makes the assertion below non-vacuous (RESOLVE_NO_SYMLINKS must reject it,
+	// rather than the write failing earlier for an unrelated path-traversal reason).
 	attackTarget := filepath.Join(tmp, "sensitive_file.txt")
 	if err := os.WriteFile(attackTarget, []byte("sensitive\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(attackTarget, configPath); err != nil {
+	if err := os.Symlink(attackTarget, filepath.Join(tmp, "daemon.toml")); err != nil {
 		t.Fatal(err)
 	}
 
 	// The installer must reject the write.
-	err := installerWriteConfigFile(rootFD, configPath, []byte("injected\n"), 0, 0, 0o600)
+	err := installerWriteConfigFile(rootFD, "/daemon.toml", []byte("injected\n"), os.Getuid(), os.Getgid(), 0o600)
 	if err == nil {
 		t.Fatal("expected error when target is a symlink, got nil")
 	}
@@ -222,15 +219,15 @@ func TestInstallerWriteConfigFile_RejectsSymlinkInParentDir(t *testing.T) {
 	}
 
 	// "ardur" directory is now a symlink to attackdir.
-	symDir := filepath.Join(tmp, "ardur")
-	if err := os.Symlink(attackDir, symDir); err != nil {
+	if err := os.Symlink(attackDir, filepath.Join(tmp, "ardur")); err != nil {
 		t.Fatal(err)
 	}
 
-	configPath := filepath.Join(symDir, "daemon.toml")
-
-	// Must be rejected because "ardur" resolves via a symlink.
-	err := installerWriteConfigFile(rootFD, configPath, []byte("injected\n"), 0, 0, 0o600)
+	// Resolve "/ardur/daemon.toml" relative to rootFD (the tmpdir): the parent
+	// component "ardur" is a symlink, so installerOpenDir must reject it. Passing
+	// a root-anchored path (not filepath.Join(tmp, ...)) ensures the traversal
+	// actually reaches — and is stopped at — the symlinked component.
+	err := installerWriteConfigFile(rootFD, "/ardur/daemon.toml", []byte("injected\n"), os.Getuid(), os.Getgid(), 0o600)
 	if err == nil {
 		t.Fatal("expected error when a parent directory is a symlink, got nil")
 	}
