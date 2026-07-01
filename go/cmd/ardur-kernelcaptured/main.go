@@ -529,8 +529,25 @@ func main() {
 		log.Info("eBPF ringbuf consumer disabled (--no-ringbuf)")
 	}
 
+	// Notify systemd that the daemon is ready (Type=notify in the unit).
+	// Non-fatal: if not running under systemd NOTIFY_SOCKET is unset and
+	// sdNotify is a no-op.
+	if err := sdNotify("READY=1"); err != nil {
+		log.Warn("sd_notify READY failed", "error", err)
+	}
+
+	// Watchdog keepalive goroutine: sends WATCHDOG=1 at half the unit's
+	// WatchdogSec=30 interval so systemd never times out during normal
+	// operation.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runWatchdog(ctx, 15*time.Second, log)
+	}()
+
 	<-ctx.Done()
 	log.Info("shutting down", "reason", ctx.Err())
+	_ = sdNotify("STOPPING=1")
 	svr.Close()
 	wg.Wait()
 	log.Info("ardur-kernelcaptured stopped")

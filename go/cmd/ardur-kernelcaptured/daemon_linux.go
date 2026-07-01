@@ -7,12 +7,58 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
 
 func platformName() string { return "linux" }
+
+// sdNotify sends a systemd notification state to the NOTIFY_SOCKET if one is
+// configured. If the daemon is not running under systemd the env var is absent
+// and the call is a no-op. Notification failure is non-fatal: the daemon
+// continues to run and systemd falls back to its startup timeout.
+func sdNotify(state string) error {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return nil
+	}
+	// NOTIFY_SOCKET may be prefixed with '@' for abstract sockets.
+	network := "unixgram"
+	addr := socket
+	if len(addr) > 0 && addr[0] == '@' {
+		addr = "\x00" + addr[1:]
+	}
+	conn, err := net.DialUnix(network, nil, &net.UnixAddr{Net: network, Name: addr})
+	if err != nil {
+		return fmt.Errorf("sd_notify dial: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte(state)); err != nil {
+		return fmt.Errorf("sd_notify write: %w", err)
+	}
+	return nil
+}
+
+// runWatchdog sends WATCHDOG=1 keepalives to systemd on the given interval.
+// The interval should be at most half of WatchdogSec in the unit file.
+// The goroutine exits when ctx is cancelled.
+func runWatchdog(ctx context.Context, interval time.Duration, log *slog.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := sdNotify("WATCHDOG=1"); err != nil {
+				log.Warn("watchdog notify failed", "error", err)
+			}
+		}
+	}
+}
 
 // runEBPFConsumer loads the embedded eBPF program, attaches exec/exit
 // tracepoints, and streams ProcessEvents to d.processKernelEvent until ctx is
