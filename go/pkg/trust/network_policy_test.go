@@ -200,6 +200,44 @@ func TestNetworkPolicyForTier_NamespaceIsolation(t *testing.T) {
 	}
 }
 
+// TestLimitedDNSEgressScopedToKubeDNS verifies the UDP/53 egress rule in the
+// limited tier is scoped to kube-dns pods in kube-system, not open to any
+// destination (which would be an exfiltration channel).
+func TestLimitedDNSEgressScopedToKubeDNS(t *testing.T) {
+	np := NetworkPolicyForTier(TierLimited, "agents")
+
+	for _, rule := range np.Spec.Egress {
+		for _, p := range rule.Ports {
+			if p.Protocol == nil || *p.Protocol != corev1.ProtocolUDP {
+				continue
+			}
+			if p.Port == nil || p.Port.IntVal != 53 {
+				continue
+			}
+			// Found DNS rule — must have a To restriction.
+			if len(rule.To) == 0 {
+				t.Fatal("UDP/53 egress rule has no To restriction: allows DNS to any destination (exfil risk)")
+			}
+			for _, peer := range rule.To {
+				ns := peer.NamespaceSelector
+				pod := peer.PodSelector
+				if ns == nil || pod == nil {
+					t.Error("DNS peer must specify both NamespaceSelector and PodSelector")
+					continue
+				}
+				if ns.MatchLabels["kubernetes.io/metadata.name"] != "kube-system" {
+					t.Errorf("DNS peer NamespaceSelector must target kube-system, got %v", ns.MatchLabels)
+				}
+				if pod.MatchLabels["k8s-app"] != "kube-dns" {
+					t.Errorf("DNS peer PodSelector must target k8s-app=kube-dns, got %v", pod.MatchLabels)
+				}
+			}
+			return
+		}
+	}
+	t.Error("no UDP/53 egress rule found in limited tier policy")
+}
+
 func assertPolicyType(t *testing.T, np *networkingv1.NetworkPolicy, want networkingv1.PolicyType) {
 	t.Helper()
 	for _, pt := range np.Spec.PolicyTypes {

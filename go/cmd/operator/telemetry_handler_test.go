@@ -195,6 +195,62 @@ func TestTelemetryIngestor_ApplyPolicyCalledOnTierChange(t *testing.T) {
 	}
 }
 
+// TestBearerAuthMiddleware_NoAuth_Returns401 verifies unauthenticated requests
+// are rejected with 401, preventing any pod from forging telemetry signals.
+func TestBearerAuthMiddleware_NoAuth_Returns401(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := BearerAuthMiddleware("secret-token", inner)
+	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for missing auth header, got %d", w.Code)
+	}
+}
+
+func TestBearerAuthMiddleware_WrongToken_Returns401(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := BearerAuthMiddleware("secret-token", inner)
+	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for wrong token, got %d", w.Code)
+	}
+}
+
+func TestBearerAuthMiddleware_CorrectToken_PassesThrough(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	h := BearerAuthMiddleware("secret-token", inner)
+	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", w.Code)
+	}
+}
+
+func TestBearerAuthMiddleware_EmptyToken_RejectsAll(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := BearerAuthMiddleware("", inner)
+	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for empty token (fail-closed), got %d", w.Code)
+	}
+}
+
 // TestTelemetryIngestor_ResponseContainsAuthorizationTier checks the JSON
 // response includes the authorization_tier field.
 func TestTelemetryIngestor_ResponseContainsAuthorizationTier(t *testing.T) {

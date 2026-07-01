@@ -144,9 +144,25 @@ func limitedEgressPolicy(namespace string) *networkingv1.NetworkPolicy {
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
 				{
-					// DNS egress: UDP 53 to kube-dns
+					// DNS egress: UDP 53 scoped to kube-dns pods in kube-system.
+					// The To restriction prevents using port 53 as an exfiltration
+					// channel to arbitrary external resolvers.
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &udpProto, Port: &dnsPort},
+					},
+					To: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "kube-system",
+								},
+							},
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"k8s-app": "kube-dns",
+								},
+							},
+						},
 					},
 				},
 				{

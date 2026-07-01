@@ -117,6 +117,20 @@ func isNotFound(err error) bool {
 		containsError(err, trust.ErrAgentNotFound))
 }
 
+// BearerAuthMiddleware rejects requests whose Authorization header does not
+// match "Bearer <token>". An empty token is treated as misconfigured — every
+// request is rejected (fail-closed). This prevents privilege escalation via
+// forged signals when no token has been provisioned.
+func BearerAuthMiddleware(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token == "" || r.Header.Get("Authorization") != "Bearer "+token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func containsError(err, target error) bool {
 	for err != nil {
 		if err == target {

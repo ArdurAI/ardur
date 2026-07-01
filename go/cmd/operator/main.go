@@ -31,6 +31,7 @@ func main() {
 		metricsAddr          string
 		healthProbeAddr      string
 		telemetryAddr        string
+		telemetryToken       string
 		enableLeaderElection bool
 		signingKeyPath       string
 		issuerURI            string
@@ -40,6 +41,9 @@ func main() {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics endpoint bind address.")
 	flag.StringVar(&healthProbeAddr, "health-probe-bind-address", ":8081", "Health probe bind address.")
 	flag.StringVar(&telemetryAddr, "telemetry-bind-address", ":8082", "Telemetry signal ingestion address. POST /telemetry/signal")
+	flag.StringVar(&telemetryToken, "telemetry-token", os.Getenv("VIBAP_TELEMETRY_TOKEN"),
+		"Bearer token required on POST /telemetry/signal. Also read from VIBAP_TELEMETRY_TOKEN. "+
+			"Without a token every request is rejected (fail-closed).")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for HA.")
 	flag.StringVar(&signingKeyPath, "signing-key", "", "Path to Ed25519 signing key (JWK). Required in production.")
 	flag.StringVar(&issuerURI, "issuer-uri", "https://vibap.ardur.dev", "Credential issuer URI.")
@@ -103,7 +107,10 @@ func main() {
 	ingestor := NewTelemetryIngestor(reconciler.trustAgg, func(ctx context.Context, namespace, tier string) error {
 		return reconciler.applyNetworkPolicyForTier(ctx, namespace, tier)
 	})
-	telemetryMux.Handle("/telemetry/signal", ingestor)
+	if telemetryToken == "" {
+		setupLog.Info("WARNING: no telemetry token configured; POST /telemetry/signal will reject all requests")
+	}
+	telemetryMux.Handle("/telemetry/signal", BearerAuthMiddleware(telemetryToken, ingestor))
 
 	go func() {
 		setupLog.Info("starting telemetry ingestor", "addr", telemetryAddr)
