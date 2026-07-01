@@ -16,6 +16,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -254,6 +255,15 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 		ap.Status.CompositeScore = result.Credential.Claims.Trust.CompositeScore
 	}
 
+	// REQUIRES_CLUSTER: apply the per-tier NetworkPolicy so egress enforcement
+	// reflects the current trust tier immediately after every credential issuance.
+	if npErr := r.applyNetworkPolicyForTier(ctx, ap.Namespace, ap.Status.TrustTier); npErr != nil {
+		logger.Error(npErr, "failed to apply tier NetworkPolicy",
+			"namespace", ap.Namespace, "tier", ap.Status.TrustTier)
+		r.recordEvent(ap, corev1.EventTypeWarning, "NetworkPolicyFailed",
+			"Failed to apply egress NetworkPolicy for tier %s: %v", ap.Status.TrustTier, npErr)
+	}
+
 	governanceErr := r.reconcileGovernance(ctx, ap)
 
 	setCondition(ap, vibapv1alpha1.ConditionCredentialIssued, metav1.ConditionTrue,
@@ -294,6 +304,44 @@ func (r *AgentPassportReconciler) ensureAgentRegistered(ctx context.Context, age
 		trustSpec.StaticCapabilityScore,
 		trustSpec.HistoricalReputation,
 	)
+}
+
+// applyNetworkPolicyForTier creates or updates the NetworkPolicy for the given
+// trust tier in the given namespace.
+//
+// REQUIRES_CLUSTER: calls the K8s networking API (Get + Create/Update).
+// No-op when tier is empty (pre-issue state).
+func (r *AgentPassportReconciler) applyNetworkPolicyForTier(ctx context.Context, namespace, tier string) error {
+	if tier == "" {
+		return nil
+	}
+	desired := trust.NetworkPolicyForTier(tier, namespace)
+	return applyNetworkPolicy(ctx, r.Client, desired)
+}
+
+// applyNetworkPolicy creates or updates np via the K8s API.
+// REQUIRES_CLUSTER: calls the K8s networking API.
+func applyNetworkPolicy(ctx context.Context, c client.Client, desired *networkingv1.NetworkPolicy) error {
+	existing := &networkingv1.NetworkPolicy{}
+	key := client.ObjectKey{Namespace: desired.Namespace, Name: desired.Name}
+
+	err := c.Get(ctx, key, existing)
+	if apierrors.IsNotFound(err) {
+		if createErr := c.Create(ctx, desired); createErr != nil {
+			return fmt.Errorf("creating NetworkPolicy %s: %w", desired.Name, createErr)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting NetworkPolicy %s: %w", desired.Name, err)
+	}
+
+	existing.Spec = desired.Spec
+	existing.Labels = desired.Labels
+	if updateErr := c.Update(ctx, existing); updateErr != nil {
+		return fmt.Errorf("updating NetworkPolicy %s: %w", desired.Name, updateErr)
+	}
+	return nil
 }
 
 func (r *AgentPassportReconciler) loadPolicyFromConfigMap(ctx context.Context, ns string, ref *vibapv1alpha1.PolicyReference) (string, error) {
