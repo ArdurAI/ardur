@@ -10,8 +10,17 @@ evidence_levels: ["code-and-doc", "doc-and-manifest", "limitation-backed"]
 ---
 
 This page is the hosted documentation map. Readers should be able to understand
-the current repo, usage path, known limits, and troubleshooting surface here
-without using GitHub as the documentation browser.
+the published repo snapshot, usage path, known limits, and troubleshooting
+surface here without using GitHub as the documentation browser.
+
+## Published-site freshness
+
+The hosted site is a public Pages deployment snapshot. It can lag the latest
+`dev` branch even when CI has already validated a newer source-doc change. Each
+source-backed page links to the exact source commit used for that Pages build;
+use that commit as the freshness boundary. For newer `dev` documentation that is
+not yet visible on the hosted site, use a clean source checkout or a local Hugo
+build until the change is promoted through a reviewed public deploy.
 
 ## Start
 

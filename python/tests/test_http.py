@@ -131,6 +131,20 @@ def _get(url: str) -> tuple[int, dict[str, Any]]:
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
+def _raw_http_request(port: int, request: bytes) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.settimeout(5)
+        sock.sendall(request)
+        sock.shutdown(socket.SHUT_WR)
+        chunks: list[bytes] = []
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -151,6 +165,27 @@ class TestHTTPHealth:
         assert status == 200
         assert body["status"] == "ok"
         assert "version" in body
+
+
+class TestHTTPRequestParsing:
+    def test_transfer_encoding_chunked_is_rejected_before_json_dispatch(self, http_proxy):
+        base, _ = http_proxy
+        port = int(base.rsplit(":", 1)[1])
+        response = _raw_http_request(
+            port,
+            b"POST /session/start HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Content-Length: 0\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+            b"2\r\n{}\r\n0\r\n\r\n",
+        )
+        headers, _, body = response.partition(b"\r\n\r\n")
+
+        assert headers.startswith(b"HTTP/1.0 400 ")
+        assert json.loads(body.decode("utf-8")) == {"error": "unsupported Transfer-Encoding"}
 
 
 class TestHTTPEvaluate:

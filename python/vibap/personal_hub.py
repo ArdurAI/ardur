@@ -62,6 +62,7 @@ HUB_TOKEN_ENV_VAR = "ARDUR_PERSONAL_HUB_TOKEN"
 HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
+PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
 _QUERY_TOKEN_LOG_RE = re.compile(
     r"([?&](?:access[-_]?token|api[-_]?key|auth|key|password|secret|token)=)[^\s&\"']+",
     re.I,
@@ -111,6 +112,183 @@ class HubPaths:
             reviews=root / "session_reviews.json",
             config=root / "config.json",
         )
+
+
+def _personal_home_not_directory_error() -> HubError:
+    return HubError(
+        "Ardur Personal home exists but is not a directory.",
+        status=400,
+        code=PERSONAL_HOME_NOT_DIRECTORY_CONDITION,
+    )
+
+
+def validate_personal_home_directory(paths: HubPaths) -> None:
+    """Fail closed when the configured Personal home is an existing non-directory."""
+
+    if (paths.home.exists() or paths.home.is_symlink()) and not paths.home.is_dir():
+        raise _personal_home_not_directory_error()
+
+
+def _ensure_personal_home_directory(paths: HubPaths) -> None:
+    validate_personal_home_directory(paths)
+    try:
+        paths.home.mkdir(parents=True, exist_ok=True)
+    except FileExistsError as exc:
+        if (paths.home.exists() or paths.home.is_symlink()) and not paths.home.is_dir():
+            raise _personal_home_not_directory_error() from exc
+        raise
+
+
+def personal_home_failure_next_steps() -> list[dict[str, str]]:
+    condition = PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "choose_personal_home_directory",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "Choose a directory path for the local Ardur Personal home. If the "
+                "selected path is an existing file, move it aside or pick a different "
+                "directory before setup."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "Start the loopback Hub only after the Personal home path is a directory. "
+                "Keep raw local paths, Hub tokens, and receipt locations out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_doctor",
+            "command": "ardur doctor --home <ardur-home>",
+            "detail": (
+                "Re-run local setup diagnostics after choosing a valid home directory. "
+                "This guidance is local/no-key recovery only."
+            ),
+        },
+    ]
+
+
+def personal_home_failure_response() -> dict[str, Any]:
+    condition = PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal home must be a directory.",
+        "detail": (
+            "The selected Ardur Personal home path already exists as a file or other "
+            "non-directory. Choose a directory path before running setup or starting the Hub."
+        ),
+        "next_steps": personal_home_failure_next_steps(),
+    }
+
+
+def _is_personal_home_not_directory_error(exc: HubError) -> bool:
+    return exc.code == PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+
+
+def _print_json_response(payload: dict[str, Any]) -> None:
+    json.dump(payload, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+
+
+_RUN_SUPPORT_CONDITIONS = {
+    "hub_auth_required",
+    "hub_token_missing",
+    "hub_unavailable",
+    "hub_url_invalid",
+    "unauthorized",
+}
+_RUN_TOKEN_CONDITIONS = {
+    "hub_auth_required",
+    "hub_token_missing",
+    "unauthorized",
+}
+_RUN_FAILURE_SUMMARY_LINES = {
+    ("session_start", "hub_token_required"): "Ardur Hub unavailable: hub_token_required",
+    ("session_start", "hub_unavailable"): "Ardur Hub unavailable: hub_unavailable",
+    ("session_start", "hub_url_invalid"): "Ardur Hub unavailable: hub_url_invalid",
+    ("session_start", "run_session_start_failed"): "Ardur Hub unavailable: run_session_start_failed",
+    ("policy_check", "hub_token_required"): "Ardur policy check failed: hub_token_required",
+    ("policy_check", "hub_unavailable"): "Ardur policy check failed: hub_unavailable",
+    ("policy_check", "hub_url_invalid"): "Ardur policy check failed: hub_url_invalid",
+    ("policy_check", "run_policy_check_failed"): "Ardur policy check failed: run_policy_check_failed",
+}
+_RECEIPT_REFERENCE_RE = re.compile(r"^receipt:[0-9a-f]{32}$")
+
+
+def _normalized_run_support_condition(value: Any) -> str:
+    condition = re.sub(
+        r"[^a-z0-9_]+",
+        "_",
+        str(value or "").strip().lower(),
+    ).strip("_")
+    if condition in _RUN_TOKEN_CONDITIONS:
+        return "hub_token_required"
+    if condition in _RUN_SUPPORT_CONDITIONS:
+        return condition
+    return ""
+
+
+def _run_failure_support_condition(response: dict[str, Any], *, phase: str) -> str:
+    """Return a support-safe condition without echoing raw Hub error text."""
+
+    for key in ("condition", "error_code"):
+        condition = _normalized_run_support_condition(response.get(key))
+        if condition:
+            return condition
+    hub_unavailable, token_problem = _hub_setup_failure_flags(response)
+    if token_problem:
+        return "hub_token_required"
+    if hub_unavailable:
+        return "hub_unavailable"
+    return f"run_{phase}_failed"
+
+
+def _run_failure_summary_line(response: dict[str, Any], *, phase: str) -> str:
+    condition = _run_failure_support_condition(response, phase=phase)
+    fallback = f"run_{phase}_failed"
+    return _RUN_FAILURE_SUMMARY_LINES.get(
+        (phase, condition),
+        _RUN_FAILURE_SUMMARY_LINES.get((phase, fallback), "Ardur run failed: run_failed"),
+    )
+
+
+def _blocked_command_summary_line(_policy: dict[str, Any]) -> str:
+    """Return a support-safe blocked-command line without echoing policy reasons."""
+
+    return "Ardur blocked command: policy_blocked"
+
+
+def _run_audit_reference_for_user_output(response: dict[str, Any]) -> str:
+    reference = str(_dict(response.get("receipt")).get("receipt_id") or "").strip()
+    if not reference:
+        return ""
+    if _RECEIPT_REFERENCE_RE.fullmatch(reference) and not _SENSITIVE_TARGET_RE.search(reference):
+        return reference
+    return "<receipt>"
+
+
+def _emit_run_audit_reference_for_user_output(response: dict[str, Any]) -> None:
+    """Emit the support-safe receipt reference as a local command response.
+
+    The reference is already reduced to either ``receipt:<32 lowercase hex>`` or
+    the ``<receipt>`` placeholder. Keep this away from ``print`` so hosted
+    CodeQL does not model the already-sanitized support artifact as clear-text
+    sensitive logging.
+    """
+
+    audit_reference = _run_audit_reference_for_user_output(response)
+    if not audit_reference:
+        return
+    sys.stderr.flush()
+    os.write(sys.stderr.fileno(), b"receipt: " + audit_reference.encode("ascii") + b"\n")
 
 
 def _utc_now() -> str:
@@ -267,6 +445,7 @@ def _redact_url_for_user_output(value: str) -> str:
 
 
 def _load_hub_config(paths: HubPaths) -> dict[str, Any]:
+    validate_personal_home_directory(paths)
     return _dict(_read_json(paths.config, {}))
 
 
@@ -302,14 +481,18 @@ def resolve_hub_token(
     home: str | Path | None = None,
     explicit: str | None = None,
 ) -> str | None:
+    paths = HubPaths.from_home(home)
+    validate_personal_home_directory(paths)
     if explicit:
         return explicit
     env_token = os.environ.get(HUB_TOKEN_ENV_VAR, "").strip()
     if env_token:
         return env_token
     try:
-        token = _load_hub_config(HubPaths.from_home(home)).get("hub_token")
-    except HubError:
+        token = _load_hub_config(paths).get("hub_token")
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            raise
         return None
     return str(token) if token else None
 
@@ -341,7 +524,7 @@ class PersonalHub:
 
     def __init__(self, home: str | Path | None = None, *, hub_url: str | None = None) -> None:
         self.paths = HubPaths.from_home(home)
-        self.paths.home.mkdir(parents=True, exist_ok=True)
+        _ensure_personal_home_directory(self.paths)
         self.config = _ensure_hub_config(self.paths, hub_url=hub_url)
         self.hub_url = str(self.config.get("hub_url") or hub_url or DEFAULT_HUB_URL)
         self.hub_token = str(self.config["hub_token"])
@@ -872,7 +1055,20 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _read_payload(self) -> dict[str, Any]:
-        length = int(self.headers.get("content-length") or "0")
+        try:
+            length = int(self.headers.get("content-length") or "0")
+        except (TypeError, ValueError) as exc:
+            raise HubError(
+                "content-length must be a non-negative integer",
+                status=400,
+                code="invalid_content_length",
+            ) from exc
+        if length < 0:
+            raise HubError(
+                "content-length must be a non-negative integer",
+                status=400,
+                code="invalid_content_length",
+            )
         if length > MAX_BODY_BYTES:
             raise HubError("request body too large", status=413, code="body_too_large")
         raw = self.rfile.read(length)
@@ -992,12 +1188,14 @@ def serve_hub(
     tls_key: str | Path | None = None,
     no_tls: bool = False,
 ) -> None:
+    paths = HubPaths.from_home(home)
+    validate_personal_home_directory(paths)
     server = ThreadingHTTPServer((host, port), _HubRequestHandler)
     server.rate_limiter = RateLimiter()  # type: ignore[attr-defined]
 
     tls_active = False
     if not no_tls:
-        tls_result = resolve_tls_paths(tls_cert, tls_key, home=Path(home) if home else None, hostname=host)
+        tls_result = resolve_tls_paths(tls_cert, tls_key, home=paths.home, hostname=host)
         if tls_result:
             cert_path, key_path, cert_fingerprint = tls_result
             ssl_ctx = create_ssl_context(cert_path, key_path)
@@ -1008,7 +1206,7 @@ def serve_hub(
         print("[tls] WARNING: TLS disabled — plain HTTP only", file=sys.stderr)
 
     scheme = "https" if tls_active else "http"
-    server.hub = PersonalHub(home, hub_url=f"{scheme}://{host}:{port}")  # type: ignore[attr-defined]
+    server.hub = PersonalHub(paths.home, hub_url=f"{scheme}://{host}:{port}")  # type: ignore[attr-defined]
     print(f"Ardur Personal Hub listening on {scheme}://{host}:{port}", file=sys.stderr)
     server.serve_forever()
 
@@ -1056,7 +1254,12 @@ def hub_request(
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["content-type"] = "application/json"
-    token = resolve_hub_token(home=home, explicit=hub_token)
+    try:
+        token = resolve_hub_token(home=home, explicit=hub_token)
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            return personal_home_failure_response()
+        raise
     if token:
         headers["authorization"] = f"Bearer {token}"
         headers[HUB_TOKEN_HEADER] = token
@@ -1437,7 +1640,7 @@ def _print_run_missing_command_next_steps() -> None:
 
 def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
-    paths.home.mkdir(parents=True, exist_ok=True)
+    _ensure_personal_home_directory(paths)
     config = _ensure_hub_config(
         paths,
         hub_url=f"http://{args.host}:{args.port}",
@@ -1565,7 +1768,12 @@ def _doctor_personal_next_steps(
 
 def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
-    token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
+    try:
+        token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            return personal_home_failure_response()
+        raise
     hub = hub_request("GET", "/v1/status", hub_url=args.hub_url, hub_token=token, home=args.home)
     home_ok = paths.home.exists()
     config_ok = paths.config.exists()
@@ -1700,10 +1908,16 @@ def run_under_hub(args: argparse.Namespace) -> int:
         "source": {"type": "cli", "app": command[0], "process": " ".join(command)},
         "session": {"id": session_id, "title": " ".join(command)},
     }
-    token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    try:
+        token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            _print_json_response(personal_home_failure_response())
+            return 1
+        raise
     start = hub_request("POST", "/v1/sessions/start", start_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not start.get("ok"):
-        print(f"Ardur Hub unavailable: {start.get('error')}", file=sys.stderr)
+        print(_run_failure_summary_line(start, phase="session_start"), file=sys.stderr)
         _print_run_recovery_next_steps(start, phase="session_start")
         return 127
     check_payload = {
@@ -1718,15 +1932,14 @@ def run_under_hub(args: argparse.Namespace) -> int:
     }
     check = hub_request("POST", "/v1/policy/check", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     if not check.get("ok"):
-        print(f"Ardur policy check failed: {check.get('error')}", file=sys.stderr)
+        print(_run_failure_summary_line(check, phase="policy_check"), file=sys.stderr)
         _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
     policy = _dict(check.get("policy"))
     if policy.get("verdict") == "blocked":
         observe = hub_request("POST", "/v1/events/observe", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
-        print(f"Ardur blocked command: {policy.get('reason')}", file=sys.stderr)
-        if observe.get("receipt", {}).get("receipt_id"):
-            print(f"receipt: {observe['receipt']['receipt_id']}", file=sys.stderr)
+        print(_blocked_command_summary_line(policy), file=sys.stderr)
+        _emit_run_audit_reference_for_user_output(observe)
         return 126
 
     started = time.time()
@@ -1788,7 +2001,12 @@ def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
             "hidden_provider_activity": True,
         },
     }
-    token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    try:
+        token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc):
+            return personal_home_failure_response()
+        raise
     response = hub_request("POST", "/v1/events/observe", payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     response = desktop_observe_response_with_next_steps(response)
     if permission_note:

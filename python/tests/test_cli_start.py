@@ -54,6 +54,7 @@ def _assert_structured_mission_failure(capsys, tmp_path, exit_code, condition, l
     payload = json.loads(captured.out)
     assert payload["ok"] is False
     assert payload["error"] == condition
+    assert payload["error_code"] == condition
     assert payload["condition"] == condition
     assert payload["next_steps"]
     rendered_next_steps = json.dumps(payload["next_steps"], sort_keys=True)

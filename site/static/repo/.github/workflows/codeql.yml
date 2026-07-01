@@ -64,11 +64,10 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      # v3 is an annotated tag (tag-object 865f5f5c... → commit ce64ddcb...).
       # Pin to the commit SHA per the same discipline as the other
       # workflows; comment shows the human-readable version.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v3 (commit)
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v3 (commit)
         with:
           languages: ${{ matrix.language }}
           # `security-and-quality` is the broadest pack — covers
@@ -79,9 +78,9 @@ jobs:
           queries: security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v3 (commit)
+        uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v3 (commit)
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v3 (commit)
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v3 (commit)
         with:
           category: "/language:${{ matrix.language }}"

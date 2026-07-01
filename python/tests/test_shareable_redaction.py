@@ -92,6 +92,7 @@ def test_percent_encoded_local_paths_are_redacted_and_detected() -> None:
     [
         "receipt at %252FUsers%252Frahul%252Fproject%252Fsecret.json",
         "receipt at %25252FUsers%25252Frahul%25252Fproject%25252Fsecret.json",
+        "receipt at %252525252FUsers%252525252Frahul%252525252Fproject%252525252Fsecret.json",
         "receipt at %25EF%25BC%258FUsers%25EF%25BC%258Frahul%25EF%25BC%258Fsecret.json",
     ],
 )

@@ -18,6 +18,7 @@ var ErrDaemonSessionStatusEvidenceLogFilesystemAppend = errors.New("kernelcaptur
 // service lifecycle, cgroup assignment, BPF map mutation, and client-visible
 // protocol expansion.
 type DaemonSessionStatusEvidenceLogFilesystem interface {
+	Lstat(path string) (fs.FileInfo, error)
 	MkdirAll(path string, perm fs.FileMode) error
 	AppendFile(path string, data []byte, perm fs.FileMode) error
 	Rename(oldPath string, newPath string) error
@@ -90,6 +91,9 @@ func ApplyDaemonSessionStatusEvidenceLogFilesystemAppendForPlan(cfg DaemonSessio
 	if err := validateEvidenceLogFilesystemAppendPlanPaths(plan); err != nil {
 		return DaemonSessionStatusEvidenceLogAppendPlan{}, err
 	}
+	if err := validateEvidenceLogFilesystemAppendNoSymlinks(cfg.Filesystem, plan); err != nil {
+		return DaemonSessionStatusEvidenceLogAppendPlan{}, err
+	}
 
 	parentDir := filepath.Dir(plan.EvidenceLogPath)
 	if err := cfg.Filesystem.MkdirAll(parentDir, directoryMode); err != nil {
@@ -160,6 +164,94 @@ func validateEvidenceLogFilesystemAppendPlanPaths(plan DaemonSessionStatusEviden
 		if !strings.HasPrefix(rotationPath, path+".") {
 			return evidenceLogFilesystemAppendError("rotation path %q is not derived from evidence-log path %q", rotationPath, path)
 		}
+	}
+	return nil
+}
+
+func validateEvidenceLogFilesystemAppendNoSymlinks(filesystem DaemonSessionStatusEvidenceLogFilesystem, plan DaemonSessionStatusEvidenceLogAppendPlan) error {
+	parentDir := filepath.Dir(plan.EvidenceLogPath)
+	if err := validateEvidenceLogFilesystemParentChain(filesystem, plan.StateDir, parentDir); err != nil {
+		return err
+	}
+	if err := validateEvidenceLogFilesystemPathNotSymlink(filesystem, plan.EvidenceLogPath, "evidence-log path"); err != nil {
+		return err
+	}
+	if plan.Decision == DaemonSessionStatusEvidenceLogAppendRotateThenAppend {
+		if err := validateEvidenceLogFilesystemParentChain(filesystem, plan.StateDir, filepath.Dir(plan.RotationPath)); err != nil {
+			return err
+		}
+		if err := validateEvidenceLogFilesystemPathNotSymlink(filesystem, plan.RotationPath, "rotation path"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEvidenceLogFilesystemParentChain(filesystem DaemonSessionStatusEvidenceLogFilesystem, stateDir string, parentDir string) error {
+	parents, err := evidenceLogFilesystemParentChain(stateDir, parentDir)
+	if err != nil {
+		return err
+	}
+	for _, parent := range parents {
+		info, err := filesystem.Lstat(parent)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return evidenceLogFilesystemAppendError("prevalidate evidence-log parent %q failed: %w", parent, err)
+		}
+		mode := info.Mode()
+		if mode&fs.ModeSymlink != 0 {
+			return evidenceLogFilesystemAppendError("prevalidate evidence-log parent %q failed: symlink parent is not allowed", parent)
+		}
+		if !mode.IsDir() {
+			return evidenceLogFilesystemAppendError("prevalidate evidence-log parent %q failed: parent is not a directory", parent)
+		}
+	}
+	return nil
+}
+
+func evidenceLogFilesystemParentChain(stateDir string, parentDir string) ([]string, error) {
+	stateDir = cleanPath(stateDir)
+	parentDir = cleanPath(parentDir)
+	if stateDir == "" || parentDir == "" {
+		return nil, evidenceLogFilesystemAppendError("parent prevalidation requires daemon state dir and evidence-log parent")
+	}
+	if !lexicalPathWithin(parentDir, stateDir) {
+		return nil, evidenceLogFilesystemAppendError("evidence-log parent %q is outside daemon state custody root", parentDir)
+	}
+	parents := []string{stateDir}
+	if parentDir == stateDir {
+		return parents, nil
+	}
+	rel, err := filepath.Rel(stateDir, parentDir)
+	if err != nil {
+		return nil, evidenceLogFilesystemAppendError("derive evidence-log parent chain failed: %w", err)
+	}
+	current := stateDir
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return nil, evidenceLogFilesystemAppendError("evidence-log parent %q escaped daemon state custody root", parentDir)
+		}
+		current = filepath.Join(current, part)
+		parents = append(parents, current)
+	}
+	return parents, nil
+}
+
+func validateEvidenceLogFilesystemPathNotSymlink(filesystem DaemonSessionStatusEvidenceLogFilesystem, path string, label string) error {
+	info, err := filesystem.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return evidenceLogFilesystemAppendError("prevalidate %s %q failed: %w", label, path, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return evidenceLogFilesystemAppendError("prevalidate %s %q failed: symlink path is not allowed", label, path)
 	}
 	return nil
 }

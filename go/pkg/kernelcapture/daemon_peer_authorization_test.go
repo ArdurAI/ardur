@@ -16,19 +16,19 @@ func TestAuthorizeObservedDaemonPeerAllowsExplicitUIDOrGID(t *testing.T) {
 	}{
 		{
 			name:        "uid allowlist",
-			creds:       DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 1234},
+			creds:       DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 1234, ProcessStartTimeTicks: 100001},
 			policy:      DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 			wantMatched: "uid",
 		},
 		{
 			name:        "gid allowlist",
-			creds:       DaemonObservedPeerCredentials{UID: 502, GID: 991, PID: 1235},
+			creds:       DaemonObservedPeerCredentials{UID: 502, GID: 991, PID: 1235, ProcessStartTimeTicks: 100002},
 			policy:      DaemonPeerAuthorizationPolicy{AllowedGIDs: []uint32{991}},
 			wantMatched: "gid",
 		},
 		{
 			name:        "root must still be explicit",
-			creds:       DaemonObservedPeerCredentials{UID: 0, GID: 0, PID: 1236},
+			creds:       DaemonObservedPeerCredentials{UID: 0, GID: 0, PID: 1236, ProcessStartTimeTicks: 100003},
 			policy:      DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{0}},
 			wantMatched: "uid",
 		},
@@ -46,7 +46,7 @@ func TestAuthorizeObservedDaemonPeerAllowsExplicitUIDOrGID(t *testing.T) {
 			if decision.Matched != tc.wantMatched {
 				t.Fatalf("matched = %q, want %q", decision.Matched, tc.wantMatched)
 			}
-			if decision.PID != tc.creds.PID || decision.UID != tc.creds.UID || decision.GID != tc.creds.GID {
+			if decision.PID != tc.creds.PID || decision.UID != tc.creds.UID || decision.GID != tc.creds.GID || decision.ProcessStartTimeTicks != tc.creds.ProcessStartTimeTicks {
 				t.Fatalf("decision did not preserve observed credentials: got %+v want %+v", decision, tc.creds)
 			}
 		})
@@ -63,17 +63,22 @@ func TestAuthorizeObservedDaemonPeerFailsClosed(t *testing.T) {
 	}{
 		{
 			name:   "missing observed pid",
-			creds:  DaemonObservedPeerCredentials{UID: 501, GID: 20},
+			creds:  DaemonObservedPeerCredentials{UID: 501, GID: 20, ProcessStartTimeTicks: 100004},
+			policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		},
+		{
+			name:   "missing observed process start time",
+			creds:  DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 1234},
 			policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		},
 		{
 			name:   "empty policy",
-			creds:  DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 1234},
+			creds:  DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 1234, ProcessStartTimeTicks: 100005},
 			policy: DaemonPeerAuthorizationPolicy{},
 		},
 		{
 			name:   "unmatched observed peer",
-			creds:  DaemonObservedPeerCredentials{UID: 502, GID: 21, PID: 1234},
+			creds:  DaemonObservedPeerCredentials{UID: 502, GID: 21, PID: 1234, ProcessStartTimeTicks: 100006},
 			policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}, AllowedGIDs: []uint32{20}},
 		},
 	} {

@@ -271,6 +271,14 @@ func TestDaemonProtocolRejectsRawPrivilegedPathFields(t *testing.T) {
 			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"peer_pid":1234}}` + "\n"),
 		},
 		{
+			name: "process start time ticks",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"register_session","register_session":{"session_id":"session-1","event_classes":["process_lifecycle"],"ttl_seconds":60,"process_start_time_ticks":987654321}}` + "\n"),
+		},
+		{
+			name: "peer process start time space variant",
+			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"health","health":{},"peer process start time":987654321}` + "\n"),
+		},
+		{
 			name: "ucred wrapper",
 			raw:  []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"health","health":{},"ucred":{"uid":501}}` + "\n"),
 		},

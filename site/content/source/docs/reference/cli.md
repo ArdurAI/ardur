@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b5efb58babb27a2f4b86a1c12544a3f8a9c4f400ee23f9abd8c18a8418bd3f53"
+source_sha256: "56318c1fc679c4c63168e30e35e39c2708f861aa60270c1a6545464f4409531d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -45,9 +45,48 @@ Passport from a JSON mission file and start a session immediately.
 ardur start [--host HOST] [--port PORT] [--mission FILE]
             [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
             [--require-auth | --no-require-auth]
+            [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
 
 Defaults: bind `127.0.0.1:8080`. Auth required by default.
+
+TLS setup is local loopback proxy configuration. By default Ardur can create
+local self-signed TLS material; `--tls-cert` and `--tls-key` select explicit
+certificate and private-key PEM files, and `--no-tls` disables TLS only for
+plain-HTTP loopback development. This is not a production TLS, release, or
+hosted-website visibility claim.
+
+Invalid explicit TLS material fails closed before keys, state files, audit logs,
+sessions, or the proxy startup path are created. If either `--tls-cert` or
+`--tls-key` is provided, both values must point to existing files unless TLS is
+disabled for loopback development with `--no-tls`. Missing paths, one-sided
+cert/key inputs, or directory inputs exit non-zero and write parseable stdout
+JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`start_tls_material_invalid`, a message, a detail, and placeholder-only
+`next_steps`. The failure path keeps stderr empty, emits no traceback, does not
+echo raw local paths, JWTs, private keys, or certificate material, and leaves no
+key, state, log, or session artifacts behind.
+
+Invalid `--port` values outside the TCP range `0..65535` fail closed before
+keys, state files, audit logs, sessions, or the proxy startup path are created.
+They exit non-zero and write parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `start_port_invalid`, a message, a
+detail, and placeholder-only `next_steps`. The failure path keeps stderr empty,
+emits no traceback, does not echo raw local paths or secrets, and leaves no
+key, state, log, or session artifacts behind. Valid `--port 0` remains the
+ephemeral-port path, where the operating system chooses an available local port;
+it is not a standalone server-readiness claim.
+
+Invalid `--host` values fail closed after port range validation and before TLS,
+key, state, audit log, session, or proxy startup work begins. Host values must
+be plain bindable host names or IP addresses; empty or whitespace-only values,
+URL-shaped values, values with schemes, ports, paths, queries, fragments, or
+hosts that cannot be bound locally return parseable stdout JSON with `ok: false`
+and stable `condition`/`error`/`error_code` values of `start_host_invalid`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, malformed URLs, socket errors, or secrets, and leaves no key, state, log,
+or session artifacts behind. If `--port` and `--host` are both invalid, the
+existing `start_port_invalid` contract remains the first failure.
 
 State directory security: `--state-dir` is local secret state. Persisted
 sessions and passport state can contain bearer credentials, including parent
@@ -55,6 +94,29 @@ sessions and passport state can contain bearer credentials, including parent
 hardens the state and `sessions/` directories to `0700` and writes JSON state
 files as `0600`; do not point this option at a shared or world-readable
 location.
+
+Mission-file input failures fail closed after port, host, and TLS material
+validation but before key, state, audit log, session, or proxy startup work
+begins. A missing mission file returns `start_mission_file_missing`; malformed
+JSON or invalid UTF-8 JSON returns `start_mission_file_malformed_json`;
+unreadable files return `start_mission_file_unreadable`; and directories or
+mission JSON that does not match the schema return `start_mission_file_invalid`.
+These failures exit non-zero and write stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values, a message, a detail, and
+placeholder-only `next_steps`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or file contents, and leaves no key,
+state, log, or session artifacts behind. Valid mission-file session-start
+behavior remains unchanged.
+
+Invalid start write targets fail closed after port, host, TLS material, and
+mission-file validation but before key generation, state initialization, audit
+log creation, session creation, or proxy startup. An existing non-directory
+`--state-dir` returns `state_dir_not_directory`; an existing non-file
+`--log-path` returns `log_path_not_file`. These failures keep stdout parseable
+as JSON with `ok: false`, stable `condition`/`error`/`error_code` values, and
+placeholder-only `next_steps`, keep stderr empty, emit no traceback, do not echo
+raw local paths or secrets, and leave no Mission Passport signing keys, state,
+log, or session artifacts behind.
 
 ### `ardur kill-switch`
 
@@ -121,6 +183,34 @@ ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
 ```
 
+Invalid attest state and audit-log write targets fail closed before Mission
+Passport key generation, state/session or log artifacts, and attestation token
+issuance. An existing non-directory `--state-dir` returns
+`state_dir_not_directory`; a `--state-dir` whose parent is an existing
+non-directory, including a dangling symlink, returns
+`state_dir_parent_not_directory`. An existing non-file `--log-path` returns
+`log_path_not_file`; a `--log-path` whose parent is an existing non-directory,
+including a dangling symlink, returns `log_path_parent_not_directory`. These
+local/no-key CLI failures keep stdout parseable as JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values, and placeholder-only `next_steps`, keep
+stderr empty, emit no traceback, do not echo raw local paths or secrets, and
+leave no Mission Passport signing keys, state, session, audit-log, or
+attestation artifacts behind.
+
+Session validation failures are a separate local/no-key `ardur attest` contract.
+An invalid UUID input fails as `invalid_session_id`; a valid UUID with no
+persisted session fails as `session_not_found`; and an existing persisted session
+file that is malformed JSON, empty, non-object JSON, or schema-invalid fails as
+`session_invalid`. These failures write parseable stdout JSON with `ok: false`
+and `valid: false` where applicable, stable `condition`/`error` values, and
+placeholder-only `next_steps`; stderr stays empty, no traceback is emitted, and
+the output does not echo raw local paths, session contents, tokens, private keys,
+or other secrets. They fail before Mission Passport key generation,
+state/session locks, replay, revocation, lineage, audit-log, receipt-log,
+attestation-token, or other new artifacts are created. This documents the local
+CLI contract on `origin/dev` only; it is not a release, package,
+public-readiness, live-provider/API, hosted-service, or universal-capture claim.
+
 ## Personal Path
 
 ### `ardur hub`
@@ -130,6 +220,24 @@ Start the local Ardur Personal Hub HTTP service.
 ```text
 ardur hub [--host HOST] [--port PORT] [--home DIR]
 ```
+
+If `--home` points to an existing file instead of a directory, `ardur hub`
+fails closed before starting a server. The command exits `1` and writes
+parseable stdout JSON with `ok: false`, stable `condition`/`error` values, and
+`error_code: path_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
+does not copy raw local paths or tokens into the output.
+
+Invalid Hub bind inputs fail closed before starting or exposing the Personal
+Hub service. `--port` must be an integer in the TCP range `0..65535`; invalid
+values return `hub_port_invalid`, while `--port 0` remains the ephemeral local
+bind path. `--host` must be a plain bindable host name or IP address, not a URL,
+empty value, value with a scheme/path/port, or otherwise unbindable host;
+invalid values return `hub_host_invalid`. These failures exit non-zero and write
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values, a message, a detail, and placeholder-only `next_steps`; stderr stays
+empty, no traceback is emitted, no raw local paths or malformed hosts are echoed,
+and no Personal Hub state or service artifacts are created.
 
 See [Personal Hub HTTP API](/__ardur_internal__/source/docs/reference/personal-hub-api/) for the endpoints exposed.
 
@@ -150,6 +258,14 @@ ardur setup [--host HOST] [--port PORT] [--home DIR]
 `--rotate-token` forces a new token even if one already exists.
 `--extension-path` selects which browser-extension directory the setup output
 points users to (default: `examples/ardur-personal-extension`).
+
+If `--home` points to an existing file instead of a directory, `ardur setup`
+fails closed before writing setup state, generating or printing a token, or
+installing launch files. The command exits `1` and writes parseable stdout JSON
+with `ok: false`, stable `condition`/`error` values, and
+`error_code: path_not_directory`; stderr stays empty, no traceback is
+emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
+does not copy raw local paths or tokens into the output.
 
 ### `ardur status`
 
@@ -230,24 +346,75 @@ material.
 
 ### `ardur run -- COMMAND ...`
 
-Run a CLI command through the local Hub. Non-interactive only.
+Run a non-interactive CLI command through one of two local Ardur paths.
+
+Legacy Hub streaming remains the default when no governance selector is supplied:
 
 ```text
 ardur run [--hub-url URL] [--hub-token TOKEN] [--home DIR] -- <command>
 ```
 
+The zero-setup governance bridge is selected when `--mission`,
+`--allowed-tools`, `--forbidden-tools`, `--max-tool-calls`, or `--via` is
+supplied. It issues a temporary Mission Passport, starts an embedded loopback
+governance proxy, launches the command, then prints a governance summary to
+stderr when the command exits:
+
+```text
+ardur run [--home DIR]
+          [--mission TEXT]
+          [--allowed-tools NAME[,NAME] ...]
+          [--forbidden-tools NAME[,NAME] ...]
+          [--max-tool-calls N]
+          [--max-duration-s N]
+          [--via auto|claude-code|env|intercept]
+          [--no-kernel-correlation]
+          -- <command>
+```
+
+`--allowed-tools` and `--forbidden-tools` are repeatable and each value may be a
+comma-separated list. `--max-tool-calls` sets the governed tool-call budget
+(default `250` when governing), while `--max-duration-s` sets the wall-clock run
+budget. `--via auto` chooses the adapter automatically, `--via claude-code` uses
+the Claude Code hook path, `--via env` exposes governance details to a
+cooperating command through environment variables, and `--via intercept` is only
+a scaffolded transparent-intercept path today; it fails closed rather than
+claiming universal CLI capture. `--no-kernel-correlation` disables the
+best-effort kernel/cgroup correlation attempt that may be available on suitable
+Linux hosts.
+
+Safe local example:
+
+```bash
+ardur run \
+  --mission "Demonstrate a local governed command without writes" \
+  --allowed-tools Read,Glob,Grep \
+  --forbidden-tools Bash,Write \
+  --max-tool-calls 25 \
+  --max-duration-s 60 \
+  --via env \
+  --no-kernel-correlation \
+  -- python3 -c 'print("hello from an Ardur-governed command")'
+```
+
 If no command is supplied after `--`, `ardur run` exits `2`, leaves stdout empty,
 does not execute a child process, and prints placeholder-safe `Next steps:`
-guidance showing the `ardur run -- <command>` form. If the local Hub cannot be
-reached, or session start/policy setup fails before `<command>` runs because
-local Hub auth/token state is missing or invalid, `ardur run` preserves the
-existing setup-failure exit code (`127`) and prints a placeholder-safe
-`Next steps:` section to stderr. The remediation text points to local setup, Hub
-startup, Hub token supply/rotation, and `ardur doctor` using `<ardur-home>`,
-`<hub-url>`, `<hub-token>`, and `<command>` placeholders rather than copying raw
-temp homes or tokens. Blocked commands still exit `126` with a receipt when
-policy evaluation succeeds; successful commands preserve stdout, stderr, and
-child exit-code streaming without remediation noise.
+guidance showing the `ardur run -- <command>` form. On the legacy Hub path, if
+the local Hub cannot be reached, or session start/policy setup fails before
+`<command>` runs because local Hub auth/token state is missing or invalid,
+`ardur run` preserves the existing setup-failure exit code (`127`) and prints a
+placeholder-safe `Next steps:` section to stderr. The remediation text points to
+local setup, Hub startup, Hub token supply/rotation, and `ardur doctor` using
+`<ardur-home>`, `<hub-url>`, `<hub-token>`, and `<command>` placeholders rather
+than copying raw temp homes or tokens. Blocked legacy commands still exit `126`
+with a receipt when policy evaluation succeeds; successful commands preserve
+stdout, stderr, and child exit-code streaming without remediation noise.
+
+The governance bridge is still local and bounded: the embedded proxy listens on
+loopback only for the launched run, kernel correlation is best effort and may be
+disabled with `--no-kernel-correlation`, and this CLI reference does not claim
+production eBPF/daemon enforcement, service-management readiness, universal CLI
+capture, or provider-hidden action visibility.
 
 ### `ardur desktop-observe`
 
@@ -420,6 +587,16 @@ placeholder-only `next_steps` such as
 human output prints the same recovery guidance without a Python traceback or raw
 local temp paths.
 
+If the selected plugin directory is present but local plugin-content validation
+fails, the command exits nonzero before writing `active_mission.jwt`, keys, or
+hook artifacts. JSON output includes `ok: false`,
+`error: "claude_code_plugin_invalid"`,
+`condition: "claude_code_plugin_invalid"`, stable `invalid_checks` such as
+`plugin_manifest`, and placeholder-only `next_steps`; human output prints the
+same recovery guidance without a traceback or raw local temp paths. This is
+local/no-key validation of the supplied plugin directory only; it does not prove
+live Claude provider behavior or complete plugin schema parity.
+
 Policy input flags are local setup inputs for additional policy backends:
 `--forbid-rules FILE` loads forbid-rules JSON, `--cedar-policy FILE` loads a
 Cedar policy, and `--cedar-entities FILE` optionally loads Cedar entities JSON.
@@ -510,6 +687,18 @@ They do not call Gemini, contact a provider, claim visibility into
 provider-hidden actions, or require copying raw tokens or local private paths
 into shared logs.
 
+If stdin is a valid JSON object but no active Mission Passport is available,
+the command also fails closed with exit code `2` and stdout JSON containing
+`status: "deny"`, `block: true`, matching `condition`/`error` fields set to
+`gemini_cli_hook_missing_active_passport`, and a `claim_boundary` stating that
+no receipt was emitted because no valid Mission Passport was available. The
+response emits no receipt before a valid passport exists, keeps stderr empty,
+emits no traceback, and includes placeholder-only `next_steps` for issuing a
+local Mission Passport, setting `ARDUR_MISSION_PASSPORT`, and rerunning
+`ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>`.
+This missing-passport recovery path is local/no-key guidance only; it does not
+call Gemini, contact a provider, or claim provider-hidden visibility.
+
 `status=allow` means Ardur recorded evidence and left Gemini/user permission
 flow authoritative. `status=deny` and `status=unknown` return a blocking result
 for wrappers that fail closed. Unknown results are used for unmapped Gemini tool
@@ -561,6 +750,19 @@ and print a JSON result.
 ```text
 ardur codex-app-server-event [--keys-dir DIR]
 ```
+
+If stdin is a valid JSON object but no active Mission Passport is available,
+the command fails closed with exit code `2` and stdout JSON containing
+`status: "deny"`, `block: true`, matching `condition`/`error` fields set to
+`codex_app_server_event_missing_active_passport`, and a `claim_boundary` stating
+that no receipt was emitted because no valid Mission Passport was available. The
+response emits no receipt before a valid passport exists, keeps stderr empty,
+emits no traceback, and includes placeholder-only `next_steps` for issuing a
+local Mission Passport, setting `ARDUR_MISSION_PASSPORT`, and rerunning
+`ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>`. This
+missing-passport recovery path is local/no-key guidance only; it does not call
+Codex, contact a provider, prove live Codex cloud behavior, or claim
+provider-hidden visibility.
 
 `status=allow` means Ardur recorded local evidence and left Codex/user
 permission flow authoritative. `status=deny` and `status=unknown` return a

@@ -6,7 +6,7 @@ This page is the canonical reference linked from the README, `STATUS.md`,
 plugin documentation, and every example. When the capture surface changes,
 this page changes; everywhere else just links to it.
 
-Last updated: 2026-06-05. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
+Last updated: 2026-06-25. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
  - The handler also automatically removes in-memory evidence-log append state when sessions end or expire; it does not delete, rotate, archive, or rename evidence-log files.
 
 ## What Ardur captures today (v0.1)
@@ -16,7 +16,7 @@ Last updated: 2026-06-05. Current shipping version: v0.1 (tool-call boundary). C
 | Claude Code `Read` tool | Full — file path, content digest (SHA-256), size, exit code | `tool=Read`, `target=<path>`, `arguments_hash`, `invocation_digest` |
 | Claude Code `Edit` / `MultiEdit` tool | Full — path, old/new strings, exit | `tool=Edit\|MultiEdit`, `target=<path>` |
 | Claude Code `Write` tool | Full — path, full content digest | `tool=Write`, `target=<path>`, response digest |
-| Claude Code `Glob` / `Grep` tool | Full — pattern, results, count | `tool=Glob\|Grep`, search args |
+| Claude Code `Glob` / `Grep` tool | Tool-call boundary — pattern/search args and response digest; host-reported result/count metadata can be truncated or incomplete when count metadata is absent or marked incomplete | `tool=Glob\|Grep`, search args, response digest |
 | Claude Code `Bash` tool | **Command string only** — *not* the subprocess effects (see "What is *not* captured" below) | `tool=Bash`, `target=<command-string>` |
 | Claude Code `WebFetch` / `WebSearch` | Full — URL, response digest | `tool=WebFetch\|WebSearch`, `target=<url>` |
 | Claude Code `Task` (subagent dispatch) | Full — parent intent, child trace id, prompt | `tool=Task`, plus `SubagentStart` / `SubagentStop` lifecycle receipts |

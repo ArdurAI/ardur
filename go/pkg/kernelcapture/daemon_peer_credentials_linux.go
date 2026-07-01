@@ -4,11 +4,16 @@ package kernelcapture
 
 import (
 	"fmt"
+	"io"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
 )
+
+const maxLinuxProcStatBytes = 4096
 
 // ObserveLinuxUnixPeerCredentials reads Linux SO_PEERCRED from an already-open
 // Unix connection and returns the daemon-owned peer observation used by the
@@ -47,14 +52,70 @@ func ObserveLinuxUnixPeerCredentials(conn *net.UnixConn, socketPath string) (Dae
 	if ucred.Pid <= 0 {
 		return DaemonSocketPeerObservation{}, fmt.Errorf("%w: observed peer pid is required", ErrDaemonPeerCredentialRetrieval)
 	}
+	startTimeTicks, err := readLinuxProcProcessStartTimeTicks(uint32(ucred.Pid))
+	if err != nil {
+		return DaemonSocketPeerObservation{}, err
+	}
 
 	return DaemonSocketPeerObservation{
 		Credentials: DaemonObservedPeerCredentials{
-			UID: ucred.Uid,
-			GID: ucred.Gid,
-			PID: uint32(ucred.Pid),
+			UID:                   ucred.Uid,
+			GID:                   ucred.Gid,
+			PID:                   uint32(ucred.Pid),
+			ProcessStartTimeTicks: startTimeTicks,
 		},
 		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 		SocketPath:       cleanedSocketPath,
 	}, nil
+}
+
+func readLinuxProcProcessStartTimeTicks(pid uint32) (uint64, error) {
+	if pid == 0 {
+		return 0, fmt.Errorf("%w: observed peer pid is required", ErrDaemonPeerCredentialRetrieval)
+	}
+	file, err := os.Open(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, fmt.Errorf("%w: peer /proc stat unavailable: %v", ErrDaemonPeerCredentialRetrieval, pathlessOSError(err))
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxLinuxProcStatBytes+1))
+	if err != nil {
+		return 0, fmt.Errorf("%w: read peer /proc stat: %v", ErrDaemonPeerCredentialRetrieval, err)
+	}
+	if len(data) > maxLinuxProcStatBytes {
+		return 0, fmt.Errorf("%w: peer /proc stat exceeds %d bytes", ErrDaemonPeerCredentialRetrieval, maxLinuxProcStatBytes)
+	}
+	startTimeTicks, err := parseLinuxProcStatStartTimeTicks(string(data))
+	if err != nil {
+		return 0, fmt.Errorf("%w: parse peer /proc stat start time: %v", ErrDaemonPeerCredentialRetrieval, err)
+	}
+	return startTimeTicks, nil
+}
+
+func pathlessOSError(err error) error {
+	if pathErr, ok := err.(*os.PathError); ok {
+		return pathErr.Err
+	}
+	return err
+}
+
+func parseLinuxProcStatStartTimeTicks(raw string) (uint64, error) {
+	trimmed := strings.TrimSpace(raw)
+	closeIndex := strings.LastIndex(trimmed, ") ")
+	if closeIndex < 0 {
+		return 0, fmt.Errorf("missing process name terminator")
+	}
+	fields := strings.Fields(trimmed[closeIndex+2:])
+	if len(fields) <= 19 {
+		return 0, fmt.Errorf("expected at least 22 proc stat fields, got %d", len(fields)+2)
+	}
+	startTimeTicks, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid start time ticks %q: %v", fields[19], err)
+	}
+	if startTimeTicks == 0 {
+		return 0, fmt.Errorf("start time ticks is zero")
+	}
+	return startTimeTicks, nil
 }

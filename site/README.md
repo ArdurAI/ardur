@@ -4,6 +4,16 @@ This Hugo project renders Ardur's public evidence and documentation surface.
 It is a publishing layer over the root repo, not a replacement for the source
 docs.
 
+## Published-site freshness
+
+The hosted GitHub Pages site reflects the last public Pages deployment, not
+necessarily the latest `dev` commit. Pushes to `dev` validate and build the site
+in CI, but the current workflow only uploads and deploys the Pages artifact from
+`main`. Treat the source-link commit shown on each hosted page as the freshness
+boundary: if it points at an older commit, use a clean source checkout or local
+Hugo build for newer `dev` documentation until a reviewed public deploy or main
+promotion happens.
+
 ## Local preview
 
 ```sh

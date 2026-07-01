@@ -25,7 +25,7 @@ func TestAuthorizeDaemonProtocolPeerBindsObservedCredentialsToRequest(t *testing
 		},
 	}
 	observation := DaemonSocketPeerObservation{
-		Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+		Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 700001},
 		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 		SocketPath:       plan.SocketPath,
 	}
@@ -50,6 +50,13 @@ func TestAuthorizeDaemonProtocolPeerBindsObservedCredentialsToRequest(t *testing
 	if handshake.Authorization.Verdict != DaemonPeerAuthorizationVerdictAllow {
 		t.Fatalf("authorization verdict = %q, want allow", handshake.Authorization.Verdict)
 	}
+	if handshake.ProcessStartTimeTicks != 700001 || handshake.Authorization.ProcessStartTimeTicks != 700001 {
+		t.Fatalf("process start identity was not copied into handshake/authorization: %#v", handshake)
+	}
+	observation.Credentials.ProcessStartTimeTicks = 0
+	if handshake.ProcessStartTimeTicks != 700001 || handshake.Authorization.ProcessStartTimeTicks != 700001 {
+		t.Fatalf("caller mutation changed handshake process start identity: %#v", handshake)
+	}
 	if !containsText(handshake.ClaimBoundary, "explicit UID/GID policy before handling") {
 		t.Fatalf("claim boundary missing peer-policy guardrail: %#v", handshake.ClaimBoundary)
 	}
@@ -66,7 +73,7 @@ func TestAuthorizeDaemonProtocolPeerHandlesSessionIDsByMethod(t *testing.T) {
 		t.Fatalf("BuildDaemonCustodyPlan returned error: %v", err)
 	}
 	observation := DaemonSocketPeerObservation{
-		Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+		Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 700002},
 		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 		SocketPath:       plan.SocketPath,
 	}
@@ -137,7 +144,7 @@ func TestAuthorizeDaemonProtocolPeerFailsClosed(t *testing.T) {
 		},
 	}
 	validObservation := DaemonSocketPeerObservation{
-		Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+		Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 700003},
 		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 		SocketPath:       plan.SocketPath,
 	}
@@ -210,6 +217,14 @@ func TestAuthorizeDaemonProtocolPeerFailsClosed(t *testing.T) {
 				ProducerVersion: "phase2-process-lifecycle-v0",
 			},
 			wantErr: ErrDaemonSocketPeerObservation,
+		},
+		{
+			name:    "missing process start identity",
+			req:     validRequest,
+			obs:     DaemonSocketPeerObservation{Credentials: DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321}, CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred, SocketPath: plan.SocketPath},
+			policy:  validPolicy,
+			plan:    plan,
+			wantErr: ErrDaemonPeerAuthorization,
 		},
 		{
 			name:    "unauthorized peer",

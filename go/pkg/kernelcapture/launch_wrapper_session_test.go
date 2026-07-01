@@ -200,6 +200,9 @@ func TestBuildLaunchWrapperSessionProofFailsClosed(t *testing.T) {
 		{name: "peer identity in nested metadata", mut: func(m *LaunchWrapperSessionMetadata) {
 			m.HandoffMetadata = map[string]any{"nested": map[string]any{"peer_uid": 501}}
 		}},
+		{name: "peer process start time in nested metadata", mut: func(m *LaunchWrapperSessionMetadata) {
+			m.HandoffMetadata = map[string]any{"nested": map[string]any{"peer_process_start_time_ticks": 987654321}}
+		}},
 		{name: "raw command in handoff metadata", mut: func(m *LaunchWrapperSessionMetadata) {
 			m.HandoffMetadata = map[string]any{"command": "/bin/echo raw"}
 		}},

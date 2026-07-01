@@ -1,9 +1,12 @@
 package trust
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -220,6 +223,51 @@ func TestInMemoryAggregator_Recovery(t *testing.T) {
 	score, _ = agg.GetScore(ctx, "agent-1")
 	if score.RuntimeCompliance <= runtimeBefore {
 		t.Errorf("runtime didn't recover: before=%.2f, after=%.2f", runtimeBefore, score.RuntimeCompliance)
+	}
+}
+
+func TestInMemoryAggregator_RateLimitLogOmitsAgentID(t *testing.T) {
+	var buf bytes.Buffer
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	defer func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	agg, _ := NewInMemoryAggregator()
+	defer agg.Close()
+	ctx := context.Background()
+	agentID := "agent-1\nforged-log-line"
+	agg.RegisterAgent(ctx, agentID, 0.8, 0.9)
+
+	agg.mu.Lock()
+	agg.agents[agentID].maxSignalsPerMin = 1
+	agg.mu.Unlock()
+
+	for i := 0; i < 2; i++ {
+		_, err := agg.IngestSignal(ctx, TelemetrySignal{
+			AgentID:  agentID,
+			Type:     SignalPolicyViolation,
+			Severity: SeverityLow,
+			Source:   "test",
+		})
+		if err != nil {
+			t.Fatalf("IngestSignal: %v", err)
+		}
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "rate limit exceeded for registered agent") {
+		t.Fatalf("expected rate-limit log entry, got %q", logged)
+	}
+	if strings.Contains(logged, "agent-1") || strings.Contains(logged, "forged-log-line") {
+		t.Fatalf("rate-limit log leaked agent ID: %q", logged)
 	}
 }
 

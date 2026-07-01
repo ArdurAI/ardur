@@ -54,9 +54,12 @@ cd ../go && go build ./...
 
 ### VM / Sandbox / Remote Server
 
-Same as Linux above. The proxy listens on `127.0.0.1` by default — if you need
-remote access, set up an SSH tunnel or reverse proxy. The proxy supports mutual
-TLS for production deployments.
+Same as Linux above. `ardur start` binds to `127.0.0.1` by default. For a VM or
+remote sandbox, keep Ardur on loopback and use an SSH tunnel for development
+access unless you have separately reviewed the host, proxy, and network boundary.
+The local TLS flags are loopback proxy configuration, not a hosted-service or
+client-certificate deployment claim; see the [CLI reference]({{< relref "/source/docs/reference/cli/" >}})
+for the current `ardur start --host` and TLS boundary.
 
 ---
 
