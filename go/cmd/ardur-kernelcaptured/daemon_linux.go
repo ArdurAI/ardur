@@ -79,5 +79,6 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 		}
 
 		d.processKernelEvent(evt, loss)
+		loss = kernelcapture.CaptureLoss{} // reset: drops since last good event have been reported
 	}
 }

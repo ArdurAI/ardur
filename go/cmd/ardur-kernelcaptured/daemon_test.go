@@ -173,6 +173,39 @@ func TestRouteEvent_NoMatch(t *testing.T) {
 	}
 }
 
+// TestRouteEvent_SlowPathPIDTreeMatch exercises the slow-path PID-tree scan.
+// The session is registered with CgroupID=0 (no cgroup guard) so it does not
+// appear in cgroupIndex. The event carries CgroupID=99 which misses the fast
+// path (cgroupIndex[99] is empty), falling through to the PID-tree scan where
+// PID=100 matches the root PID.
+func TestRouteEvent_SlowPathPIDTreeMatch(t *testing.T) {
+	d := newTestDaemon(t)
+
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID:    "slow-path-test",
+		RootPID:      100,
+		CgroupID:     0,
+		EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+		TTLSeconds:   300,
+	}, "slow-path-test")
+
+	// CgroupID=99: fast path checks cgroupIndex[99], finds nothing, falls through.
+	// scope.CgroupID=0 disables the cgroup guard inside MatchesAndTrack.
+	// PID=100 matches the registered root PID.
+	evt := kernelcapture.ProcessEvent{
+		PID:      100,
+		CgroupID: 99,
+		Type:     kernelcapture.ProcessEventExec,
+	}
+	sid, corr := d.routeEvent(&evt)
+	if sid != "slow-path-test" {
+		t.Errorf("routeEvent slow-path PID-tree match: got %q, want %q", sid, "slow-path-test")
+	}
+	if corr == nil {
+		t.Error("routeEvent slow-path: expected non-nil correlator")
+	}
+}
+
 func TestAppendKernelReceipt(t *testing.T) {
 	d := newTestDaemon(t)
 	stub := newStubFS()
