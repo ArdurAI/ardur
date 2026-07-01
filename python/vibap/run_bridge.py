@@ -128,6 +128,16 @@ class ClaudeCodeAdapter(EnvProxyAdapter):
     ``VIBAP_HOME`` the base adapter sets — which makes the hook load this run's
     ``active_mission.jwt`` — the agent is governed by the hook with zero
     permanent configuration. Nothing is written to ``~/.claude/settings.json``.
+
+    .. note::
+        **Receipt gap**: the Claude Code hook evaluates tool calls locally via
+        the plugin mechanism; it does **not** POST to ``ARDUR_PROXY_URL``
+        (``/evaluate``).  As a result, ``RunResult.total_events`` is 0 on this
+        path — governance is enforced by the hook but the embedded proxy-side
+        receipt chain is empty.  The hook's own JSONL output in ``VIBAP_HOME``
+        is the authoritative governance record for ClaudeCode invocations.
+        Wiring the hook to also report to the embedded proxy is tracked as a
+        follow-up under Epic A (#63).
     """
 
     name = "claude-code"

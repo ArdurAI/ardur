@@ -241,6 +241,41 @@ def test_transparent_intercept_is_scaffold_only(tmp_path: Path) -> None:
 # ── CLI dispatch ───────────────────────────────────────────────────────────────
 
 
+def test_claude_adapter_proxy_receives_zero_events_when_hook_governs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Document the hook↔proxy receipt gap on the claude-code path.
+
+    ClaudeCodeAdapter inherits ARDUR_PROXY_URL from EnvProxyAdapter but the
+    Claude Code hook evaluates tool calls locally via the plugin — it never
+    POSTs to /evaluate.  Even when real tool calls are made through the hook,
+    the embedded proxy's event counter stays at 0.  This test verifies the
+    current (known-incomplete) behaviour with a noop subprocess so that any
+    future change that wires the hook to also POST to /evaluate will cause an
+    assertion failure here, prompting an update to expect total_events > 0.
+    See: run_bridge.ClaudeCodeAdapter docstring and Epic A (#63).
+    """
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    home = tmp_path / "cc-home"
+    noop = tmp_path / "noop.py"
+    noop.write_text("import sys; sys.exit(0)", encoding="utf-8")
+
+    result = run_governed(
+        command=[sys.executable, str(noop)],
+        mission="ClaudeCode hook path: proxy gets 0 events.",
+        allowed_tools=["Read"],
+        home=home,
+        via="claude-code",
+    )
+    assert result.adapter == "claude-code"
+    # The subprocess made no calls to ARDUR_PROXY_URL/evaluate.
+    # Even for a real `claude` subprocess governed via the hook, calls are
+    # evaluated locally by the hook — the proxy never sees them.
+    assert result.total_events == 0
+    # An attestation is still issued (it covers the session, not only proxy hits).
+    assert result.attestation_token
+
+
 def test_run_dispatch_legacy_vs_governance() -> None:
     """`ardur run` stays on the legacy hub path until a governance flag appears."""
     from vibap.cli import _run_has_governance_intent, build_parser
