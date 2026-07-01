@@ -72,6 +72,7 @@ from .codex_app_server_fixture import (
 from .posture_index import build_posture_index, format_posture_report
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
 from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
+from .run_bridge import VALID_VIA_MODES, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
 
 
@@ -1946,7 +1947,23 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_has_governance_intent(args: argparse.Namespace) -> bool:
+    """True when ``ardur run`` was invoked as a governance bridge.
+
+    The legacy ``ardur run`` streams a command through the Ardur Personal Hub.
+    The governance bridge (issue passport → start session → launch governed) is
+    selected whenever any governance flag is present, keeping the legacy path
+    untouched for existing callers.
+    """
+    return any(
+        getattr(args, name, None) not in (None, False)
+        for name in ("mission", "allowed_tools", "forbidden_tools", "via", "govern")
+    ) or getattr(args, "max_tool_calls", None) is not None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    if _run_has_governance_intent(args):
+        return run_governed_cli(args)
     return run_under_hub(args)
 
 
@@ -3221,10 +3238,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uninstall.set_defaults(func=cmd_uninstall)
 
-    run = subparsers.add_parser("run", help="run a CLI command through Ardur Personal Hub")
-    run.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
+    run = subparsers.add_parser(
+        "run",
+        help="run a command through Ardur — governed launcher (with --mission/--allowed-tools) "
+        "or Ardur Personal Hub streaming (legacy)",
+    )
+    run.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL (legacy hub path)")
     run.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    run.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    run.add_argument("--home", type=Path, help="Ardur home directory (ephemeral by default for governance)")
+    # Governance-bridge flags. Supplying any of these switches `ardur run` from
+    # the legacy hub-streaming path to the zero-setup governance launcher.
+    run.add_argument("--mission", help="mission text for the governed agent run")
+    run.add_argument(
+        "--allowed-tools",
+        action="append",
+        help="comma-separated allowlist of tools the agent may call (repeatable)",
+    )
+    run.add_argument(
+        "--forbidden-tools",
+        action="append",
+        help="comma-separated denylist of tools the agent may not call (repeatable)",
+    )
+    run.add_argument(
+        "--max-tool-calls",
+        type=int,
+        default=None,
+        help="maximum governed tool calls for the run (default 250 when governing)",
+    )
+    run.add_argument(
+        "--max-duration-s",
+        type=int,
+        default=86400,
+        help="wall-clock budget for the governed run in seconds",
+    )
+    run.add_argument(
+        "--via",
+        choices=sorted(VALID_VIA_MODES),
+        default=None,
+        help="how to route the agent's tool-call governance (default auto-detects Claude Code)",
+    )
+    run.add_argument(
+        "--no-kernel-correlation",
+        action="store_true",
+        help="skip eBPF daemon/cgroup correlation even when available",
+    )
     run.add_argument("command", nargs=argparse.REMAINDER, help="command to run after --")
     run.set_defaults(func=cmd_run)
 
