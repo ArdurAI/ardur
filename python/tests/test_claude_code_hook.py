@@ -1473,6 +1473,70 @@ def test_daemon_unlinks_stale_unix_socket_path(tmp_path):
             stale_path.unlink()
 
 
+def test_daemon_cleanup_unlinks_stale_unix_socket_path(tmp_path):
+    import os
+    import socket
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    stale_path = Path(f"/tmp/ardur-stale-cleanup-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.bind(str(stale_path))
+    finally:
+        server.close()
+
+    try:
+        assert stale_path.exists()
+        daemon_module._cleanup_stale_socket(stale_path, timeout_s=0.001)
+        assert not stale_path.exists()
+    finally:
+        if stale_path.exists():
+            stale_path.unlink()
+
+
+def test_daemon_socket_probe_treats_starting_listener_as_active(tmp_path):
+    import os
+    import socket
+    import threading
+    import time
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    socket_path = Path(f"/tmp/ardur-starting-socket-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    observed = {"accepted": False}
+    failures: list[Exception] = []
+    server.bind(str(socket_path))
+
+    def _listen_after_bind() -> None:
+        try:
+            time.sleep(0.05)
+            server.listen(1)
+            server.settimeout(1.0)
+            conn, _ = server.accept()
+            with conn:
+                observed["accepted"] = True
+        except Exception as exc:  # pragma: no cover - surfaced via assertion
+            failures.append(exc)
+
+    thread = threading.Thread(target=_listen_after_bind, daemon=True)
+    thread.start()
+
+    try:
+        assert daemon_module._socket_path_is_active(socket_path, timeout_s=0.5)
+        thread.join(timeout=2)
+        assert not failures
+        assert observed["accepted"]
+    finally:
+        server.close()
+        thread.join(timeout=0.1)
+        if socket_path.exists():
+            socket_path.unlink()
+
+
 def test_daemon_creates_private_socket_parent_when_missing(tmp_path, monkeypatch):
     import os
     import stat as stat_module
@@ -1522,15 +1586,22 @@ def test_daemon_creates_private_socket_parent_when_missing(tmp_path, monkeypatch
         assert parent_mode == 0o700
         assert socket_mode == 0o600
 
-        output = daemon_module.dispatch_pre_tool_use(
-            {
-                "session_id": "daemon-private-session",
-                "tool_name": "Read",
-                "tool_input": {"file_path": "/tmp/daemon-private.txt"},
-                "tool_use_id": "daemon-private-call",
-            },
-            keys_dir=tmp_path,
-        )
+        output = None
+        for _ in range(100):
+            output = daemon_module.dispatch_pre_tool_use(
+                {
+                    "session_id": "daemon-private-session",
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": "/tmp/daemon-private.txt"},
+                    "tool_use_id": "daemon-private-call",
+                },
+                keys_dir=tmp_path,
+            )
+            if output is not None:
+                break
+            if failures or not thread.is_alive():
+                break
+            time.sleep(0.01)
         assert output is not None
         assert output["continue"] is True
 

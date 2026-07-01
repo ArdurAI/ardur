@@ -666,6 +666,52 @@ def _emit_chained_receipt(
     return receipt_obj
 
 
+def _missing_active_passport_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "issue_mission_passport",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": (
+                "Issue a local Mission Passport for the agent and mission you want this "
+                "Codex app-server proof event to evaluate. Keep the token private."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "configure_active_mission_passport",
+            "command": "export ARDUR_MISSION_PASSPORT=<token-or-token-file>",
+            "detail": (
+                "Set ARDUR_MISSION_PASSPORT to the issued JWT or to a file containing it; "
+                "alternatively place it at <ardur-home>/active_mission.jwt for local runs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_codex_app_server_event",
+            "command": "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>",
+            "detail": (
+                "Rerun the Codex app-server event helper with a JSON object from <event-json-file>. "
+                "This proof surface emits no receipt until a valid active Mission Passport is available."
+            ),
+        },
+    ]
+
+
+def _missing_active_passport_response() -> dict[str, Any]:
+    condition = "codex_app_server_event_missing_active_passport"
+    return {
+        "status": "deny",
+        "block": True,
+        "error": condition,
+        "condition": condition,
+        "message": "ardur: blocked - no valid active Mission Passport was available",
+        "detail": "Set ARDUR_MISSION_PASSPORT or issue/configure a local Mission Passport before rerunning the event helper.",
+        "claim_boundary": "no receipt emitted because no valid mission passport was available",
+        "next_steps": _missing_active_passport_next_steps(condition),
+    }
+
+
 def handle_host_event(host_event: dict[str, Any], *, keys_dir: Path | None = None) -> dict[str, Any]:
     """Handle a visible local Codex app-server/host-event payload.
 
@@ -678,13 +724,8 @@ def handle_host_event(host_event: dict[str, Any], *, keys_dir: Path | None = Non
 
     try:
         claims = load_active_passport(keys_dir=keys_dir)
-    except MissionLoadError as exc:
-        return {
-            "status": "deny",
-            "block": True,
-            "message": f"ardur: blocked - {exc}",
-            "claim_boundary": "no receipt emitted because no valid mission passport was available",
-        }
+    except MissionLoadError:
+        return _missing_active_passport_response()
 
     tool_name = str(host_event.get("tool_name", "") or "").strip() or "unknown_codex_tool"
     tool_args = _normalize_tool_args(host_event)

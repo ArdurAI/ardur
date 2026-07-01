@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import io
 import json
@@ -226,6 +227,25 @@ def test_hub_cors_origin_is_normalized_and_rejects_header_splitting():
     assert handler._allowed_cors_origin() is None
 
 
+@pytest.mark.parametrize("content_length", ["-1", "not-an-integer"])
+def test_hub_rejects_invalid_content_length_before_body_read(content_length):
+    handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "headers", {"content-length": content_length})
+
+    class ReadMustNotRun:
+        def read(self, length=-1):
+            raise AssertionError("invalid Content-Length must fail before body read")
+
+    setattr(handler, "rfile", ReadMustNotRun())
+
+    with pytest.raises(HubError) as excinfo:
+        handler._read_payload()
+
+    assert excinfo.value.status == 400
+    assert excinfo.value.code == "invalid_content_length"
+    assert "non-negative integer" in str(excinfo.value)
+
+
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
 
@@ -244,6 +264,319 @@ def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     assert json.loads(config_path.read_text())["hub_token"] == first["hub_token"]
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+
+def test_setup_existing_file_home_fails_closed_without_path_leak(tmp_path, capsys):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main(["setup", "--home", str(existing_file_home)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "path_not_directory"
+    assert result["error_code"] == "path_not_directory"
+    assert result["next_steps"]
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur setup --home <ardur-dir>" in next_steps_json
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "FileExistsError",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+
+
+def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_leak(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --home before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        [
+            "hub",
+            "--home",
+            str(existing_file_home),
+            "--no-tls",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "path_not_directory"
+    assert result["error_code"] == "path_not_directory"
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur hub --home <ardur-dir>" in next_steps_json
+    assert "ardur setup --home <ardur-dir>" in next_steps_json
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "FileExistsError",
+        "[tls] WARNING",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+
+
+@pytest.mark.parametrize("port", ["-1", "70000"])
+def test_hub_invalid_port_returns_safe_json_before_server_bind_without_artifacts(
+    tmp_path, monkeypatch, capsys, port
+):
+    from vibap import cli as cli_module
+
+    hub_home = tmp_path / "ardur-home"
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --port before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        ["hub", "--home", str(hub_home), "--no-tls", "--host", "127.0.0.1", "--port", port]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_port_invalid"
+    assert result["error"] == "hub_port_invalid"
+    assert result["error_code"] == "hub_port_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert "Traceback" not in rendered
+    assert "OverflowError" not in rendered
+    assert port not in rendered
+    assert str(hub_home) not in rendered
+    assert str(tmp_path) not in rendered
+    assert not hub_home.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+
+
+def test_hub_invalid_host_returns_safe_json_before_server_bind_without_artifacts(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    hub_home = tmp_path / "ardur-home"
+    raw_host = "http://["
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --host before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        ["hub", "--home", str(hub_home), "--no-tls", "--host", raw_host, "--port", "0"]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_host_invalid"
+    assert result["error"] == "hub_host_invalid"
+    assert result["error_code"] == "hub_host_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert "Traceback" not in rendered
+    assert "gaierror" not in rendered.lower()
+    assert "socket" not in rendered.lower()
+    assert raw_host not in rendered
+    assert str(hub_home) not in rendered
+    assert str(tmp_path) not in rendered
+    assert not hub_home.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+
+
+def test_hub_port_zero_reaches_server_without_long_lived_service(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    bound_addresses = []
+    served = []
+
+    class FakeHub:
+        def __init__(self, home, hub_url):
+            self.home = home
+            self.hub_url = hub_url
+
+    class FakeServer:
+        def __init__(self, address, handler):
+            bound_addresses.append((address, handler))
+            self.socket = object()
+
+        def serve_forever(self):
+            served.append(True)
+
+    monkeypatch.setattr(personal_hub, "PersonalHub", FakeHub)
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", FakeServer)
+
+    rc = cli_module.main(
+        [
+            "hub",
+            "--home",
+            str(tmp_path / "ardur-home"),
+            "--no-tls",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.out == ""
+    assert bound_addresses == [(('127.0.0.1', 0), personal_hub._HubRequestHandler)]
+    assert served == [True]
+
+
+def _assert_personal_home_not_directory_response(
+    *,
+    rc: int,
+    stdout: str,
+    stderr: str,
+    existing_file_home,
+    tmp_path,
+) -> dict:
+    result = json.loads(stdout)
+
+    assert rc == 1
+    assert stderr == ""
+    assert result["ok"] is False
+    assert result["condition"] == personal_hub.PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    assert result["error_code"] == personal_hub.PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur setup --home <ardur-home>" in next_steps_json
+    assert "ardur hub --home <ardur-home>" in next_steps_json
+    assert "ardur doctor --home <ardur-home>" in next_steps_json
+    combined_output = stdout + stderr
+    for marker in (
+        "Traceback",
+        "NotADirectoryError",
+        "FileExistsError",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+    return result
+
+
+@pytest.mark.parametrize(
+    "command_args",
+    [
+        ["doctor", "--hub-url", "http://127.0.0.1:9"],
+        ["status", "--hub-url", "http://127.0.0.1:9"],
+        [
+            "desktop-observe",
+            "--hub-url",
+            "http://127.0.0.1:9",
+            "--app",
+            "SmokeApp",
+            "--title",
+            "SmokeWindow",
+        ],
+    ],
+)
+def test_personal_json_commands_existing_file_home_fail_closed_without_path_leak(
+    tmp_path,
+    capsys,
+    command_args,
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main([command_args[0], "--home", str(existing_file_home), *command_args[1:]])
+    captured = capsys.readouterr()
+
+    _assert_personal_home_not_directory_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        existing_file_home=existing_file_home,
+        tmp_path=tmp_path,
+    )
+
+
+def test_run_existing_file_home_fails_closed_before_child_execution_without_path_leak(
+    tmp_path,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+    child_marker = tmp_path / "child-executed"
+
+    rc = cli_module.main(
+        [
+            "run",
+            "--home",
+            str(existing_file_home),
+            "--hub-url",
+            "http://127.0.0.1:9",
+            "--",
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(child_marker)!r}).write_text('ran', encoding='utf-8')",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    _assert_personal_home_not_directory_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        existing_file_home=existing_file_home,
+        tmp_path=tmp_path,
+    )
+    assert not child_marker.exists()
 
 
 def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
@@ -1929,13 +2262,14 @@ def test_run_under_hub_unavailable_hub_reports_placeholder_next_steps(
     monkeypatch,
 ):
     sentinel = tmp_path / "child-ran.txt"
+    raw_error = f"connection refused at {tmp_path}?token=raw-hub-token-placeholder"
 
     monkeypatch.setattr(
         personal_hub,
         "hub_request",
         lambda *_args, **_kwargs: {
             "ok": False,
-            "error": "connection refused",
+            "error": raw_error,
             "error_code": "hub_unavailable",
         },
     )
@@ -1957,14 +2291,58 @@ def test_run_under_hub_unavailable_hub_reports_placeholder_next_steps(
     assert exit_code == 127
     assert captured.out == ""
     assert not sentinel.exists()
-    assert "Ardur Hub unavailable: connection refused" in captured.err
+    assert "Ardur Hub unavailable: hub_unavailable" in captured.err
     assert "Next steps:" in captured.err
     remediation = captured.err.split("Next steps:", 1)[1]
     assert "ardur setup --home <ardur-home>" in remediation
     assert "ardur hub --home <ardur-home>" in remediation
     assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in remediation
     assert "<hub-token>" in remediation
+    assert raw_error not in captured.err
+    assert "raw-hub-token-placeholder" not in captured.err
     assert str(tmp_path) not in remediation
+
+
+def test_run_under_hub_policy_check_failure_sanitizes_support_error(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    sentinel = tmp_path / "child-ran.txt"
+    raw_error = f"policy backend failed at {tmp_path} with token=raw-policy-token-placeholder"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": False, "error": raw_error, "error_code": "policy_backend_failed"}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("policy check failure must not execute a child process")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", f"from pathlib import Path; Path({str(sentinel)!r}).write_text('ran')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert "Ardur policy check failed: run_policy_check_failed" in captured.err
+    assert "Next steps:" in captured.err
+    assert raw_error not in captured.err
+    assert "raw-policy-token-placeholder" not in captured.err
+    assert str(tmp_path) not in captured.err
 
 
 def test_run_under_hub_auth_failure_reports_token_next_steps_without_raw_secret(
@@ -1997,6 +2375,7 @@ def test_run_under_hub_auth_failure_reports_token_next_steps_without_raw_secret(
     captured = capsys.readouterr()
     assert exit_code == 127
     assert captured.out == ""
+    assert "Ardur Hub unavailable: hub_token_required" in captured.err
     assert "Next steps:" in captured.err
     remediation = captured.err.split("Next steps:", 1)[1]
     assert "--hub-token <hub-token>" in remediation
@@ -2028,6 +2407,132 @@ def test_run_under_hub_blocked_policy_keeps_126_receipt_and_no_remediation(
     assert exit_code == 126
     assert "Ardur blocked command:" in captured.err
     assert "receipt:" in captured.err
+    assert "Next steps:" not in captured.err
+
+
+def test_run_under_hub_blocked_policy_sanitizes_reason_and_preserves_receipt_reference(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    raw_reason = f"blocked raw path {tmp_path} token=raw-block-token-placeholder"
+    receipt_reference = "receipt:0123456789abcdef0123456789abcdef"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": raw_reason}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert "Ardur blocked command: policy_blocked" in captured.err
+    assert f"receipt: {receipt_reference}" in captured.err
+    assert "Next steps:" not in captured.err
+    assert raw_reason not in captured.err
+    assert "raw-block-token-placeholder" not in captured.err
+    assert str(tmp_path) not in captured.err
+
+
+def test_run_under_hub_blocked_policy_receipt_output_avoids_print_sink(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    receipt_reference = "receipt:0123456789abcdef0123456789abcdef"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": "deny"}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    real_print = builtins.print
+
+    def receipt_print_guard(*args, **kwargs):
+        if kwargs.get("file") is sys.stderr and args and str(args[0]).startswith("receipt:"):
+            raise AssertionError("receipt reference output must not use print as a log sink")
+        return real_print(*args, **kwargs)
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+    monkeypatch.setattr(builtins, "print", receipt_print_guard)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert f"receipt: {receipt_reference}" in captured.err
+    assert "Next steps:" not in captured.err
+
+
+def test_run_under_hub_blocked_policy_redacts_unsafe_receipt_reference(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    unsafe_receipt_reference = ".".join(("eyJhbGciOiJub25lIn0", "e30", "signature"))
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": "deny"}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": unsafe_receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert "Ardur blocked command: policy_blocked" in captured.err
+    assert "receipt: <receipt>" in captured.err
+    assert unsafe_receipt_reference not in captured.err
     assert "Next steps:" not in captured.err
 
 

@@ -9,7 +9,40 @@ from __future__ import annotations
 import pytest
 
 from vibap.passport import issue_passport
-from vibap.proxy import Decision, _sanitize_value
+from vibap.proxy import Decision, _check_resource_scope, _sanitize_value
+
+
+class TestResourceScopeSecurity:
+    def test_path_hint_list_wrapped_bare_value_is_scope_checked(self):
+        ok, reason = _check_resource_scope(
+            {"directory": ["hr"]},
+            resource_scope=["sales/*"],
+        )
+
+        assert not ok
+        assert "hr" in reason
+        assert "outside resource_scope" in reason
+
+    def test_deep_percent_encoded_traversal_is_rejected(self):
+        normalized, error = _sanitize_value(
+            "%2525252E%2525252E%2525252Fetc%2525252Fpasswd"
+        )
+
+        assert error is not None
+        assert ".." in error
+        assert normalized == "../etc/passwd"
+
+    def test_excessive_percent_encoding_fails_closed(self):
+        import urllib.parse
+
+        value = "../etc/passwd"
+        for _ in range(12):
+            value = urllib.parse.quote(value, safe="")
+
+        normalized, error = _sanitize_value(value)
+
+        assert error == "percent-encoding nesting exceeds maximum"
+        assert normalized == value
 
 
 class TestSessionLifecycle:

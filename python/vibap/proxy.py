@@ -350,6 +350,10 @@ _DEFAULT_PROSE_HINTS = frozenset({
 # trip the fail-closed exhaustion path in ``_check_resource_scope``.
 _RESOURCE_TOKEN_MAX_LEN = 4096
 
+# Bound iterative percent-decoding so encoded traversal markers cannot stay
+# hidden behind one more layer while still preventing unbounded decode work.
+_RESOURCE_PERCENT_DECODE_MAX_ITERATIONS = 8
+
 # Minimal prose-only allowlist of grammatical slash compounds that must not
 # be reclassified as resource references by the embedded-path rule below.
 # ``_is_path_shaped_token`` remains the primary grammar guard; this set only
@@ -404,13 +408,18 @@ def _sanitize_value(value: str) -> tuple[str, str | None]:
     # 0. Percent-decode loop (path traversal catalog finding #1, #2, #5).
     #    Without this, %2E%2E/%2F bypasses the step-3 '..' check because
     #    the literal '%2E%2E' does not contain '..'. Iterative decode handles
-    #    double-encoding (%252E → %2E → .). Max 3 iterations to prevent DoS.
+    #    nested encodings (%252E → %2E → .). The loop is bounded and fails
+    #    closed if a value keeps changing after the cap.
     import urllib.parse
-    for _ in range(3):
+    raw_input = value
+    for _ in range(_RESOURCE_PERCENT_DECODE_MAX_ITERATIONS):
         decoded = urllib.parse.unquote(value)
         if decoded == value:
             break
         value = decoded
+    else:
+        if urllib.parse.unquote(value) != value:
+            return raw_input, "percent-encoding nesting exceeds maximum"
 
     # 1. Null-byte rejection (also catches %00 after percent-decode above).
     if "\x00" in value:
@@ -897,10 +906,13 @@ def _iter_resource_values(
                 if exhausted is not None:
                     exhausted["v"] = True
                 return
-            # Key context doesn't carry through list/tuple boundaries —
-            # a list member is unkeyed from the scope-matcher's viewpoint.
+            # Preserve parent key context through list/tuple boundaries.
+            # Path-hint keys such as ``directory`` can legitimately carry a
+            # list of resources; dropping the key lets bare values like
+            # ``{"directory": ["hr"]}`` evade ``resource_scope`` because
+            # they do not have path syntax on their own.
             yield from _iter_resource_values(
-                item, key=None, depth=depth + 1, budget=budget, exhausted=exhausted,
+                item, key=key, depth=depth + 1, budget=budget, exhausted=exhausted,
             )
         return
     # Non-string scalars (int/float/bool/None) are never resources.
@@ -4983,6 +4995,9 @@ def serve_proxy(
             return
 
         def _read_json(self) -> dict[str, Any]:
+            transfer_encoding = self.headers.get("Transfer-Encoding")
+            if transfer_encoding and transfer_encoding.strip().lower() != "identity":
+                raise ValueError("unsupported Transfer-Encoding")
             length = int(self.headers.get("Content-Length", "0"))
             if length > MAX_REQUEST_BODY:
                 raise ValueError(f"request body too large ({length} bytes, max {MAX_REQUEST_BODY})")

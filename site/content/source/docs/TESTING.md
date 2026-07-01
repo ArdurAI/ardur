@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "73304c7598fe2ded8c5ff4afb0d579e23eae0bc20c2a3f4e285cf846d3fc9a93"
+source_sha256: "9140a18394f0a0b10111374e3eea23e7d39d55d7a7b41b8ad683acb4ad25fd12"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -56,7 +56,7 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 [`/.github/workflows/codeql.yml`](/__ardur_internal__/repo/.github/workflows/codeql.yml)
 
 - A pre-flight job (`detect-languages`) checks whether `python/` or `go/` carries source files. With the current dev tree, the matrix detects Python and Go and runs analysis per language.
-- Pinned to `github/codeql-action@ce64ddcb` (commit-pinned; `v3` is an annotated tag whose tag-object is `865f5f5c...` and whose underlying commit is `ce64ddcb...`). Same pin discipline as the rest of the workflow set.
+- The CodeQL actions (`init`, `autobuild`, and `analyze`) are pinned to full commit SHAs in the workflow file, with the human-readable `v3` series noted in comments. Treat `.github/workflows/codeql.yml` as the authority for the exact pins so this testing guide does not drift when the pin is updated.
 - Pairs with the `code_quality` ruleset rule on `main`: that rule reads from GitHub's code-scanning alerts table, so it passes vacuously while the matrix is empty and substantively once code lands. The CI job name (`codeql`) is intentionally **not** in the required-status-checks list — the ruleset already gates merges via the alerts mechanism.
 
 ### `tests` — Python and Go runtime tests

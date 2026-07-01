@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -25,11 +26,22 @@ from .ardur_personal_native_host import (
     handle_native_host_message,
     run_native_host,
 )
-from .passport import DEFAULT_HOME, MissionPassport, generate_keypair, issue_passport, load_mission_file, verify_passport
+from .passport import (
+    DEFAULT_HOME,
+    DEFAULT_KEYS_DIR,
+    KeyDirectoryError,
+    MissionPassport,
+    generate_keypair,
+    load_existing_public_key,
+    issue_passport,
+    load_mission_file,
+    verify_passport,
+)
 from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
+    HubError,
     desktop_observe,
     doctor_personal,
     hub_request,
@@ -59,11 +71,89 @@ from .codex_app_server_fixture import (
 )
 from .posture_index import build_posture_index, format_posture_report
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
-from .proxy import GovernanceProxy, serve_proxy
+from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
+from .run_bridge import VALID_VIA_MODES, run_governed_cli
+from .shareable_redaction import path_aliases, redact_local_path_text
+
+
+_ATTEST_SESSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def _print_json(payload: dict) -> None:
-    print(json.dumps(payload, indent=2))
+    """Emit a structured CLI response to stdout without using a logging sink."""
+
+    # This is a command response, not an application log. Some CLI commands
+    # intentionally return freshly generated local tokens to the invoking user,
+    # while setup/hub recovery paths return non-secret condition codes.
+    json.dump(payload, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+
+
+def _hub_path_error_code() -> str:
+    return "_".join(("personal", "home", "not", "directory"))
+
+
+def _path_not_directory_condition() -> str:
+    return "path_not_directory"
+
+
+def _path_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_personal_home_directory",
+            "command": "ardur setup --home <ardur-dir>",
+            "detail": (
+                "Choose a directory path for local Ardur state. If the selected "
+                "path is an existing file, move it aside or pick a different "
+                "directory before setup."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-dir>",
+            "detail": (
+                "Start the loopback Hub only after the selected path is a directory. "
+                "Keep raw local paths, tokens, and receipt locations out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_doctor",
+            "command": "ardur doctor --home <ardur-dir>",
+            "detail": (
+                "Re-run local setup diagnostics after choosing a valid directory. "
+                "This guidance is local/no-key recovery only."
+            ),
+        },
+    ]
+
+
+def _path_not_directory_response() -> dict:
+    condition = _path_not_directory_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur setup path must be a directory.",
+        "detail": (
+            "The selected Ardur setup path already exists as a file or other "
+            "non-directory. Choose a directory path before running setup or starting the Hub."
+        ),
+        "next_steps": _path_not_directory_next_steps(condition),
+    }
+
+
+def _path_failure_exit_code(exc: HubError) -> int:
+    if exc.code != _hub_path_error_code():
+        raise exc
+    _print_json(_path_not_directory_response())
+    return 1
 
 
 def _print_report_next_steps(report: dict) -> None:
@@ -79,8 +169,750 @@ def _print_report_next_steps(report: dict) -> None:
             print(f"   {detail}")
 
 
+def _keys_dir_failure_condition(exc: KeyDirectoryError) -> str:
+    return getattr(exc, "condition", "keys_dir_not_directory")
+
+
+def _keys_dir_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_keys_directory",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": (
+                "Choose a directory path for Mission Passport signing keys. If the selected "
+                "path is an existing file, move it aside or use a different directory."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "verify_with_valid_keys_directory",
+            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "detail": (
+                "Use the same key directory that issued the Mission Passport. Keep raw tokens, "
+                "private keys, and local paths out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "attest_with_valid_keys_directory",
+            "command": (
+                "ardur attest --session <session-id> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Retry attestation only after selecting a real key directory and the matching "
+                "local state/log locations."
+            ),
+        },
+    ]
+
+
+def _keys_dir_failure_response(exc: KeyDirectoryError) -> dict:
+    condition = _keys_dir_failure_condition(exc)
+    detail = getattr(exc, "detail", "The selected Mission Passport key path is not a directory.")
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport key directory must be a directory.",
+        "detail": detail,
+        "next_steps": _keys_dir_failure_next_steps(condition),
+    }
+
+
+def _path_points_to_existing_non_directory(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        candidate.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    try:
+        return not candidate.is_dir()
+    except OSError:
+        return True
+
+
+def _keys_dir_failure_exit_code(path: Path | None) -> int | None:
+    candidate = Path(path).expanduser() if path is not None else DEFAULT_KEYS_DIR
+    if not _path_points_to_existing_non_directory(
+        candidate
+    ) and not _path_has_existing_non_directory_parent(candidate):
+        return None
+    _print_json(_keys_dir_failure_response(KeyDirectoryError()))
+    return 1
+
+
+def _state_dir_failure_condition() -> str:
+    return "state_dir_not_directory"
+
+
+def _state_dir_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_state_directory",
+            "command": (
+                "ardur start --keys-dir <keys-dir> --state-dir <state-dir> "
+                "--log-path <audit-log>"
+            ),
+            "detail": (
+                "Choose a directory path for persisted Mission Passport state. If the selected "
+                "path is an existing file, move it aside or use a different directory."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "attest_with_valid_state_directory",
+            "command": (
+                "ardur attest --session <session-id> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Retry attestation only after selecting a real state directory that contains "
+                "the governed session records."
+            ),
+        },
+    ]
+
+
+def _state_dir_failure_response() -> dict:
+    condition = _state_dir_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport state directory must be a directory.",
+        "detail": (
+            "The selected Mission Passport state path already exists as a file or other "
+            "non-directory. Choose a directory path before starting or attesting a session."
+        ),
+        "next_steps": _state_dir_failure_next_steps(condition),
+    }
+
+
+def _state_dir_parent_failure_condition() -> str:
+    return "state_dir_parent_not_directory"
+
+
+def _state_dir_parent_failure_response() -> dict:
+    condition = _state_dir_parent_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport state directory parent must be a directory.",
+        "detail": (
+            "A parent of the selected Mission Passport state path already exists as a "
+            "file or other non-directory. Choose a state directory whose parents are directories."
+        ),
+        "next_steps": _state_dir_failure_next_steps(condition),
+    }
+
+
+def _state_dir_points_to_existing_non_directory(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        return candidate.exists() and not candidate.is_dir()
+    except OSError:
+        return False
+
+
+def _path_has_existing_non_directory_parent(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    for parent in candidate.parents:
+        try:
+            parent.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        try:
+            return not parent.is_dir()
+        except OSError:
+            return True
+    return False
+
+
+def _state_dir_failure_exit_code(path: Path | None) -> int | None:
+    if not _state_dir_points_to_existing_non_directory(path):
+        return None
+    _print_json(_state_dir_failure_response())
+    return 1
+
+
+def _state_dir_parent_failure_exit_code(path: Path | None) -> int | None:
+    if not _path_has_existing_non_directory_parent(path):
+        return None
+    _print_json(_state_dir_parent_failure_response())
+    return 1
+
+
+def _log_path_failure_condition() -> str:
+    return "log_path_not_file"
+
+
+def _log_path_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_audit_log_file",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Choose a JSONL audit-log file path. If the selected path is an "
+                "existing directory or other non-file, move it aside or use a file path."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "attest_with_valid_audit_log_file",
+            "command": (
+                "ardur attest --session <session-id> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Retry attestation only after selecting a writable audit-log file path. "
+                "Keep raw local paths, tokens, and private-key material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _log_path_failure_response() -> dict:
+    condition = _log_path_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport audit log path must be a file path.",
+        "detail": (
+            "The selected Mission Passport audit log path already exists as a directory "
+            "or other non-file. Choose a JSONL file path before starting or attesting a session."
+        ),
+        "next_steps": _log_path_failure_next_steps(condition),
+    }
+
+
+def _log_path_parent_failure_condition() -> str:
+    return "log_path_parent_not_directory"
+
+
+def _log_path_parent_failure_response() -> dict:
+    condition = _log_path_parent_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport audit log parent must be a directory.",
+        "detail": (
+            "A parent of the selected Mission Passport audit log path already exists as "
+            "a file or other non-directory. Choose an audit-log path whose parents are directories."
+        ),
+        "next_steps": _log_path_failure_next_steps(condition),
+    }
+
+
+def _log_path_points_to_existing_non_file(path: Path | None) -> bool:
+    if path is None:
+        return False
+    candidate = Path(path).expanduser()
+    try:
+        return candidate.exists() and not candidate.is_file()
+    except OSError:
+        return False
+
+
+def _log_path_failure_exit_code(path: Path | None) -> int | None:
+    if not _log_path_points_to_existing_non_file(path):
+        return None
+    _print_json(_log_path_failure_response())
+    return 1
+
+
+def _log_path_parent_failure_exit_code(path: Path | None) -> int | None:
+    if not _path_has_existing_non_directory_parent(path):
+        return None
+    _print_json(_log_path_parent_failure_response())
+    return 1
+
+
+def _start_port_failure_condition() -> str:
+    return "start_port_invalid"
+
+
+def _start_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_start_port",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Use an integer TCP port from 0 through 65535. Use 0 when you "
+                "want the operating system to choose an available local port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_ephemeral_port",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <valid-port>"
+            ),
+            "detail": (
+                "For local setup checks, --port 0 avoids collisions and stays within "
+                "the valid TCP port range. Keep raw local paths, tokens, and key "
+                "material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _start_port_failure_response() -> dict:
+    condition = _start_port_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start port must be within the valid TCP port range.",
+        "detail": "Choose an integer port from 0 through 65535 before starting Ardur.",
+        "next_steps": _start_port_failure_next_steps(condition),
+    }
+
+
+def _start_port_failure_exit_code(port: int) -> int | None:
+    if 0 <= port <= 65535:
+        return None
+    _print_json(_start_port_failure_response())
+    return 1
+
+
+def _start_host_failure_condition() -> str:
+    return "start_host_invalid"
+
+
+def _start_host_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_bindable_start_host",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Pass only a host name or IP address that this machine can bind. "
+                "Do not include URL schemes, ports, paths, credentials, or empty values."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_loopback_host",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host 127.0.0.1 --port <valid-port>"
+            ),
+            "detail": (
+                "For local setup checks, use a loopback host such as 127.0.0.1 or "
+                "localhost with --port 0. Keep raw local paths, URLs, tokens, and key "
+                "material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _start_host_failure_response() -> dict:
+    condition = _start_host_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start host must be a bindable host name or IP address.",
+        "detail": (
+            "Choose a host value that can be bound locally before starting Ardur. "
+            "Use --port for the port; do not include a URL scheme, path, or empty host."
+        ),
+        "next_steps": _start_host_failure_next_steps(condition),
+    }
+
+
+def _start_host_has_url_shape(host: str) -> bool:
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(host)
+    except ValueError:
+        return True
+    return bool(
+        "://" in host
+        or host.startswith("//")
+        or "/" in host
+        or "?" in host
+        or "#" in host
+        or (parsed.scheme and not host.startswith("["))
+        or parsed.netloc
+    )
+
+
+def _start_host_is_bindable(host: str) -> bool:
+    import socket
+
+    try:
+        candidates = socket.getaddrinfo(host, 0, socket.AF_INET, socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    for family, socktype, proto, _canonname, sockaddr in candidates:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.bind(sockaddr)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _start_host_failure_exit_code(host: str) -> int | None:
+    host_value = str(host)
+    stripped = host_value.strip()
+    if (
+        not stripped
+        or stripped != host_value
+        or _start_host_has_url_shape(stripped)
+        or not _start_host_is_bindable(stripped)
+    ):
+        _print_json(_start_host_failure_response())
+        return 1
+    return None
+
+
+def _hub_port_failure_condition() -> str:
+    return "hub_port_invalid"
+
+
+def _hub_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_hub_port",
+            "command": "ardur hub --host <loopback-host> --port <port> --home <ardur-home>",
+            "detail": (
+                "Use an integer TCP port from 0 through 65535. Use 0 when you "
+                "want the operating system to choose an available local port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_personal_doctor",
+            "command": "ardur doctor --home <ardur-home> --hub-url <hub-url>",
+            "detail": (
+                "After choosing a valid local Hub port, check Ardur Personal setup "
+                "with placeholder-only local diagnostics."
+            ),
+        },
+    ]
+
+
+def _hub_port_failure_response() -> dict:
+    condition = _hub_port_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal Hub port must be within the valid TCP port range.",
+        "detail": "Choose an integer port from 0 through 65535 before starting the Hub.",
+        "next_steps": _hub_port_failure_next_steps(condition),
+    }
+
+
+def _hub_port_failure_exit_code(port: int) -> int | None:
+    if 0 <= port <= 65535:
+        return None
+    _print_json(_hub_port_failure_response())
+    return 1
+
+
+def _hub_host_failure_condition() -> str:
+    return "hub_host_invalid"
+
+
+def _hub_host_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_bindable_hub_host",
+            "command": "ardur hub --host <loopback-host> --port <port> --home <ardur-home>",
+            "detail": (
+                "Pass only a host name or IP address that this machine can bind. "
+                "Do not include URL schemes, ports, paths, credentials, or empty values."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_loopback_host",
+            "command": "ardur hub --host 127.0.0.1 --port <valid-port> --home <ardur-home>",
+            "detail": (
+                "For local setup checks, use a loopback host such as 127.0.0.1, "
+                "::1, or localhost with --port 0. Keep raw local paths, URLs, "
+                "tokens, and key material out of shared logs."
+            ),
+        },
+    ]
+
+
+def _hub_host_failure_response() -> dict:
+    condition = _hub_host_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal Hub host must be a bindable host name or IP address.",
+        "detail": (
+            "Choose a host value that can be bound locally before starting the Hub. "
+            "Use --port for the port; do not include a URL scheme, path, or empty host."
+        ),
+        "next_steps": _hub_host_failure_next_steps(condition),
+    }
+
+
+def _hub_host_is_bindable(host: str) -> bool:
+    import socket
+
+    try:
+        candidates = socket.getaddrinfo(host, 0, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    for family, socktype, proto, _canonname, sockaddr in candidates:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.bind(sockaddr)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _hub_host_failure_exit_code(host: str) -> int | None:
+    host_value = str(host)
+    stripped = host_value.strip()
+    if (
+        not stripped
+        or stripped != host_value
+        or _start_host_has_url_shape(stripped)
+        or not _hub_host_is_bindable(stripped)
+    ):
+        _print_json(_hub_host_failure_response())
+        return 1
+    return None
+
+
+def _start_tls_material_failure_condition() -> str:
+    return "start_tls_material_invalid"
+
+
+def _start_tls_material_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_readable_tls_files",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port> "
+                "--tls-cert <tls-cert.pem> --tls-key <tls-key.pem>"
+            ),
+            "detail": (
+                "Use existing certificate and private-key files when providing explicit TLS "
+                "material. Keep raw local paths, tokens, and private-key material out of "
+                "shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "use_local_auto_tls_or_no_tls",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Omit --tls-cert/--tls-key to let Ardur create local self-signed TLS, "
+                "or add --no-tls only for loopback development when plain HTTP is intended."
+            ),
+        },
+    ]
+
+
+def _start_tls_material_failure_response() -> dict:
+    condition = _start_tls_material_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start TLS material is invalid.",
+        "detail": (
+            "Explicit --tls-cert and --tls-key values must both point to existing files "
+            "before Ardur starts the local governance proxy."
+        ),
+        "next_steps": _start_tls_material_failure_next_steps(condition),
+    }
+
+
+def _start_tls_material_invalid(args: argparse.Namespace) -> bool:
+    if args.no_tls:
+        return False
+    if args.tls_cert is None and args.tls_key is None:
+        return False
+    if args.tls_cert is None or args.tls_key is None:
+        return True
+    try:
+        return not Path(args.tls_cert).expanduser().is_file() or not Path(args.tls_key).expanduser().is_file()
+    except OSError:
+        return True
+
+
+def _start_tls_material_failure_exit_code(args: argparse.Namespace) -> int | None:
+    if not _start_tls_material_invalid(args):
+        return None
+    _print_json(_start_tls_material_failure_response())
+    return 1
+
+
+def _start_mission_file_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "fix_mission_file_and_restart",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log>"
+            ),
+            "detail": (
+                "Replace <mission.json> with a readable JSON object containing "
+                "agent_id, mission, and any intended mission constraints. Keep raw "
+                "local paths and file contents out of shared logs."
+            ),
+        }
+    ]
+
+
+def _start_mission_file_failure_condition(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, FileNotFoundError):
+        return (
+            "start_mission_file_missing",
+            "The --mission file could not be found. Provide an existing mission JSON file before starting Ardur.",
+        )
+    if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError)):
+        return (
+            "start_mission_file_malformed_json",
+            "The --mission file must be valid UTF-8 JSON containing a mission object.",
+        )
+    if isinstance(exc, PermissionError):
+        return (
+            "start_mission_file_unreadable",
+            "The --mission file could not be read. Check file permissions and retry with a readable mission JSON file.",
+        )
+    if isinstance(exc, IsADirectoryError):
+        return (
+            "start_mission_file_invalid",
+            "The --mission input must point to a mission JSON file, not a directory.",
+        )
+    if isinstance(exc, OSError):
+        return (
+            "start_mission_file_unreadable",
+            "The --mission file could not be read. Retry with a readable mission JSON file.",
+        )
+    return (
+        "start_mission_file_invalid",
+        "The --mission JSON object does not match Ardur's mission schema. Include required fields and valid values.",
+    )
+
+
+def _start_mission_file_failure_response(exc: Exception) -> dict:
+    condition, detail = _start_mission_file_failure_condition(exc)
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start could not load the mission file.",
+        "detail": detail,
+        "next_steps": _start_mission_file_failure_next_steps(condition),
+    }
+
+
 def cmd_start(args: argparse.Namespace) -> int:
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    port_failure = _start_port_failure_exit_code(args.port)
+    if port_failure is not None:
+        return port_failure
+    host_failure = _start_host_failure_exit_code(args.host)
+    if host_failure is not None:
+        return host_failure
+    tls_material_failure = _start_tls_material_failure_exit_code(args)
+    if tls_material_failure is not None:
+        return tls_material_failure
+    mission = None
+    ttl_s = None
+    if args.mission:
+        try:
+            mission, ttl_s, _ = load_mission_file(args.mission)
+        except (
+            FileNotFoundError,
+            PermissionError,
+            IsADirectoryError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            _print_json(_start_mission_file_failure_response(exc))
+            return 1
+    state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
+    if state_dir_failure is not None:
+        return state_dir_failure
+    state_dir_parent_failure = _state_dir_parent_failure_exit_code(args.state_dir)
+    if state_dir_parent_failure is not None:
+        return state_dir_parent_failure
+    log_path_failure = _log_path_failure_exit_code(args.log_path)
+    if log_path_failure is not None:
+        return log_path_failure
+    log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
+    if log_path_parent_failure is not None:
+        return log_path_parent_failure
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
@@ -89,8 +921,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     )
 
     initial_session_id = None
-    if args.mission:
-        mission, ttl_s, _ = load_mission_file(args.mission)
+    if mission is not None:
         token = issue_passport(mission, private_key, ttl_s=ttl_s)
         session = proxy.start_session(token)
         initial_session_id = session.jti
@@ -224,7 +1055,11 @@ def cmd_issue(args: argparse.Namespace) -> int:
         response, exit_code = issue_budget_failure
         _print_json(response)
         return exit_code
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     mission = MissionPassport(
         agent_id=args.agent_id,
         mission=args.mission,
@@ -275,8 +1110,128 @@ def _verify_failure_response(exc: Exception) -> dict:
     }
 
 
+def _verify_public_key_missing_next_steps() -> list[dict[str, str]]:
+    condition = "passport_public_key_missing"
+    return [
+        {
+            "condition": condition,
+            "action": "verify_with_issuing_key_directory",
+            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "detail": (
+                "Use the key directory that issued this Mission Passport. Keep raw "
+                "tokens, private keys, and local paths out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "issue_a_new_passport_if_needed",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": (
+                "Issue a fresh local Mission Passport when the original public key is unavailable."
+            ),
+        },
+    ]
+
+
+def _verify_public_key_missing_response() -> dict:
+    condition = "passport_public_key_missing"
+    return {
+        "ok": False,
+        "valid": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport public key is required for verification.",
+        "detail": (
+            "The selected key directory does not contain passport_public.pem. "
+            "Verification is read-only and will not create signing keys."
+        ),
+        "next_steps": _verify_public_key_missing_next_steps(),
+    }
+
+
+def _verify_public_key_invalid_next_steps() -> list[dict[str, str]]:
+    condition = "passport_public_key_invalid"
+    return [
+        {
+            "condition": condition,
+            "action": "restore_issuing_public_key",
+            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "detail": (
+                "Replace passport_public.pem with the EC public key that issued this "
+                "Mission Passport, then retry verification. Keep raw tokens, private "
+                "keys, and local paths out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "issue_a_new_passport_if_needed",
+            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+            "detail": (
+                "Issue a fresh local Mission Passport only after choosing a key directory "
+                "with valid Mission Passport key material."
+            ),
+        },
+    ]
+
+
+def _verify_public_key_invalid_response() -> dict:
+    condition = "passport_public_key_invalid"
+    return {
+        "ok": False,
+        "valid": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport public key could not be loaded for verification.",
+        "detail": (
+            "passport_public.pem exists but is not a readable EC public key. "
+            "Verification is read-only and will not repair, overwrite, or create signing keys."
+        ),
+        "next_steps": _verify_public_key_invalid_next_steps(),
+    }
+
+
+def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
+    try:
+        jwt.get_unverified_header(token)
+        jwt.decode(
+            token,
+            options={
+                "verify_signature": False,
+                "verify_aud": False,
+                "verify_exp": False,
+                "verify_iat": False,
+                "verify_iss": False,
+                "verify_nbf": False,
+            },
+        )
+    except jwt.PyJWTError:
+        _print_json(
+            _verify_failure_response(jwt.DecodeError("Mission Passport token is malformed."))
+        )
+        return 1
+    return None
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
-    _, public_key = generate_keypair(keys_dir=args.keys_dir)
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    malformed_token_failure = _verify_malformed_token_failure_exit_code(args.token)
+    if malformed_token_failure is not None:
+        return malformed_token_failure
+    try:
+        public_key = load_existing_public_key(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
+    except FileNotFoundError:
+        _print_json(_verify_public_key_missing_response())
+        return 1
+    except ValueError:
+        _print_json(_verify_public_key_invalid_response())
+        return 1
     try:
         claims = verify_passport(args.token, public_key)
     except (jwt.PyJWTError, PermissionError, ValueError) as exc:
@@ -298,6 +1253,11 @@ def _attest_failure_condition(exc: Exception) -> tuple[str, str]:
             "session_not_found",
             "No persisted session was found for the supplied session id in the selected state directory.",
         )
+    if "session invalid" in message:
+        return (
+            "session_invalid",
+            "Persisted session data is invalid or corrupt; start or locate a governed session before attesting.",
+        )
     return (
         "attestation_failed",
         "The session could not be loaded or attested from the selected local state.",
@@ -316,7 +1276,7 @@ def _attest_failure_next_steps(condition: str) -> list[dict[str, str]]:
             ),
         }
     ]
-    if condition in {"invalid_session_id", "session_not_found"}:
+    if condition in {"invalid_session_id", "session_not_found", "session_invalid"}:
         steps.append(
             {
                 "condition": condition,
@@ -341,8 +1301,73 @@ def _attest_failure_response(exc: Exception) -> dict:
     }
 
 
+def _attest_session_file_path(session_id: str, state_dir: Path | None) -> Path:
+    root = Path(state_dir).expanduser() if state_dir is not None else DEFAULT_STATE_DIR
+    return root / "sessions" / f"{session_id}.json"
+
+
+def _attest_session_invalid_error() -> ValueError:
+    return ValueError("session invalid: persisted session file is malformed")
+
+
+def _validate_attest_session_file_before_artifacts(session_path: Path) -> int | None:
+    try:
+        raw_session = session_path.read_text(encoding="utf-8")
+        payload = json.loads(raw_session)
+        if not isinstance(payload, dict):
+            raise ValueError("session file must contain a JSON object")
+        session = GovernanceSession.from_dict(payload)
+        if not isinstance(session.passport_token, str) or not session.passport_token:
+            raise ValueError("session passport token is missing")
+        for claim_name in ("jti", "sub", "mission"):
+            claim_value = session.passport_claims.get(claim_name)
+            if not isinstance(claim_value, str) or not claim_value:
+                raise ValueError("session passport claims are incomplete")
+    except (OSError, TypeError, ValueError, KeyError, AttributeError):
+        _print_json(_attest_failure_response(_attest_session_invalid_error()))
+        return 1
+    return None
+
+
+def _attest_session_failure_exit_code(session_id: str, state_dir: Path | None) -> int | None:
+    if not _ATTEST_SESSION_ID_RE.match(session_id):
+        _print_json(_attest_failure_response(ValueError("invalid session ID format: must be UUID")))
+        return 1
+    session_path = _attest_session_file_path(session_id, state_dir)
+    try:
+        session_exists = session_path.exists()
+    except OSError:
+        session_exists = False
+    if session_exists:
+        return _validate_attest_session_file_before_artifacts(session_path)
+    _print_json(_attest_failure_response(ValueError("unknown session '<session-id>'")))
+    return 1
+
+
 def cmd_attest(args: argparse.Namespace) -> int:
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
+    if state_dir_failure is not None:
+        return state_dir_failure
+    state_dir_parent_failure = _state_dir_parent_failure_exit_code(args.state_dir)
+    if state_dir_parent_failure is not None:
+        return state_dir_parent_failure
+    log_path_failure = _log_path_failure_exit_code(args.log_path)
+    if log_path_failure is not None:
+        return log_path_failure
+    log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
+    if log_path_parent_failure is not None:
+        return log_path_parent_failure
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    session_failure = _attest_session_failure_exit_code(args.session, args.state_dir)
+    if session_failure is not None:
+        return session_failure
+    try:
+        private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     proxy = GovernanceProxy(
         log_path=args.log_path,
         state_dir=args.state_dir,
@@ -625,14 +1650,23 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
 
 
 def cmd_hub(args: argparse.Namespace) -> int:
-    serve_hub(
-        host=args.host,
-        port=args.port,
-        home=args.home,
-        tls_cert=args.tls_cert,
-        tls_key=args.tls_key,
-        no_tls=args.no_tls,
-    )
+    port_failure = _hub_port_failure_exit_code(args.port)
+    if port_failure is not None:
+        return port_failure
+    host_failure = _hub_host_failure_exit_code(args.host)
+    if host_failure is not None:
+        return host_failure
+    try:
+        serve_hub(
+            host=args.host,
+            port=args.port,
+            home=args.home,
+            tls_cert=args.tls_cert,
+            tls_key=args.tls_key,
+            no_tls=args.no_tls,
+        )
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
     return 0
 
 
@@ -881,7 +1915,11 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
-    _print_json(setup_personal(args))
+    try:
+        response = setup_personal(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
+    _print_json(response)
     return 0
 
 
@@ -909,7 +1947,23 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_has_governance_intent(args: argparse.Namespace) -> bool:
+    """True when ``ardur run`` was invoked as a governance bridge.
+
+    The legacy ``ardur run`` streams a command through the Ardur Personal Hub.
+    The governance bridge (issue passport → start session → launch governed) is
+    selected whenever any governance flag is present, keeping the legacy path
+    untouched for existing callers.
+    """
+    return any(
+        getattr(args, name, None) not in (None, False)
+        for name in ("mission", "allowed_tools", "forbidden_tools", "via", "govern")
+    ) or getattr(args, "max_tool_calls", None) is not None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    if _run_has_governance_intent(args):
+        return run_governed_cli(args)
     return run_under_hub(args)
 
 
@@ -1028,6 +2082,42 @@ CLAUDE_CODE_PROTECT_MODES = {
     },
 }
 
+_ARDUR_HOME_PLACEHOLDER = "<ardur-home>"
+_CLAUDE_CODE_PLUGIN_PLACEHOLDER = "<claude-code-plugin>"
+_PROJECT_PLACEHOLDER = "<your-project>"
+
+
+def _claude_code_plugin_detail(kind: str, suffix: str = "") -> str:
+    target = _CLAUDE_CODE_PLUGIN_PLACEHOLDER
+    if suffix:
+        target = f"{target}/{suffix}"
+    return f"expected {kind} at {target}"
+
+
+def _claude_code_doctor_path_placeholder(_value: str) -> str:
+    return "<local-path>"
+
+
+def _claude_code_doctor_file_uri_placeholder(_value: str) -> str:
+    return "<local-file-uri>"
+
+
+def _claude_code_plugin_validation_detail(raw_detail: str, *, plugin: Path, home: Path) -> str:
+    detail = raw_detail.strip()
+    if not detail:
+        return "Claude Code plugin validation failed; inspect the validation output."
+    root_pairs: list[tuple[str, str]] = []
+    for alias in path_aliases(plugin):
+        root_pairs.append((alias, _CLAUDE_CODE_PLUGIN_PLACEHOLDER))
+    for alias in path_aliases(home):
+        root_pairs.append((alias, _ARDUR_HOME_PLACEHOLDER))
+    return redact_local_path_text(
+        detail,
+        root_pairs=root_pairs,
+        absolute_replacement=_claude_code_doctor_path_placeholder,
+        file_uri_replacement=_claude_code_doctor_file_uri_placeholder,
+    )
+
 
 def _default_claude_plugin_dir() -> Path:
     cwd_candidate = Path.cwd() / "plugins" / "claude-code"
@@ -1046,37 +2136,37 @@ def _claude_code_plugin_checks(plugin_dir: Path) -> list[dict[str, object]]:
         {
             "name": "plugin_dir",
             "ok": plugin_dir.exists() and plugin_dir.is_dir(),
-            "detail": str(plugin_dir),
+            "detail": _claude_code_plugin_detail("directory"),
         },
         {
             "name": "plugin_manifest",
             "ok": (plugin_dir / ".claude-plugin" / "plugin.json").is_file(),
-            "detail": str(plugin_dir / ".claude-plugin" / "plugin.json"),
+            "detail": _claude_code_plugin_detail("file", ".claude-plugin/plugin.json"),
         },
         {
             "name": "plugin_hooks",
             "ok": (plugin_dir / "hooks" / "hooks.json").is_file(),
-            "detail": str(plugin_dir / "hooks" / "hooks.json"),
+            "detail": _claude_code_plugin_detail("file", "hooks/hooks.json"),
         },
         {
             "name": "pre_tool_use",
             "ok": (plugin_dir / "hooks" / "pre_tool_use").is_file(),
-            "detail": str(plugin_dir / "hooks" / "pre_tool_use"),
+            "detail": _claude_code_plugin_detail("file", "hooks/pre_tool_use"),
         },
         {
             "name": "post_tool_use",
             "ok": (plugin_dir / "hooks" / "post_tool_use").is_file(),
-            "detail": str(plugin_dir / "hooks" / "post_tool_use"),
+            "detail": _claude_code_plugin_detail("file", "hooks/post_tool_use"),
         },
         {
             "name": "subagent_start",
             "ok": (plugin_dir / "hooks" / "subagent_start").is_file(),
-            "detail": str(plugin_dir / "hooks" / "subagent_start"),
+            "detail": _claude_code_plugin_detail("file", "hooks/subagent_start"),
         },
         {
             "name": "subagent_stop",
             "ok": (plugin_dir / "hooks" / "subagent_stop").is_file(),
-            "detail": str(plugin_dir / "hooks" / "subagent_stop"),
+            "detail": _claude_code_plugin_detail("file", "hooks/subagent_stop"),
         },
     ]
 
@@ -1110,6 +2200,137 @@ def _protect_claude_code_plugin_incomplete_response(
                 "action": "rerun_protect",
                 "command": "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>",
                 "detail": "After the plugin path is corrected, rerun protection for the project folder.",
+            },
+        ],
+    }
+
+
+_CLAUDE_CODE_REQUIRED_HOOK_EVENTS = (
+    "PreToolUse",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+)
+
+
+def _claude_code_plugin_json_object_check(path: Path, check_name: str, label: str) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    try:
+        raw = path.read_text("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, {
+            "name": check_name,
+            "detail": f"{label} could not be read as UTF-8 JSON ({exc.__class__.__name__}).",
+        }
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, {
+            "name": check_name,
+            "detail": f"{label} contains invalid JSON at line {exc.lineno}, column {exc.colno}.",
+        }
+    if not isinstance(parsed, dict):
+        return None, {
+            "name": check_name,
+            "detail": f"{label} must be a JSON object.",
+        }
+    return parsed, None
+
+
+def _claude_code_hooks_manifest_valid(hooks_manifest: dict[str, object]) -> bool:
+    hooks = hooks_manifest.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    for event_name in _CLAUDE_CODE_REQUIRED_HOOK_EVENTS:
+        event_entries = hooks.get(event_name)
+        if not isinstance(event_entries, list) or not event_entries:
+            return False
+        for event_entry in event_entries:
+            if not isinstance(event_entry, dict):
+                return False
+            command_hooks = event_entry.get("hooks")
+            if not isinstance(command_hooks, list) or not command_hooks:
+                return False
+            has_command_hook = False
+            for command_hook in command_hooks:
+                if not isinstance(command_hook, dict):
+                    return False
+                if (
+                    command_hook.get("type") == "command"
+                    and isinstance(command_hook.get("command"), str)
+                    and command_hook["command"].strip()
+                ):
+                    has_command_hook = True
+            if not has_command_hook:
+                return False
+    return True
+
+
+def _claude_code_plugin_content_checks(plugin_dir: Path) -> list[dict[str, object]]:
+    failures: list[dict[str, object]] = []
+    manifest, manifest_failure = _claude_code_plugin_json_object_check(
+        plugin_dir / ".claude-plugin" / "plugin.json",
+        "plugin_manifest",
+        "Claude Code plugin manifest",
+    )
+    if manifest_failure:
+        failures.append(manifest_failure)
+    elif manifest is not None:
+        missing_manifest_fields: list[str] = []
+        for field_name in ("name", "version"):
+            field_value = manifest.get(field_name)
+            if not isinstance(field_value, str) or not field_value.strip():
+                missing_manifest_fields.append(field_name)
+        if missing_manifest_fields:
+            failures.append({
+                "name": "plugin_manifest",
+                "detail": "Claude Code plugin manifest is missing non-empty fields: " + ", ".join(missing_manifest_fields) + ".",
+            })
+
+    hooks_manifest, hooks_failure = _claude_code_plugin_json_object_check(
+        plugin_dir / "hooks" / "hooks.json",
+        "plugin_hooks",
+        "Claude Code hooks manifest",
+    )
+    if hooks_failure:
+        failures.append(hooks_failure)
+    elif hooks_manifest is not None and not _claude_code_hooks_manifest_valid(hooks_manifest):
+        failures.append({
+            "name": "plugin_hooks",
+            "detail": (
+                "Claude Code hooks manifest must define command hooks for "
+                + ", ".join(_CLAUDE_CODE_REQUIRED_HOOK_EVENTS)
+                + "."
+            ),
+        })
+    return failures
+
+
+def _protect_claude_code_plugin_invalid_response(
+    failed_checks: list[dict[str, object]],
+) -> dict[str, object]:
+    invalid_checks = [str(check["name"]) for check in failed_checks]
+    details = [str(check.get("detail", "")).strip() for check in failed_checks if str(check.get("detail", "")).strip()]
+    detail = "Invalid Claude Code plugin checks: " + ", ".join(invalid_checks)
+    if details:
+        detail += ". " + " ".join(details)
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "claude_code_plugin_invalid",
+        "condition": "claude_code_plugin_invalid",
+        "message": "Claude Code plugin content is invalid.",
+        "detail": detail,
+        "invalid_checks": invalid_checks,
+        "next_steps": [
+            {
+                "action": "validate_plugin",
+                "command": "claude plugin validate <claude-code-plugin>",
+                "detail": "Validate the local Claude Code plugin manifest and hook schema before configuring protection.",
+            },
+            {
+                "action": "rerun_protect",
+                "command": "ardur protect claude-code --scope <your-project> --home <ardur-home> --plugin-dir <claude-code-plugin>",
+                "detail": "After the plugin content is corrected, rerun protection for the project folder.",
             },
         ],
     }
@@ -1295,11 +2516,7 @@ def _write_private_text(path: Path, text: str) -> None:
             os.close(fd)
 
 
-def _claude_code_doctor_next_steps(
-    checks: list[dict[str, object]],
-    plugin: Path,
-    active_passport: Path,
-) -> list[dict[str, str]]:
+def _claude_code_doctor_next_steps(checks: list[dict[str, object]]) -> list[dict[str, str]]:
     by_name = {str(check["name"]): check for check in checks}
     steps: list[dict[str, str]] = []
     plugin_check_names = [
@@ -1319,7 +2536,10 @@ def _claude_code_doctor_next_steps(
             {
                 "check": "plugin_files",
                 "action": "repair_plugin_path",
-                "command": shlex.join(["ardur", "doctor-claude-code", "--plugin-dir", str(plugin)]),
+                "command": (
+                    "ardur doctor-claude-code --plugin-dir "
+                    f"{_CLAUDE_CODE_PLUGIN_PLACEHOLDER} --home {_ARDUR_HOME_PLACEHOLDER}"
+                ),
                 "detail": "Missing Claude Code plugin checks: " + ", ".join(missing_plugin_checks),
             }
         )
@@ -1341,18 +2561,10 @@ def _claude_code_doctor_next_steps(
             {
                 "check": "active_passport",
                 "action": "run_protect_claude_code",
-                "command": shlex.join(
-                    [
-                        "ardur",
-                        "protect",
-                        "claude-code",
-                        "--scope",
-                        "<your-project>",
-                        "--home",
-                        str(active_passport.parent),
-                        "--plugin-dir",
-                        str(plugin),
-                    ]
+                "command": (
+                    "ardur protect claude-code --scope "
+                    f"{_PROJECT_PLACEHOLDER} --home {_ARDUR_HOME_PLACEHOLDER} "
+                    f"--plugin-dir {_CLAUDE_CODE_PLUGIN_PLACEHOLDER}"
                 ),
                 "detail": "Create an active Mission Passport for the local Claude Code plugin.",
             }
@@ -1368,7 +2580,7 @@ def _claude_code_doctor_next_steps(
             {
                 "check": "plugin_validate",
                 "action": "validate_plugin",
-                "command": shlex.join(["claude", "plugin", "validate", str(plugin)]),
+                "command": f"claude plugin validate {_CLAUDE_CODE_PLUGIN_PLACEHOLDER}",
                 "detail": str(
                     plugin_validate_check.get("detail")
                     or "Claude Code plugin validation failed; inspect the validation output."
@@ -1385,13 +2597,13 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
     checks.append({
         "name": "claude_binary",
         "ok": bool(claude_binary),
-        "detail": claude_binary or "claude not found on PATH",
+        "detail": "claude found on PATH" if claude_binary else "claude not found on PATH",
     })
     active_passport = (home.expanduser() if home else DEFAULT_HOME) / "active_mission.jwt"
     checks.append({
         "name": "active_passport",
         "ok": active_passport.is_file(),
-        "detail": str(active_passport),
+        "detail": f"expected file at {_ARDUR_HOME_PLACEHOLDER}/active_mission.jwt",
     })
     if claude_binary and all(check["ok"] for check in checks[:5]):
         result = subprocess.run(
@@ -1402,7 +2614,11 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
         checks.append({
             "name": "plugin_validate",
             "ok": result.returncode == 0,
-            "detail": result.stdout.strip() or result.stderr.strip(),
+            "detail": _claude_code_plugin_validation_detail(
+                result.stdout.strip() or result.stderr.strip(),
+                plugin=plugin,
+                home=active_passport.parent,
+            ),
         })
     else:
         checks.append({
@@ -1414,7 +2630,7 @@ def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None)
     return {
         "ok": ok,
         "checks": checks,
-        "next_steps": [] if ok else _claude_code_doctor_next_steps(checks, plugin, active_passport),
+        "next_steps": [] if ok else _claude_code_doctor_next_steps(checks),
     }
 
 
@@ -1566,6 +2782,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
     if failed_plugin_checks:
         return _protect_claude_code_plugin_incomplete_response(failed_plugin_checks)
+    invalid_plugin_checks = _claude_code_plugin_content_checks(plugin_dir)
+    if invalid_plugin_checks:
+        return _protect_claude_code_plugin_invalid_response(invalid_plugin_checks)
     # Validate policy input files before issuing keys/tokens so setup failures
     # remain local, structured, and free of unnecessary generated artifacts.
     try:
@@ -2019,10 +3238,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uninstall.set_defaults(func=cmd_uninstall)
 
-    run = subparsers.add_parser("run", help="run a CLI command through Ardur Personal Hub")
-    run.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
+    run = subparsers.add_parser(
+        "run",
+        help="run a command through Ardur — governed launcher (with --mission/--allowed-tools) "
+        "or Ardur Personal Hub streaming (legacy)",
+    )
+    run.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL (legacy hub path)")
     run.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    run.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    run.add_argument("--home", type=Path, help="Ardur home directory (ephemeral by default for governance)")
+    # Governance-bridge flags. Supplying any of these switches `ardur run` from
+    # the legacy hub-streaming path to the zero-setup governance launcher.
+    run.add_argument("--mission", help="mission text for the governed agent run")
+    run.add_argument(
+        "--allowed-tools",
+        action="append",
+        help="comma-separated allowlist of tools the agent may call (repeatable)",
+    )
+    run.add_argument(
+        "--forbidden-tools",
+        action="append",
+        help="comma-separated denylist of tools the agent may not call (repeatable)",
+    )
+    run.add_argument(
+        "--max-tool-calls",
+        type=int,
+        default=None,
+        help="maximum governed tool calls for the run (default 250 when governing)",
+    )
+    run.add_argument(
+        "--max-duration-s",
+        type=int,
+        default=86400,
+        help="wall-clock budget for the governed run in seconds",
+    )
+    run.add_argument(
+        "--via",
+        choices=sorted(VALID_VIA_MODES),
+        default=None,
+        help="how to route the agent's tool-call governance (default auto-detects Claude Code)",
+    )
+    run.add_argument(
+        "--no-kernel-correlation",
+        action="store_true",
+        help="skip eBPF daemon/cgroup correlation even when available",
+    )
     run.add_argument("command", nargs=argparse.REMAINDER, help="command to run after --")
     run.set_defaults(func=cmd_run)
 

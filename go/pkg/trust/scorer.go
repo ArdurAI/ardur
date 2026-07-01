@@ -322,8 +322,8 @@ func (a *InMemoryAggregator) IngestSignal(_ context.Context, signal TelemetrySig
 		state.signalWindow = pruned
 
 		if len(state.signalWindow) >= state.maxSignalsPerMin {
-			log.Printf("trust: rate limit exceeded for agent %s (%d penalty signals in last minute), skipping penalty",
-				signal.AgentID, len(state.signalWindow))
+			log.Printf("trust: rate limit exceeded for registered agent (%d penalty signals in last minute), skipping penalty",
+				len(state.signalWindow))
 		} else {
 			penalty := SeverityPenalty(signal.Severity) / 100.0
 			state.runtimeCompliance = math.Max(0, state.runtimeCompliance-penalty)

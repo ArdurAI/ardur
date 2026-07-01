@@ -16,9 +16,10 @@ var ErrDaemonPeerAuthorization = errors.New("kernelcapture: unauthorized daemon 
 // identity. A future Unix socket server must populate this from the operating
 // system (for example SO_PEERCRED on Linux), not from client JSON.
 type DaemonObservedPeerCredentials struct {
-	UID uint32
-	GID uint32
-	PID uint32
+	UID                   uint32
+	GID                   uint32
+	PID                   uint32
+	ProcessStartTimeTicks uint64
 }
 
 // DaemonPeerAuthorizationPolicy is deliberately fail-closed. A daemon that has
@@ -33,12 +34,13 @@ type DaemonPeerAuthorizationPolicy struct {
 // a daemon-observed peer. It is safe to include in debug reports because it does
 // not contain secrets or protocol payloads.
 type DaemonPeerAuthorization struct {
-	Verdict string
-	Reason  string
-	UID     uint32
-	GID     uint32
-	PID     uint32
-	Matched string
+	Verdict               string
+	Reason                string
+	UID                   uint32
+	GID                   uint32
+	PID                   uint32
+	ProcessStartTimeTicks uint64
+	Matched               string
 }
 
 // AuthorizeObservedDaemonPeer validates a local client identity before a future
@@ -47,13 +49,18 @@ type DaemonPeerAuthorization struct {
 // or inspect process trees.
 func AuthorizeObservedDaemonPeer(creds DaemonObservedPeerCredentials, policy DaemonPeerAuthorizationPolicy) (DaemonPeerAuthorization, error) {
 	decision := DaemonPeerAuthorization{
-		Verdict: DaemonPeerAuthorizationVerdictDeny,
-		UID:     creds.UID,
-		GID:     creds.GID,
-		PID:     creds.PID,
+		Verdict:               DaemonPeerAuthorizationVerdictDeny,
+		UID:                   creds.UID,
+		GID:                   creds.GID,
+		PID:                   creds.PID,
+		ProcessStartTimeTicks: creds.ProcessStartTimeTicks,
 	}
 	if creds.PID == 0 {
 		decision.Reason = "missing observed peer pid"
+		return decision, fmt.Errorf("%w: %s", ErrDaemonPeerAuthorization, decision.Reason)
+	}
+	if creds.ProcessStartTimeTicks == 0 {
+		decision.Reason = "missing observed peer process start time"
 		return decision, fmt.Errorf("%w: %s", ErrDaemonPeerAuthorization, decision.Reason)
 	}
 	if len(policy.AllowedUIDs) == 0 && len(policy.AllowedGIDs) == 0 {

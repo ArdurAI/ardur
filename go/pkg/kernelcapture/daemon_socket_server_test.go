@@ -21,7 +21,7 @@ func TestDaemonUnixSocketServerBindsAcceptsAndAuthorizesWithObservedPeer(t *test
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -48,7 +48,7 @@ func TestDaemonUnixSocketServerRejectsUnauthorizedPeerFailClosed(t *testing.T) {
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 999, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 999, GID: 20, PID: 4321, ProcessStartTimeTicks: 800002},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -105,7 +105,7 @@ func TestDaemonUnixSocketServerEnforcesBoundedConcurrency(t *testing.T) {
 		policy:                   DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil
@@ -296,7 +296,7 @@ func TestDaemonUnixSocketServerRemovesSocketOnClose(t *testing.T) {
 		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
 		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
 			return DaemonSocketPeerObservation{
-				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321},
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
 				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
 				SocketPath:       socketPath,
 			}, nil

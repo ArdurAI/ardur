@@ -127,6 +127,22 @@ DEFAULT_HOME = _default_home_dir()
 DEFAULT_KEYS_DIR = Path(os.environ.get("VIBAP_KEYS_DIR", DEFAULT_HOME / "keys")).expanduser()
 
 
+class KeyDirectoryError(ValueError):
+    """Fail-closed error for invalid Mission Passport key directory inputs."""
+
+    def __init__(
+        self,
+        detail: str = (
+            "The selected Mission Passport key path already exists as a file or other non-directory."
+        ),
+        *,
+        condition: str = "keys_dir_not_directory",
+    ) -> None:
+        super().__init__(detail)
+        self.condition = condition
+        self.detail = detail
+
+
 def _normalize_cwd(value: str | None) -> str | None:
     """Validate + canonicalize an optional ``cwd`` claim.
 
@@ -319,7 +335,14 @@ class MissionPassport:
 
 def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
     target = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
-    target.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not target.is_dir():
+        raise KeyDirectoryError()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError) as exc:
+        raise KeyDirectoryError() from exc
+    if not target.is_dir():
+        raise KeyDirectoryError()
     return target
 
 
@@ -397,6 +420,31 @@ def load_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePubli
     if not pub_path.exists():
         return generate_keypair(keys_dir=target_dir)[1]
     return serialization.load_pem_public_key(pub_path.read_bytes())
+
+
+def load_existing_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePublicKey:
+    """Load ``passport_public.pem`` without creating key directories or key material."""
+    target_dir = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    try:
+        if target_dir.exists() and not target_dir.is_dir():
+            raise KeyDirectoryError()
+    except OSError as exc:
+        raise KeyDirectoryError() from exc
+    pub_path = target_dir / "passport_public.pem"
+    try:
+        public_bytes = pub_path.read_bytes()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "passport_public.pem is missing from the Mission Passport key directory"
+        ) from exc
+    except NotADirectoryError as exc:
+        raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise ValueError("passport_public.pem is not a readable EC public key") from exc
+    public_key = serialization.load_pem_public_key(public_bytes)
+    if not isinstance(public_key, ec.EllipticCurvePublicKey):
+        raise ValueError("passport_public.pem must contain an EC public key")
+    return public_key
 
 
 def derive_mission_id(agent_id: str, mission_text: str) -> str:

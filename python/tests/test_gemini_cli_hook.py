@@ -429,6 +429,57 @@ def test_gemini_hook_cli_returns_structured_input_error_next_steps(
     assert str(tmp_path) not in output_text
 
 
+def test_gemini_hook_cli_reports_missing_passport_with_next_steps(tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    chain_dir = tmp_path / "chain"
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "VIBAP_HOME": str(tmp_path / "ardur-home"),
+        "ARDUR_GEMINI_HOOK_DIR": str(chain_dir),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+    env.pop("ARDUR_MISSION_PASSPORT", None)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "vibap.cli",
+            "gemini-cli-hook",
+            "pre",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        input="{}\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+        cwd=repo_root,
+        timeout=20,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["status"] == "deny"
+    assert output["block"] is True
+    assert output["condition"] == "gemini_cli_hook_missing_active_passport"
+    assert [step["action"] for step in output["next_steps"]] == [
+        "issue_mission_passport",
+        "configure_active_mission_passport",
+        "rerun_gemini_cli_hook",
+    ]
+    assert "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>" in output_text
+    assert "ARDUR_MISSION_PASSPORT=<token-or-token-file>" in output_text
+    assert "ardur gemini-cli-hook pre --keys-dir <keys-dir> < <gemini-hook-event-json-file>" in output_text
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not list(chain_dir.rglob("receipts.jsonl"))
+
+
 @pytest.mark.parametrize(
     ("session_id", "env_trace_id", "expected_trace_id"),
     [

@@ -43,11 +43,12 @@ type DaemonSessionRecord struct {
 	ExpiresAt    time.Time
 	EndedAt      time.Time
 
-	PeerUID          uint32
-	PeerGID          uint32
-	PeerPID          uint32
-	CredentialSource string
-	SocketPath       string
+	PeerUID                   uint32
+	PeerGID                   uint32
+	PeerPID                   uint32
+	PeerProcessStartTimeTicks uint64
+	CredentialSource          string
+	SocketPath                string
 }
 
 func (r DaemonSessionRecord) Status(now time.Time) string {
@@ -183,21 +184,22 @@ func (r *DaemonSessionRegistry) handleRegisterSession(req DaemonProtocolRequest,
 	}
 
 	record := DaemonSessionRecord{
-		SessionID:        sessionID,
-		MissionID:        strings.TrimSpace(register.MissionID),
-		TraceID:          strings.TrimSpace(register.TraceID),
-		RootPID:          register.RootPID,
-		PIDNamespaceID:   register.PIDNamespaceID,
-		CgroupID:         register.CgroupID,
-		EventClasses:     append([]string(nil), register.EventClasses...),
-		HandoffMetadata:  copyDaemonSessionHandoffMetadata(register.HandoffMetadata),
-		RegisteredAt:     now,
-		ExpiresAt:        now.Add(time.Duration(register.TTLSeconds) * time.Second),
-		PeerUID:          handshake.Authorization.UID,
-		PeerGID:          handshake.Authorization.GID,
-		PeerPID:          handshake.Authorization.PID,
-		CredentialSource: handshake.CredentialSource,
-		SocketPath:       cleanPath(handshake.SocketPath),
+		SessionID:                 sessionID,
+		MissionID:                 strings.TrimSpace(register.MissionID),
+		TraceID:                   strings.TrimSpace(register.TraceID),
+		RootPID:                   register.RootPID,
+		PIDNamespaceID:            register.PIDNamespaceID,
+		CgroupID:                  register.CgroupID,
+		EventClasses:              append([]string(nil), register.EventClasses...),
+		HandoffMetadata:           copyDaemonSessionHandoffMetadata(register.HandoffMetadata),
+		RegisteredAt:              now,
+		ExpiresAt:                 now.Add(time.Duration(register.TTLSeconds) * time.Second),
+		PeerUID:                   handshake.Authorization.UID,
+		PeerGID:                   handshake.Authorization.GID,
+		PeerPID:                   handshake.Authorization.PID,
+		PeerProcessStartTimeTicks: handshake.ProcessStartTimeTicks,
+		CredentialSource:          handshake.CredentialSource,
+		SocketPath:                cleanPath(handshake.SocketPath),
 	}
 	r.sessions[sessionID] = record
 	return DaemonProtocolResponse{
@@ -255,9 +257,14 @@ func (r *DaemonSessionRegistry) handleEndSession(req DaemonProtocolRequest, hand
 }
 
 func daemonSessionRegistryPeerOwnsRecord(record DaemonSessionRecord, handshake DaemonProtocolPeerHandshake) bool {
+	if record.PeerProcessStartTimeTicks == 0 || handshake.ProcessStartTimeTicks == 0 || handshake.Authorization.ProcessStartTimeTicks == 0 {
+		return false
+	}
 	return record.PeerUID == handshake.Authorization.UID &&
 		record.PeerGID == handshake.Authorization.GID &&
 		record.PeerPID == handshake.Authorization.PID &&
+		record.PeerProcessStartTimeTicks == handshake.ProcessStartTimeTicks &&
+		record.PeerProcessStartTimeTicks == handshake.Authorization.ProcessStartTimeTicks &&
 		record.CredentialSource == handshake.CredentialSource
 }
 
@@ -313,6 +320,12 @@ func validateDaemonSessionRegistryHandshake(handshake DaemonProtocolPeerHandshak
 	}
 	if handshake.Authorization.PID == 0 {
 		return fmt.Errorf("%w: peer handshake must include observed peer pid", ErrDaemonSessionRegistry)
+	}
+	if handshake.ProcessStartTimeTicks == 0 || handshake.Authorization.ProcessStartTimeTicks == 0 {
+		return fmt.Errorf("%w: peer handshake must include observed peer process start time", ErrDaemonSessionRegistry)
+	}
+	if handshake.ProcessStartTimeTicks != handshake.Authorization.ProcessStartTimeTicks {
+		return fmt.Errorf("%w: peer handshake process start time must match authorization evidence", ErrDaemonSessionRegistry)
 	}
 	if strings.TrimSpace(handshake.CredentialSource) == "" {
 		return fmt.Errorf("%w: peer handshake credential source is required", ErrDaemonSessionRegistry)

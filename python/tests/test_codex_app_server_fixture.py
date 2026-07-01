@@ -485,8 +485,12 @@ def _run_codex_app_server_event_cli(tmp_path: Path, stdin: str) -> subprocess.Co
     repo_root = Path(__file__).resolve().parents[2]
     env = {
         **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "VIBAP_HOME": str(tmp_path / "ardur-home"),
+        "ARDUR_CODEX_APP_SERVER_DIR": str(tmp_path / "chain"),
         "PYTHONPATH": str(repo_root / "python"),
     }
+    env.pop("ARDUR_MISSION_PASSPORT", None)
     return subprocess.run(
         [
             sys.executable,
@@ -553,6 +557,30 @@ def test_codex_app_server_event_cli_reports_non_object_json_with_next_steps(tmp_
         condition="codex_app_server_event_input_not_object",
     )
     assert "must be a JSON object" in output["detail"]
+
+
+def test_codex_app_server_event_cli_reports_missing_passport_with_next_steps(tmp_path):
+    completed = _run_codex_app_server_event_cli(tmp_path, "{}\n")
+
+    assert completed.returncode == 2
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["status"] == "deny"
+    assert output["block"] is True
+    assert output["condition"] == "codex_app_server_event_missing_active_passport"
+    assert [step["action"] for step in output["next_steps"]] == [
+        "issue_mission_passport",
+        "configure_active_mission_passport",
+        "rerun_codex_app_server_event",
+    ]
+    assert "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>" in output_text
+    assert "ARDUR_MISSION_PASSPORT=<token-or-token-file>" in output_text
+    assert "ardur codex-app-server-event --keys-dir <keys-dir> < <event-json-file>" in output_text
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert "<ABSOLUTE_PATH:" not in output_text
+    assert not list((tmp_path / "chain").rglob("receipts.jsonl"))
 
 
 def test_codex_app_server_event_cli_uses_exit_code_two_for_blocking_unknown(tmp_path):

@@ -113,6 +113,32 @@ func TestNextRingbufProcessEventDeadlineExceeded(t *testing.T) {
 	}
 }
 
+func TestNextRingbufProcessEventUsesPollDeadlineBeforeFarContextDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
+	defer cancel()
+	pollInterval := 25 * time.Millisecond
+	reader := &scriptedRingbufReader{reads: []scriptedRingbufRead{{sample: []byte{1, 2, 3}}}}
+
+	started := time.Now()
+	_, _, err := nextRingbufProcessEvent(ctx, reader, SessionScope{}, pollInterval)
+	var typed *RingbufNextError
+	if !errors.As(err, &typed) || typed.Kind != RingbufErrorMalformedRecord {
+		t.Fatalf("expected malformed-record sentinel after one read, got %T (%v)", err, err)
+	}
+	if len(reader.deadlines) != 1 {
+		t.Fatalf("deadlines recorded = %d, want 1", len(reader.deadlines))
+	}
+	deadline := reader.deadlines[0]
+	if deadline.After(started.Add(time.Second)) {
+		t.Fatalf("deadline = %s, want short poll deadline near %s, not far context deadline", deadline, started.Add(pollInterval))
+	}
+	if deadline.Before(started) {
+		t.Fatalf("deadline = %s, want future poll deadline", deadline)
+	}
+}
+
 func TestNextRingbufProcessEventMalformedRecordAndGapPropagation(t *testing.T) {
 	t.Parallel()
 

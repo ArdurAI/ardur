@@ -49,14 +49,15 @@ type DaemonSocketPeerObservation struct {
 // to include in review/debug reports because it contains bounded local IDs and
 // explicit non-claims, not protocol payloads or secrets.
 type DaemonProtocolPeerHandshake struct {
-	ProtocolVersion  string
-	Method           string
-	SessionID        string
-	SocketPath       string
-	CredentialSource string
-	Authorization    DaemonPeerAuthorization
-	ClaimBoundary    []string
-	NotClaimed       []string
+	ProtocolVersion       string
+	Method                string
+	SessionID             string
+	SocketPath            string
+	CredentialSource      string
+	ProcessStartTimeTicks uint64
+	Authorization         DaemonPeerAuthorization
+	ClaimBoundary         []string
+	NotClaimed            []string
 }
 
 // AuthorizeDaemonProtocolPeer validates a protocol request, validates the
@@ -78,15 +79,17 @@ func AuthorizeDaemonProtocolPeer(req DaemonProtocolRequest, observation DaemonSo
 		return DaemonProtocolPeerHandshake{}, err
 	}
 	return DaemonProtocolPeerHandshake{
-		ProtocolVersion:  req.ProtocolVersion,
-		Method:           req.Method,
-		SessionID:        daemonProtocolRequestSessionID(req),
-		SocketPath:       cleanPath(observation.SocketPath),
-		CredentialSource: observation.CredentialSource,
-		Authorization:    authorization,
+		ProtocolVersion:       req.ProtocolVersion,
+		Method:                req.Method,
+		SessionID:             daemonProtocolRequestSessionID(req),
+		SocketPath:            cleanPath(observation.SocketPath),
+		CredentialSource:      observation.CredentialSource,
+		ProcessStartTimeTicks: authorization.ProcessStartTimeTicks,
+		Authorization:         authorization,
 		ClaimBoundary: []string{
 			"protocol request is joined to daemon-observed local peer credentials before handling",
 			"peer identity must come from an OS credential source such as linux SO_PEERCRED, never client JSON",
+			"peer identity includes daemon-observed process start time so PID reuse cannot satisfy ownership by PID alone",
 			"peer authorization is validated against the daemon custody plan and explicit UID/GID policy before handling",
 		},
 		NotClaimed: []string{
