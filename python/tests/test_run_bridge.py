@@ -136,7 +136,9 @@ def test_ardur_run_governs_launched_agent_zero_setup(
 
     # — ZERO manual ardur protect: governance ran from an isolated ephemeral
     #   home with its own passport; nothing was written to ~/.claude/settings.json —
-    assert (home / "active_mission.jwt").is_file()
+    passport_file = home / "active_mission.jwt"
+    assert passport_file.is_file()
+    assert (passport_file.stat().st_mode & 0o777) == 0o600
     assert not (home / "settings.json").exists()
 
     # — kernel correlation degraded gracefully (no daemon on the test host) —

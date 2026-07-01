@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -241,10 +242,8 @@ class CgroupHandle:
         the directory is empty. Any failure is swallowed: a leaked empty cgroup
         is harmless and self-clearing on reboot.
         """
-        try:
+        with suppress(OSError):
             self.path.rmdir()
-        except OSError:
-            pass
 
 
 def create_run_cgroup(session_id: str, *, root: Path | None = None) -> CgroupHandle | None:

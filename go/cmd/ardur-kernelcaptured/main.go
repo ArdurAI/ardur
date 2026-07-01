@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -57,10 +58,10 @@ const (
 // <evidenceDir>/<sessionID>/kernel_receipts.jsonl for each observed process
 // event that is correlated to a registered session.
 type KernelReceiptEntry struct {
-	SchemaVersion string                            `json:"schema_version"`
-	SessionID     string                            `json:"session_id"`
-	RecordedAt    time.Time                         `json:"recorded_at"`
-	Event         kernelcapture.ProcessEvent        `json:"event"`
+	SchemaVersion string                               `json:"schema_version"`
+	SessionID     string                               `json:"session_id"`
+	RecordedAt    time.Time                            `json:"recorded_at"`
+	Event         kernelcapture.ProcessEvent           `json:"event"`
 	Receipt       kernelcapture.SyntheticKernelReceipt `json:"receipt"`
 }
 
@@ -321,13 +322,23 @@ func (osEvidenceFS) MkdirAll(path string, perm fs.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
-func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) error {
+func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) (err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, perm)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(data)
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+	written, err := f.Write(data)
+	if err != nil {
+		return err
+	}
+	if written != len(data) {
+		return io.ErrShortWrite
+	}
 	return err
 }
 

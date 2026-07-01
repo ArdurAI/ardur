@@ -370,6 +370,20 @@ def _count_lines(path: Path) -> int:
         return 0
 
 
+def _write_private_text(path: Path, text: str) -> None:
+    """Write sensitive run-scoped text without a permissive-umask window."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(text)
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
 def _attestation_digest(token: str) -> str:
     return "sha-256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -500,11 +514,7 @@ def run_governed(
     )
     token = issue_passport(passport, private_key, ttl_s=max_duration_s)
     passport_path = home / "active_mission.jwt"
-    passport_path.write_text(token + "\n", encoding="utf-8")
-    try:
-        passport_path.chmod(0o600)
-    except OSError:
-        pass
+    _write_private_text(passport_path, token + "\n")
 
     # 2. Embedded governance proxy + session.
     from .proxy import GovernanceProxy
@@ -526,10 +536,10 @@ def run_governed(
     server_thread = threading.Thread(target=server.serve_forever, name="ardur-run-proxy", daemon=True)
     server_thread.start()
 
-    correlation = kc.CorrelationResult(available=False, reason="not attempted")
     cgroup_handle: kc.CgroupHandle | None = None
     daemon_registered = False
     proc: subprocess.Popen[bytes] | None = None
+    notes: list[str] = []
     try:
         _wait_for_health(proxy_url, api_token)
 
@@ -546,7 +556,10 @@ def run_governed(
             api_token=api_token,
             plugin_dir=_claude_plugin_dir(),
         )
-        run_env, run_command, notes = adapter.prepare(ctx, command, env if env is not None else dict(os.environ))
+        run_env, run_command, adapter_notes = adapter.prepare(
+            ctx, command, env if env is not None else dict(os.environ)
+        )
+        notes.extend(adapter_notes)
 
         # 4. Dedicated cgroup (Linux + cgroup v2 + writable), best effort.
         if enable_kernel_correlation:
@@ -602,7 +615,7 @@ def run_governed(
                     session_id=session_id, trace_id=trace_id
                 )
             except (kc.DaemonUnavailable, kc.DaemonProtocolError):
-                pass
+                notes.append("kernel daemon end_session unavailable during local cleanup")
         if cgroup_handle is not None:
             cgroup_handle.cleanup()
         server.shutdown()
