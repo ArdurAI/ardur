@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -21,6 +22,14 @@ const (
 	DaemonPreflightPathSocket     = "socket"
 	DaemonPreflightPathBPFFSDir   = "bpffs_dir"
 	DaemonPreflightPathRingbufMap = "bpffs_map"
+
+	// BPF-LSM / BTF detection check names.
+	DaemonPreflightCheckBTFVmlinux = "btf_vmlinux"
+	DaemonPreflightCheckBPFLSM    = "bpflsm_active"
+
+	// Kernel paths inspected for BPF-LSM capability.
+	KernelBTFVmlinuxPath   = "/sys/kernel/btf/vmlinux"
+	KernelLSMActivePath    = "/sys/kernel/security/lsm"
 )
 
 // DaemonPreflightReport is a read-only inspection result for the future
@@ -312,6 +321,101 @@ func daemonPreflightModeType(mode fs.FileMode) string {
 	default:
 		return "file"
 	}
+}
+
+// InspectBPFLSMPreflight checks whether the running kernel exposes BTF and
+// has BPF-LSM active. It is a non-mutating, read-only inspection and never
+// loads BPF programs, attaches hooks, or modifies kernel state.
+//
+// The returned findings use the standard DaemonPreflightFinding shape so that
+// callers can mix them with the path-custody findings from
+// InspectDaemonCustodyPreflight. CanContinue is false if any finding is a
+// hard failure; a warn verdict indicates degraded-but-functional operation
+// (e.g. BTF present but BPF-LSM not active — seccomp enforcement still works).
+func InspectBPFLSMPreflight(optFns ...DaemonPreflightOption) DaemonPreflightReport {
+	opts := daemonPreflightOptions{fs: osDaemonPreflightFS{}}
+	for _, fn := range optFns {
+		if fn != nil {
+			fn(&opts)
+		}
+	}
+	report := DaemonPreflightReport{
+		Mode: "bpflsm_capability_check",
+		WorksNow: []string{
+			"read-only BTF and BPF-LSM capability inspection",
+		},
+		NotClaimed: []string{
+			"BPF program loading or attachment",
+			"LSM hook installation",
+		},
+	}
+
+	// Check 1: /sys/kernel/btf/vmlinux — required for CO-RE BPF programs.
+	btfFinding := DaemonPreflightFinding{
+		CheckName: DaemonPreflightCheckBTFVmlinux,
+		Path:      KernelBTFVmlinuxPath,
+	}
+	if _, err := opts.fs.Stat(KernelBTFVmlinuxPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+			btfFinding.Verdict = DaemonPreflightVerdictFail
+			btfFinding.Details = "BTF vmlinux not present; CO-RE BPF programs cannot load (need CONFIG_DEBUG_INFO_BTF=y)"
+			btfFinding.Remediation = "enable CONFIG_DEBUG_INFO_BTF=y in kernel config or use a distribution kernel with BTF support"
+		} else {
+			btfFinding.Verdict = DaemonPreflightVerdictFail
+			btfFinding.Details = fmt.Sprintf("stat %s: %v", KernelBTFVmlinuxPath, err)
+			btfFinding.Remediation = "check kernel and securityfs mount state"
+		}
+	} else {
+		btfFinding.Verdict = DaemonPreflightVerdictPass
+		btfFinding.Details = "BTF vmlinux present; CO-RE BPF programs can load"
+	}
+	report.Findings = append(report.Findings, btfFinding)
+
+	// Check 2: /sys/kernel/security/lsm — must list "bpf" to attach BPF-LSM hooks.
+	lsmFinding := DaemonPreflightFinding{
+		CheckName: DaemonPreflightCheckBPFLSM,
+		Path:      KernelLSMActivePath,
+	}
+	lsmContent, lsmErr := os.ReadFile(KernelLSMActivePath)
+	if lsmErr != nil {
+		if errors.Is(lsmErr, fs.ErrNotExist) || os.IsNotExist(lsmErr) {
+			lsmFinding.Verdict = DaemonPreflightVerdictWarn
+			lsmFinding.Details = "securityfs not mounted or LSM list unavailable; BPF-LSM status unknown"
+			lsmFinding.Remediation = "mount securityfs: mount -t securityfs securityfs /sys/kernel/security"
+		} else {
+			lsmFinding.Verdict = DaemonPreflightVerdictWarn
+			lsmFinding.Details = fmt.Sprintf("read %s: %v", KernelLSMActivePath, lsmErr)
+			lsmFinding.Remediation = "check kernel security subsystem configuration"
+		}
+	} else {
+		active := strings.TrimSpace(string(lsmContent))
+		lsmFinding.Details = fmt.Sprintf("active LSMs: %s", active)
+		hasBPF := false
+		for _, lsm := range strings.Split(active, ",") {
+			if strings.TrimSpace(lsm) == "bpf" {
+				hasBPF = true
+				break
+			}
+		}
+		if hasBPF {
+			lsmFinding.Verdict = DaemonPreflightVerdictPass
+			lsmFinding.Details += " — bpf LSM is active; BPF-LSM hooks can be attached"
+		} else {
+			lsmFinding.Verdict = DaemonPreflightVerdictWarn
+			lsmFinding.Details += " — bpf LSM not active; BPF-LSM hooks will fail to attach"
+			lsmFinding.Remediation = "add lsm=...,bpf to kernel command line (e.g. in GRUB_CMDLINE_LINUX) or enable CONFIG_BPF_LSM=y and reboot"
+		}
+	}
+	report.Findings = append(report.Findings, lsmFinding)
+
+	report.CanContinue = true
+	for _, f := range report.Findings {
+		if f.Verdict == DaemonPreflightVerdictFail {
+			report.CanContinue = false
+			break
+		}
+	}
+	return report
 }
 
 type osDaemonPreflightFS struct{}
