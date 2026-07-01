@@ -58,8 +58,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 from .bpf_types import (
@@ -187,12 +186,6 @@ _EXEC_KEYWORDS: frozenset[str] = frozenset(
     {"bash", "sh", "shell", "exec", "execute", "run", "subprocess", "invoke",
      "spawn", "terminal", "cmd", "powershell", "script", "make", "npm", "pip",
      "cargo"}
-)
-
-_EXTERNAL_SEND_KEYWORDS: frozenset[str] = frozenset(
-    {"send", "email", "message", "post", "webhook", "slack", "teams", "notify",
-     "notification", "alert", "sms", "twilio", "sendgrid", "mailgun", "ses",
-     "push"}
 )
 
 # Two-component pairs that qualify external-send context (send alone is

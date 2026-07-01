@@ -10,8 +10,6 @@ import pytest
 
 from vibap.bpf_lower import (
     BpfLowerError,
-    BpfPolicyPlan,
-    OpPolicyEntry,
     lower_to_bpf_policy_plan,
 )
 from vibap.bpf_types import (
@@ -304,12 +302,13 @@ class TestResourcePoliciesTyped:
         assert plan.allowlists_op(OP_FILE_WRITE)
 
     def test_url_allowlist_hostname_goes_to_tier2(self) -> None:
+        expected_tier2 = "url_allowlist_hostname:api.example.com"
         plan = lower_to_bpf_policy_plan(
             resource_policies=[
                 {"type": "url_allowlist", "allow_domains": ["api.example.com"]}
             ]
         )
-        assert any("api.example.com" in t for t in plan.tier2_ops)
+        assert expected_tier2 in plan.tier2_ops
         assert "api.example.com" not in plan.net_allow
 
     def test_url_allowlist_ip_goes_to_net_allow(self) -> None:
@@ -330,6 +329,7 @@ class TestResourcePoliciesTyped:
         assert plan.allowlists_op(OP_NET_CONNECT)
 
     def test_mixed_hostname_and_ip_in_url_allowlist(self) -> None:
+        expected_tier2 = "url_allowlist_hostname:api.example.com"
         plan = lower_to_bpf_policy_plan(
             resource_policies=[
                 {
@@ -339,7 +339,7 @@ class TestResourcePoliciesTyped:
             ]
         )
         assert "10.0.0.1" in plan.net_allow
-        assert any("api.example.com" in t for t in plan.tier2_ops)
+        assert expected_tier2 in plan.tier2_ops
 
 
 # ---------------------------------------------------------------------------
