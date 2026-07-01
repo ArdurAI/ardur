@@ -235,8 +235,14 @@ func evalVisibility(events []benchmark.Event) TraceResult {
 
 // evalMCEPReconciliation uses per-event ExpectedLabel as the oracle. Any
 // event with ExpectedLabel != "authorized" (case-insensitive) constitutes a
-// finding. This arm matches the ground truth when per-event labels are
-// accurate; use it to validate that other arms agree with the labeled data.
+// finding.
+//
+// ORACLE CIRCULARITY: This arm reads back the same ExpectedLabel field that
+// defines the benchmark ground truth. Its accuracy is 100% by construction —
+// it does not detect anything; it only reflects the labels. Report it as a
+// sanity-check arm, not as a detection metric. A 100% accuracy figure for
+// this arm says nothing about the harness's ability to identify violations
+// independently; use cedar_strict, cedar_state, and visibility for that.
 func evalMCEPReconciliation(events []benchmark.Event) TraceResult {
 	findings := 0
 	for _, ev := range events {

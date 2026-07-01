@@ -127,7 +127,11 @@ func printAccuracy(results []live.BenchmarkResult) {
 			}
 		}
 		pct := float64(correct) / float64(len(results)) * 100
-		fmt.Printf("  %-22s %d/%d (%.0f%%)\n", arm.name, correct, len(results), pct)
+		suffix := ""
+		if arm.name == "mcep_reconciliation" {
+			suffix = " [oracle — 100% by construction; see REPRODUCE.md]"
+		}
+		fmt.Printf("  %-22s %d/%d (%.0f%%)%s\n", arm.name, correct, len(results), pct, suffix)
 	}
 }
 
