@@ -30,6 +30,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -244,6 +245,10 @@ func (d *daemon) appendKernelReceipt(sessionID string, evt kernelcapture.Process
 
 	dir := filepath.Join(d.evidenceDir, sanitizeSessionID(sessionID))
 	path := filepath.Join(dir, "kernel_receipts.jsonl")
+	if err := prevalidateKernelReceiptAppendPath(d.fs, d.evidenceDir, dir, path); err != nil {
+		d.log.Warn("prevalidate kernel receipt path", "path", path, "error", err)
+		return
+	}
 	if err := d.fs.MkdirAll(dir, 0o700); err != nil {
 		d.log.Warn("create evidence log dir", "path", dir, "error", err)
 		return
@@ -311,6 +316,7 @@ func sanitizeSessionID(id string) string {
 // evidenceFS is the minimal filesystem interface used for writing JSONL
 // evidence log entries. Using an interface here allows test injection.
 type evidenceFS interface {
+	Lstat(path string) (fs.FileInfo, error)
 	MkdirAll(path string, perm fs.FileMode) error
 	AppendFile(path string, data []byte, perm fs.FileMode) error
 }
@@ -318,8 +324,91 @@ type evidenceFS interface {
 // osEvidenceFS is the OS-backed production implementation of evidenceFS.
 type osEvidenceFS struct{}
 
+func (osEvidenceFS) Lstat(path string) (fs.FileInfo, error) {
+	return os.Lstat(path)
+}
+
 func (osEvidenceFS) MkdirAll(path string, perm fs.FileMode) error {
 	return os.MkdirAll(path, perm)
+}
+
+func prevalidateKernelReceiptAppendPath(fsys evidenceFS, evidenceDir string, parentDir string, receiptPath string) error {
+	if fsys == nil {
+		return fmt.Errorf("filesystem is required")
+	}
+	if err := prevalidateKernelReceiptParentChain(fsys, evidenceDir, parentDir); err != nil {
+		return err
+	}
+	if err := prevalidateKernelReceiptPathNotSymlink(fsys, receiptPath, "kernel receipt path"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func prevalidateKernelReceiptParentChain(fsys evidenceFS, evidenceDir string, parentDir string) error {
+	parents, err := kernelReceiptParentChain(evidenceDir, parentDir)
+	if err != nil {
+		return err
+	}
+	for _, parent := range parents {
+		info, err := fsys.Lstat(parent)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("prevalidate kernel receipt parent %q failed: %w", parent, err)
+		}
+		mode := info.Mode()
+		if mode&fs.ModeSymlink != 0 {
+			return fmt.Errorf("prevalidate kernel receipt parent %q failed: symlink parent is not allowed", parent)
+		}
+		if !mode.IsDir() {
+			return fmt.Errorf("prevalidate kernel receipt parent %q failed: parent is not a directory", parent)
+		}
+	}
+	return nil
+}
+
+func kernelReceiptParentChain(evidenceDir string, parentDir string) ([]string, error) {
+	evidenceDir = filepath.Clean(evidenceDir)
+	parentDir = filepath.Clean(parentDir)
+	rel, err := filepath.Rel(evidenceDir, parentDir)
+	if err != nil {
+		return nil, fmt.Errorf("derive kernel receipt parent chain failed: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("kernel receipt parent %q escaped evidence directory %q", parentDir, evidenceDir)
+	}
+	parents := []string{evidenceDir}
+	if rel == "." {
+		return parents, nil
+	}
+	current := evidenceDir
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return nil, fmt.Errorf("kernel receipt parent %q escaped evidence directory %q", parentDir, evidenceDir)
+		}
+		current = filepath.Join(current, part)
+		parents = append(parents, current)
+	}
+	return parents, nil
+}
+
+func prevalidateKernelReceiptPathNotSymlink(fsys evidenceFS, path string, label string) error {
+	info, err := fsys.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("prevalidate %s %q failed: %w", label, path, err)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("prevalidate %s %q failed: symlink path is not allowed", label, path)
+	}
+	return nil
 }
 
 func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) (err error) {

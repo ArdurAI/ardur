@@ -26,6 +26,10 @@ type stubEvidenceFS struct {
 
 func newStubFS() *stubEvidenceFS { return &stubEvidenceFS{appends: map[string][]byte{}} }
 
+func (s *stubEvidenceFS) Lstat(_ string) (fs.FileInfo, error) {
+	return nil, fs.ErrNotExist
+}
+
 func (s *stubEvidenceFS) MkdirAll(path string, _ fs.FileMode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -241,6 +245,116 @@ func TestAppendKernelReceipt(t *testing.T) {
 	}
 	if entry.SchemaVersion != KernelReceiptSchema {
 		t.Errorf("receipt entry schema_version: got %q, want %q", entry.SchemaVersion, KernelReceiptSchema)
+	}
+}
+
+func TestAppendKernelReceiptRejectsSymlinkSessionDirBeforeAppend(t *testing.T) {
+	d := newTestDaemon(t)
+	d.evidenceDir = filepath.Join(t.TempDir(), "evidence")
+
+	sessionID := "symlink-session-dir"
+	sessionDir := filepath.Join(d.evidenceDir, sanitizeSessionID(sessionID))
+	escapeDir := filepath.Join(t.TempDir(), "escape")
+	if err := os.MkdirAll(d.evidenceDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(evidenceDir): %v", err)
+	}
+	if err := os.MkdirAll(escapeDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(escapeDir): %v", err)
+	}
+	if err := os.Symlink(escapeDir, sessionDir); err != nil {
+		t.Fatalf("Symlink(sessionDir): %v", err)
+	}
+
+	evt, receipt := kernelReceiptFixture()
+	d.appendKernelReceipt(sessionID, evt, receipt)
+
+	info, err := os.Lstat(sessionDir)
+	if err != nil {
+		t.Fatalf("Lstat(sessionDir): %v", err)
+	}
+	if info.Mode()&fs.ModeSymlink == 0 {
+		t.Fatalf("session dir should remain a symlink, mode=%v", info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(escapeDir, "kernel_receipts.jsonl")); err == nil || !os.IsNotExist(err) {
+		t.Fatalf("symlink target was modified or unexpected stat error: %v", err)
+	}
+}
+
+func TestAppendKernelReceiptRejectsSymlinkReceiptFileBeforeAppend(t *testing.T) {
+	d := newTestDaemon(t)
+	d.evidenceDir = filepath.Join(t.TempDir(), "evidence")
+
+	sessionID := "symlink-receipt-file"
+	sessionDir := filepath.Join(d.evidenceDir, sanitizeSessionID(sessionID))
+	receiptPath := filepath.Join(sessionDir, "kernel_receipts.jsonl")
+	escapePath := filepath.Join(t.TempDir(), "escape.jsonl")
+	original := []byte("preexisting\n")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(sessionDir): %v", err)
+	}
+	if err := os.WriteFile(escapePath, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(escapePath): %v", err)
+	}
+	if err := os.Symlink(escapePath, receiptPath); err != nil {
+		t.Fatalf("Symlink(receiptPath): %v", err)
+	}
+
+	evt, receipt := kernelReceiptFixture()
+	d.appendKernelReceipt(sessionID, evt, receipt)
+
+	info, err := os.Lstat(receiptPath)
+	if err != nil {
+		t.Fatalf("Lstat(receiptPath): %v", err)
+	}
+	if info.Mode()&fs.ModeSymlink == 0 {
+		t.Fatalf("receipt path should remain a symlink, mode=%v", info.Mode())
+	}
+	data, err := os.ReadFile(escapePath)
+	if err != nil {
+		t.Fatalf("ReadFile(escapePath): %v", err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("symlink target was modified: got %q want %q", data, original)
+	}
+}
+
+func TestAppendKernelReceiptRejectsNonDirectorySessionPathBeforeAppend(t *testing.T) {
+	d := newTestDaemon(t)
+	d.evidenceDir = filepath.Join(t.TempDir(), "evidence")
+
+	sessionID := "non-directory-session"
+	sessionPath := filepath.Join(d.evidenceDir, sanitizeSessionID(sessionID))
+	original := []byte("not a directory")
+	if err := os.MkdirAll(d.evidenceDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(evidenceDir): %v", err)
+	}
+	if err := os.WriteFile(sessionPath, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(sessionPath): %v", err)
+	}
+
+	evt, receipt := kernelReceiptFixture()
+	d.appendKernelReceipt(sessionID, evt, receipt)
+
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("ReadFile(sessionPath): %v", err)
+	}
+	if string(data) != string(original) {
+		t.Fatalf("non-directory parent was modified: got %q want %q", data, original)
+	}
+	if _, err := os.Lstat(filepath.Join(sessionPath, "kernel_receipts.jsonl")); err == nil {
+		t.Fatal("receipt path unexpectedly exists under non-directory parent")
+	}
+}
+
+func kernelReceiptFixture() (kernelcapture.ProcessEvent, kernelcapture.SyntheticKernelReceipt) {
+	return kernelcapture.ProcessEvent{PID: 200, CgroupID: 55, Type: kernelcapture.ProcessEventExec}, kernelcapture.SyntheticKernelReceipt{
+		EventID:               "evt-001",
+		EventClass:            "process_exec",
+		CoverageStatus:        "not_claimed",
+		CorrelationMethod:     "cgroup_time_window",
+		CorrelationConfidence: "medium",
+		Verdict:               "not_claimed",
 	}
 }
 
