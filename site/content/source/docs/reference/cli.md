@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "56318c1fc679c4c63168e30e35e39c2708f861aa60270c1a6545464f4409531d"
+source_sha256: "e783787acec840b1015f7f82ced34cce9bf79287af43dc0ad8f85ee12e910cc3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -266,6 +266,19 @@ with `ok: false`, stable `condition`/`error` values, and
 `error_code: path_not_directory`; stderr stays empty, no traceback is
 emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
+
+Invalid setup bind inputs fail closed before writing config, generating or
+printing a Hub token, installing the LaunchAgent plist, creating setup state, or
+starting a service. `--port` must be an integer stable TCP port from `1` through
+`65535`; invalid values return stable `condition`/`error`/`error_code` values of
+`setup_port_invalid`. `--host` must be a plain bindable host name or IP address,
+not an empty value, URL, host with a scheme/path/port, or otherwise unbindable
+host; invalid values return stable `condition`/`error`/`error_code` values of
+`setup_host_invalid`. These local/no-key failures exit non-zero and write
+parseable stdout JSON with `ok: false`, a message, a detail, and
+placeholder-only `next_steps`; stderr stays empty, no traceback is emitted, no
+raw local paths, tokens, or malformed host inputs are echoed, and no config,
+token, LaunchAgent, key, session, log, state, or service artifacts are created.
 
 ### `ardur status`
 
