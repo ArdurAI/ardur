@@ -468,7 +468,26 @@ def test_profile_init_existing_profile_human_has_next_steps(tmp_path, capsys):
     assert str(tmp_path) not in captured.out
 
 
-def test_profile_init_directory_without_force_json_preserves_existing_profile_response(tmp_path, capsys):
+def test_profile_init_force_replaces_existing_profile_file(tmp_path, capsys):
+    profile = tmp_path / "ARDUR.md"
+    profile.write_text("existing profile\n", encoding="utf-8")
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile,
+            force=True,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert "Mode: safe coding" in profile.read_text(encoding="utf-8")
+
+
+def test_profile_init_directory_without_force_json_has_path_invalid_next_steps(tmp_path, capsys):
     profile_dir = tmp_path / "ARDUR.md"
     profile_dir.mkdir()
 
@@ -487,9 +506,14 @@ def test_profile_init_directory_without_force_json_preserves_existing_profile_re
     assert captured.err == ""
     response = json.loads(captured.out)
     assert response["ok"] is False
-    assert response["error"] == "profile_exists"
-    assert response["condition"] == "profile_exists"
+    assert response["error"] == "profile_path_invalid"
+    assert response["condition"] == "profile_path_invalid"
+    assert "directory" in response["detail"]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur profile init --path <profile-file> --force" in commands
+    assert "ardur protect claude-code --profile <profile-file>" in commands
     assert str(tmp_path) not in captured.out
+    assert list(profile_dir.iterdir()) == []
 
 
 def test_profile_init_forced_directory_path_json_has_next_steps(tmp_path, capsys):
@@ -518,6 +542,7 @@ def test_profile_init_forced_directory_path_json_has_next_steps(tmp_path, capsys
     assert "ardur profile init --path <profile-file> --force" in commands
     assert "ardur protect claude-code --profile <profile-file>" in commands
     assert str(tmp_path) not in captured.out
+    assert list(profile_dir.iterdir()) == []
 
 
 def test_profile_init_forced_directory_path_human_has_next_steps(tmp_path, capsys):
@@ -543,6 +568,38 @@ def test_profile_init_forced_directory_path_human_has_next_steps(tmp_path, capsy
     assert "ardur profile init --path <profile-file> --force" in captured.out
     assert "ardur protect claude-code --profile <profile-file>" in captured.out
     assert str(tmp_path) not in captured.out
+    assert list(profile_dir.iterdir()) == []
+
+
+def test_profile_init_symlink_to_directory_json_has_path_invalid_next_steps(tmp_path, capsys):
+    target_dir = tmp_path / "profile-dir-target"
+    target_dir.mkdir()
+    profile_link = tmp_path / "ARDUR.md"
+    profile_link.symlink_to(target_dir, target_is_directory=True)
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile_link,
+            force=False,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_path_invalid"
+    assert response["condition"] == "profile_path_invalid"
+    assert "directory" in response["detail"]
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur profile init --path <profile-file> --force" in commands
+    assert "ardur protect claude-code --profile <profile-file>" in commands
+    assert str(tmp_path) not in captured.out
+    assert list(target_dir.iterdir()) == []
 
 
 def test_protect_claude_code_missing_plugin_json_has_next_steps(tmp_path, capsys):

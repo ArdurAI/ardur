@@ -172,6 +172,8 @@ def write_profile_template(
     if template not in PROFILE_TEMPLATES:
         raise ValueError(f"unknown Ardur profile template: {template}")
     target = Path(path).expanduser()
+    if target.exists() and target.is_dir():
+        raise IsADirectoryError(f"{target} is a directory; choose a Markdown file path")
     if target.exists() and not force:
         raise FileExistsError(f"{target} already exists; use --force to replace it")
     target.parent.mkdir(parents=True, exist_ok=True)
