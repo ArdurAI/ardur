@@ -78,13 +78,24 @@ func run() error {
 		Generation:  smokeGeneration,
 		EnforceMode: kernelcapture.BpfEnforceModeEnforce,
 		OpPolicies: []kernelcapture.DaemonOpPolicy{
+			// EnforceMode: Enforce sets cgroup_managed's STRICT flag, so any
+			// op with no rule in the active slot fails closed. execve(2)
+			// opens the target binary for reading (guard_file_open,
+			// OP_FILE_READ) *before* the kernel calls bprm_check_security
+			// (guard_bprm_check, OP_EXEC) — confirmed on a real kernel: the
+			// first version of this test denied at the file-open step with
+			// no OP_FILE_READ rule present, and the process never reached
+			// exec at all. Without this ALLOW, EPERM would still occur (both
+			// hooks fail closed), but for the wrong reason, and no OP_EXEC
+			// DENY event would ever land on enforce_events.
+			{Op: kernelcapture.BpfOpFileRead, Action: kernelcapture.BpfActionAllow, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
 			{Op: kernelcapture.BpfOpExec, Action: kernelcapture.BpfActionDeny, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
 		},
 	}
 	if err := kernelcapture.ApplyPolicyMaps(maps, cgroupID, policy); err != nil {
-		return fmt.Errorf("apply OP_EXEC:DENY policy: %w", err)
+		return fmt.Errorf("apply OP_FILE_READ:ALLOW + OP_EXEC:DENY policy: %w", err)
 	}
-	fmt.Printf("applied OP_EXEC:DENY (ENFORCE) policy for cgroup_id=%d\n", cgroupID)
+	fmt.Printf("applied OP_FILE_READ:ALLOW + OP_EXEC:DENY (ENFORCE) policy for cgroup_id=%d\n", cgroupID)
 
 	denyEvent := make(chan error, 1)
 	watcherReady := make(chan struct{})
