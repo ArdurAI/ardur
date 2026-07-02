@@ -1,4 +1,10 @@
-//go:build !linux
+//go:build !linux && !darwin
+
+// daemon_unsupported.go covers platforms with no host-sensor backend at all
+// (i.e. anything that is neither Linux/eBPF nor Darwin/Endpoint-Security).
+// Darwin gets its own file, daemon_darwin.go, which wires the Endpoint
+// Security client scaffold (kernelcapture.NewESClient) in place of the
+// generic "unsupported" message below.
 
 package main
 

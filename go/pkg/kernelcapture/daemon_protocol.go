@@ -21,6 +21,13 @@ const (
 
 	DaemonProtocolEventProcessLifecycle = "process_lifecycle"
 
+	// EnforcementTierBPFLSM/EnforcementTierNone are the values a health
+	// response's EnforcementTier field takes. Forward-compatible with future
+	// tiers (seccomp unotify, plan E4) — a new tier adds a new constant here,
+	// not a breaking change to the field's meaning.
+	EnforcementTierBPFLSM = "bpf_lsm"
+	EnforcementTierNone   = "none"
+
 	MaxDaemonProtocolTTLSeconds = 24 * 60 * 60
 
 	// MaxDaemonPolicyGeneration is the largest generation value the daemon will
@@ -117,6 +124,11 @@ type DaemonProtocolResponse struct {
 	// directories are root-0700, so this is the only channel a non-root client
 	// has to learn what kernel-level enforcement happened.
 	Enforcement *EnforceEventSummary `json:"enforcement,omitempty"`
+	// EnforcementTier reports which kernel-enforcement backend is currently
+	// live on this daemon: EnforcementTierBPFLSM or EnforcementTierNone.
+	// Populated on successful health responses only — session_status responses
+	// use Enforcement (per-session) instead.
+	EnforcementTier string `json:"enforcement_tier,omitempty"`
 }
 
 // CgroupFilterSequence describes daemon-side map sequencing. Enabling
