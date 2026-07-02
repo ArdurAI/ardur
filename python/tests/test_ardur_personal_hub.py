@@ -274,6 +274,40 @@ def test_hub_json_responses_carry_no_store_security_headers(tmp_path):
     assert header_map["x-content-type-options"] == "nosniff"
 
 
+def test_hub_html_responses_carry_no_store_security_headers(tmp_path):
+    handler = object.__new__(_HubRequestHandler)
+    sent_headers: list[tuple[str, str]] = []
+    statuses: list[int] = []
+    wfile = io.BytesIO()
+    setattr(handler, "headers", {})
+    setattr(handler, "server", SimpleNamespace(hub=PersonalHub(tmp_path)))
+    setattr(handler, "wfile", wfile)
+    setattr(handler, "send_response", lambda status: statuses.append(status))
+    setattr(
+        handler,
+        "send_header",
+        lambda name, value: sent_headers.append((name.lower(), value)),
+    )
+    setattr(handler, "end_headers", lambda: None)
+
+    html_body = "<main>Ardur dashboard</main>"
+    handler._send_html(html_body, status=202)
+
+    header_map = {name: value for name, value in sent_headers}
+    response_body = wfile.getvalue()
+    assert statuses == [202]
+    assert header_map["content-type"] == "text/html; charset=utf-8"
+    assert header_map["cache-control"] == "no-store"
+    assert header_map["pragma"] == "no-cache"
+    assert header_map["referrer-policy"] == "no-referrer"
+    assert header_map["content-security-policy"] == (
+        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+    )
+    assert header_map["x-content-type-options"] == "nosniff"
+    assert header_map["content-length"] == str(len(response_body))
+    assert response_body == html_body.encode("utf-8")
+
+
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
 

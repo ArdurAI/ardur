@@ -1290,6 +1290,8 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         data = content.encode("utf-8")
         self.send_response(status)
         self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        self.send_header("pragma", "no-cache")
         self.send_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header("referrer-policy", "no-referrer")
         self.send_header("x-content-type-options", "nosniff")
