@@ -1,14 +1,14 @@
 # Phase 2 Daemon/Kernel Boundary Claim Ledger
 
-Date: 2026-05-12
-Branch baseline: `origin/dev` at `825baab0910a7a602d23d13b2021b2573be40a6e`
+Date: 2026-07-01
+Branch baseline: `origin/dev` at `a82d6ed6cd6cc0d3eed2cd22c44428cc8db938a6`
 Scope: public-site claim ledger source for the current Phase 2 development boundary.
 
 ## Claim supported
 
 The current `dev` branch supports a bounded development claim:
 
-> Ardur has a gated local Linux eBPF process-lifecycle proof harness that can load and attach exec/exit tracepoints in a privileged Linux test environment, plus no-mutation daemon custody, preflight, peer-authorization, protocol/peer handshake, Linux `SO_PEERCRED` retrieval plus daemon-observed process-start identity binding, accepted-connection protocol seam, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup and PID-reuse mismatch rejection when same UID/GID/PID presents different process-start ticks, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, a narrow local `session_status` client proof that rejects response expansion, a no-write status evidence-log planning seam with schema/digest/rotation bounds, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions against a fake sink only, an injected filesystem append/rotation adapter that executes validated logical-path writes through caller-provided filesystem implementations with temp-dir test coverage, daemon-side `session_status` evidence-log wiring that appends successful status snapshots through that injected filesystem before retaining them without expanding the client protocol, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, and a no-privilege/no-execution launch-wrapper session-proof seam with deterministic argv/cwd digest evidence.
+> Ardur has a gated local Linux eBPF process-lifecycle proof harness that can load and attach exec/exit tracepoints in a privileged Linux test environment, plus bounded Linux Slice 2 daemon installer/systemd/link-pinning development surfaces: `ardur-sensor` preflight/install/status/uninstall commands, fd-anchored root custody path/config creation, a systemd unit with `sd_notify`/watchdog/capability/path boundaries, and BPF tracepoint-link/ringbuf-map pinning for restart survival. The boundary also includes no-mutation daemon custody/preflight seams, peer-authorization and protocol/peer handshake contracts, Linux `SO_PEERCRED` retrieval plus daemon-observed process-start identity binding, accepted-connection protocol seam, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup and PID-reuse mismatch rejection when same UID/GID/PID presents different process-start ticks, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, a narrow local `session_status` client proof that rejects response expansion, a no-write status evidence-log planning seam with schema/digest/rotation bounds, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions against a fake sink only, an injected filesystem append/rotation adapter that executes validated logical-path writes through caller-provided filesystem implementations with temp-dir test coverage, daemon-side `session_status` evidence-log wiring that appends successful status snapshots through that injected filesystem before retaining them without expanding the client protocol, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, and a no-privilege/no-execution launch-wrapper session-proof seam with deterministic argv/cwd digest evidence.
 
 This is an experimental development boundary, not release or production readiness.
 
@@ -17,6 +17,10 @@ This is an experimental development boundary, not release or production readines
 - `go/pkg/kernelcapture/README.md` states the current MVP claim boundary and non-claims.
 - `go/pkg/kernelcapture/linux_ebpf_smoke_linux.go` contains the gated Linux eBPF lifecycle smoke path.
 - `go/pkg/kernelcapture/daemon_custody.go` and `go/pkg/kernelcapture/daemon_preflight.go` define dry-run custody and read-only preflight checks.
+- `go/cmd/ardur-sensor/main.go` defines the Linux host-sensor management CLI surface: preflight, install, uninstall, and status. The install path checks kernel capabilities, calls the custody installer, installs the systemd unit, and can run `systemctl daemon-reload` plus `systemctl enable --now` unless `--no-enable` is supplied.
+- `go/pkg/kernelcapture/daemon_installer_linux.go` implements fd-anchored root custody path/config creation with post-install preflight assertion and explicit boundaries for socket bind, bpffs map pinning, runtime directory creation, and systemd service lifecycle.
+- `packaging/systemd/ardur-kernelcaptured.service` defines the bounded root systemd service unit with `Type=notify`, `WatchdogSec=30s`, runtime/state/log directory declarations, BPF-related capability bounds, and explicit daemon-owned write paths.
+- `go/pkg/kernelcapture/linux_ebpf_daemon_linux.go` adds restart-survival BPF link and ringbuf-map pinning under daemon-owned bpffs paths, with fallback behavior when pinning is unavailable.
 - `go/pkg/kernelcapture/daemon_protocol.go` defines the deterministic JSON-line protocol contract, rejects daemon-owned fields from clients, and decodes client-visible responses with unknown-field rejection so internal daemon status snapshot fields cannot be accepted as wire protocol expansion.
 - `go/pkg/kernelcapture/daemon_peer_authorization.go` requires daemon-observed peer identity, including non-zero process-start ticks, and explicit UID/GID policy.
 - `go/pkg/kernelcapture/daemon_peer_credentials_linux.go` implements the Linux `SO_PEERCRED` retrieval seam for already-open Unix connections and reads bounded `/proc/<pid>/stat` start-time ticks for the observed peer PID.
@@ -42,7 +46,8 @@ This is an experimental development boundary, not release or production readines
 
 This evidence does **not** support claims of:
 
-- production daemon install/start/service-management readiness
+- production daemon readiness beyond the bounded Linux/systemd Slice 2 installer proof surface
+- release package, cross-platform installer, unattended upgrade, rollback, or production service-management support
 - production live enforcement or persistent session-state management
 - production persistent status snapshot/evidence-log storage, fsync/crash recovery, or restart-safe evidence retention
 - daemon-owned evidence-log service wiring, ownership changes, or production append/rotation lifecycle
@@ -52,17 +57,29 @@ This evidence does **not** support claims of:
 - file/network side-effect capture
 - universal CLI capture across Codex, Gemini, Kimi, or future CLIs
 - cross-platform kernel capture (macOS Endpoint Security or Windows ETW)
+- unprivileged/no-install eBPF support
 - production readiness
 
-## Verification run for this claim-ledger refresh
+## Verification run for this 2026-07-01 claim-ledger docs refresh
+
+This refresh is a docs/source-mirror alignment pass over the current
+`origin/dev` claim boundary, not a new runtime/kernel validation run. Local
+evidence for this docs refresh included:
 
 ```bash
-python3 site/scripts/validate_claims.py
-python3 site/scripts/sync_source_docs.py --check
-cd go && go test ./pkg/kernelcapture -count=1
-./scripts/check-local.sh --quick --python <path-to-project-python>
+./scripts/conductor-bootstrap.sh
+git diff --check origin/dev
 git diff --check
-gitleaks detect --source . --no-git --redact
+python3 site/scripts/sync_source_docs.py --check
+python3 site/scripts/validate_claims.py
+/opt/homebrew/bin/hugo --source site
+python3 site/scripts/validate_rendered_docs_links.py site/public
 ```
 
-Local Hugo rendering was unavailable in this environment (`hugo unavailable`), so rendered-site validation remains delegated to the `hugo-site` GitHub workflow for the pushed commit.
+A focused scan over the source ledger and generated mirror confirmed that the
+Slice 2 installer/systemd/link-pinning markers and the non-claims above remain
+present, and that stale local-Hugo-unavailable current-refresh wording is absent.
+The broader Go tests, check-local quick gate, and gitleaks scan belong to prior
+Phase 2/final-gates evidence and must be rerun by any future
+final-gates/pre-release task that uses this ledger as landing evidence. This
+docs/source-mirror refresh does not claim to have rerun them.
