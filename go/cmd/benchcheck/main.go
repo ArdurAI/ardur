@@ -30,6 +30,20 @@ import (
 	"github.com/ArdurAI/ardur/go/benchmark/live"
 )
 
+// oracleArms lists arm names whose ground truth is derived from the arm's
+// own verdict, so their accuracy is 100% by construction rather than an
+// independently measured result. See REPRODUCE.md.
+var oracleArms = []string{"mcep_reconciliation"}
+
+func isOracleArm(name string) bool {
+	for _, o := range oracleArms {
+		if o == name {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	outDir := flag.String("out", "bench-results", "output directory for results.json and summary.csv")
 	quiet := flag.Bool("quiet", false, "suppress result table on stdout")
@@ -128,7 +142,7 @@ func printAccuracy(results []live.BenchmarkResult) {
 		}
 		pct := float64(correct) / float64(len(results)) * 100
 		suffix := ""
-		if arm.name == "mcep_reconciliation" {
+		if isOracleArm(arm.name) {
 			suffix = " [oracle — 100% by construction; see REPRODUCE.md]"
 		}
 		fmt.Printf("  %-22s %d/%d (%.0f%%)%s\n", arm.name, correct, len(results), pct, suffix)
@@ -140,6 +154,10 @@ type summary struct {
 	Skipped  int                    `json:"skipped_pairs"`
 	Results  []live.BenchmarkResult `json:"results"`
 	Accuracy map[string]float64     `json:"arm_accuracy"`
+	// OracleArms lists the arm_accuracy keys whose 1.0 is 100% by
+	// construction (ground truth derived from the arm's own verdict), not
+	// an independently measured accuracy. See REPRODUCE.md.
+	OracleArms []string `json:"oracle_arms"`
 }
 
 func writeResults(outDir string, results []live.BenchmarkResult, skipped int, packDir string) error {
@@ -149,10 +167,11 @@ func writeResults(outDir string, results []live.BenchmarkResult, skipped int, pa
 
 	acc := armAccuracy(results)
 	s := summary{
-		PackDir:  packDir,
-		Skipped:  skipped,
-		Results:  results,
-		Accuracy: acc,
+		PackDir:    packDir,
+		Skipped:    skipped,
+		Results:    results,
+		Accuracy:   acc,
+		OracleArms: oracleArms,
 	}
 
 	jsonBytes, err := json.MarshalIndent(s, "", "  ")
