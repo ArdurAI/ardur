@@ -175,10 +175,18 @@ jobs:
       # touch the host. virtme-ng's guest runs as root by design, which is
       # what loading a BPF-LSM program and creating a cgroup requires.
       #
-      # The LSM list below is Ubuntu's default stack (see
-      # /sys/kernel/security/lsm on a stock GitHub-hosted runner) with "bpf"
-      # appended — dropping any of the defaults would itself change guest
-      # boot behavior in ways unrelated to this test.
+      # lsm=bpf only, not the full Ubuntu default stack (landlock/apparmor/
+      # yama/lockdown/integrity): a first attempt requested the full stack
+      # plus bpf and the boot's *actual* active order came back as
+      # "lockdown,capability,landlock,yama,apparmor,bpf,ima,evm" — capability
+      # wasn't even requested, confirming the kernel enforces its own
+      # ordering for LSMs with fixed relative-position constraints regardless
+      # of this list, so asking for a specific order here buys nothing. What
+      # it does buy is confounding variables: guard_bprm_check's
+      # `if (ret != 0) return ret;` short-circuits before evaluating our
+      # policy (and before emit_event ever runs) if any earlier LSM in the
+      # chain denies first, for a reason unrelated to this test. Keeping only
+      # "bpf" isolates that.
       - name: Boot with BPF-LSM active and run the smoke test
         run: |
           VNG="$(command -v vng)"
@@ -186,5 +194,5 @@ jobs:
           sudo "$VNG" \
             --verbose \
             --run \
-            --append "lsm=landlock,lockdown,yama,integrity,apparmor,bpf" \
+            --append "lsm=bpf" \
             --exec /tmp/ardur-guard-smoke

@@ -87,7 +87,9 @@ func run() error {
 	fmt.Printf("applied OP_EXEC:DENY (ENFORCE) policy for cgroup_id=%d\n", cgroupID)
 
 	denyEvent := make(chan error, 1)
-	go watchForDenyEvent(handles, cgroupID, denyEvent)
+	watcherReady := make(chan struct{})
+	go watchForDenyEvent(handles, cgroupID, watcherReady, denyEvent)
+	<-watcherReady // watcher is blocked in reader.Read() before we trigger the exec
 
 	if err := execveInCgroupExpectEPERM(cgFile); err != nil {
 		return err
@@ -153,20 +155,38 @@ func execveInCgroupExpectEPERM(cgFile *os.File) error {
 }
 
 // watchForDenyEvent reads enforce_events until it sees a DENY record for
-// cgroupID + OP_EXEC, or the reader is closed / times out.
-func watchForDenyEvent(handles *kernelcapture.ProcessGuardHandles, cgroupID uint64, result chan<- error) {
+// cgroupID + OP_EXEC, or the reader is closed / times out. Closes ready right
+// before its first blocking Read() call so the caller can be certain the
+// watcher is actually listening before triggering the exec that should
+// produce the event — belt-and-suspenders on top of the ring buffer itself
+// preserving unconsumed entries regardless of when Read() is first called.
+//
+// Every record seen (matching or not) is logged: if this test ever fails
+// again, that log distinguishes "zero records — decide() never called
+// emit_event, e.g. another LSM earlier in the lsm= chain denied the exec
+// first and guard_bprm_check's `if (ret != 0) return ret;` short-circuited
+// before evaluating our policy at all" from "records arrived but didn't
+// match — a decode or field-value bug in this harness" or "matched a
+// different op/action than expected."
+func watchForDenyEvent(handles *kernelcapture.ProcessGuardHandles, cgroupID uint64, ready chan<- struct{}, result chan<- error) {
 	reader := handles.Reader()
 	reader.SetDeadline(time.Now().Add(ringbufTimeout))
+	close(ready)
+	seen := 0
 	for {
 		record, err := reader.Read()
 		if err != nil {
-			result <- fmt.Errorf("read enforce_events: %w", err)
+			result <- fmt.Errorf("read enforce_events: %w (saw %d unrelated record(s) first)", err, seen)
 			return
 		}
 		ev, ok := decodeSmokeEvent(record.RawSample)
 		if !ok {
+			fmt.Printf("enforce_events: record too short to decode (%d bytes)\n", len(record.RawSample))
 			continue
 		}
+		seen++
+		fmt.Printf("enforce_events[%d]: cgroup_id=%d op=%d action=%d mode=%d pid=%d\n",
+			seen, ev.cgroupID, ev.op, ev.actionTaken, ev.enforceMode, ev.pid)
 		if ev.cgroupID == cgroupID && ev.op == uint32(kernelcapture.BpfOpExec) && ev.actionTaken == uint32(kernelcapture.BpfActionDeny) {
 			result <- nil
 			return
@@ -177,8 +197,8 @@ func watchForDenyEvent(handles *kernelcapture.ProcessGuardHandles, cgroupID uint
 // smokeEvent holds only the leading scalar fields of struct
 // ardur_enforce_event (process_guard.bpf.c) that this smoke test needs to
 // assert on — see decodeEnforceEvent in
-// go/cmd/ardur-kernelcaptured/daemon_guard_common.go for the full,
-// production decode of every field (comm, path, etc).
+// go/cmd/ardur-kernelcaptured/daemon_enforce.go for the full, production
+// decode of every field (comm, path, etc).
 type smokeEvent struct {
 	cgroupID    uint64
 	pid         uint32
