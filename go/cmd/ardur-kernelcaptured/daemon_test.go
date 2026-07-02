@@ -54,13 +54,17 @@ func newTestDaemon(t *testing.T) *daemon {
 	t.Helper()
 	tmpDir := t.TempDir()
 	return &daemon{
-		log:         testLogger(t),
-		registry:    kernelcapture.NewDaemonSessionRegistry(),
-		evidenceDir: filepath.Join(tmpDir, "evidence"),
-		cgroupIndex: make(map[uint64]string),
-		treeScopes:  make(map[string]*kernelcapture.ProcessTreeScope),
-		correlators: make(map[string]*kernelcapture.Correlator),
-		fs:          osEvidenceFS{},
+		log:                  testLogger(t),
+		registry:             kernelcapture.NewDaemonSessionRegistry(),
+		evidenceDir:          filepath.Join(tmpDir, "evidence"),
+		cgroupIndex:          make(map[uint64]string),
+		treeScopes:           make(map[string]*kernelcapture.ProcessTreeScope),
+		correlators:          make(map[string]*kernelcapture.Correlator),
+		enforceChains:        make(map[string]*kernelcapture.EnforceReceiptChain),
+		enforceSummaries:     make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
+		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
+		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
+		fs:                   osEvidenceFS{},
 	}
 }
 

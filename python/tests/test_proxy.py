@@ -79,6 +79,42 @@ class TestSessionLifecycle:
         assert isinstance(result, dict)
 
 
+class TestIssueAttestationForSessionKernelEnforcement:
+    """Epic A #63 / plan E3 phase b: the finalized attestation must be able to
+    see kernel-level enforcement denials, not just proxy-evaluated decisions.
+    """
+
+    def test_folds_kernel_enforcement_block_into_attestation_claims(
+        self, proxy, example_mission, private_key
+    ):
+        token = issue_passport(example_mission, private_key, ttl_s=60)
+        session = proxy.start_session(token)
+        enforcement = {
+            "total_events": 3,
+            "verdict_counts": {"denied": 2, "compliant": 1},
+            "tier_coverage": {"bpf_lsm:enforce": 3},
+            "chain_digest": "deadbeef",
+        }
+
+        _jwt_token, claims = proxy.issue_attestation_for_session(
+            session.jti, proxy.receipt_private_key, kernel_enforcement=enforcement
+        )
+
+        assert claims["kernel_enforcement"] == enforcement
+
+    def test_omits_kernel_enforcement_when_none_provided(
+        self, proxy, example_mission, private_key
+    ):
+        token = issue_passport(example_mission, private_key, ttl_s=60)
+        session = proxy.start_session(token)
+
+        _jwt_token, claims = proxy.issue_attestation_for_session(
+            session.jti, proxy.receipt_private_key
+        )
+
+        assert "kernel_enforcement" not in claims
+
+
 class TestPassportVerification:
     def test_verify_valid_passport(self, proxy, example_mission, private_key):
         token = issue_passport(example_mission, private_key, ttl_s=60)

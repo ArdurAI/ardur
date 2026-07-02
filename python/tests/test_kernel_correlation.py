@@ -200,3 +200,75 @@ def test_register_session_validates_inputs(tmp_path: Path) -> None:
         client.register_session(session_id="s", root_pid=0, cgroup_id=1, ttl_seconds=60)
     with pytest.raises(ValueError):
         client.register_session(session_id="s", root_pid=1, cgroup_id=0, ttl_seconds=60)
+
+
+def test_session_status_roundtrip_returns_enforcement_summary(sockdir: Path) -> None:
+    """The daemon's session_status response carries a kernel-enforcement
+    rollup (Epic A #63 / plan E3 phase a). Evidence-log directories are
+    root-0700, so this socket round-trip is the only channel a non-root
+    caller has to learn what kernel enforcement happened for a session.
+    """
+    sock = sockdir / "c.sock"
+    daemon = _FakeDaemon(
+        sock,
+        {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "session_status",
+            "session_id": "sess-1",
+            "status": "active",
+            "enforcement": {
+                "total_events": 4,
+                "verdict_counts": {"denied": 3, "compliant": 1},
+                "tier_coverage": {"bpf_lsm:enforce": 4},
+                "orphan_count": 0,
+                "lost_samples": 0,
+                "last_seq": 4,
+                "chain_digest": "abc123",
+            },
+        },
+    )
+    daemon.start()
+    try:
+        client = kc.KernelCaptureClient(sock)
+        resp = client.session_status(session_id="sess-1")
+    finally:
+        daemon.close()
+
+    assert resp["status"] == "active"
+    assert resp["enforcement"]["total_events"] == 4
+    assert resp["enforcement"]["verdict_counts"]["denied"] == 3
+    assert daemon.received is not None
+    assert daemon.received["method"] == "session_status"
+    assert daemon.received["session_status"]["session_id"] == "sess-1"
+
+
+def test_session_status_validates_session_id(tmp_path: Path) -> None:
+    client = kc.KernelCaptureClient(tmp_path / "x.sock")
+    with pytest.raises(ValueError):
+        client.session_status(session_id="")
+
+
+def test_session_status_response_without_enforcement_key(sockdir: Path) -> None:
+    """A session with no processed enforce_events omits the key entirely;
+    callers must treat a missing key the same as an empty summary.
+    """
+    sock = sockdir / "c.sock"
+    daemon = _FakeDaemon(
+        sock,
+        {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "session_status",
+            "session_id": "sess-2",
+            "status": "active",
+        },
+    )
+    daemon.start()
+    try:
+        client = kc.KernelCaptureClient(sock)
+        resp = client.session_status(session_id="sess-2")
+    finally:
+        daemon.close()
+
+    assert "enforcement" not in resp
