@@ -187,6 +187,26 @@ class KernelCaptureClient:
             }
         )
 
+    def session_status(self, *, session_id: str) -> dict[str, Any]:
+        """Fetch the daemon's status snapshot for a session, including its
+        kernel-enforcement rollup (``"enforcement"``) when the daemon has
+        processed enforce_events for it.
+
+        Evidence-log directories are root-0700, so this socket round-trip is
+        the only way a non-root caller can learn what kernel enforcement
+        happened for a session — see go/pkg/kernelcapture/daemon_protocol.go's
+        ``DaemonProtocolResponse.Enforcement``.
+        """
+        if not session_id:
+            raise ValueError("session_id is required")
+        return self._roundtrip(
+            {
+                "protocol_version": DAEMON_PROTOCOL_VERSION,
+                "method": "session_status",
+                "session_status": {"session_id": session_id},
+            }
+        )
+
 
 # ── cgroup v2 helpers ──────────────────────────────────────────────────────────
 

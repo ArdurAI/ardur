@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from argparse import Namespace
 import json
+import shutil
+import socket
 import sys
+import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -26,6 +30,7 @@ from vibap.run_bridge import (
     EnvProxyAdapter,
     RunContext,
     TransparentInterceptAdapter,
+    _kernel_enforcement_claim,
     run_governed,
     run_governed_cli,
     select_adapter,
@@ -133,6 +138,9 @@ def test_ardur_run_governs_launched_agent_zero_setup(
     assert att["passport_jti"] == result.session_id
     assert int(att["permits"]) == 2
     assert int(att["denials"]) == 1
+    # No kernel daemon was reachable (hermetic test host), so the attestation
+    # must not claim kernel-enforcement data it never actually observed.
+    assert "kernel_enforcement" not in att
 
     # — ZERO manual ardur protect: governance ran from an isolated ephemeral
     #   home with its own passport; nothing was written to ~/.claude/settings.json —
@@ -178,6 +186,119 @@ def test_run_governed_rejects_unknown_via(tmp_path: Path, monkeypatch: pytest.Mo
     _hermetic_kernel_env(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="unknown --via"):
         run_governed(command=["true"], via="bogus", home=tmp_path / "h")
+
+
+class _FakeSessionStatusDaemon:
+    """A one-shot AF_UNIX server that replays a canned session_status response."""
+
+    def __init__(self, socket_path: Path, response: dict) -> None:
+        self.socket_path = socket_path
+        self.response = response
+        self.received: dict | None = None
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(socket_path))
+        self._server.listen(1)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            conn, _ = self._server.accept()
+        except OSError:
+            return
+        with conn:
+            buf = b""
+            while b"\n" not in buf:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            line = buf.split(b"\n", 1)[0]
+            try:
+                self.received = json.loads(line.decode("utf-8"))
+            except ValueError:
+                self.received = None
+            conn.sendall(json.dumps(self.response).encode("utf-8") + b"\n")
+
+    def close(self) -> None:
+        self._server.close()
+
+
+class TestKernelEnforcementClaim:
+    """Epic A #63 / plan E3 phase b: the run bridge must be able to fetch a
+    session's kernel-enforcement rollup before folding it into the
+    attestation — and must never let that fetch block finalization.
+    """
+
+    def test_returns_none_when_correlation_was_never_established(self) -> None:
+        correlation = kc.CorrelationResult(available=False, reason="cgroup v2 unavailable")
+        assert _kernel_enforcement_claim("sess-x", correlation) is None
+
+    def test_fetches_enforcement_summary_when_daemon_reachable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sock_dir = Path(tempfile.mkdtemp(dir="/tmp"))
+        try:
+            sock = sock_dir / "c.sock"
+            monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(sock))
+            daemon = _FakeSessionStatusDaemon(
+                sock,
+                {
+                    "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                    "ok": True,
+                    "method": "session_status",
+                    "session_id": "sess-x",
+                    "status": "active",
+                    "enforcement": {"total_events": 2, "verdict_counts": {"denied": 2}},
+                },
+            )
+            try:
+                correlation = kc.CorrelationResult(
+                    available=True, reason="registered", method="cgroup_daemon_register"
+                )
+                result = _kernel_enforcement_claim("sess-x", correlation)
+            finally:
+                daemon.close()
+        finally:
+            shutil.rmtree(sock_dir, ignore_errors=True)
+
+        assert result == {"total_events": 2, "verdict_counts": {"denied": 2}}
+        assert daemon.received is not None
+        assert daemon.received["method"] == "session_status"
+        assert daemon.received["session_status"]["session_id"] == "sess-x"
+
+    def test_degrades_to_none_when_daemon_unreachable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(tmp_path / "no-such-daemon.sock"))
+        correlation = kc.CorrelationResult(available=True, reason="registered")
+        assert _kernel_enforcement_claim("sess-x", correlation) is None
+
+    def test_degrades_to_none_when_daemon_returns_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sock_dir = Path(tempfile.mkdtemp(dir="/tmp"))
+        try:
+            sock = sock_dir / "c.sock"
+            monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(sock))
+            daemon = _FakeSessionStatusDaemon(
+                sock,
+                {
+                    "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                    "ok": False,
+                    "method": "session_status",
+                    "error": "session not found",
+                },
+            )
+            try:
+                correlation = kc.CorrelationResult(available=True, reason="registered")
+                result = _kernel_enforcement_claim("sess-x", correlation)
+            finally:
+                daemon.close()
+        finally:
+            shutil.rmtree(sock_dir, ignore_errors=True)
+
+        assert result is None
 
 
 @pytest.mark.parametrize("command", ([], ["--"]))
