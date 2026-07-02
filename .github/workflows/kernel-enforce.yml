@@ -163,15 +163,17 @@ jobs:
         working-directory: go
         run: go build -o /tmp/ardur-guard-smoke ./cmd/ardur-guard-smoke
 
-      # vng with no -r/--kernel assumes it's being run from inside a built
-      # Linux kernel source tree (it looks for arch/x86/boot/bzImage relative
-      # to cwd — confirmed by CI: "kernel file .../arch/x86/boot/bzImage does
-      # not exist, try --build"). We're not in a kernel tree; point it at the
-      # runner's actual installed/running kernel image instead via -r, which
-      # is "the runner kernel" per the task, not a custom build. --append
-      # adds to that boot's kernel command line only; it does not touch the
-      # host. virtme-ng's guest runs as root by design, which is what loading
-      # a BPF-LSM program and creating a cgroup requires.
+      # `vng --run` (bare, no argument) boots "the same kernel running on the
+      # host" per `vng --help`'s Action section — this is "the runner kernel"
+      # per the task, not a custom build; a bare `vng` (no --run at all)
+      # instead assumes it's invoked from inside a built Linux kernel source
+      # tree and looks for ./arch/x86/boot/bzImage, which doesn't exist here
+      # (confirmed by CI). There is no --kernel flag (also confirmed by CI —
+      # "unrecognized arguments"); commands run inside the guest via --exec,
+      # not a trailing `--` positional (that syntax doesn't exist either).
+      # --append adds to that boot's kernel command line only; it does not
+      # touch the host. virtme-ng's guest runs as root by design, which is
+      # what loading a BPF-LSM program and creating a cgroup requires.
       #
       # The LSM list below is Ubuntu's default stack (see
       # /sys/kernel/security/lsm on a stock GitHub-hosted runner) with "bpf"
@@ -181,12 +183,8 @@ jobs:
         run: |
           VNG="$(command -v vng)"
           test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }
-          KERNEL_IMG="/boot/vmlinuz-$(uname -r)"
-          # vmlinuz is root-only (0600) on Ubuntu; check as root, since that's
-          # what actually reads it below.
-          sudo test -r "$KERNEL_IMG" || { echo "::error::$KERNEL_IMG not readable as root"; sudo ls -la /boot; exit 1; }
           sudo "$VNG" \
             --verbose \
-            --kernel "$KERNEL_IMG" \
+            --run \
             --append "lsm=landlock,lockdown,yama,integrity,apparmor,bpf" \
-            -- /tmp/ardur-guard-smoke
+            --exec /tmp/ardur-guard-smoke
