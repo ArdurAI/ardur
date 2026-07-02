@@ -67,6 +67,10 @@ CLAUDE_REMOTE_TRIGGER_OUTPUT_VERSION_OBSERVED = {
     "2.1.175": False,
     "2.1.176": False,
     "2.1.177": False,
+    "2.1.198": False,
+}
+CLAUDE_REMOTE_TRIGGER_OUTPUT_METADATA_FIELDS_BY_VERSION = {
+    "2.1.198": ["capabilities", "stored.contract", "stored.capabilities"],
 }
 
 
@@ -113,7 +117,7 @@ ADAPTERS: dict[str, AdapterConfig] = {
         visible_boundary="Claude Code ProjectsInput and ProjectsOutput no-key semantic fixture",
         sdk_surface={
             "package": "@anthropic-ai/claude-code",
-            "checked_versions": ["2.1.175", "2.1.176", "2.1.177"],
+            "checked_versions": ["2.1.175", "2.1.176", "2.1.177", "2.1.198"],
             "project_methods": list(CLAUDE_PROJECT_METHODS),
             "source_file": "sdk-tools.d.ts",
             "model": "example-model-name-placeholder",
@@ -1010,7 +1014,14 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
                 "remote_trigger_output": {
                     "fields_observed": ["status", "json", "summary"],
                     "version_field_observed_by_version": dict(CLAUDE_REMOTE_TRIGGER_OUTPUT_VERSION_OBSERVED),
+                    "metadata_fields_observed_by_version": dict(
+                        CLAUDE_REMOTE_TRIGGER_OUTPUT_METADATA_FIELDS_BY_VERSION
+                    ),
                     "boundary": "2.1.175/2.1.176/2.1.177 source surfaces did not expose a version field here",
+                    "source_metadata_boundary": (
+                        "2.1.198 source surface exposes capabilities and stored contract metadata only; "
+                        "no live remote-trigger execution is claimed"
+                    ),
                 },
             },
             "unknown_boundaries": list(CLAUDE_PROJECT_UNKNOWN_BOUNDARIES),

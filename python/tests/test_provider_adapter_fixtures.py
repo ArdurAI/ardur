@@ -328,8 +328,10 @@ def test_claude_project_context_shareable_report_has_no_raw_local_or_project_con
     assert "<MISSION_TEMPLATE>" in combined
 
 
-def test_claude_project_context_source_boundary_fields_do_not_invent_remote_trigger_version(tmp_path: Path) -> None:
-    """Artifact/WebFetch version provenance is distinct from absent RemoteTriggerOutput.version."""
+def test_claude_project_context_source_boundary_fields_do_not_invent_remote_trigger_version(
+    tmp_path: Path,
+) -> None:
+    """Artifact/WebFetch provenance is distinct from RemoteTriggerOutput source metadata."""
 
     report, _out_dir = _run_claude_project_fixture(tmp_path)
     source_boundaries = report["claude_project_context"]["source_boundaries"]
@@ -349,7 +351,15 @@ def test_claude_project_context_source_boundary_fields_do_not_invent_remote_trig
         "2.1.175": False,
         "2.1.176": False,
         "2.1.177": False,
+        "2.1.198": False,
     }
+    assert remote_trigger["metadata_fields_observed_by_version"] == {
+        "2.1.198": ["capabilities", "stored.contract", "stored.capabilities"]
+    }
+    assert remote_trigger["source_metadata_boundary"] == (
+        "2.1.198 source surface exposes capabilities and stored contract metadata only; "
+        "no live remote-trigger execution is claimed"
+    )
     assert "version" not in remote_trigger
 
 

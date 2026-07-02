@@ -74,6 +74,15 @@ REQUIRED_VECTOR_CLASSES = {
         "sdk_output_metadata",
         "unknown",
     },
+    "claude-code-background-dialog-remote-trigger-v2198": {
+        "policy_input",
+        "session_context",
+        "host_runtime_event",
+        "cloud_agent_run",
+        "deployment_context",
+        "sdk_output_metadata",
+        "unknown",
+    },
     "claude-action-allowed-tools-parser": {"cloud_agent_run", "policy_input", "session_context", "unknown"},
     "claude-action-token-cleanup-timeout-best-effort": {
         "cloud_agent_run",
@@ -1565,3 +1574,159 @@ def test_claude_code_reportfindings_vector_preserves_host_reported_boundaries() 
     assert "public readiness/growth" in claim_boundary
     assert "universal cli" in claim_boundary
     assert "credential/file-body handling" in claim_boundary
+
+
+def test_claude_code_background_dialog_remote_trigger_vector_preserves_source_boundary() -> None:
+    """Claude Code 2.1.198 background/dialog/remote-trigger semantics stay source-only."""
+
+    rows = _read_jsonl(VECTORS_PATH)
+    row = next(
+        item
+        for item in rows
+        if item["vector_id"] == "claude-code-background-dialog-remote-trigger-v2198"
+    )
+
+    assert row["source_family"] == "claude-code"
+    assert row["source_pin"]["kind"] == "package"
+    assert "@anthropic-ai/claude-code@2.1.198" in row["source_pin"]["value"]
+    assert "d8fff51260f0aed38691098736c7dd2db201be6f2b9a0d8c2648ded3d64cd0b8" in (
+        row["source_pin"]["value"]
+    )
+    assert "7b4d9466560401cfbf3a6b2c6b371709058aa57a" in row["source_pin"]["value"]
+    assert "085ff76703d0997f50f2fb347857577af6c24c0ab2cd4aac15ea92afb6605422" in (
+        row["source_pin"]["value"]
+    )
+    assert row["source_pin"]["source_snapshot_sha256"] == (
+        "4ae888455d6336643cc5f1756ff11b5c10348db8a460142d55119b2fe69243a3"
+    )
+    assert row["source_pin"]["source_matrix_sha256"] == (
+        "e6bbf6736babe03f2aa20b4adc6b8e038a6dd4922ed70f8d98cf5c595b21bf7b"
+    )
+    assert row["source_pin"]["review_sha256"] == (
+        "c91cdd9456d65851c482f4f2e4373ef10edde6eeb2ca45cd7cbc4abdfbb93fdb"
+    )
+
+    signal = row["source_semantic_signal"]
+    for phrase in (
+        "agents run in the background by default",
+        "run_in_background=false",
+        "TaskStopInput",
+        "afkTimeoutMs",
+        "RemoteTriggerOutput",
+        "capabilities",
+        "stored.contract",
+        "Node >=22.0.0",
+    ):
+        assert phrase in signal
+
+    assert set(row["evidence_classes"]) == REQUIRED_VECTOR_CLASSES[
+        "claude-code-background-dialog-remote-trigger-v2198"
+    ]
+
+    mapping = row["ardur_mapping"]
+    assert mapping["proof_role"] == "source_semantic_background_dialog_remote_trigger_boundary"
+    assert mapping["background_agent_control"] == (
+        "run_in_background_false_requests_synchronous_behavior_source_context"
+    )
+    assert mapping["task_stop_target_boundary"] == (
+        "host_reported_task_id_or_name_for_background_agents_or_teammates_without_stop_success_proof"
+    )
+    assert mapping["dialog_afk_metadata"] == (
+        "afkTimeoutMs_sdk_output_metadata_absent_on_human_resolved_paths"
+    )
+    assert mapping["remote_trigger_metadata_fields"] == [
+        "capabilities",
+        "stored.contract",
+        "stored.capabilities",
+    ]
+    assert mapping["node_engine_precondition"] == "node_gte_22_package_precondition"
+    assert mapping["sdk_tools_d_ts_sha256"] == (
+        "d8fff51260f0aed38691098736c7dd2db201be6f2b9a0d8c2648ded3d64cd0b8"
+    )
+    assert mapping["npm_dist_shasum"] == "7b4d9466560401cfbf3a6b2c6b371709058aa57a"
+    assert mapping["tarball_sha256"] == (
+        "085ff76703d0997f50f2fb347857577af6c24c0ab2cd4aac15ea92afb6605422"
+    )
+    assert mapping["source_index_sha256"] == (
+        "4ae888455d6336643cc5f1756ff11b5c10348db8a460142d55119b2fe69243a3"
+    )
+    assert mapping["focused_probe_sha256"] == (
+        "75dbbc67b3715161961d262e2584aaa2c023809829717a3095601fbb26e996f2"
+    )
+    assert mapping["parent_matrix_sha256"] == (
+        "e6bbf6736babe03f2aa20b4adc6b8e038a6dd4922ed70f8d98cf5c595b21bf7b"
+    )
+    assert mapping["review_sha256"] == (
+        "c91cdd9456d65851c482f4f2e4373ef10edde6eeb2ca45cd7cbc4abdfbb93fdb"
+    )
+    assert mapping["matrix_review_boundary"] == (
+        "no_live_claude_background_dialog_or_remote_trigger_validation"
+    )
+
+    assert set(row["unknown_boundaries"]).issuperset(
+        {
+            "live_claude_code_behavior",
+            "actual_background_agent_scheduling",
+            "actual_synchronous_control",
+            "actual_task_stop_success",
+            "agent_team_identity",
+            "afk_user_presence_truth",
+            "dialog_outcome_truth",
+            "live_remote_trigger_execution",
+            "remote_trigger_capability_truth",
+            "stored_contract_runtime_enforcement",
+            "provider_hidden_behavior",
+            "server_side_actions",
+            "action_runner_side_effects",
+            "runtime_kernel_side_effects",
+            "network_side_effects",
+            "credentials",
+            "provider_api_calls",
+            "release_readiness",
+            "public_readiness",
+            "growth_proof",
+            "universal_cli_capture",
+        }
+    )
+
+    serialized = json.dumps(row, sort_keys=True)
+    for forbidden in (
+        "Bearer",
+        "github_pat_",
+        "raw-secret-value",
+        "BEGIN PRIVATE KEY",
+        "/Users/",
+        "raw file content",
+    ):
+        assert forbidden not in serialized
+
+    not_claimed = " ".join(row["not_claimed"]).lower()
+    for phrase in (
+        "no live claude code run",
+        "provider api call",
+        "background agent",
+        "remote trigger",
+        "actual background scheduling",
+        "taskstop success",
+        "afk/user-presence truth",
+        "source metadata only",
+        "node >=22",
+        "runtime/ebpf",
+        "public readiness",
+        "trust root",
+    ):
+        assert phrase in not_claimed
+
+    claim_boundary = row["claim_boundary"].lower()
+    assert "does not prove live claude code" in claim_boundary
+    assert "background scheduling" in claim_boundary
+    assert "synchronous control" in claim_boundary
+    assert "taskstop success" in claim_boundary
+    assert "afk/user-presence" in claim_boundary
+    assert "live remote-trigger execution" in claim_boundary
+    assert "provider-hidden/server-side" in claim_boundary
+    assert "stored-contract enforcement" in claim_boundary
+    assert "runtime/kernel" in claim_boundary
+    assert "release readiness" in claim_boundary
+    assert "public readiness/growth" in claim_boundary
+    assert "universal cli" in claim_boundary
