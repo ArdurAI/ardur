@@ -1957,7 +1957,7 @@ def _run_has_governance_intent(args: argparse.Namespace) -> bool:
     """
     return any(
         getattr(args, name, None) not in (None, False)
-        for name in ("mission", "allowed_tools", "forbidden_tools", "via", "govern")
+        for name in ("mission", "allowed_tools", "forbidden_tools", "via", "govern", "enforce")
     ) or getattr(args, "max_tool_calls", None) is not None
 
 
@@ -3281,6 +3281,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-kernel-correlation",
         action="store_true",
         help="skip eBPF daemon/cgroup correlation even when available",
+    )
+    run.add_argument(
+        "--enforce",
+        action="store_true",
+        help="abort the run if kernel-level BPF policy enforcement cannot be installed "
+        "(default: permissive — degrade to hook/proxy governance with a recorded note)",
     )
     run.add_argument("command", nargs=argparse.REMAINDER, help="command to run after --")
     run.set_defaults(func=cmd_run)

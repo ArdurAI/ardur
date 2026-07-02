@@ -22,6 +22,18 @@ Wire protocol (one JSON object + ``\\n`` per message, JSON-line framed):
     response: {"protocol_version": "kernelcapture.daemon.v1", "ok": true,
                "method": "register_session", "session_id": ..., "status": ...}
 
+``apply_policy`` (Slice 4.2, go/pkg/kernelcapture/daemon_protocol.go) installs a
+lowered ``bpf_lower.BpfPolicyPlan`` into the six BPF enforcement maps for the
+session's cgroup:
+
+    request:  {"protocol_version": "kernelcapture.daemon.v1",
+               "method": "apply_policy",
+               "apply_policy": {"session_id": ..., "op_policies": [...],
+                                "path_allow": [...], "net_allow": [...],
+                                "generation": ..., "enforce_mode": ...}}
+    response: {"protocol_version": "kernelcapture.daemon.v1", "ok": true,
+               "method": "apply_policy", "session_id": ...}
+
 The daemon authenticates the peer at the socket layer (SO_PEERCRED on Linux),
 so the client carries no token. Daemon-owned path fields and peer-identity
 fields are rejected by the daemon if a client tries to smuggle them in; this
@@ -36,7 +48,10 @@ import socket
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .bpf_lower import BpfPolicyPlan
 
 # Must track go/pkg/kernelcapture/daemon_protocol.go.
 DAEMON_PROTOCOL_VERSION = "kernelcapture.daemon.v1"
@@ -170,6 +185,48 @@ class KernelCaptureClient:
                 "protocol_version": DAEMON_PROTOCOL_VERSION,
                 "method": "register_session",
                 "register_session": register,
+            }
+        )
+
+    def apply_policy(
+        self,
+        *,
+        session_id: str,
+        plan: BpfPolicyPlan,
+        generation: int,
+    ) -> dict[str, Any]:
+        """Install a lowered BPF policy plan for ``session_id``'s cgroup.
+
+        Encodes ``plan`` (the ``bpf_lower.lower_to_bpf_policy_plan`` output)
+        into the wire-format ``DaemonApplyPolicyRequest`` the Go daemon expects
+        (``go/pkg/kernelcapture/daemon_protocol.go``). ``generation`` must be a
+        positive, per-session-monotonic counter: the BPF program treats 0 as
+        "uninitialized" and the daemon rejects it. Deep validation (op/action/
+        enforce_mode enum values, duplicate ops, absolute paths) happens
+        daemon-side; a rejection surfaces as :class:`DaemonProtocolError`.
+        """
+        if not session_id:
+            raise ValueError("session_id is required")
+        if generation <= 0:
+            raise ValueError("generation must be a positive integer")
+        apply_policy: dict[str, Any] = {
+            "session_id": session_id,
+            "op_policies": [
+                {"op": entry.op, "action": entry.action, "enforce_mode": entry.enforce_mode}
+                for entry in plan.op_policies
+            ],
+            "generation": int(generation),
+            "enforce_mode": plan.enforce_mode,
+        }
+        if plan.path_allow:
+            apply_policy["path_allow"] = list(plan.path_allow)
+        if plan.net_allow:
+            apply_policy["net_allow"] = list(plan.net_allow)
+        return self._roundtrip(
+            {
+                "protocol_version": DAEMON_PROTOCOL_VERSION,
+                "method": "apply_policy",
+                "apply_policy": apply_policy,
             }
         )
 
