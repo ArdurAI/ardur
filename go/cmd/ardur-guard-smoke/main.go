@@ -251,15 +251,33 @@ func setupSmokeCgroup(cgroupDir string) (uint64, *os.File, error) {
 	return st.Ino, f, nil
 }
 
-// resolvedTempDir creates a fresh temp directory and resolves any symlinks
-// in its path. guard_file_open resolves the path it checks via bpf_d_path
-// (the kernel's canonical view, symlinks and all already followed), so a
-// path_allow entry must be given in the same resolved form or an
-// environment where the temp dir's parent happens to be a symlink (not
-// expected on the kernel-smoke runner, but cheap to guard against) would
-// make an intentionally-allowed write look like a false DENY.
+// tempDirBase is /dev/shm, not the OS default (os.MkdirTemp("", ...), which
+// resolves to /tmp). Confirmed on a real kernel-smoke run: virtme-ng's guest
+// mounts /tmp (along with /etc, /lib, /home, /opt, /srv, /usr, /var) as an
+// overlayfs so the runner's read-only host root can be written to at all —
+// and EVM (Extended Verification Module, one of several LSMs active
+// alongside "bpf" in this guest regardless of what --append requests; see
+// this file's own history in kernel-enforce.yml for that precedent) logs
+// "evm: overlay not supported" at boot and then independently vetoes
+// file_open on writes under that overlay with EPERM. This is a completely
+// separate LSM decision from process_guard's — confirmed by the
+// enforce_events log on the failing run, which showed process_guard
+// correctly returning ALLOW (action=0) for the exact same open() that still
+// failed. /dev/shm is a plain tmpfs, outside virtme-ng's overlay set and not
+// subject to this EVM interaction, so it exercises this scenario's actual
+// subject (process_guard's ACT_ALLOWLIST decision) without an unrelated LSM
+// getting in the way.
+const tempDirBase = "/dev/shm"
+
+// resolvedTempDir creates a fresh temp directory under tempDirBase and
+// resolves any symlinks in its path. guard_file_open resolves the path it
+// checks via bpf_d_path (the kernel's canonical view, symlinks and all
+// already followed), so a path_allow entry must be given in the same
+// resolved form or an environment where the temp dir's parent happens to be
+// a symlink would make an intentionally-allowed write look like a false
+// DENY.
 func resolvedTempDir(pattern string) (string, error) {
-	dir, err := os.MkdirTemp("", pattern)
+	dir, err := os.MkdirTemp(tempDirBase, pattern)
 	if err != nil {
 		return "", err
 	}
