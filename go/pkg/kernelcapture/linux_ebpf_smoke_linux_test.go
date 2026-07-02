@@ -4,9 +4,14 @@ package kernelcapture
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/cilium/ebpf/rlimit"
 )
 
 func TestLinuxEBPFExecSmoke(t *testing.T) {
@@ -298,4 +303,86 @@ func TestLinuxEBPFCgroupFilterNegativeSmoke(t *testing.T) {
 		result.NegativeTargetPID,
 		result.NegativeTimedOut,
 	)
+}
+
+// TestLinuxEBPFPinnedRestartSmoke proves LoadAndAttachProcessExecEBPFPinned's
+// restart path: a second load against the same bpffs paths must bind its
+// ringbuf reader to the exact map the still-attached (pinned) programs write
+// into, not a freshly created map that nothing feeds. See issue #95.
+func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF pinned-restart smoke")
+	}
+
+	_ = rlimit.RemoveMemlock()
+
+	dir := filepath.Join("/sys/fs/bpf", fmt.Sprintf("ardur-test-restart-%d", os.Getpid()))
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	paths := PinnedEBPFPaths{
+		ExecLinkPath:  filepath.Join(dir, "exec_tp_link"),
+		ExitLinkPath:  filepath.Join(dir, "exit_tp_link"),
+		EventsMapPath: filepath.Join(dir, "process_lifecycle_events"),
+	}
+
+	// ── First "boot": fresh load, attach, and pin. ──────────────────────
+	first, err := LoadAndAttachProcessExecEBPFPinned(paths)
+	if err != nil {
+		t.Fatalf("first LoadAndAttachProcessExecEBPFPinned: %v", err)
+	}
+	for _, p := range []string{paths.ExecLinkPath, paths.ExitLinkPath, paths.EventsMapPath} {
+		// A plain open(2) on a pinned bpf_link returns EIO (links require
+		// the BPF_OBJ_GET syscall path, unlike pinned maps/regular files),
+		// so check pin existence with Lstat rather than fileReadable.
+		if _, statErr := os.Lstat(p); statErr != nil {
+			first.Close()
+			t.Fatalf("expected pin at %s after first load: %v", p, statErr)
+		}
+	}
+
+	// Close the Go-side handles WITHOUT unpinning: this simulates the daemon
+	// process exiting while the kernel keeps the pinned links (and thus the
+	// attached programs) alive, per the documented Close contract.
+	first.Close()
+
+	// ── "Restart": reload from the same pins. ───────────────────────────
+	second, err := LoadAndAttachProcessExecEBPFPinned(paths)
+	if err != nil {
+		t.Fatalf("second (restart) LoadAndAttachProcessExecEBPFPinned: %v", err)
+	}
+	defer second.Close()
+
+	source := NewRingbufProcessSourceFromRingbufReader(second.Reader())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "/usr/bin/true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start restart-probe command: %v", err)
+	}
+	targetPID := uint32(cmd.Process.Pid)
+	scope := SessionScope{PIDs: map[uint32]struct{}{targetPID: {}}}
+
+	haveExec, haveExit := false, false
+	for !(haveExec && haveExit) {
+		evt, ok, err := source.Next(ctx, scope)
+		if err != nil {
+			t.Fatalf("read ringbuf event from restarted handles (exec=%t exit=%t): %v", haveExec, haveExit, err)
+		}
+		if !ok {
+			continue
+		}
+		switch evt.Type {
+		case ProcessEventExec:
+			haveExec = true
+		case ProcessEventExit:
+			haveExit = true
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("restart-probe command failed: %v", err)
+	}
+	if !haveExec || !haveExit {
+		t.Fatalf("restart handles observed no events for pid %d: exec=%t exit=%t", targetPID, haveExec, haveExit)
+	}
 }

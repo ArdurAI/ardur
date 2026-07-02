@@ -5,6 +5,7 @@ package kernelcapture
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -18,7 +19,12 @@ type ProcessExecEBPFHandles struct {
 	objs   processExecObjects
 	execTP link.Link
 	exitTP link.Link
-	reader *ringbuf.Reader
+	// eventsMap is only set when reusing a pinned ringbuf map across a
+	// daemon restart (see LoadAndAttachProcessExecEBPFPinned); on a fresh
+	// load the map is owned by objs instead. Close must release it either
+	// way.
+	eventsMap *ebpf.Map
+	reader    *ringbuf.Reader
 }
 
 // Reader returns the ringbuf.Reader for consuming process lifecycle events.
@@ -33,6 +39,9 @@ func (h *ProcessExecEBPFHandles) Close() {
 	}
 	if h.reader != nil {
 		_ = h.reader.Close()
+	}
+	if h.eventsMap != nil {
+		_ = h.eventsMap.Close()
 	}
 	if h.exitTP != nil {
 		_ = h.exitTP.Close()
@@ -103,30 +112,42 @@ type PinnedEBPFPaths struct {
 	ExecLinkPath string
 	// ExitLinkPath is the bpffs pin path for the exit tracepoint link.
 	ExitLinkPath string
+	// EventsMapPath is the bpffs pin path for the process-lifecycle ringbuf
+	// map. A restart reuses this exact map so the reader stays bound to
+	// whatever the pinned (still-attached) programs are writing into.
+	EventsMapPath string
 }
 
 // DefaultPinnedEBPFPaths returns the standard bpffs pin paths under the
-// ardur-owned bpffs namespace (/sys/fs/bpf/ardur/).
+// ardur-owned bpffs namespace (/sys/fs/bpf/ardur/). EventsMapPath matches the
+// ringbuf map path recorded by BuildDaemonCustodyPlan.
 func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 	return PinnedEBPFPaths{
-		ExecLinkPath: "/sys/fs/bpf/ardur/exec_tp_link",
-		ExitLinkPath: "/sys/fs/bpf/ardur/exit_tp_link",
+		ExecLinkPath:  "/sys/fs/bpf/ardur/exec_tp_link",
+		ExitLinkPath:  "/sys/fs/bpf/ardur/exit_tp_link",
+		EventsMapPath: "/sys/fs/bpf/ardur/process_lifecycle_events",
 	}
 }
 
 // LoadAndAttachProcessExecEBPFPinned is like LoadAndAttachProcessExecEBPF but
-// adds BPF link-pinning for restart survival.
+// adds BPF link- and map-pinning for restart survival.
 //
-// On first start (no pinned links at paths): loads and attaches the eBPF
-// program as usual, then pins both tracepoint links to bpffs. The pins keep
-// the links — and thus the attached programs — alive in the kernel even after
-// the daemon exits. A ringbuf map pin is also created so no events are lost
-// during the restart gap.
+// On first start (no pinned state at paths): loads and attaches the eBPF
+// program as usual, then pins both tracepoint links and the ringbuf map to
+// bpffs. The pins keep the links — and thus the attached programs — alive in
+// the kernel even after the daemon exits, and keep the ringbuf map reachable
+// so no events are lost during the restart gap.
 //
-// On restart (pinned links exist at paths): loads the pinned links back
-// without re-attaching, which avoids a brief window where the tracepoints are
-// detached. The eBPF program has been continuously running in the kernel since
-// the prior daemon start.
+// On restart (pinned links AND the pinned ringbuf map all exist at paths):
+// loads the pinned links back without re-attaching, which avoids a brief
+// window where the tracepoints are detached, and loads the pinned map to open
+// a new reader bound to the exact map the still-attached programs write into.
+// The eBPF program has been continuously running in the kernel since the
+// prior daemon start.
+//
+// If any of the three pins is missing (e.g. a prior pin attempt partially
+// failed), the pinned state is treated as unusable and the function falls
+// back to a fresh load/attach/pin, matching first-start behavior.
 //
 // If pinning fails (e.g., bpffs not mounted, insufficient permissions), the
 // function returns the handles without pins and logs the failure. The daemon
@@ -136,30 +157,24 @@ func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 // remove the bpffs pins; they are intentionally left for the next daemon
 // start. To remove pins call os.Remove on the PinnedEBPFPaths.
 func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPFHandles, error) {
-	// ── Try to reuse pinned links from a previous daemon run ──────────────
-	if execLink, exitLink, ok := tryLoadPinnedLinks(paths); ok {
-		// Both links are alive — the eBPF programs are still attached in the
-		// kernel. We only need a fresh ringbuf reader.
-		h := &ProcessExecEBPFHandles{
-			execTP: execLink,
-			exitTP: exitLink,
-		}
-		// Load fresh eBPF objects to get access to the ringbuf map for a new
-		// reader. The loaded programs/maps co-exist with the pinned ones.
-		if err := loadProcessExecObjects(&h.objs, nil); err != nil {
-			execLink.Close()
-			exitLink.Close()
-			return nil, fmt.Errorf("load eBPF objects for ringbuf reader: %w", err)
-		}
-		reader, err := ringbuf.NewReader(h.objs.Events)
+	// ── Try to reuse pinned links + map from a previous daemon run ────────
+	if execLink, exitLink, eventsMap, ok := tryLoadPinnedState(paths); ok {
+		// The links are alive — the eBPF programs are still attached in the
+		// kernel and writing into eventsMap. Open a reader bound to that
+		// same map so restart doesn't lose the events the programs emit.
+		reader, err := ringbuf.NewReader(eventsMap)
 		if err != nil {
-			h.objs.Close()
-			execLink.Close()
-			exitLink.Close()
+			_ = eventsMap.Close()
+			_ = exitLink.Close()
+			_ = execLink.Close()
 			return nil, fmt.Errorf("open ringbuf reader (pinned restart): %w", err)
 		}
-		h.reader = reader
-		return h, nil
+		return &ProcessExecEBPFHandles{
+			execTP:    execLink,
+			exitTP:    exitLink,
+			eventsMap: eventsMap,
+			reader:    reader,
+		}, nil
 	}
 
 	// ── Fresh load and attach ──────────────────────────────────────────────
@@ -168,32 +183,44 @@ func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPF
 		return nil, err
 	}
 
-	// Ensure the bpffs directory exists before pinning.
-	if mkErr := os.MkdirAll("/sys/fs/bpf/ardur", 0o700); mkErr == nil {
-		// Pin exec link; non-fatal on failure.
+	// Ensure the bpffs directories for all three pin paths exist, then pin
+	// the exec link, exit link, and ringbuf map; each Pin is non-fatal on
+	// failure. A partial pin (e.g. links pinned but the map pin fails) makes
+	// tryLoadPinnedState fail on the next restart, which falls back to this
+	// fresh-load path again rather than reusing a stale link.
+	if mkErr := os.MkdirAll(filepath.Dir(paths.ExecLinkPath), 0o700); mkErr == nil {
 		_ = h.execTP.Pin(paths.ExecLinkPath)
-		// Pin exit link; non-fatal on failure.
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(paths.ExitLinkPath), 0o700); mkErr == nil {
 		_ = h.exitTP.Pin(paths.ExitLinkPath)
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(paths.EventsMapPath), 0o700); mkErr == nil {
+		_ = h.objs.Events.Pin(paths.EventsMapPath)
 	}
 
 	return h, nil
 }
 
-// tryLoadPinnedLinks attempts to load both tracepoint links from bpffs.
-// Returns (execLink, exitLink, true) if both succeed; otherwise closes any
-// partially-opened link and returns (nil, nil, false).
-func tryLoadPinnedLinks(paths PinnedEBPFPaths) (link.Link, link.Link, bool) {
+// tryLoadPinnedState attempts to load both tracepoint links and the ringbuf
+// map from bpffs. Returns ok=true only if all three succeed; otherwise it
+// closes any partially-opened handles and returns ok=false so the caller
+// falls back to a fresh load rather than binding a reader to a map the
+// attached programs are not writing into.
+func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, eventsMap *ebpf.Map, ok bool) {
 	execLink, err := link.LoadPinnedLink(paths.ExecLinkPath, nil)
 	if err != nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	exitLink, err := link.LoadPinnedLink(paths.ExitLinkPath, nil)
+	exitLink, err = link.LoadPinnedLink(paths.ExitLinkPath, nil)
 	if err != nil {
 		_ = execLink.Close()
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return execLink, exitLink, true
+	eventsMap, err = ebpf.LoadPinnedMap(paths.EventsMapPath, nil)
+	if err != nil {
+		_ = exitLink.Close()
+		_ = execLink.Close()
+		return nil, nil, nil, false
+	}
+	return execLink, exitLink, eventsMap, true
 }
-
-// ensure ebpf package import is used (bpf2go generated code also imports it)
-var _ = (*ebpf.CollectionSpec)(nil)
