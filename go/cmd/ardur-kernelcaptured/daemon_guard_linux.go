@@ -5,24 +5,22 @@ package main
 // daemon_guard_linux.go — BPF-LSM guard program integration for the daemon (Linux only).
 //
 // Slice 4.2: loads process_guard.bpf.c (BPF-LSM), populates d.policyMaps so
-// that handleApplyPolicy can write to the BPF enforcement maps, and consumes
-// the enforce_events ringbuf to produce BpfEnforceEvent records that are
-// correlated against registered sessions and appended to evidence logs.
+// that handleApplyPolicy can write to the BPF enforcement maps, and feeds the
+// enforce_events ringbuf into the platform-independent processing pipeline in
+// daemon_enforce.go (decode, sequence, hash-chain, correlate — added in #100
+// ahead of this file landing, exactly for this to plug into: see that file's
+// header comment).
 //
 // Graceful degrade: if BPF-LSM is unavailable (BTF missing, "bpf" not in the
 // active LSM list, or capability failure), the guard is skipped with a warning.
 // The exec tracepoint consumer (daemon_linux.go/runEBPFConsumer) and the socket
 // control plane continue to operate normally.
-//
-// See daemon_guard_common.go for the platform-independent decode/routing
-// logic (decodeEnforceEvent, processEnforceEvent, enforceEventVerdict).
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 	"github.com/cilium/ebpf/ringbuf"
@@ -64,39 +62,52 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 		"hooks", "bprm_check_security, lsm.s/file_open, socket_connect",
 	)
 
-	return consumeEnforceEvents(ctx, handles.Reader(), d, log)
+	// ringbuf.Reader.Read() blocks with no context awareness of its own; close
+	// it on ctx cancellation to unblock a pending read, the same pattern
+	// DaemonUnixSocketServer.Serve uses for its accept loop.
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = handles.Reader().Close()
+		case <-stop:
+		}
+	}()
+	defer close(stop)
+
+	return consumeEnforceEvents(ctx, ringbufEnforceEventReader{handles.Reader()}, d, log)
 }
 
-// consumeEnforceEvents reads raw BPfEnforceEvent structs from the ringbuf,
-// decodes them, correlates them to registered sessions, and appends evidence.
+// ringbufEnforceEventReader adapts *ringbuf.Reader to the enforceEventReader
+// interface consumeEnforceEvents (daemon_enforce.go) expects, so that
+// platform-independent pipeline can be built and tested without depending on
+// cilium/ebpf/ringbuf directly.
 //
-// Note: unlike perf.Record, cilium/ebpf's ringbuf.Record carries no lost-sample
-// counter — BPF_MAP_TYPE_RINGBUF reservation failures happen inside the BPF
-// program (emit_event's bpf_ringbuf_reserve returning NULL) and are not
-// surfaced to the userspace reader, so there is nothing to count here.
-func consumeEnforceEvents(ctx context.Context, reader *ringbuf.Reader, d *daemon, log *slog.Logger) error {
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+// ringbuf.ErrClosed (the reader closed under it, e.g. by the ctx.Done()
+// watcher in runGuardConsumer) maps to io.EOF, consumeEnforceEvents' signal
+// to stop cleanly. Any other error is wrapped and returned as-is;
+// consumeEnforceEvents itself re-checks ctx.Err() after a read failure and
+// prefers that as the returned error when it's set, so there's no need to
+// pattern-match cancellation-flavored error text here too.
+//
+// LostSamples is always 0: unlike perf.Record, cilium/ebpf's ringbuf.Record
+// carries no lost-sample counter at any version — BPF_MAP_TYPE_RINGBUF
+// reservation failures happen inside the BPF program itself (emit_event's
+// bpf_ringbuf_reserve returning NULL) and are never surfaced to the
+// userspace reader. There is nothing this adapter can report here; the field
+// exists in enforceEventRecord for a future producer that can supply it
+// (e.g. a perf-buffer-backed transport), not for this one.
+type ringbufEnforceEventReader struct {
+	r *ringbuf.Reader
+}
 
-		record, err := reader.Read()
-		if err != nil {
-			if err == io.EOF || err == ringbuf.ErrClosed {
-				return nil
-			}
-			if strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "deadline exceeded") {
-				return ctx.Err()
-			}
-			return fmt.Errorf("enforce_events ringbuf read: %w", err)
+func (a ringbufEnforceEventReader) Read() (enforceEventRecord, error) {
+	record, err := a.r.Read()
+	if err != nil {
+		if err == ringbuf.ErrClosed {
+			return enforceEventRecord{}, io.EOF
 		}
-
-		ev, err := decodeEnforceEvent(record.RawSample)
-		if err != nil {
-			log.Warn("decode enforce_event failed", "error", err)
-			continue
-		}
-
-		d.processEnforceEvent(ev, log)
+		return enforceEventRecord{}, fmt.Errorf("enforce_events ringbuf read: %w", err)
 	}
+	return enforceEventRecord{RawSample: record.RawSample}, nil
 }
