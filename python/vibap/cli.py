@@ -1920,7 +1920,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     except HubError as exc:
         return _path_failure_exit_code(exc)
     _print_json(response)
-    return 0
+    return 0 if response.get("ok") else 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -3186,7 +3186,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup = subparsers.add_parser("setup", help="configure Ardur Personal on this Mac")
     setup.add_argument("--host", default=DEFAULT_HUB_HOST, help="Hub bind address")
-    setup.add_argument("--port", type=int, default=DEFAULT_HUB_PORT, help="Hub port")
+    setup.add_argument("--port", default=DEFAULT_HUB_PORT, help="Hub port")
     setup.add_argument("--home", type=Path, help="Ardur Personal home directory")
     setup.add_argument(
         "--rotate-token",

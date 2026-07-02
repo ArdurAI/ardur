@@ -63,6 +63,8 @@ HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
 PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
+SETUP_HOST_INVALID_CONDITION = "setup_host_invalid"
+SETUP_PORT_INVALID_CONDITION = "setup_port_invalid"
 _QUERY_TOKEN_LOG_RE = re.compile(
     r"([?&](?:access[-_]?token|api[-_]?key|auth|key|password|secret|token)=)[^\s&\"']+",
     re.I,
@@ -187,6 +189,151 @@ def personal_home_failure_response() -> dict[str, Any]:
         ),
         "next_steps": personal_home_failure_next_steps(),
     }
+
+
+def setup_port_failure_next_steps() -> list[dict[str, str]]:
+    condition = SETUP_PORT_INVALID_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_setup_port",
+            "command": "ardur setup --home <ardur-home> --host <loopback-host> --port <setup-port>",
+            "detail": (
+                "Use an integer TCP port from 1 through 65535 for setup. "
+                "Do not include signs, whitespace, or non-numeric text."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_default_loopback_setup",
+            "command": "ardur setup --home <ardur-home> --host 127.0.0.1 --port <setup-port>",
+            "detail": (
+                "Choose a stable loopback Hub port before generating local config, "
+                "tokens, or launch-agent files."
+            ),
+        },
+    ]
+
+
+def setup_port_failure_response() -> dict[str, Any]:
+    condition = SETUP_PORT_INVALID_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur setup port must be a stable TCP port.",
+        "detail": "Choose an integer port from 1 through 65535 before running setup.",
+        "next_steps": setup_port_failure_next_steps(),
+    }
+
+
+def setup_host_failure_next_steps() -> list[dict[str, str]]:
+    condition = SETUP_HOST_INVALID_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_setup_host",
+            "command": "ardur setup --home <ardur-home> --host <loopback-host> --port <setup-port>",
+            "detail": (
+                "Pass only a bindable host name or IP address. Do not include URL "
+                "schemes, ports, paths, credentials, empty values, or surrounding whitespace."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_loopback_host",
+            "command": "ardur setup --home <ardur-home> --host 127.0.0.1 --port <setup-port>",
+            "detail": (
+                "Use a loopback host for local setup, then run doctor with placeholder-only "
+                "diagnostics if setup still fails."
+            ),
+        },
+    ]
+
+
+def setup_host_failure_response() -> dict[str, Any]:
+    condition = SETUP_HOST_INVALID_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur setup host must be a bindable host name or IP address.",
+        "detail": (
+            "Choose a host value that can be bound locally before setup. Use --port "
+            "for the port; do not include a URL scheme, path, or empty host."
+        ),
+        "next_steps": setup_host_failure_next_steps(),
+    }
+
+
+def _validated_setup_port(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        port = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or stripped != value or not re.fullmatch(r"[0-9]+", stripped):
+            return None
+        port = int(stripped)
+    else:
+        return None
+    if 1 <= port <= 65535:
+        return port
+    return None
+
+
+def _setup_host_has_url_shape(host: str) -> bool:
+    try:
+        parsed = urlparse.urlsplit(host)
+    except ValueError:
+        return True
+    return bool(
+        "://" in host
+        or host.startswith("//")
+        or "/" in host
+        or "?" in host
+        or "#" in host
+        or (parsed.scheme and not host.startswith("["))
+        or parsed.netloc
+    )
+
+
+def _setup_host_is_bindable(host: str) -> bool:
+    import socket
+
+    try:
+        candidates = socket.getaddrinfo(host, 0, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    for family, socktype, proto, _canonname, sockaddr in candidates:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.bind(sockaddr)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def _validated_setup_host(value: Any) -> str | None:
+    host_value = str(value)
+    stripped = host_value.strip()
+    if (
+        not stripped
+        or stripped != host_value
+        or _setup_host_has_url_shape(stripped)
+        or not _setup_host_is_bindable(stripped)
+    ):
+        return None
+    return stripped
+
+
+def _setup_hub_url(host: str, port: int) -> str:
+    url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return f"http://{url_host}:{port}"
 
 
 def _is_personal_home_not_directory_error(exc: HubError) -> bool:
@@ -1640,14 +1787,21 @@ def _print_run_missing_command_next_steps() -> None:
 
 def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
+    validate_personal_home_directory(paths)
+    port = _validated_setup_port(getattr(args, "port", DEFAULT_HUB_PORT))
+    if port is None:
+        return setup_port_failure_response()
+    host = _validated_setup_host(getattr(args, "host", DEFAULT_HUB_HOST))
+    if host is None:
+        return setup_host_failure_response()
     _ensure_personal_home_directory(paths)
     config = _ensure_hub_config(
         paths,
-        hub_url=f"http://{args.host}:{args.port}",
+        hub_url=_setup_hub_url(host, port),
         browser_extension_path=str(Path(args.extension_path).expanduser()) if args.extension_path else None,
         rotate_token=bool(getattr(args, "rotate_token", False)),
     )
-    launch_agent = _write_launch_agent(paths, args.host, args.port)
+    launch_agent = _write_launch_agent(paths, host, port)
     return {
         "ok": True,
         "home": str(paths.home),

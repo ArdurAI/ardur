@@ -297,6 +297,113 @@ def test_setup_existing_file_home_fails_closed_without_path_leak(tmp_path, capsy
         assert marker not in combined_output
 
 
+def _assert_no_setup_artifacts(home, user_home):
+    assert not (home / "config.json").exists()
+    assert not (home / "state").exists()
+    assert not (home / "keys").exists()
+    assert not (home / "governance_log.jsonl").exists()
+    assert not (home / "receipts.jsonl").exists()
+    assert not (home / "sessions_index.json").exists()
+    assert not (home / "session_reviews.json").exists()
+    assert not (
+        user_home / "Library" / "LaunchAgents" / "dev.ardur.personal-hub.plist"
+    ).exists()
+
+
+def _assert_setup_validation_response(
+    *,
+    rc: int,
+    stdout: str,
+    stderr: str,
+    condition: str,
+    raw_input: str,
+    home,
+    tmp_path,
+):
+    result = json.loads(stdout)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert stderr == ""
+    assert result["ok"] is False
+    assert result["condition"] == condition
+    assert result["error"] == condition
+    assert result["error_code"] == condition
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+    for marker in (
+        "Traceback",
+        "ValueError",
+        "OverflowError",
+        "gaierror",
+        str(home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in rendered
+    if raw_input and raw_input not in {"0", " 127.0.0.1"}:
+        assert raw_input not in rendered
+
+
+@pytest.mark.parametrize("port", ["-1", "0", "70000", "not-a-port", "", " 8765"])
+def test_setup_invalid_port_fails_closed_before_config_token_or_launch_agent(
+    tmp_path, monkeypatch, capsys, port
+):
+    from vibap import cli as cli_module
+
+    user_home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(user_home))
+    home = tmp_path / "ardur-home"
+
+    rc = cli_module.main(["setup", "--home", str(home), "--port", port])
+    captured = capsys.readouterr()
+
+    _assert_setup_validation_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        condition=personal_hub.SETUP_PORT_INVALID_CONDITION,
+        raw_input=port,
+        home=home,
+        tmp_path=tmp_path,
+    )
+    _assert_no_setup_artifacts(home, user_home)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["", " 127.0.0.1", "http://127.0.0.1", "http://[", "127.0.0.1:8765"],
+)
+def test_setup_invalid_host_fails_closed_before_config_token_or_launch_agent(
+    tmp_path, monkeypatch, capsys, host
+):
+    from vibap import cli as cli_module
+
+    user_home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(user_home))
+    home = tmp_path / "ardur-home"
+
+    rc = cli_module.main(["setup", "--home", str(home), "--host", host])
+    captured = capsys.readouterr()
+
+    _assert_setup_validation_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        condition=personal_hub.SETUP_HOST_INVALID_CONDITION,
+        raw_input=host,
+        home=home,
+        tmp_path=tmp_path,
+    )
+    _assert_no_setup_artifacts(home, user_home)
+
+
 def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_leak(
     tmp_path, monkeypatch, capsys
 ):
