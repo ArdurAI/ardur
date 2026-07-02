@@ -17,6 +17,7 @@ const (
 	DaemonProtocolMethodEndSession      = "end_session"
 	DaemonProtocolMethodSessionStatus   = "session_status"
 	DaemonProtocolMethodApplyPolicy     = "apply_policy"
+	DaemonProtocolMethodSetKillSwitch   = "set_kill_switch"
 
 	DaemonProtocolEventProcessLifecycle = "process_lifecycle"
 
@@ -42,6 +43,17 @@ type DaemonProtocolRequest struct {
 	EndSession      *DaemonEndSessionRequest      `json:"end_session,omitempty"`
 	SessionStatus   *DaemonSessionStatusRequest   `json:"session_status,omitempty"`
 	ApplyPolicy     *DaemonApplyPolicyRequest     `json:"apply_policy,omitempty"`
+	SetKillSwitch   *DaemonSetKillSwitchRequest   `json:"set_kill_switch,omitempty"`
+}
+
+// DaemonSetKillSwitchRequest engages or disengages the global BPF-LSM
+// kill switch. Engaged=true suspends all enforcement (every op passes
+// through); false re-enables enforcement per the currently applied policy.
+// This is a global, not per-session, control — like health, it carries no
+// session_id; peer authorization (UID/GID allowlist) is what gates who may
+// call it, the same as every other method.
+type DaemonSetKillSwitchRequest struct {
+	Engaged bool `json:"engaged"`
 }
 
 // DaemonApplyPolicyRequest installs or replaces the BPF enforcement policy for
@@ -53,12 +65,12 @@ type DaemonProtocolRequest struct {
 // apply for this session.  The BPF program uses the generation to detect stale
 // map entries left over from a prior policy cycle.
 type DaemonApplyPolicyRequest struct {
-	SessionID   string             `json:"session_id"`
-	OpPolicies  []DaemonOpPolicy   `json:"op_policies"`
-	PathAllow   []string           `json:"path_allow,omitempty"`
-	NetAllow    []string           `json:"net_allow,omitempty"` // CIDR strings (IPv4 or IPv6)
+	SessionID   string              `json:"session_id"`
+	OpPolicies  []DaemonOpPolicy    `json:"op_policies"`
+	PathAllow   []string            `json:"path_allow,omitempty"`
+	NetAllow    []string            `json:"net_allow,omitempty"` // CIDR strings (IPv4 or IPv6)
 	Generation  BpfPolicyGeneration `json:"generation"`
-	EnforceMode BpfEnforceMode     `json:"enforce_mode"` // default mode for no-rule ops
+	EnforceMode BpfEnforceMode      `json:"enforce_mode"` // default mode for no-rule ops
 }
 
 // DaemonOpPolicy is one (op, action, enforce_mode) triple in an apply_policy
@@ -171,7 +183,7 @@ func DecodeDaemonProtocolResponse(data []byte) (DaemonProtocolResponse, error) {
 	switch resp.Method {
 	case "", DaemonProtocolMethodHealth, DaemonProtocolMethodRegisterSession,
 		DaemonProtocolMethodEndSession, DaemonProtocolMethodSessionStatus,
-		DaemonProtocolMethodApplyPolicy:
+		DaemonProtocolMethodApplyPolicy, DaemonProtocolMethodSetKillSwitch:
 	default:
 		return DaemonProtocolResponse{}, fmt.Errorf("%w: unknown response method %q", ErrDaemonProtocol, resp.Method)
 	}
@@ -184,33 +196,37 @@ func ValidateDaemonProtocolRequest(req DaemonProtocolRequest) error {
 	}
 	switch req.Method {
 	case DaemonProtocolMethodHealth:
-		if req.Health == nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil {
+		if req.Health == nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: health request must include only health payload", ErrDaemonProtocol)
 		}
 	case DaemonProtocolMethodRegisterSession:
-		if req.RegisterSession == nil || req.Health != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil {
+		if req.RegisterSession == nil || req.Health != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: register_session request must include only register_session payload", ErrDaemonProtocol)
 		}
 		return validateDaemonRegisterSession(*req.RegisterSession)
 	case DaemonProtocolMethodEndSession:
-		if req.EndSession == nil || req.Health != nil || req.RegisterSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil {
+		if req.EndSession == nil || req.Health != nil || req.RegisterSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: end_session request must include only end_session payload", ErrDaemonProtocol)
 		}
 		if strings.TrimSpace(req.EndSession.SessionID) == "" {
 			return fmt.Errorf("%w: end_session session_id is required", ErrDaemonProtocol)
 		}
 	case DaemonProtocolMethodSessionStatus:
-		if req.SessionStatus == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.ApplyPolicy != nil {
+		if req.SessionStatus == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: session_status request must include only session_status payload", ErrDaemonProtocol)
 		}
 		if strings.TrimSpace(req.SessionStatus.SessionID) == "" {
 			return fmt.Errorf("%w: session_status session_id is required", ErrDaemonProtocol)
 		}
 	case DaemonProtocolMethodApplyPolicy:
-		if req.ApplyPolicy == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil {
+		if req.ApplyPolicy == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: apply_policy request must include only apply_policy payload", ErrDaemonProtocol)
 		}
 		return validateDaemonApplyPolicy(*req.ApplyPolicy)
+	case DaemonProtocolMethodSetKillSwitch:
+		if req.SetKillSwitch == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil {
+			return fmt.Errorf("%w: set_kill_switch request must include only set_kill_switch payload", ErrDaemonProtocol)
+		}
 	default:
 		return fmt.Errorf("%w: unknown method %q", ErrDaemonProtocol, req.Method)
 	}

@@ -25,11 +25,11 @@ const (
 
 	// BPF-LSM / BTF detection check names.
 	DaemonPreflightCheckBTFVmlinux = "btf_vmlinux"
-	DaemonPreflightCheckBPFLSM    = "bpflsm_active"
+	DaemonPreflightCheckBPFLSM     = "bpflsm_active"
 
 	// Kernel paths inspected for BPF-LSM capability.
-	KernelBTFVmlinuxPath   = "/sys/kernel/btf/vmlinux"
-	KernelLSMActivePath    = "/sys/kernel/security/lsm"
+	KernelBTFVmlinuxPath = "/sys/kernel/btf/vmlinux"
+	KernelLSMActivePath  = "/sys/kernel/security/lsm"
 )
 
 // DaemonPreflightReport is a read-only inspection result for the future

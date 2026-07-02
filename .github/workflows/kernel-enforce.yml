@@ -1,0 +1,178 @@
+name: kernel-enforce
+
+# Privileged Linux CI for the Slice 4.2 BPF-LSM enforcement bridge
+# (go/pkg/kernelcapture/process_guard.bpf.c). Two jobs:
+#
+#   bpf-generate — compiles process_guard.bpf.c with the same toolchain
+#     (Ubuntu 24.04 default clang, currently 18.x) used to produce the
+#     committed processguard_bpfel.{go,o} / processexec_bpfel.{go,o}, fails
+#     if regeneration drifts from what's committed, then builds/vets/tests
+#     the whole Go module with the real generated symbols present. This is
+#     the check that would have caught PR #92's original compile blockers
+#     (missing struct sockaddr / vmlinux.h, decide()'s 6-arg BPF-to-BPF call)
+#     and the ringbuf.Record.LostSamples API-surface bug found while fixing
+#     them — none of that is visible from the darwin-only "Go" workflow,
+#     which excludes every //go:build linux file in this package.
+#
+#   kernel-smoke — boots the runner's own kernel inside a disposable
+#     KVM+virtme-ng VM with BPF-LSM explicitly enabled on the command line,
+#     then runs ardur-guard-smoke as root inside it: load process_guard,
+#     apply an OP_EXEC:DENY policy to a fresh cgroup, spawn a child directly
+#     into that cgroup, and assert (a) its execve fails EPERM and (b) a
+#     matching DENY record lands on the enforce_events ringbuf. This is the
+#     one thing bpf-generate cannot prove: that the compiled program actually
+#     enforces on a live kernel, not just that it loads.
+#
+# kernel-smoke starts as continue-on-error: true — promote it to a required
+# check once a burn-in period confirms the virtme-ng invocation and kernel
+# cmdline handling are stable on GitHub-hosted runners.
+#
+# This workflow is also the gate for the cilium/ebpf dependency: any future
+# version bump that touches go/go.mod must pass bpf-generate (compiles
+# against the real generated BPF objects) before merging.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "go/pkg/kernelcapture/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/cmd/ardur-guard-smoke/**"
+      - "go/go.mod"
+      - "go/go.sum"
+      - ".github/workflows/kernel-enforce.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "go/pkg/kernelcapture/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/cmd/ardur-guard-smoke/**"
+      - "go/go.mod"
+      - "go/go.sum"
+      - ".github/workflows/kernel-enforce.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bpf-generate:
+    name: bpf-generate
+    # Pinned (not ubuntu-latest): the drift check below only means anything
+    # if every run compiles process_guard.bpf.c with the same clang the
+    # committed .o files were built with. If GitHub silently moves
+    # ubuntu-latest to a new default, this job should be re-pinned in the
+    # same PR that regenerates and re-commits the artifacts.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          # Must match the `go` directive in go/go.mod (currently 1.26.4).
+          go-version: "1.26.4"
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Install BPF build toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev linux-libc-dev
+          clang --version
+
+      - name: go generate ./go/pkg/kernelcapture/...
+        working-directory: go/pkg/kernelcapture
+        run: go generate ./...
+
+      - name: Fail if generated BPF objects drifted from committed artifacts
+        run: |
+          if ! git diff --exit-code -- \
+              go/pkg/kernelcapture/processguard_bpfel.go \
+              go/pkg/kernelcapture/processguard_bpfel.o \
+              go/pkg/kernelcapture/processexec_bpfel.go \
+              go/pkg/kernelcapture/processexec_bpfel.o; then
+            echo "::error::go generate produced output that differs from what's committed. Run 'go generate ./go/pkg/kernelcapture/...' on Linux (clang + libbpf-dev) and commit the regenerated files."
+            exit 1
+          fi
+
+      - name: go build ./...
+        working-directory: go
+        run: go build ./...
+
+      - name: go vet ./...
+        working-directory: go
+        run: go vet ./...
+
+      # Runs with the real generated processGuardObjects/loadProcessGuardObjects
+      # present, unlike the darwin-only "Go" workflow — this is what proves
+      # the nil-policyMaps guard, the double-buffer slot logic, and the rest
+      # of the Slice 4.2 review's fixes hold together on the platform they
+      # actually ship on.
+      - name: go test ./...
+        working-directory: go
+        run: go test -count=1 -race ./...
+
+  kernel-smoke:
+    name: kernel-smoke
+    needs: bpf-generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Soft gate for now: promote to a required check once a burn-in period
+    # confirms the virtme-ng invocation (kernel cmdline flag names, guest
+    # privilege model) is stable on GitHub-hosted runners. Until then this
+    # job reports its result without blocking merges.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.26.4"
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Check KVM is available
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm not present on this runner; kernel-smoke requires a KVM-capable host."
+            exit 1
+          fi
+          ls -la /dev/kvm
+
+      - name: Install BPF toolchain, QEMU, and virtme-ng
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev linux-libc-dev \
+            qemu-system-x86 python3-pip
+          # --user + --break-system-packages: Ubuntu 24.04's system Python is
+          # PEP 668 externally-managed; virtme-ng has no apt package here.
+          python3 -m pip install --user --break-system-packages virtme-ng
+
+      - name: go generate ./go/pkg/kernelcapture/...
+        working-directory: go/pkg/kernelcapture
+        run: go generate ./...
+
+      - name: Build ardur-guard-smoke
+        working-directory: go
+        run: go build -o /tmp/ardur-guard-smoke ./cmd/ardur-guard-smoke
+
+      # vng with no -r/--kernel boots the runner's own currently-installed
+      # kernel (uname -r) — "the runner kernel" per the task, not a custom
+      # build. --append adds to that boot's kernel command line only; it does
+      # not touch the host. virtme-ng's guest runs as root by design, which
+      # is what loading a BPF-LSM program and creating a cgroup requires.
+      #
+      # The LSM list below is Ubuntu's default stack (see
+      # /sys/kernel/security/lsm on a stock GitHub-hosted runner) with "bpf"
+      # appended — dropping any of the defaults would itself change guest
+      # boot behavior in ways unrelated to this test.
+      - name: Boot with BPF-LSM active and run the smoke test
+        run: |
+          VNG="$(python3 -m site --user-base)/bin/vng"
+          test -x "$VNG" || { echo "::error::vng not found after pip install"; exit 1; }
+          sudo "$VNG" \
+            --verbose \
+            --append "lsm=landlock,lockdown,yama,integrity,apparmor,bpf" \
+            -- /tmp/ardur-guard-smoke

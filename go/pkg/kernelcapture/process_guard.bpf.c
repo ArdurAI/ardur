@@ -12,8 +12,14 @@
 //   lsm/socket_connect      — network policy (OP_NET_CONNECT)
 //
 // Map write ordering (enforced by daemon apply_policy):
-//   1. Write cgroup_op_policy, cgroup_path_allow, cgroup_net_allow entries.
-//   2. Write cgroup_managed LAST (generation-atomic gate).
+//   1. Write cgroup_op_policy entries into the INACTIVE double-buffer slot
+//      (the slot not referenced by the current cgroup_managed.active_slot),
+//      then cgroup_path_allow, cgroup_net_allow entries.
+//   2. Write cgroup_managed LAST, pointing active_slot at the slot just
+//      populated. This is the atomic gate: readers never observe a partially
+//      written generation, because the slot they're reading from is never
+//      mutated concurrently with a write — the writer always targets the
+//      *other* slot until this final flip.
 //
 // Until cgroup_managed is written, the cgroup is ungoverned and all ops pass.
 
@@ -80,19 +86,39 @@ struct socket {
 	short type;
 } __attribute__((preserve_access_index));
 
+// struct sockaddr — minimal CO-RE shim. Not pulled in transitively by
+// linux/bpf.h or the libbpf headers, so lsm/socket_connect's `address->sa_family`
+// has no type to resolve against without either this shim or vmlinux.h. Only
+// the field this program reads is declared; sockaddr_in/sockaddr_in6 payload
+// bytes past sa_family are read via raw offset arithmetic below (stable UAPI
+// layout, not CO-RE'd).
+struct sockaddr {
+	unsigned short sa_family;
+} __attribute__((preserve_access_index));
+
 // ---------------------------------------------------------------------------
 // BPF map key/value structs
 // ---------------------------------------------------------------------------
 
-// cgroup_op_policy key: {cgroup_id, op}
+// cgroup_op_policy key: {cgroup_id, op, slot}
 // C layout must match CgroupOpMapKey in bpf_enforce_types.go.
-// __u64 then __u32 → 12 bytes, natural alignment OK (no padding needed for hash).
+// __u64 + __u32 + __u32 = 16 bytes, naturally aligned (no implicit padding).
+//
+// `slot` is the double-buffer index (0 or 1) this entry belongs to. The daemon
+// always writes a full policy generation into the slot NOT referenced by the
+// current cgroup_managed.active_slot, then flips active_slot — so a reader
+// never observes entries from two different apply_policy calls mixed together
+// for the same cgroup+op.
 struct ardur_cgroup_op_key {
 	__u64 cgroup_id;
 	__u32 op;
+	__u32 slot;
 };
 
 // cgroup_op_policy value: {action, enforce_mode, generation}
+// generation is provenance/debugging only (which apply_policy call wrote this
+// entry); it is NOT consulted by the lookup path — slot selection via
+// cgroup_managed.active_slot is what makes the swap atomic.
 struct ardur_cgroup_op_value {
 	__u32 action;
 	__u32 enforce_mode;
@@ -104,11 +130,13 @@ struct ardur_managed_key {
 	__u8 cgroup_raw[8];
 };
 
-// cgroup_managed value: {flags, generation}
-// flags bit 0 = ARDUR_MANAGED_STRICT.  generation must match op-policy entries.
+// cgroup_managed value: {flags, generation, active_slot}
+// flags bit 0 = ARDUR_MANAGED_STRICT.  active_slot selects which double-buffer
+// slot of cgroup_op_policy is currently live (0 or 1).
 struct ardur_managed_value {
 	__u32 flags;
 	__u32 generation;
+	__u32 active_slot;
 };
 
 // Path LPM trie key: {prefixlen, cgroup_raw[8], path[ARDUR_PATH_LEN]}
@@ -147,7 +175,9 @@ struct ardur_enforce_event {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 8192);
+	// 2x headroom vs. a single-buffer design: each governed {cgroup,op} pair
+	// occupies at most 2 entries (one per double-buffer slot) at any time.
+	__uint(max_entries, 16384);
 	__type(key,   struct ardur_cgroup_op_key);
 	__type(value, struct ardur_cgroup_op_value);
 } cgroup_op_policy SEC(".maps");
@@ -223,13 +253,14 @@ lookup_managed(__u64 cgroup_id)
 }
 
 static __always_inline struct ardur_cgroup_op_value *
-lookup_op_policy(__u64 cgroup_id, __u32 op, __u32 active_generation)
+lookup_op_policy(__u64 cgroup_id, __u32 op, __u32 active_slot)
 {
-	struct ardur_cgroup_op_key k = {.cgroup_id = cgroup_id, .op = op};
-	struct ardur_cgroup_op_value *v = bpf_map_lookup_elem(&cgroup_op_policy, &k);
-	if (!v || v->generation != active_generation)
-		return NULL;
-	return v;
+	struct ardur_cgroup_op_key k = {
+		.cgroup_id = cgroup_id,
+		.op = op,
+		.slot = active_slot,
+	};
+	return bpf_map_lookup_elem(&cgroup_op_policy, &k);
 }
 
 // path_is_allowed looks the supplied path up in the cgroup_path_allow LPM trie.
@@ -249,11 +280,16 @@ static int path_is_allowed(__u64 cgroup_id, const char *path_src, int path_len)
 	__builtin_memset(lk, 0, sizeof(*lk));
 	__builtin_memcpy(lk->cgroup_raw, &cgroup_id, 8);
 
-	int copy_len = path_len < ARDUR_PATH_LEN ? path_len : ARDUR_PATH_LEN;
-	bpf_probe_read_kernel(lk->path, copy_len & (ARDUR_PATH_LEN - 1), path_src);
+	// Clamp to [0, ARDUR_PATH_LEN]; the ternary alone gives the verifier a
+	// provable static upper bound on copy_len, so bpf_probe_read_kernel's size
+	// argument is always in range. (A bitmask clamp here is a trap: masking by
+	// (ARDUR_PATH_LEN-1) wraps copy_len==ARDUR_PATH_LEN to 0, silently zeroing
+	// a full-length path read.)
+	__u32 copy_len = path_len < ARDUR_PATH_LEN ? (__u32)path_len : (__u32)ARDUR_PATH_LEN;
+	bpf_probe_read_kernel(lk->path, copy_len, path_src);
 
 	// prefixlen: 64 bits for cgroup_raw + path bytes (excluding null terminator)
-	int prefix_bytes = copy_len > 0 ? copy_len - 1 : 0;
+	int prefix_bytes = copy_len > 0 ? (int)copy_len - 1 : 0;
 	lk->prefixlen = 64 + ((__u32)prefix_bytes) * 8;
 
 	__u64 *allowed = bpf_map_lookup_elem(&cgroup_path_allow, lk);
@@ -275,8 +311,10 @@ static int net_is_allowed(__u64 cgroup_id, const __u8 *addr_bytes, int addr_len)
 	__builtin_memset(lk, 0, sizeof(*lk));
 	__builtin_memcpy(lk->cgroup_raw, &cgroup_id, 8);
 
-	int copy_len = addr_len < 16 ? addr_len : 16;
-	bpf_probe_read_kernel(lk->addr, copy_len & 15, addr_bytes);
+	// Same clamp-not-mask reasoning as path_is_allowed: masking by 15 would
+	// wrap a full 16-byte IPv6 read (copy_len==16) to 0.
+	__u32 copy_len = addr_len < 16 ? (__u32)addr_len : (__u32)16;
+	bpf_probe_read_kernel(lk->addr, copy_len, addr_bytes);
 
 	// prefixlen: 64 bits for cgroup scope + full address length for host lookup.
 	// LPM trie will find the longest stored prefix ≤ this.
@@ -309,13 +347,30 @@ static __always_inline void emit_event(
 	bpf_ringbuf_submit(ev, 0);
 }
 
+// decide_ctx packs decide()'s inputs into a single pointer argument.
+// BPF-to-BPF calls (decide is `static`, not `__always_inline`, so clang emits
+// a real subprogram call) allow at most 5 register args (r1-r5); the previous
+// 6-scalar signature (cgroup_id, op, path_src, path_len, addr_bytes, addr_len)
+// exceeded that and also tripped "stack arguments are not supported". One
+// pointer arg sidesteps both limits.
+struct decide_ctx {
+	__u64 cgroup_id;
+	__u32 op;
+	int path_len;
+	int addr_len;
+	const char *path_src;
+	const __u8 *addr_bytes;
+};
+
 // decide returns 0 (allow) or -1 (-EPERM, deny) and emits an event.
-// For allowlist ops, path_src/path_len carry the path or addr string for the LPM check.
-static int decide(
-	__u64 cgroup_id, __u32 op,
-	const char *path_src, int path_len,
-	const __u8 *addr_bytes, int addr_len)
+// For allowlist ops, ctx->path_src/path_len (or addr_bytes/addr_len) carry the
+// path or address to check against the LPM allowlist.
+static int decide(struct decide_ctx *ctx)
 {
+	__u64 cgroup_id = ctx->cgroup_id;
+	__u32 op = ctx->op;
+	const char *path_src = ctx->path_src;
+
 	if (kill_switch_is_on())
 		return 0;
 
@@ -324,10 +379,10 @@ static int decide(
 		return 0;  // cgroup not governed — untouched
 
 	struct ardur_cgroup_op_value *pol =
-		lookup_op_policy(cgroup_id, op, mv->generation);
+		lookup_op_policy(cgroup_id, op, mv->active_slot);
 
 	if (!pol) {
-		// No rule for this op in the active generation
+		// No rule for this op in the active slot
 		if (mv->flags & ARDUR_MANAGED_STRICT) {
 			emit_event(cgroup_id, op, ARDUR_ACT_DENY, ARDUR_ENFORCE_ENFORCE, path_src);
 			return -1;  // -EPERM: fail-closed
@@ -345,10 +400,10 @@ static int decide(
 
 	if (pol->action == ARDUR_ACT_ALLOWLIST) {
 		int ok = 0;
-		if (op == ARDUR_OP_NET_CONNECT && addr_bytes && addr_len > 0)
-			ok = net_is_allowed(cgroup_id, addr_bytes, addr_len);
-		else if (path_src && path_len > 0)
-			ok = path_is_allowed(cgroup_id, path_src, path_len);
+		if (op == ARDUR_OP_NET_CONNECT && ctx->addr_bytes && ctx->addr_len > 0)
+			ok = net_is_allowed(cgroup_id, ctx->addr_bytes, ctx->addr_len);
+		else if (path_src && ctx->path_len > 0)
+			ok = path_is_allowed(cgroup_id, path_src, ctx->path_len);
 
 		if (!ok) {
 			emit_event(cgroup_id, op, ARDUR_ACT_DENY, pol->enforce_mode, path_src);
@@ -385,8 +440,13 @@ int BPF_PROG(guard_bprm_check, struct linux_binprm *bprm, int ret)
 	long pret = bpf_probe_read_kernel_str(exec_path, sizeof(exec_path), filename);
 	int path_len = pret > 0 ? (int)pret : 0;
 
-	return decide(cgroup_id, ARDUR_OP_EXEC,
-	              exec_path, path_len, NULL, 0);
+	struct decide_ctx dctx = {
+		.cgroup_id = cgroup_id,
+		.op = ARDUR_OP_EXEC,
+		.path_src = exec_path,
+		.path_len = path_len,
+	};
+	return decide(&dctx);
 }
 
 // guard_file_open — intercepts open(2)/openat(2) etc.
@@ -408,7 +468,13 @@ int BPF_PROG(guard_file_open, struct file *file, int ret)
 	long pret = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
 	int path_len = pret > 0 ? (int)pret : 0;
 
-	return decide(cgroup_id, op, path_buf, path_len, NULL, 0);
+	struct decide_ctx dctx = {
+		.cgroup_id = cgroup_id,
+		.op = op,
+		.path_src = path_buf,
+		.path_len = path_len,
+	};
+	return decide(&dctx);
 }
 
 // guard_socket_connect — intercepts connect(2).
@@ -442,8 +508,13 @@ int BPF_PROG(guard_socket_connect, struct socket *sock,
 		return 0;
 	}
 
-	return decide(cgroup_id, ARDUR_OP_NET_CONNECT,
-	              NULL, 0, addr_buf, addr_len);
+	struct decide_ctx dctx = {
+		.cgroup_id = cgroup_id,
+		.op = ARDUR_OP_NET_CONNECT,
+		.addr_bytes = addr_buf,
+		.addr_len = addr_len,
+	};
+	return decide(&dctx);
 }
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";

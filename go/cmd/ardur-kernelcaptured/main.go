@@ -134,9 +134,13 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 // socket server. It delegates to the registry and maintains the cgroup routing
 // index as a side effect of successful register/end-session responses.
 func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
-	// apply_policy is handled locally — the registry has no BPF awareness.
-	if req.Method == kernelcapture.DaemonProtocolMethodApplyPolicy {
+	// apply_policy and set_kill_switch are handled locally — the registry has
+	// no BPF awareness.
+	switch req.Method {
+	case kernelcapture.DaemonProtocolMethodApplyPolicy:
 		return d.handleApplyPolicy(req)
+	case kernelcapture.DaemonProtocolMethodSetKillSwitch:
+		return d.handleSetKillSwitch(req)
 	}
 
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
@@ -178,6 +182,23 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 	}
 
 	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, *ap); err != nil {
+		if errors.Is(err, kernelcapture.ErrPolicyMapsUnavailable) && ap.EnforceMode != kernelcapture.BpfEnforceModeEnforce {
+			// Permissive mode: the whole point of PERMISSIVE is "log, don't
+			// block". Treat a missing BPF-LSM guard the same way — record the
+			// degradation loudly but don't fail the caller's request.
+			d.log.Warn("apply_policy degraded: BPF-LSM guard unavailable, enforcement not active for this session",
+				"session_id", ap.SessionID, "cgroup_id", record.CgroupID)
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+				OK:              true,
+				SessionID:       ap.SessionID,
+				Status:          "degraded_no_enforcement",
+			}
+		}
+		// ENFORCE_STRICT (or any other failure): fail loudly. Silently
+		// accepting a policy that can never be enforced is worse than
+		// refusing it — the caller must know enforcement is not active.
 		d.log.Error("apply_policy failed", "session_id", ap.SessionID, "cgroup_id", record.CgroupID, "error", err)
 		return errResp(fmt.Sprintf("apply policy maps: %v", err))
 	}
@@ -195,6 +216,29 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
 		OK:              true,
 		SessionID:       ap.SessionID,
+	}
+}
+
+// handleSetKillSwitch engages or disengages the global BPF-LSM kill switch.
+// Unlike apply_policy, a missing guard is always a hard failure here: there
+// is no "degraded" reading of "the caller asked to change enforcement state
+// and nothing happened" — the caller must know the call had no effect.
+func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest) kernelcapture.DaemonProtocolResponse {
+	sw := req.SetKillSwitch
+	if err := kernelcapture.SetKillSwitch(d.policyMaps, sw.Engaged); err != nil {
+		d.log.Error("set_kill_switch failed", "engaged", sw.Engaged, "error", err)
+		return kernelcapture.DaemonProtocolResponse{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+			OK:              false,
+			Error:           fmt.Sprintf("set kill switch: %v", err),
+		}
+	}
+	d.log.Warn("kill switch changed", "engaged", sw.Engaged)
+	return kernelcapture.DaemonProtocolResponse{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+		OK:              true,
 	}
 }
 

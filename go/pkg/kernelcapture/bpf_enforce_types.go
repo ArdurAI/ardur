@@ -15,7 +15,7 @@
 package kernelcapture
 
 // BpfOp identifies the operation class being enforced.
-// Values must match the ``enum ardur_op`` in process_enforce.bpf.c.
+// Values must match the “enum ardur_op“ in process_enforce.bpf.c.
 type BpfOp uint32
 
 const (
@@ -44,7 +44,7 @@ func (op BpfOp) String() string {
 }
 
 // BpfAction is the enforcement action stored in cgroup_op_policy map values.
-// Values must match the ``enum ardur_action`` in process_enforce.bpf.c.
+// Values must match the “enum ardur_action“ in process_enforce.bpf.c.
 type BpfAction uint32
 
 const (
@@ -70,7 +70,7 @@ func (a BpfAction) String() string {
 }
 
 // BpfEnforceMode controls whether violations kill the syscall or only log.
-// Values must match the ``enum ardur_enforce_mode`` in process_enforce.bpf.c.
+// Values must match the “enum ardur_enforce_mode“ in process_enforce.bpf.c.
 type BpfEnforceMode uint32
 
 const (
@@ -95,17 +95,20 @@ func (m BpfEnforceMode) String() string {
 // A value of 1 at this index suspends all enforcement globally.
 const KillSwitchIndex = 0
 
-// CgroupOpMapKey is the key for the ``cgroup_op_policy`` BPF hash map.
+// CgroupOpMapKey is the key for the “cgroup_op_policy“ BPF hash map.
 //
-// C layout (12 bytes, packed):
+// C layout (16 bytes, naturally aligned):
 //
-//	struct ardur_cgroup_op_key { __u64 cgroup_id; __u32 op; };
+//	struct ardur_cgroup_op_key { __u64 cgroup_id; __u32 op; __u32 slot; };
+//
+// Slot is the double-buffer index (0 or 1) — see CgroupManagedMapValue.
 type CgroupOpMapKey struct {
 	CgroupID uint64
 	Op       BpfOp
+	Slot     uint32
 }
 
-// CgroupOpMapValue is the value for the ``cgroup_op_policy`` BPF hash map.
+// CgroupOpMapValue is the value for the “cgroup_op_policy“ BPF hash map.
 //
 // C layout (12 bytes):
 //
@@ -113,12 +116,28 @@ type CgroupOpMapKey struct {
 type CgroupOpMapValue struct {
 	Action      BpfAction
 	EnforceMode BpfEnforceMode
-	// Generation is a monotonically increasing counter the daemon increments on
-	// each policy update. The BPF program reads it to detect stale cached entries.
+	// Generation is provenance/debugging metadata only (which apply_policy
+	// call wrote this entry). It is NOT consulted by the BPF lookup path —
+	// CgroupOpMapKey.Slot plus CgroupManagedMapValue.ActiveSlot is what makes
+	// a policy swap atomic: the daemon always writes a full generation into
+	// the slot NOT referenced by ActiveSlot, then flips ActiveSlot last.
 	Generation uint32
 }
 
-// PathAllowPrefix is one entry in the ``cgroup_path_allow`` LPM trie map.
+// CgroupManagedMapValue is the value for the “cgroup_managed“ BPF hash map.
+//
+// C layout (12 bytes):
+//
+//	struct ardur_managed_value { __u32 flags; __u32 generation; __u32 active_slot; };
+type CgroupManagedMapValue struct {
+	Flags      uint32
+	Generation uint32
+	// ActiveSlot selects which double-buffer slot of cgroup_op_policy is
+	// currently live (0 or 1).
+	ActiveSlot uint32
+}
+
+// PathAllowPrefix is one entry in the “cgroup_path_allow“ LPM trie map.
 // The trie key includes a cgroup_id scope so entries from different sessions
 // don't interfere.
 //
@@ -130,8 +149,8 @@ type PathAllowPrefix struct {
 	PathPrefix string // Absolute path prefix (must start with "/")
 }
 
-// NetAllowPrefix is one entry in the ``cgroup_net_allow`` LPM trie map.
-// The ``Addr`` field is a 16-byte IPv4-mapped-IPv6 or native-IPv6 address.
+// NetAllowPrefix is one entry in the “cgroup_net_allow“ LPM trie map.
+// The “Addr“ field is a 16-byte IPv4-mapped-IPv6 or native-IPv6 address.
 //
 // C key layout:
 //
@@ -142,7 +161,7 @@ type NetAllowPrefix struct {
 	PrefixLen uint32   // CIDR prefix length (0–128)
 }
 
-// BpfEnforceEvent is the record emitted to the ``enforce_events`` ringbuf
+// BpfEnforceEvent is the record emitted to the “enforce_events“ ringbuf
 // when a policy violation is detected. The daemon reads these from the ringbuf
 // and appends them to per-session evidence logs.
 //

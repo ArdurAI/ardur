@@ -193,6 +193,21 @@ func (s *DaemonUnixSocketServer) handleAcceptedConnection(ctx context.Context, c
 		<-s.semaphore
 		_ = conn.Close()
 	}()
+	// One misbehaving request (e.g. a handler bug reachable only in a
+	// specific degraded state, such as BPF-LSM maps not being loaded) must
+	// not take the whole daemon down — each connection runs in its own
+	// goroutine, and an unrecovered panic there crashes the process. This is
+	// a backstop; the real fix for any given panic is to make the handler
+	// fail cleanly instead of panicking.
+	defer func() {
+		if r := recover(); r != nil {
+			_ = writeDaemonProtocolResponse(conn, DaemonProtocolResponse{
+				ProtocolVersion: DaemonProtocolVersion,
+				OK:              false,
+				Error:           fmt.Sprintf("internal server error: %v", r),
+			})
+		}
+	}()
 
 	req, handshake, err := s.authorizeAcceptedConnection(conn)
 	if err != nil {
