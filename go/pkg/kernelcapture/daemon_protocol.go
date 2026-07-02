@@ -111,6 +111,12 @@ type DaemonProtocolResponse struct {
 	SessionID       string `json:"session_id,omitempty"`
 	Status          string `json:"status,omitempty"`
 	Error           string `json:"error,omitempty"`
+	// Enforcement carries a session's kernel-enforcement rollup on successful
+	// session_status responses. Populated by the daemon when enforce_events
+	// have been processed for the session; omitted otherwise. Evidence-log
+	// directories are root-0700, so this is the only channel a non-root client
+	// has to learn what kernel-level enforcement happened.
+	Enforcement *EnforceEventSummary `json:"enforcement,omitempty"`
 }
 
 // CgroupFilterSequence describes daemon-side map sequencing. Enabling

@@ -66,9 +66,12 @@ func runWatchdog(ctx context.Context, interval time.Duration, log *slog.Logger) 
 //
 // Claim boundary: loads the process-exec eBPF objects embedded in the binary,
 // attaches sched/sched_process_exec and sched/sched_process_exit, reads events
-// from the BPF ringbuf, and routes them to registered sessions. Does NOT pin
-// maps on bpffs, create or join cgroups, install/start a system service, or
-// enforce any action against the observed process.
+// from the BPF ringbuf, and routes them to registered sessions. Pins the
+// tracepoint links and ringbuf map under the ardur-owned bpffs namespace
+// (kernelcapture.DefaultPinnedEBPFPaths) so a daemon restart reuses the
+// still-attached programs instead of re-attaching. Does NOT create or join
+// cgroups, install/start a system service, or enforce any action against the
+// observed process.
 func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 	btfPath := "/sys/kernel/btf/vmlinux"
 	if _, err := os.Stat(btfPath); err != nil {
@@ -81,7 +84,7 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 		"btf", btfPath,
 	)
 
-	handles, err := kernelcapture.LoadAndAttachProcessExecEBPF()
+	handles, err := kernelcapture.LoadAndAttachProcessExecEBPFPinned(kernelcapture.DefaultPinnedEBPFPaths())
 	if err != nil {
 		return fmt.Errorf("load and attach eBPF: %w", err)
 	}

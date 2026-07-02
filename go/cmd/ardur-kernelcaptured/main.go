@@ -81,6 +81,14 @@ type daemon struct {
 	treeScopes  map[string]*kernelcapture.ProcessTreeScope
 	correlators map[string]*kernelcapture.Correlator
 
+	// enforce_events state, maintained under mu (session-scoped) plus two
+	// daemon-lifetime singletons for events that cannot be attributed to any
+	// session (enforceOrphanChain/enforceOrphanSummary; see daemon_enforce.go).
+	enforceChains        map[string]*kernelcapture.EnforceReceiptChain
+	enforceSummaries     map[string]*kernelcapture.EnforceEventSummaryAccumulator
+	enforceOrphanChain   *kernelcapture.EnforceReceiptChain
+	enforceOrphanSummary *kernelcapture.EnforceEventSummaryAccumulator
+
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
 
@@ -118,15 +126,19 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 	}
 
 	return &daemon{
-		log:         log,
-		registry:    registry,
-		custodyPlan: custodyPlan,
-		peerPolicy:  peerPolicy,
-		evidenceDir: evidenceDir,
-		cgroupIndex: make(map[uint64]string),
-		treeScopes:  make(map[string]*kernelcapture.ProcessTreeScope),
-		correlators: make(map[string]*kernelcapture.Correlator),
-		fs:          osEvidenceFS{},
+		log:                  log,
+		registry:             registry,
+		custodyPlan:          custodyPlan,
+		peerPolicy:           peerPolicy,
+		evidenceDir:          evidenceDir,
+		cgroupIndex:          make(map[uint64]string),
+		treeScopes:           make(map[string]*kernelcapture.ProcessTreeScope),
+		correlators:          make(map[string]*kernelcapture.Correlator),
+		enforceChains:        make(map[string]*kernelcapture.EnforceReceiptChain),
+		enforceSummaries:     make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
+		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
+		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
+		fs:                   osEvidenceFS{},
 	}, nil
 }
 
@@ -155,6 +167,10 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 	case kernelcapture.DaemonProtocolMethodEndSession:
 		if sessionID := req.EndSession; sessionID != nil {
 			d.onSessionEnded(sessionID.SessionID)
+		}
+	case kernelcapture.DaemonProtocolMethodSessionStatus:
+		if summary, ok := d.enforceSummaryForScope(resp.SessionID); ok {
+			resp.Enforcement = &summary
 		}
 	}
 	return resp
@@ -264,6 +280,8 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 		CorrelationGrace: 5 * time.Second,
 		RestartGrace:     3 * time.Second,
 	})
+	d.enforceChains[sessionID] = kernelcapture.NewEnforceReceiptChain()
+	d.enforceSummaries[sessionID] = kernelcapture.NewEnforceEventSummaryAccumulator()
 
 	d.log.Info("session registered",
 		"session_id", sessionID,
@@ -294,6 +312,8 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	}
 	delete(d.treeScopes, sessionID)
 	delete(d.correlators, sessionID)
+	delete(d.enforceChains, sessionID)
+	delete(d.enforceSummaries, sessionID)
 
 	d.log.Info("session ended", "session_id", sessionID)
 }
@@ -396,6 +416,8 @@ func (d *daemon) pruneExpiredSessions() {
 			}
 			delete(d.treeScopes, sid)
 			delete(d.correlators, sid)
+			delete(d.enforceChains, sid)
+			delete(d.enforceSummaries, sid)
 			d.log.Info("pruned expired session", "session_id", sid)
 		}
 	}

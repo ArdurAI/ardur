@@ -3321,6 +3321,8 @@ class GovernanceProxy:
         self,
         session_id: str,
         private_key: ec.EllipticCurvePrivateKey,
+        *,
+        kernel_enforcement: dict[str, Any] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         created_summary = False
         token = ""
@@ -3329,11 +3331,11 @@ class GovernanceProxy:
                 summary, created_summary = self._finalize_session_locked(target)
                 if target.attestation_token is None:
                     lifecycle_claims = self._lifecycle_rollup_for_session_unlocked(target)
-                    extra_claims = (
-                        lifecycle_claims
-                        if int(lifecycle_claims["delegation_count"]) > 0
-                        else None
-                    )
+                    extra_claims: dict[str, Any] = {}
+                    if int(lifecycle_claims["delegation_count"]) > 0:
+                        extra_claims.update(lifecycle_claims)
+                    if kernel_enforcement is not None:
+                        extra_claims["kernel_enforcement"] = kernel_enforcement
                     target.attestation_token = issue_attestation(
                         passport_jti=target.jti,
                         agent_id=target.passport_claims["sub"],

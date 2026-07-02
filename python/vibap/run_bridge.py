@@ -455,6 +455,31 @@ def _correlate_launch(
     )
 
 
+def _kernel_enforcement_claim(
+    session_id: str,
+    correlation: kc.CorrelationResult,
+) -> dict[str, Any] | None:
+    """Fetch the daemon's kernel-enforcement rollup for a correlated session.
+
+    Returns ``None`` (never raises) when correlation was never established or
+    the daemon cannot be reached — kernel enforcement data is an enhancement
+    to the attestation, never a hard dependency for finalizing a run. This
+    must be called before the kernel daemon's ``end_session``, which retires
+    the session's enforcement summary daemon-side.
+    """
+    if not correlation.available:
+        return None
+    try:
+        client = kc.KernelCaptureClient(kc.daemon_socket_path())
+        response = client.session_status(session_id=session_id)
+    except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError):
+        return None
+    enforcement = response.get("enforcement")
+    if not isinstance(enforcement, dict):
+        return None
+    return enforcement
+
+
 # ── main entry ─────────────────────────────────────────────────────────────────
 
 
@@ -540,6 +565,9 @@ def run_governed(
     daemon_registered = False
     proc: subprocess.Popen[bytes] | None = None
     notes: list[str] = []
+    # Pre-initialized so the finally block has a safe value even if an
+    # exception is raised before kernel correlation is attempted below.
+    correlation = kc.CorrelationResult(available=False, reason="run did not reach kernel correlation")
     try:
         _wait_for_health(proxy_url, api_token)
 
@@ -605,9 +633,12 @@ def run_governed(
             notes.append(f"agent exceeded max-duration {max_duration_s}s and was terminated")
     finally:
         # 7. Finalize the governance session: attestation + receipt chain.
+        # Kernel enforcement must be fetched before the kernel daemon's
+        # end_session call below, which retires the session's summary.
+        kernel_enforcement = _kernel_enforcement_claim(session_id, correlation)
         summary = proxy.end_session(session_id)
         attestation_token, _claims = proxy.issue_attestation_for_session(
-            session_id, proxy.receipt_private_key
+            session_id, proxy.receipt_private_key, kernel_enforcement=kernel_enforcement
         )
         if daemon_registered and cgroup_handle is not None:
             try:

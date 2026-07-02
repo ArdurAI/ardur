@@ -524,27 +524,31 @@ ardur profile init --template TEMPLATE
 
 Templates: `read-only`, `safe-coding`. Default path: `./ARDUR.md`.
 
-If the target profile already exists and `--force` is omitted, the command
-fails closed instead of overwriting local guardrails. JSON output includes
-`ok: false`, `error: "profile_exists"`, `condition: "profile_exists"`, and
-deterministic `next_steps`; human output prints the same recovery guidance under
-"Next steps". The placeholder-only local recovery commands are
-`ardur profile init --path ARDUR.md --force` when you intend to replace the
-profile, or `ardur protect claude-code --profile ARDUR.md` to use the existing
-profile.
-
-If `--force` is supplied but `--path` is not a writable Markdown file, the
-command still fails closed before writing a profile. Directory targets return
-JSON with `ok: false`, `error: "profile_path_invalid"`,
+Directory targets, including symlinks to directories, are never treated as
+existing profiles to replace. With or without `--force`, `ardur profile init`
+fails closed before overwrite or existing-file recovery logic and returns JSON
+with `ok: false`, `error: "profile_path_invalid"`,
 `condition: "profile_path_invalid"`, and the message `Profile path is not a
-writable Markdown file.` Other protected or unwritable targets use the same
-placeholder-only recovery shape with a path-write failure condition. Human
-output prints the same guidance under "Next steps". The local recovery commands
-use placeholders only: `ardur profile init --path <profile-file> --force` to
-choose a writable Markdown profile path, then
-`ardur protect claude-code --profile <profile-file>` to use that profile. This
-is local/no-key setup recovery guidance; it does not prove live Claude/provider
-behavior, release readiness, or universal filesystem validation.
+writable Markdown file.` Human output prints the same guidance under "Next
+steps". The local recovery commands use placeholders only: choose a writable
+Markdown profile path such as `<profile-file>`, then run
+`ardur protect claude-code --profile <profile-file>` to use that profile.
+
+If the target profile is an existing regular file and `--force` is omitted, the
+command fails closed instead of overwriting local guardrails. JSON output
+includes `ok: false`, `error: "profile_exists"`,
+`condition: "profile_exists"`, and deterministic `next_steps`; human output
+prints the same recovery guidance under "Next steps". The placeholder-only
+local recovery commands are `ardur profile init --path ARDUR.md --force` when
+you intend to replace the regular file profile, or
+`ardur protect claude-code --profile ARDUR.md` to use the existing profile.
+
+If `--force` is supplied for an existing regular file profile, Ardur replaces it
+with the selected starter template. Other protected or unwritable file targets
+still fail closed before writing a profile and use placeholder-only recovery
+guidance with a path-write failure condition. This is local/no-key setup
+recovery guidance; it does not prove live Claude/provider behavior, release
+readiness, or universal filesystem validation.
 
 ### `ardur protect claude-code`
 

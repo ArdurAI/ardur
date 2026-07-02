@@ -294,6 +294,8 @@ func kernelEventType(kind ProcessEventType) string {
 		return "execve"
 	case ProcessEventExit:
 		return "exit"
+	case ProcessEventEnforce:
+		return "kernel_enforce"
 	default:
 		return "process_event"
 	}

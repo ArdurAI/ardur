@@ -8,6 +8,10 @@ type ProcessEventType string
 const (
 	ProcessEventExec ProcessEventType = "exec"
 	ProcessEventExit ProcessEventType = "exit"
+	// ProcessEventEnforce marks a BPF-LSM enforcement decision (deny/allowlist
+	// miss) projected into the generic ProcessEvent shape so it can be routed
+	// through the same Correlator as exec/exit events.
+	ProcessEventEnforce ProcessEventType = "enforce"
 )
 
 // ProcessEvent captures one kernel-observed process lifecycle observation.
