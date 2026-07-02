@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
@@ -76,6 +77,37 @@ func readEnforceReceiptLines(t *testing.T, stub *stubEvidenceFS, path string) []
 		out = append(out, entry)
 	}
 	return out
+}
+
+// TestDecodeEnforceEvent_FullLengthPathNotTruncated is the userspace-side
+// analogue of the Slice 4.2 review's path_is_allowed copy_len&255 finding: a
+// path that fills the entire 256-byte buffer (no trailing NUL) must decode
+// in full, not come back empty or truncated.
+func TestDecodeEnforceEvent_FullLengthPathNotTruncated(t *testing.T) {
+	fullPath := strings.Repeat("a", 256)
+	raw := encodeTestEnforceEvent(t, kernelcapture.BpfEnforceEvent{
+		CgroupID:    1,
+		PID:         1,
+		Op:          kernelcapture.BpfOpFileRead,
+		ActionTaken: kernelcapture.BpfActionAllow,
+		EnforceMode: kernelcapture.BpfEnforceModePermissive,
+		Comm:        "cat",
+		Path:        fullPath,
+	})
+
+	ev, err := decodeEnforceEvent(raw)
+	if err != nil {
+		t.Fatalf("decodeEnforceEvent: unexpected error: %v", err)
+	}
+	if ev.Path != fullPath {
+		t.Errorf("Path length = %d, want %d (full buffer must decode intact)", len(ev.Path), len(fullPath))
+	}
+}
+
+func TestDecodeEnforceEvent_TooShortErrors(t *testing.T) {
+	if _, err := decodeEnforceEvent(make([]byte, 10)); err == nil {
+		t.Error("decodeEnforceEvent on a 10-byte buffer: expected error, got nil")
+	}
 }
 
 func TestProcessEnforceEvent_DeniedEventRoutesThroughCorrelator(t *testing.T) {

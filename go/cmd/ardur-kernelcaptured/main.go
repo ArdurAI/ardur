@@ -91,6 +91,11 @@ type daemon struct {
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
+
+	// policyMaps holds the writable BPF map handles for the process_guard
+	// enforcement program. On non-Linux platforms PolicyMaps is a zero struct and
+	// ApplyPolicyMaps / RemovePolicyMaps return an error immediately.
+	policyMaps kernelcapture.PolicyMaps
 }
 
 func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, ownerUID uint32) (*daemon, error) {
@@ -141,6 +146,15 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 // socket server. It delegates to the registry and maintains the cgroup routing
 // index as a side effect of successful register/end-session responses.
 func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
+	// apply_policy and set_kill_switch are handled locally — the registry has
+	// no BPF awareness.
+	switch req.Method {
+	case kernelcapture.DaemonProtocolMethodApplyPolicy:
+		return d.handleApplyPolicy(req)
+	case kernelcapture.DaemonProtocolMethodSetKillSwitch:
+		return d.handleSetKillSwitch(req)
+	}
+
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
 	if !resp.OK {
 		return resp
@@ -160,6 +174,88 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		}
 	}
 	return resp
+}
+
+// handleApplyPolicy validates the session, resolves its cgroup_id, and writes
+// the policy into the BPF enforcement maps.
+func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kernelcapture.DaemonProtocolResponse {
+	ap := req.ApplyPolicy
+	errResp := func(msg string) kernelcapture.DaemonProtocolResponse {
+		return kernelcapture.DaemonProtocolResponse{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+			OK:              false,
+			Error:           msg,
+		}
+	}
+
+	record, err := d.registry.ActiveSession(ap.SessionID)
+	if err != nil {
+		return errResp(fmt.Sprintf("session not found or not active: %v", err))
+	}
+	if record.CgroupID == 0 {
+		return errResp("session has no cgroup_id; cannot apply BPF policy")
+	}
+
+	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, *ap); err != nil {
+		if errors.Is(err, kernelcapture.ErrPolicyMapsUnavailable) && ap.EnforceMode != kernelcapture.BpfEnforceModeEnforce {
+			// Permissive mode: the whole point of PERMISSIVE is "log, don't
+			// block". Treat a missing BPF-LSM guard the same way — record the
+			// degradation loudly but don't fail the caller's request.
+			d.log.Warn("apply_policy degraded: BPF-LSM guard unavailable, enforcement not active for this session",
+				"session_id", ap.SessionID, "cgroup_id", record.CgroupID)
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+				OK:              true,
+				SessionID:       ap.SessionID,
+				Status:          "degraded_no_enforcement",
+			}
+		}
+		// ENFORCE_STRICT (or any other failure): fail loudly. Silently
+		// accepting a policy that can never be enforced is worse than
+		// refusing it — the caller must know enforcement is not active.
+		d.log.Error("apply_policy failed", "session_id", ap.SessionID, "cgroup_id", record.CgroupID, "error", err)
+		return errResp(fmt.Sprintf("apply policy maps: %v", err))
+	}
+
+	d.log.Info("policy applied",
+		"session_id", ap.SessionID,
+		"cgroup_id", record.CgroupID,
+		"generation", ap.Generation,
+		"op_policies", len(ap.OpPolicies),
+		"path_allow", len(ap.PathAllow),
+		"net_allow", len(ap.NetAllow),
+	)
+	return kernelcapture.DaemonProtocolResponse{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+		OK:              true,
+		SessionID:       ap.SessionID,
+	}
+}
+
+// handleSetKillSwitch engages or disengages the global BPF-LSM kill switch.
+// Unlike apply_policy, a missing guard is always a hard failure here: there
+// is no "degraded" reading of "the caller asked to change enforcement state
+// and nothing happened" — the caller must know the call had no effect.
+func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest) kernelcapture.DaemonProtocolResponse {
+	sw := req.SetKillSwitch
+	if err := kernelcapture.SetKillSwitch(d.policyMaps, sw.Engaged); err != nil {
+		d.log.Error("set_kill_switch failed", "engaged", sw.Engaged, "error", err)
+		return kernelcapture.DaemonProtocolResponse{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+			OK:              false,
+			Error:           fmt.Sprintf("set kill switch: %v", err),
+		}
+	}
+	d.log.Warn("kill switch changed", "engaged", sw.Engaged)
+	return kernelcapture.DaemonProtocolResponse{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+		OK:              true,
+	}
 }
 
 // onSessionRegistered adds the session to the cgroup routing index.
@@ -196,7 +292,7 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	)
 }
 
-// onSessionEnded removes the session from the routing index.
+// onSessionEnded removes the session from the routing index and clears BPF maps.
 func (d *daemon) onSessionEnded(sessionID string) {
 	if sessionID == "" {
 		return
@@ -207,6 +303,11 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	if scope, ok := d.treeScopes[sessionID]; ok {
 		if scope.CgroupID != 0 {
 			delete(d.cgroupIndex, scope.CgroupID)
+			// Best-effort: remove enforcement state from BPF maps.
+			if err := kernelcapture.RemovePolicyMaps(d.policyMaps, scope.CgroupID); err != nil {
+				d.log.Warn("remove policy maps on session end",
+					"session_id", sessionID, "cgroup_id", scope.CgroupID, "error", err)
+			}
 		}
 	}
 	delete(d.treeScopes, sessionID)
@@ -538,7 +639,7 @@ func main() {
 		}
 	}()
 
-	// Data-plane goroutine: eBPF ringbuf consumer (platform-specific).
+	// Data-plane goroutine: eBPF exec/exit tracepoint ringbuf consumer.
 	if !*noRingbuf {
 		wg.Add(1)
 		go func() {
@@ -547,8 +648,19 @@ func main() {
 				log.Error("eBPF consumer stopped", "error", err)
 			}
 		}()
+
+		// BPF-LSM enforcement consumer: loads process_guard, populates policyMaps.
+		// Degrades gracefully on kernels without BPF-LSM (warn, not fatal).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := runGuardConsumer(ctx, d, log); err != nil && ctx.Err() == nil {
+				log.Warn("BPF-LSM guard unavailable (enforcement degraded to seccomp-advertised)",
+					"error", err)
+			}
+		}()
 	} else {
-		log.Info("eBPF ringbuf consumer disabled (--no-ringbuf)")
+		log.Info("eBPF ringbuf consumers disabled (--no-ringbuf)")
 	}
 
 	// Notify systemd that the daemon is ready (Type=notify in the unit).

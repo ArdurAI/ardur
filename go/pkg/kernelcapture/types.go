@@ -190,6 +190,26 @@ type CorrelatorOptions struct {
 	CorrelationGrace time.Duration
 }
 
+// SyntheticKernelReceiptVerdict values for the Verdict field.
+const (
+	// SyntheticKernelReceiptVerdictCompliant means the observed kernel behaviour
+	// matched the active mission policy without intervention.
+	SyntheticKernelReceiptVerdictCompliant = "compliant"
+
+	// SyntheticKernelReceiptVerdictInsufficientEvidence means the correlator
+	// could not establish attribution with sufficient confidence.
+	SyntheticKernelReceiptVerdictInsufficientEvidence = "insufficient_evidence"
+
+	// SyntheticKernelReceiptVerdictDenied means the BPF-LSM enforcement layer
+	// returned -EPERM to the agent process (the syscall was blocked).
+	SyntheticKernelReceiptVerdictDenied = "denied"
+
+	// SyntheticKernelReceiptVerdictBlocked means an allowed but allowlisted op
+	// was observed targeting a path/network destination outside the allowlist;
+	// the event was logged but the syscall was not killed (permissive mode).
+	SyntheticKernelReceiptVerdictBlocked = "blocked"
+)
+
 // SyntheticKernelReceipt is the kernel-effect synthetic receipt projection.
 type SyntheticKernelReceipt struct {
 	EventID               string      `json:"event_id"`
