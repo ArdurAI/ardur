@@ -380,6 +380,22 @@ struct decide_ctx {
 // decide returns 0 (allow) or -1 (-EPERM, deny) and emits an event.
 // For allowlist ops, ctx->path_src/path_len (or addr_bytes/addr_len) carry the
 // path or address to check against the LPM allowlist.
+//
+// Used by guard_bprm_check and guard_socket_connect (both regular, non-
+// sleepable LSM programs), so it may freely reach the LPM_TRIE allowlist
+// maps (cgroup_path_allow, cgroup_net_allow) via path_is_allowed/
+// net_is_allowed. guard_file_open is SLEEPABLE (lsm.s, required for
+// bpf_d_path) and the kernel forbids sleepable programs from touching
+// LPM_TRIE maps AT ALL — not just at runtime: the verifier rejects a
+// sleepable program if its *compiled call graph* reaches an incompatible
+// map type, even through a branch that's never taken at runtime, and
+// decide/decide_file_open are separate `static` (not `__always_inline`)
+// subprograms specifically so the map-reachability sets don't merge. Do not
+// make guard_file_open call this function — see decide_file_open below,
+// which is deliberately a separate copy of this logic with no LPM calls in
+// its compiled body. (Confirmed on a real BPF-LSM kernel: sharing this
+// function with guard_file_open fails program load with "Sleepable programs
+// can only use array, hash, ringbuf and local storage maps".)
 static int decide(struct decide_ctx *ctx)
 {
 	__u64 cgroup_id = ctx->cgroup_id;
@@ -435,6 +451,64 @@ static int decide(struct decide_ctx *ctx)
 	return 0;
 }
 
+// decide_file_open is decide()'s counterpart for guard_file_open (the only
+// sleepable hook). Identical except its ACT_ALLOWLIST branch never calls
+// path_is_allowed — see decide()'s doc comment for why sleepable programs
+// can't reach cgroup_path_allow (LPM_TRIE) at all. Path allowlisting for
+// OP_FILE_READ/OP_FILE_WRITE fails closed instead: logged and denied under
+// ENFORCE_STRICT, logged and allowed under PERMISSIVE — the same fallback
+// the "no rule" case below already uses. OP_EXEC and OP_NET_CONNECT
+// allowlisting (bprm_check, socket_connect — both non-sleepable, both still
+// call decide() above) are unaffected by this; only file-op path-prefix
+// allowlisting is unavailable, and only because of this kernel constraint.
+static int decide_file_open(struct decide_ctx *ctx)
+{
+	__u64 cgroup_id = ctx->cgroup_id;
+	__u32 op = ctx->op;
+	const char *path_src = ctx->path_src;
+
+	if (kill_switch_is_on())
+		return 0;
+
+	struct ardur_managed_value *mv = lookup_managed(cgroup_id);
+	if (!mv)
+		return 0;  // cgroup not governed — untouched
+
+	struct ardur_cgroup_op_value *pol =
+		lookup_op_policy(cgroup_id, op, mv->active_slot);
+
+	if (!pol) {
+		// No rule for this op in the active slot
+		if (mv->flags & ARDUR_MANAGED_STRICT) {
+			emit_event(cgroup_id, op, ARDUR_ACT_DENY, ARDUR_ENFORCE_ENFORCE, path_src);
+			return -1;  // -EPERM: fail-closed
+		}
+		emit_event(cgroup_id, op, ARDUR_ACT_ALLOW, ARDUR_ENFORCE_PERMISSIVE, path_src);
+		return 0;
+	}
+
+	if (pol->action == ARDUR_ACT_DENY) {
+		emit_event(cgroup_id, op, ARDUR_ACT_DENY, pol->enforce_mode, path_src);
+		if (pol->enforce_mode == ARDUR_ENFORCE_ENFORCE)
+			return -1;  // -EPERM
+		return 0;  // permissive: log only
+	}
+
+	if (pol->action == ARDUR_ACT_ALLOWLIST) {
+		// No LPM access from a sleepable program (see function doc comment
+		// above) — fail closed rather than silently pass every file open
+		// through unchecked.
+		emit_event(cgroup_id, op, ARDUR_ACT_DENY, pol->enforce_mode, path_src);
+		if (pol->enforce_mode == ARDUR_ENFORCE_ENFORCE)
+			return -1;
+		return 0;
+	}
+
+	// ACT_ALLOW or unrecognised: pass
+	emit_event(cgroup_id, op, ARDUR_ACT_ALLOW, pol->enforce_mode, path_src);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // LSM hooks
 // ---------------------------------------------------------------------------
@@ -467,6 +541,9 @@ int BPF_PROG(guard_bprm_check, struct linux_binprm *bprm, int ret)
 // guard_file_open — intercepts open(2)/openat(2) etc.
 // Uses lsm.s (sleepable) to call bpf_d_path for the full resolved path.
 // Distinguishes read vs write by examining f_flags & O_ACCMODE.
+//
+// Calls decide_file_open, NOT decide — this is the one sleepable hook, and
+// it must never reach an LPM_TRIE map (see decide()'s doc comment).
 SEC("lsm.s/file_open")
 int BPF_PROG(guard_file_open, struct file *file, int ret)
 {
@@ -489,7 +566,7 @@ int BPF_PROG(guard_file_open, struct file *file, int ret)
 		.path_src = path_buf,
 		.path_len = path_len,
 	};
-	return decide(&dctx);
+	return decide_file_open(&dctx);
 }
 
 // guard_socket_connect — intercepts connect(2).
