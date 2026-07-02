@@ -269,13 +269,22 @@ func nextPolicySlot(cm policyMapReadWriter, cgroupID uint64) uint32 {
 	return 1 - (mv.ActiveSlot & 1)
 }
 
-// pathLpmKeyLayout matches struct ardur_path_lpm_key: prefixlen(4) + cgroup_raw[8] + path[256].
-const bpfPathLen = 256
+// pathLpmKeyLayout matches struct ardur_path_lpm_key:
+// prefixlen(4) + cgroup_raw[8] + path[bpfPathLpmDataLen].
+//
+// bpfPathLpmDataLen is 248, not 256: BPF_MAP_TYPE_LPM_TRIE hard-caps a key's
+// data portion (everything after prefixlen) at 256 bytes in the kernel
+// (LPM_DATA_SIZE_MAX in kernel/bpf/lpm_trie.c) — map creation fails with
+// EINVAL above that, taking every path/net allowlist policy down with it,
+// not just long-path entries. cgroup_raw's 8 bytes come out of that budget,
+// leaving 248 for the path itself. See ARDUR_PATH_LPM_DATA_LEN in
+// process_guard.bpf.c, which this must match exactly.
+const bpfPathLpmDataLen = 256 - 8
 
 type pathLpmKeyLayout struct {
 	Prefixlen uint32
 	CgroupRaw [8]byte
-	Path      [bpfPathLen]byte
+	Path      [bpfPathLpmDataLen]byte
 }
 
 func pathLpmKey(cgroupID uint64, pathPrefix string) (unsafe.Pointer, error) {
@@ -283,8 +292,8 @@ func pathLpmKey(cgroupID uint64, pathPrefix string) (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("path must be absolute, got %q", pathPrefix)
 	}
 	pathBytes := []byte(pathPrefix)
-	if len(pathBytes) > bpfPathLen-1 {
-		pathBytes = pathBytes[:bpfPathLen-1]
+	if len(pathBytes) > bpfPathLpmDataLen-1 {
+		pathBytes = pathBytes[:bpfPathLpmDataLen-1]
 	}
 
 	var k pathLpmKeyLayout

@@ -54,8 +54,20 @@
 #define ARDUR_KILL_SWITCH_OFF  0
 #define ARDUR_KILL_SWITCH_ON   1
 
-// Path buffer size — matches BpfEnforceEvent.Path in bpf_enforce_types.go
+// Path buffer size — matches BpfEnforceEvent.Path in bpf_enforce_types.go.
+// Used for the full path read from the kernel (bprm->filename / bpf_d_path)
+// and for the ringbuf event's path field.
 #define ARDUR_PATH_LEN 256
+
+// BPF_MAP_TYPE_LPM_TRIE hard-caps a key's data portion (everything after the
+// __u32 prefixlen) at 256 bytes (LPM_DATA_SIZE_MAX in kernel/bpf/lpm_trie.c) —
+// map creation fails with EINVAL above that, and it's a whole-map failure,
+// not a per-entry one, so it takes every path/net allowlist policy down with
+// it. ardur_path_lpm_key's data portion is cgroup_raw[8] + path[...], so the
+// path field gets 8 fewer bytes than ARDUR_PATH_LEN to stay under the cap.
+// Longer paths are truncated for allowlist matching only; the full path
+// still reaches the ringbuf event via ARDUR_PATH_LEN-sized buffers elsewhere.
+#define ARDUR_PATH_LPM_DATA_LEN (256 - 8)
 
 // Network constants
 #define AF_INET  2
@@ -139,12 +151,12 @@ struct ardur_managed_value {
 	__u32 active_slot;
 };
 
-// Path LPM trie key: {prefixlen, cgroup_raw[8], path[ARDUR_PATH_LEN]}
+// Path LPM trie key: {prefixlen, cgroup_raw[8], path[ARDUR_PATH_LPM_DATA_LEN]}
 // prefixlen in bits = 64 (cgroup scope) + path_bytes * 8.
 struct ardur_path_lpm_key {
 	__u32 prefixlen;
 	__u8  cgroup_raw[8];
-	char  path[ARDUR_PATH_LEN];
+	char  path[ARDUR_PATH_LPM_DATA_LEN];
 };
 
 // Net LPM trie key: {prefixlen, cgroup_raw[8], addr[16]}
@@ -280,12 +292,15 @@ static int path_is_allowed(__u64 cgroup_id, const char *path_src, int path_len)
 	__builtin_memset(lk, 0, sizeof(*lk));
 	__builtin_memcpy(lk->cgroup_raw, &cgroup_id, 8);
 
-	// Clamp to [0, ARDUR_PATH_LEN]; the ternary alone gives the verifier a
-	// provable static upper bound on copy_len, so bpf_probe_read_kernel's size
-	// argument is always in range. (A bitmask clamp here is a trap: masking by
-	// (ARDUR_PATH_LEN-1) wraps copy_len==ARDUR_PATH_LEN to 0, silently zeroing
-	// a full-length path read.)
-	__u32 copy_len = path_len < ARDUR_PATH_LEN ? (__u32)path_len : (__u32)ARDUR_PATH_LEN;
+	// Clamp to [0, ARDUR_PATH_LPM_DATA_LEN] — lk->path's actual size, smaller
+	// than the ARDUR_PATH_LEN source buffer path_src was read into (see
+	// ARDUR_PATH_LPM_DATA_LEN's comment: the LPM trie key has 8 fewer bytes
+	// of headroom than a plain path buffer). The ternary alone gives the
+	// verifier a provable static upper bound on copy_len, so
+	// bpf_probe_read_kernel's size argument is always in range. (A bitmask
+	// clamp here is a trap: masking by (N-1) wraps copy_len==N to 0, silently
+	// zeroing a full-length path read.)
+	__u32 copy_len = path_len < ARDUR_PATH_LPM_DATA_LEN ? (__u32)path_len : (__u32)ARDUR_PATH_LPM_DATA_LEN;
 	bpf_probe_read_kernel(lk->path, copy_len, path_src);
 
 	// prefixlen: 64 bits for cgroup_raw + path bytes (excluding null terminator)

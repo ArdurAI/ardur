@@ -430,6 +430,43 @@ func TestManagedValueLayout_Size(t *testing.T) {
 	}
 }
 
+// TestPathLpmKeyLayout_DataPortionFitsKernelLPMCap catches a bug that only a
+// real kernel could otherwise surface: BPF_MAP_TYPE_LPM_TRIE caps a key's
+// data portion (everything after the leading __u32 prefixlen) at 256 bytes
+// (LPM_DATA_SIZE_MAX in kernel/bpf/lpm_trie.c). Map *creation* fails with
+// EINVAL above that — taking every path-allowlist policy down with it, not
+// just long-path entries — which is exactly what happened when
+// ardur_path_lpm_key was cgroup_raw[8] + path[256] (264 bytes of data, 8
+// over the cap): confirmed on a real BPF-LSM kernel via the kernel-smoke CI
+// job ("map cgroup_path_allow: map create: invalid argument"), something
+// darwin-only unit tests and a non-privileged Linux build can't catch.
+func TestPathLpmKeyLayout_DataPortionFitsKernelLPMCap(t *testing.T) {
+	t.Parallel()
+	const kernelLPMDataCap = 256
+	prefixlenSize := unsafe.Sizeof(uint32(0))
+	dataPortion := unsafe.Sizeof(pathLpmKeyLayout{}) - prefixlenSize
+	if dataPortion > kernelLPMDataCap {
+		t.Errorf("ardur_path_lpm_key data portion = %d bytes, exceeds the kernel's %d-byte BPF_MAP_TYPE_LPM_TRIE cap by %d bytes — cgroup_path_allow map creation will fail with EINVAL on every real kernel",
+			dataPortion, kernelLPMDataCap, dataPortion-kernelLPMDataCap)
+	}
+}
+
+// TestNetLpmKeyLayout_DataPortionFitsKernelLPMCap is the same guard as
+// TestPathLpmKeyLayout_DataPortionFitsKernelLPMCap, for cgroup_net_allow.
+// It's nowhere near the 256-byte cap today (cgroup_raw[8] + addr[16] = 24
+// bytes), but a future change to widen the address field should trip this
+// rather than fail EINVAL only on a real kernel.
+func TestNetLpmKeyLayout_DataPortionFitsKernelLPMCap(t *testing.T) {
+	t.Parallel()
+	const kernelLPMDataCap = 256
+	prefixlenSize := unsafe.Sizeof(uint32(0))
+	dataPortion := unsafe.Sizeof(netLpmKeyLayout{}) - prefixlenSize
+	if dataPortion > kernelLPMDataCap {
+		t.Errorf("ardur_net_lpm_key data portion = %d bytes, exceeds the kernel's %d-byte BPF_MAP_TYPE_LPM_TRIE cap by %d bytes",
+			dataPortion, kernelLPMDataCap, dataPortion-kernelLPMDataCap)
+	}
+}
+
 func TestPathLpmKey_RejectsRelativePath(t *testing.T) {
 	t.Parallel()
 	if _, err := pathLpmKey(1, "relative/path"); err == nil {
@@ -439,12 +476,12 @@ func TestPathLpmKey_RejectsRelativePath(t *testing.T) {
 
 func TestPathLpmKey_TruncatesOversizePath(t *testing.T) {
 	t.Parallel()
-	p, err := pathLpmKey(1, "/"+repeatByte('a', bpfPathLen*2))
+	p, err := pathLpmKey(1, "/"+repeatByte('a', bpfPathLpmDataLen*2))
 	if err != nil {
 		t.Fatalf("pathLpmKey: unexpected error: %v", err)
 	}
 	k := (*pathLpmKeyLayout)(p)
-	if k.Prefixlen > 64+uint32(bpfPathLen-1)*8 {
+	if k.Prefixlen > 64+uint32(bpfPathLpmDataLen-1)*8 {
 		t.Errorf("prefixlen = %d, exceeds max representable path length", k.Prefixlen)
 	}
 }

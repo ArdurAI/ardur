@@ -50,7 +50,7 @@ type processGuardArdurPathLpmKey struct {
 	_         structs.HostLayout
 	Prefixlen uint32
 	CgroupRaw [8]uint8
-	Path      [256]int8
+	Path      [248]int8
 }
 
 // loadProcessGuard returns the embedded CollectionSpec for processGuard.
