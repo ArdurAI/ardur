@@ -117,6 +117,15 @@ type DaemonProtocolResponse struct {
 	// directories are root-0700, so this is the only channel a non-root client
 	// has to learn what kernel-level enforcement happened.
 	Enforcement *EnforceEventSummary `json:"enforcement,omitempty"`
+	// EnforcementTier carries which kernel enforcement tier is currently
+	// active — "bpf_lsm", "seccomp", or "none" — on successful health
+	// responses (plan E4). The daemon decides this once at startup
+	// (BPF-LSM preferred, seccomp as fallback) and never changes it while
+	// running; a launcher queries it to decide whether a governed process
+	// needs to be routed through ardur-exec-shim (the seccomp tier's
+	// on-ramp) before spawning one, or can rely on BPF-LSM's cgroup-scoped
+	// enforcement with no per-process wrapper at all.
+	EnforcementTier string `json:"enforcement_tier,omitempty"`
 }
 
 // CgroupFilterSequence describes daemon-side map sequencing. Enabling

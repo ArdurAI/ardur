@@ -48,11 +48,12 @@ import (
 )
 
 const (
-	defaultSocketPath   = "/run/ardur/kernelcapture/control.sock"
-	defaultEvidenceDir  = "/var/lib/ardur/kernelcapture/evidence"
-	defaultStateDir     = "/var/lib/ardur/kernelcapture/state"
-	defaultSocketMode   = fs.FileMode(0o660)
-	KernelReceiptSchema = "ardur.kernel.receipt.v1"
+	defaultSocketPath        = "/run/ardur/kernelcapture/control.sock"
+	defaultSeccompSocketPath = "/run/ardur/kernelcapture/seccomp.sock"
+	defaultEvidenceDir       = "/var/lib/ardur/kernelcapture/evidence"
+	defaultStateDir          = "/var/lib/ardur/kernelcapture/state"
+	defaultSocketMode        = fs.FileMode(0o660)
+	KernelReceiptSchema      = "ardur.kernel.receipt.v1"
 )
 
 // KernelReceiptEntry is the JSONL record appended to
@@ -96,7 +97,31 @@ type daemon struct {
 	// enforcement program. On non-Linux platforms PolicyMaps is a zero struct and
 	// ApplyPolicyMaps / RemovePolicyMaps return an error immediately.
 	policyMaps kernelcapture.PolicyMaps
+
+	// seccompPolicy holds the seccomp tier's OP_NET_CONNECT policy (plan
+	// E4) — always kept in sync by handleApplyPolicy regardless of which
+	// tier is active, so a session's policy is already in place by the time
+	// (if ever) a seccomp listener attaches for it. Non-nil on every
+	// platform; on non-Linux it simply never gets a listener to serve.
+	seccompPolicy *kernelcapture.SeccompPolicyStore
+	// seccompListeners tracks the cancel func for each session's seccomp
+	// supervisor goroutine (Linux only; always empty elsewhere), keyed by
+	// session_id and guarded by mu like the other session-scoped maps above.
+	seccompListeners map[string]context.CancelFunc
+
+	// activeTier is decided once at startup (see main(): "prefer BPF-LSM
+	// when active, fall back to seccomp when it isn't") and advertised on
+	// health responses so a launcher can decide whether routing a governed
+	// process through ardur-exec-shim (the seccomp tier's on-ramp) is
+	// necessary at all. One of the daemonTier* constants.
+	activeTier string
 }
+
+const (
+	daemonTierNone    = "none"
+	daemonTierBPFLSM  = "bpf_lsm"
+	daemonTierSeccomp = "seccomp"
+)
 
 func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, ownerUID uint32) (*daemon, error) {
 	cfg := kernelcapture.DefaultDaemonCustodyConfig()
@@ -139,7 +164,36 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
 		fs:                   osEvidenceFS{},
+		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
+		seccompListeners:     make(map[string]context.CancelFunc),
+		activeTier:           daemonTierNone,
 	}, nil
+}
+
+// registerSeccompListener records that sessionID now has a live seccomp
+// supervisor, returning false (without recording anything) if one is already
+// registered — callers must treat false as "reject this handoff," not as a
+// signal to replace the existing listener.
+func (d *daemon) registerSeccompListener(sessionID string, cancel context.CancelFunc) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, exists := d.seccompListeners[sessionID]; exists {
+		return false
+	}
+	d.seccompListeners[sessionID] = cancel
+	return true
+}
+
+// unregisterSeccompListener stops (if still running) and forgets sessionID's
+// seccomp supervisor. Safe to call even if no listener was ever registered.
+func (d *daemon) unregisterSeccompListener(sessionID string) {
+	d.mu.Lock()
+	cancel, ok := d.seccompListeners[sessionID]
+	delete(d.seccompListeners, sessionID)
+	d.mu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
 }
 
 // handleAuthorizedRequest is the DaemonAuthorizedProtocolHandler wired into the
@@ -172,6 +226,11 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		if summary, ok := d.enforceSummaryForScope(resp.SessionID); ok {
 			resp.Enforcement = &summary
 		}
+	case kernelcapture.DaemonProtocolMethodHealth:
+		// Advertise which enforcement tier is live so a launcher can decide
+		// whether routing a governed process through ardur-exec-shim (the
+		// seccomp tier's on-ramp) is necessary before it ever spawns one.
+		resp.EnforcementTier = d.activeTier
 	}
 	return resp
 }
@@ -197,19 +256,52 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 		return errResp("session has no cgroup_id; cannot apply BPF policy")
 	}
 
+	// Always keep the seccomp tier's in-memory policy in sync, regardless of
+	// which tier (if any) is actually active on this host: a session's
+	// policy must already be in place by the time — if ever — an
+	// ardur-exec-shim hands off a listener for it, and apply_policy commonly
+	// runs before that handoff. This can only fail on malformed net_allow
+	// entries (the same CIDR-or-bare-IP acceptance ApplyPolicyMaps' LPM key
+	// builder uses), so failing here before any BPF map write is strictly
+	// better than discovering the same bad input deeper in ApplyPolicyMaps.
+	if err := kernelcapture.ApplySeccompPolicy(d.seccompPolicy, ap.SessionID, *ap); err != nil {
+		d.log.Error("apply_policy failed (seccomp tier policy)", "session_id", ap.SessionID, "error", err)
+		return errResp(fmt.Sprintf("apply seccomp policy: %v", err))
+	}
+
 	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, *ap); err != nil {
-		if errors.Is(err, kernelcapture.ErrPolicyMapsUnavailable) && ap.EnforceMode != kernelcapture.BpfEnforceModeEnforce {
-			// Permissive mode: the whole point of PERMISSIVE is "log, don't
-			// block". Treat a missing BPF-LSM guard the same way — record the
-			// degradation loudly but don't fail the caller's request.
-			d.log.Warn("apply_policy degraded: BPF-LSM guard unavailable, enforcement not active for this session",
-				"session_id", ap.SessionID, "cgroup_id", record.CgroupID)
-			return kernelcapture.DaemonProtocolResponse{
-				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
-				Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
-				OK:              true,
-				SessionID:       ap.SessionID,
-				Status:          "degraded_no_enforcement",
+		if errors.Is(err, kernelcapture.ErrPolicyMapsUnavailable) {
+			if d.activeTier == daemonTierSeccomp && seccompFullyCoversPolicy(ap) {
+				// BPF-LSM being unavailable isn't a degradation here: the
+				// active tier on this host is seccomp user-notify, and every
+				// op this request asks for (OP_NET_CONNECT only) is within
+				// that tier's scope — ApplySeccompPolicy above already
+				// stored it, so this genuinely is applied, not degraded.
+				d.log.Info("apply_policy applied via seccomp tier (BPF-LSM inactive on this host)",
+					"session_id", ap.SessionID, "cgroup_id", record.CgroupID)
+				return kernelcapture.DaemonProtocolResponse{
+					ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+					Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+					OK:              true,
+					SessionID:       ap.SessionID,
+					Status:          "applied_seccomp_tier",
+				}
+			}
+			if ap.EnforceMode != kernelcapture.BpfEnforceModeEnforce {
+				// Permissive mode: the whole point of PERMISSIVE is "log,
+				// don't block". Treat a missing BPF-LSM guard (with no
+				// seccomp fallback covering this request) the same way —
+				// record the degradation loudly but don't fail the
+				// caller's request.
+				d.log.Warn("apply_policy degraded: BPF-LSM guard unavailable, enforcement not active for this session",
+					"session_id", ap.SessionID, "cgroup_id", record.CgroupID)
+				return kernelcapture.DaemonProtocolResponse{
+					ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+					Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+					OK:              true,
+					SessionID:       ap.SessionID,
+					Status:          "degraded_no_enforcement",
+				}
 			}
 		}
 		// ENFORCE_STRICT (or any other failure): fail loudly. Silently
@@ -233,6 +325,20 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 		OK:              true,
 		SessionID:       ap.SessionID,
 	}
+}
+
+// seccompFullyCoversPolicy reports whether every op an apply_policy request
+// asks for is within the seccomp tier's scope — OP_NET_CONNECT only (see
+// seccomp_policy.go's header comment for why exec/file-open aren't). An
+// empty OpPolicies list is trivially covered: there is nothing to enforce
+// either way.
+func seccompFullyCoversPolicy(ap *kernelcapture.DaemonApplyPolicyRequest) bool {
+	for _, p := range ap.OpPolicies {
+		if p.Op != kernelcapture.BpfOpNetConnect {
+			return false
+		}
+	}
+	return true
 }
 
 // handleSetKillSwitch engages or disengages the global BPF-LSM kill switch.
@@ -298,7 +404,6 @@ func (d *daemon) onSessionEnded(sessionID string) {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if scope, ok := d.treeScopes[sessionID]; ok {
 		if scope.CgroupID != 0 {
@@ -314,6 +419,18 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	delete(d.correlators, sessionID)
 	delete(d.enforceChains, sessionID)
 	delete(d.enforceSummaries, sessionID)
+	// Grab (and forget) the seccomp listener's cancel func here, under the
+	// same lock as the map deletes above; call it below, outside the lock,
+	// since the supervisor goroutine it stops may itself try to touch
+	// d.mu-guarded state on its way out.
+	seccompCancel, hadSeccompListener := d.seccompListeners[sessionID]
+	delete(d.seccompListeners, sessionID)
+	d.mu.Unlock()
+
+	kernelcapture.RemoveSeccompPolicy(d.seccompPolicy, sessionID)
+	if hadSeccompListener && seccompCancel != nil {
+		seccompCancel()
+	}
 
 	d.log.Info("session ended", "session_id", sessionID)
 }
@@ -408,7 +525,8 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent, loss kernelc
 // cgroup index does not leak indefinitely.
 func (d *daemon) pruneExpiredSessions() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	var expiredSeccompCancels []context.CancelFunc
+	var expiredSessionIDs []string
 	for sid, scope := range d.treeScopes {
 		if _, err := d.registry.ActiveSession(sid); err != nil {
 			if scope.CgroupID != 0 {
@@ -418,7 +536,22 @@ func (d *daemon) pruneExpiredSessions() {
 			delete(d.correlators, sid)
 			delete(d.enforceChains, sid)
 			delete(d.enforceSummaries, sid)
+			if cancel, ok := d.seccompListeners[sid]; ok {
+				expiredSeccompCancels = append(expiredSeccompCancels, cancel)
+				delete(d.seccompListeners, sid)
+			}
+			expiredSessionIDs = append(expiredSessionIDs, sid)
 			d.log.Info("pruned expired session", "session_id", sid)
+		}
+	}
+	d.mu.Unlock()
+
+	for _, sid := range expiredSessionIDs {
+		kernelcapture.RemoveSeccompPolicy(d.seccompPolicy, sid)
+	}
+	for _, cancel := range expiredSeccompCancels {
+		if cancel != nil {
+			cancel()
 		}
 	}
 }
@@ -556,12 +689,14 @@ func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) (err 
 
 func main() {
 	var (
-		socketPath  = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
-		evidenceDir = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
-		stateDir    = flag.String("state-dir", defaultStateDir, "Daemon state directory")
-		noRingbuf   = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
-		debug       = flag.Bool("debug", false, "Enable debug-level logging")
-		pruneEvery  = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
+		socketPath        = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
+		seccompSocketPath = flag.String("seccomp-socket", defaultSeccompSocketPath, "Unix-domain socket ardur-exec-shim hands off its seccomp listener fd on (seccomp tier, plan E4)")
+		evidenceDir       = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
+		stateDir          = flag.String("state-dir", defaultStateDir, "Daemon state directory")
+		noRingbuf         = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
+		debug             = flag.Bool("debug", false, "Enable debug-level logging")
+		pruneEvery        = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
+		guardReadyTimeout = flag.Duration("guard-ready-timeout", 10*time.Second, "How long to wait for the BPF-LSM guard to report load success/failure before falling back to the seccomp tier")
 	)
 	flag.Parse()
 
@@ -639,7 +774,19 @@ func main() {
 		}
 	}()
 
-	// Data-plane goroutine: eBPF exec/exit tracepoint ringbuf consumer.
+	// Data-plane goroutine: eBPF exec/exit tracepoint ringbuf consumer, plus
+	// tier selection (plan E4): prefer BPF-LSM when it actually loads, fall
+	// back to seccomp user-notify otherwise. guardOutcome receives exactly
+	// one value from runGuardConsumer — nil on a successful load, the load
+	// error otherwise — before that goroutine does anything blocking, so
+	// the decision below is made synchronously instead of inferred from
+	// preflight (which can pass while the real load still fails for
+	// reasons preflight doesn't check).
+	//
+	// Both kernel-enforcement mechanisms ride on the same --no-ringbuf
+	// switch: it means "socket control plane only," so leaving it set
+	// leaves activeTier at daemonTierNone rather than standing up a
+	// seccomp handoff server nothing will ever mean to use.
 	if !*noRingbuf {
 		wg.Add(1)
 		go func() {
@@ -651,16 +798,42 @@ func main() {
 
 		// BPF-LSM enforcement consumer: loads process_guard, populates policyMaps.
 		// Degrades gracefully on kernels without BPF-LSM (warn, not fatal).
+		guardOutcome := make(chan error, 1)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := runGuardConsumer(ctx, d, log); err != nil && ctx.Err() == nil {
+			if err := runGuardConsumer(ctx, d, log, guardOutcome); err != nil && ctx.Err() == nil {
 				log.Warn("BPF-LSM guard unavailable (enforcement degraded to seccomp-advertised)",
 					"error", err)
 			}
 		}()
+
+		select {
+		case err := <-guardOutcome:
+			if err == nil {
+				d.activeTier = daemonTierBPFLSM
+			} else {
+				log.Warn("BPF-LSM tier not active, falling back to seccomp tier", "error", err)
+			}
+		case <-time.After(*guardReadyTimeout):
+			log.Warn("BPF-LSM guard did not report readiness in time, falling back to seccomp tier",
+				"timeout", guardReadyTimeout.String())
+		case <-ctx.Done():
+		}
+
+		if d.activeTier != daemonTierBPFLSM && ctx.Err() == nil {
+			d.activeTier = daemonTierSeccomp
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := runSeccompHandoffServer(ctx, *seccompSocketPath, d, log); err != nil && ctx.Err() == nil {
+					log.Error("seccomp handoff server stopped", "error", err)
+				}
+			}()
+		}
+		log.Info("enforcement tier selected", "tier", d.activeTier, "seccomp_socket", *seccompSocketPath)
 	} else {
-		log.Info("eBPF ringbuf consumers disabled (--no-ringbuf)")
+		log.Info("eBPF ringbuf consumers disabled (--no-ringbuf); enforcement tiers unavailable")
 	}
 
 	// Notify systemd that the daemon is ready (Type=notify in the unit).

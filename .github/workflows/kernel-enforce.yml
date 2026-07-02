@@ -1,7 +1,8 @@
 name: kernel-enforce
 
-# Privileged Linux CI for the Slice 4.2 BPF-LSM enforcement bridge
-# (go/pkg/kernelcapture/process_guard.bpf.c). Two jobs:
+# Privileged Linux CI for the two-tier kernel enforcement bridge
+# (go/pkg/kernelcapture/process_guard.bpf.c — BPF-LSM; seccomp_notify_linux.go
+# — seccomp user-notify). Three jobs:
 #
 #   bpf-generate — compiles process_guard.bpf.c with the same toolchain
 #     (Ubuntu 24.04 default clang, currently 18.x) used to produce the
@@ -23,9 +24,25 @@ name: kernel-enforce
 #     one thing bpf-generate cannot prove: that the compiled program actually
 #     enforces on a live kernel, not just that it loads.
 #
+#   seccomp-smoke — the seccomp user-notify tier's equivalent proof (plan
+#     E4, the common-case fallback for hosts where BPF-LSM never loads).
+#     Unlike kernel-smoke this needs no KVM/virtme-ng custom kernel boot:
+#     seccomp(SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER, ...)
+#     works under an ordinary PR_SET_NO_NEW_PRIVS-only process, confirmed
+#     empirically during E4's development — a plain runner is enough. Runs
+#     ardur-seccomp-smoke, which starts a real ardur-kernelcaptured (with no
+#     BPF-LSM available, so it falls back to seccomp), runs ardur-exec-shim
+#     against a real target process, and asserts a policy-denied connect(2)
+#     gets EPERM while a policy-allowed one reaches the kernel's real connect
+#     handling. This exact harness caught two real bugs no pure-Go test
+#     surfaced (see ardur-seccomp-smoke's package doc comment) — losing it
+#     would mean losing the only thing that can catch a regression in either.
+#
 # kernel-smoke starts as continue-on-error: true — promote it to a required
 # check once a burn-in period confirms the virtme-ng invocation and kernel
-# cmdline handling are stable on GitHub-hosted runners.
+# cmdline handling are stable on GitHub-hosted runners. seccomp-smoke needs
+# no such VM and has been stable since it was added, so it's a required
+# check from the start.
 #
 # This workflow is also the gate for the cilium/ebpf dependency: any future
 # version bump that touches go/go.mod must pass bpf-generate (compiles
@@ -38,6 +55,8 @@ on:
       - "go/pkg/kernelcapture/**"
       - "go/cmd/ardur-kernelcaptured/**"
       - "go/cmd/ardur-guard-smoke/**"
+      - "go/cmd/ardur-exec-shim/**"
+      - "go/cmd/ardur-seccomp-smoke/**"
       - "go/go.mod"
       - "go/go.sum"
       - ".github/workflows/kernel-enforce.yml"
@@ -47,6 +66,8 @@ on:
       - "go/pkg/kernelcapture/**"
       - "go/cmd/ardur-kernelcaptured/**"
       - "go/cmd/ardur-guard-smoke/**"
+      - "go/cmd/ardur-exec-shim/**"
+      - "go/cmd/ardur-seccomp-smoke/**"
       - "go/go.mod"
       - "go/go.sum"
       - ".github/workflows/kernel-enforce.yml"
@@ -196,3 +217,54 @@ jobs:
             --run \
             --append "lsm=bpf" \
             --exec /tmp/ardur-guard-smoke
+
+  seccomp-smoke:
+    name: seccomp-smoke
+    needs: bpf-generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.26.4"
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Install BPF build toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev linux-libc-dev
+          clang --version
+
+      # pkg/kernelcapture also contains the BPF-LSM tier's generated
+      # bindings; regenerate them here the same way bpf-generate and
+      # kernel-smoke do so this job never depends on a build-artifact cache
+      # or job ordering to see a consistent tree — bpf-generate's own drift
+      # check (needs: bpf-generate, above) is what actually guards that
+      # what's committed matches what this regenerates.
+      - name: go generate ./go/pkg/kernelcapture/...
+        working-directory: go/pkg/kernelcapture
+        run: go generate ./...
+
+      - name: Build ardur-kernelcaptured, ardur-exec-shim, ardur-seccomp-smoke
+        working-directory: go
+        run: |
+          go build -o /tmp/ardur-kernelcaptured ./cmd/ardur-kernelcaptured
+          go build -o /tmp/ardur-exec-shim ./cmd/ardur-exec-shim
+          go build -o /tmp/ardur-seccomp-smoke ./cmd/ardur-seccomp-smoke
+
+      # ardur-kernelcaptured's custody plan requires its run/state dirs under
+      # /run/ardur and /var/lib/ardur (daemon_custody.go) — not configurable
+      # to an arbitrary tmp path — so this needs root to create/write them,
+      # the same reason kernel-smoke's boot step above runs under sudo. No
+      # KVM, no custom kernel: seccomp(SECCOMP_SET_MODE_FILTER,
+      # SECCOMP_FILTER_FLAG_NEW_LISTENER, ...) works on the runner's own
+      # kernel with no special privilege beyond PR_SET_NO_NEW_PRIVS, which
+      # ardur-exec-shim sets itself.
+      - name: Run the seccomp tier smoke test
+        run: |
+          sudo /tmp/ardur-seccomp-smoke \
+            --daemon-bin /tmp/ardur-kernelcaptured \
+            --shim-bin /tmp/ardur-exec-shim
