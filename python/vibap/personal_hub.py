@@ -1232,6 +1232,13 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("content-type", "application/json; charset=utf-8")
         self.send_header("x-content-type-options", "nosniff")
+        self.send_header("cache-control", "no-store")
+        self.send_header("pragma", "no-cache")
+        self.send_header("referrer-policy", "no-referrer")
+        self.send_header(
+            "content-security-policy",
+            "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        )
         origin = self._allowed_cors_origin()
         if origin:
             self.send_header("access-control-allow-origin", origin)

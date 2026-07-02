@@ -246,6 +246,34 @@ def test_hub_rejects_invalid_content_length_before_body_read(content_length):
     assert "non-negative integer" in str(excinfo.value)
 
 
+def test_hub_json_responses_carry_no_store_security_headers(tmp_path):
+    handler = object.__new__(_HubRequestHandler)
+    sent_headers: list[tuple[str, str]] = []
+    statuses: list[int] = []
+    setattr(handler, "headers", {})
+    setattr(handler, "server", SimpleNamespace(hub=PersonalHub(tmp_path)))
+    setattr(handler, "wfile", io.BytesIO())
+    setattr(handler, "send_response", lambda status: statuses.append(status))
+    setattr(
+        handler,
+        "send_header",
+        lambda name, value: sent_headers.append((name.lower(), value)),
+    )
+    setattr(handler, "end_headers", lambda: None)
+
+    handler._send_json({"ok": True, "token": "bearer-like-value"})
+
+    header_map = {name: value for name, value in sent_headers}
+    assert statuses == [200]
+    assert header_map["cache-control"] == "no-store"
+    assert header_map["pragma"] == "no-cache"
+    assert header_map["referrer-policy"] == "no-referrer"
+    assert header_map["content-security-policy"] == (
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    )
+    assert header_map["x-content-type-options"] == "nosniff"
+
+
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
 
