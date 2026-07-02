@@ -146,9 +146,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang llvm libbpf-dev linux-libc-dev \
             qemu-system-x86 python3-pip
-          # --user + --break-system-packages: Ubuntu 24.04's system Python is
-          # PEP 668 externally-managed; virtme-ng has no apt package here.
-          python3 -m pip install --user --break-system-packages virtme-ng
+          # Installed as root (not --user): the smoke boot below needs sudo
+          # for /dev/kvm, and a `sudo vng` invocation only sees packages on
+          # root's own Python path — a --user install under the `runner`
+          # account is invisible to it (confirmed by CI: vng resolved but
+          # `from virtme_ng.run import main` raised ModuleNotFoundError).
+          # --break-system-packages: Ubuntu 24.04's system Python is PEP 668
+          # externally-managed; virtme-ng has no apt package here.
+          sudo python3 -m pip install --break-system-packages virtme-ng
 
       - name: go generate ./go/pkg/kernelcapture/...
         working-directory: go/pkg/kernelcapture
@@ -170,8 +175,8 @@ jobs:
       # boot behavior in ways unrelated to this test.
       - name: Boot with BPF-LSM active and run the smoke test
         run: |
-          VNG="$(python3 -m site --user-base)/bin/vng"
-          test -x "$VNG" || { echo "::error::vng not found after pip install"; exit 1; }
+          VNG="$(command -v vng)"
+          test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }
           sudo "$VNG" \
             --verbose \
             --append "lsm=landlock,lockdown,yama,integrity,apparmor,bpf" \
