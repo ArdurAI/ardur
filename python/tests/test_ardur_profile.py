@@ -487,6 +487,78 @@ def test_profile_init_force_replaces_existing_profile_file(tmp_path, capsys):
     assert "Mode: safe coding" in profile.read_text(encoding="utf-8")
 
 
+def _assert_profile_init_path_unwritable_json(profile, tmp_path, capsys, *, force):
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile,
+            force=force,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_path_unwritable"
+    assert response["condition"] == "profile_path_unwritable"
+    commands = [step["command"] for step in response["next_steps"]]
+    assert "ardur profile init --path <profile-file> --force" in commands
+    assert "ardur protect claude-code --profile <profile-file>" in commands
+    assert str(tmp_path) not in captured.out
+
+
+def test_profile_init_parent_regular_file_json_has_path_unwritable_next_steps(tmp_path, capsys):
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("do not replace\n", encoding="utf-8")
+    profile = parent_file / "ARDUR.md"
+
+    for force in (False, True):
+        _assert_profile_init_path_unwritable_json(profile, tmp_path, capsys, force=force)
+
+    assert parent_file.read_text(encoding="utf-8") == "do not replace\n"
+
+
+def test_profile_init_dangling_parent_symlink_json_has_path_unwritable_next_steps(tmp_path, capsys):
+    missing_parent_target = tmp_path / "missing-profile-parent"
+    parent_link = tmp_path / "dangling-profile-parent"
+    parent_link.symlink_to(missing_parent_target, target_is_directory=True)
+    profile = parent_link / "ARDUR.md"
+
+    for force in (False, True):
+        _assert_profile_init_path_unwritable_json(profile, tmp_path, capsys, force=force)
+
+    assert parent_link.is_symlink()
+    assert not missing_parent_target.exists()
+
+
+def test_profile_init_parent_symlink_to_existing_directory_succeeds(tmp_path, capsys):
+    parent_target = tmp_path / "profile-parent-target"
+    parent_target.mkdir()
+    parent_link = tmp_path / "profile-parent-link"
+    parent_link.symlink_to(parent_target, target_is_directory=True)
+    profile = parent_link / "ARDUR.md"
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=profile,
+            force=False,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is True
+    assert "Mode: safe coding" in (parent_target / "ARDUR.md").read_text(encoding="utf-8")
+
+
 def test_profile_init_directory_without_force_json_has_path_invalid_next_steps(tmp_path, capsys):
     profile_dir = tmp_path / "ARDUR.md"
     profile_dir.mkdir()

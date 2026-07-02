@@ -72,6 +72,21 @@ Duration: 1d
 }
 
 
+def _validate_profile_parent_path(target: Path) -> None:
+    """Fail before mkdir can turn parent-path failures into profile collisions."""
+
+    for parent in (target.parent, *target.parent.parents):
+        try:
+            parent.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise OSError("could not inspect Ardur profile parent path") from exc
+        if not parent.is_dir():
+            raise NotADirectoryError("Ardur profile parent path is not a directory")
+        return
+
+
 _SCALAR_KEYS = {
     "mode": "mode",
     "mission": "mission",
@@ -176,6 +191,7 @@ def write_profile_template(
         raise IsADirectoryError(f"{target} is a directory; choose a Markdown file path")
     if target.exists() and not force:
         raise FileExistsError(f"{target} already exists; use --force to replace it")
+    _validate_profile_parent_path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(PROFILE_TEMPLATES[template], encoding="utf-8")
     return target
