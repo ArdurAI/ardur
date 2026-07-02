@@ -28,6 +28,7 @@ from vibap.receipt import verify_chain
 from vibap.run_bridge import (
     ClaudeCodeAdapter,
     EnvProxyAdapter,
+    KernelPolicyEnforcementError,
     RunContext,
     TransparentInterceptAdapter,
     _kernel_enforcement_claim,
@@ -89,6 +90,91 @@ def _hermetic_kernel_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     fake_cgroup_root.mkdir()
     monkeypatch.setenv(kc.CGROUP_ROOT_ENV, str(fake_cgroup_root))
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(tmp_path / "no-such-daemon.sock"))
+
+
+class _FakeKernelDaemon:
+    """A multi-turn AF_UNIX stand-in for the kernelcapture daemon.
+
+    Unlike a one-shot fake, this accepts a full ``ardur run`` sequence —
+    ``register_session``, ``apply_policy``, and (on cleanup) ``end_session`` —
+    each over its own connection (matching ``KernelCaptureClient._roundtrip``,
+    which opens one connection per call), and records every request it saw.
+    """
+
+    def __init__(self, socket_path: Path, responses: dict[str, dict] | None = None) -> None:
+        self.socket_path = socket_path
+        self.responses = responses or {}
+        self.received: list[dict] = []
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(socket_path))
+        self._server.listen(5)
+        self._server.settimeout(0.2)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._serve_forever, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _serve_forever(self) -> None:
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._server.accept()
+            except OSError:
+                continue
+            with conn:
+                buf = b""
+                while b"\n" not in buf:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                line = buf.split(b"\n", 1)[0]
+                try:
+                    request = json.loads(line.decode("utf-8"))
+                except ValueError:
+                    continue
+                self.received.append(request)
+                method = request.get("method")
+                default_response = {
+                    "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                    "ok": True,
+                    "method": method,
+                }
+                response = self.responses.get(method, default_response)
+                conn.sendall(json.dumps(response).encode("utf-8") + b"\n")
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
+        self._server.close()
+
+
+@pytest.fixture
+def sockdir():
+    """A short-pathed temp dir for AF_UNIX sockets.
+
+    AF_UNIX paths are capped (104 bytes on macOS, 108 on Linux); the deep
+    pytest ``tmp_path`` blows past that on macOS, so bind sockets under /tmp.
+    """
+    path = Path(tempfile.mkdtemp(dir="/tmp"))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _live_kernel_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sockdir: Path) -> Path:
+    """Point cgroup v2 + the daemon socket at fakes that look "available".
+
+    Returns the socket path a :class:`_FakeKernelDaemon` should bind to.
+    """
+    fake_cgroup_root = tmp_path / "fake-cgroup"
+    fake_cgroup_root.mkdir()
+    (fake_cgroup_root / "cgroup.controllers").write_text("cpu memory\n", encoding="utf-8")
+    monkeypatch.setenv(kc.CGROUP_ROOT_ENV, str(fake_cgroup_root))
+    socket_path = sockdir / "daemon.sock"
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
+    return socket_path
 
 
 def test_ardur_run_governs_launched_agent_zero_setup(
@@ -174,6 +260,158 @@ def test_ardur_run_denies_when_no_tools_allowed(
     assert result.denials >= 1
     assert result.receipt_count == 3
     assert result.attestation_token
+
+
+# ── kernel policy wiring (Slice 4.2 apply_policy bridge) ────────────────────────
+
+
+def test_ardur_run_applies_kernel_policy_when_daemon_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path
+) -> None:
+    """End to end: a real cgroup + a live (fake) daemon get a lowered BPF plan.
+
+    Proves the plan is actually encoded and sent over the socket by the
+    run_bridge orchestration, not just by the client method in isolation.
+    """
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    daemon = _FakeKernelDaemon(
+        socket_path,
+        responses={
+            "register_session": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "register_session",
+                "status": "registered",
+            },
+            "apply_policy": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "apply_policy",
+                "status": "applied",
+            },
+        },
+    )
+    daemon.start()
+    try:
+        result = run_governed(
+            command=[sys.executable, str(standin_agent)],
+            mission="Kernel policy applied end to end.",
+            allowed_tools=["Read", "Glob", "Grep"],
+            forbidden_tools=["Bash"],
+            max_tool_calls=10,
+            home=tmp_path / "kernel-home",
+            via="env",
+            enforce=True,
+        )
+    finally:
+        daemon.close()
+
+    assert result.correlation["available"] is True
+    assert result.kernel_policy["applied"] is True
+    assert result.kernel_policy["generation"] == 1
+
+    methods = [req.get("method") for req in daemon.received]
+    assert "register_session" in methods
+    assert "apply_policy" in methods
+    # apply_policy must follow register_session (called "after cgroup registration").
+    assert methods.index("apply_policy") > methods.index("register_session")
+
+    apply_req = next(req["apply_policy"] for req in daemon.received if req.get("method") == "apply_policy")
+    assert apply_req["session_id"] == result.session_id
+    assert apply_req["generation"] == 1
+    assert apply_req["enforce_mode"] == 1  # ENFORCE_MODE_ENFORCE
+
+    from vibap.bpf_types import ACT_DENY, OP_EXEC
+
+    op_by_code = {entry["op"]: entry for entry in apply_req["op_policies"]}
+    assert op_by_code[OP_EXEC]["action"] == ACT_DENY  # forbidden_tools=["Bash"] -> OP_EXEC deny
+
+
+def test_ardur_run_permissive_records_degradation_note_without_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path
+) -> None:
+    """Default (permissive) mode: no daemon -> a recorded note, run still succeeds."""
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    home = tmp_path / "permissive-home"
+
+    result = run_governed(
+        command=[sys.executable, str(standin_agent)],
+        mission="Permissive kernel policy degrades gracefully.",
+        allowed_tools=["Read", "Glob", "Grep"],
+        forbidden_tools=["Bash"],
+        max_tool_calls=10,
+        home=home,
+        via="env",
+        # enforce defaults to False
+    )
+    assert result.exit_code == 0
+    assert result.kernel_policy["applied"] is False
+    assert "kernel policy not applied" in result.kernel_policy["reason"]
+    assert any("kernel policy not applied" in note for note in result.notes)
+
+
+def test_ardur_run_enforce_aborts_when_kernel_daemon_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path
+) -> None:
+    """--enforce with no daemon present: the run aborts loudly, agent is killed."""
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    home = tmp_path / "enforce-abort-home"
+
+    with pytest.raises(KernelPolicyEnforcementError, match="kernel policy not applied"):
+        run_governed(
+            command=[sys.executable, str(standin_agent)],
+            mission="Enforce mode requires kernel policy or the run must abort.",
+            allowed_tools=["Read"],
+            forbidden_tools=["Bash"],
+            max_tool_calls=10,
+            home=home,
+            via="env",
+            enforce=True,
+        )
+
+
+def test_ardur_run_enforce_aborts_when_daemon_rejects_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path
+) -> None:
+    """--enforce with a daemon present that rejects apply_policy also aborts."""
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    daemon = _FakeKernelDaemon(
+        socket_path,
+        responses={
+            "register_session": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "register_session",
+                "status": "registered",
+            },
+            "apply_policy": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": False,
+                "method": "apply_policy",
+                "error": "no BPF-LSM guard loaded on this host",
+            },
+        },
+    )
+    daemon.start()
+    try:
+        with pytest.raises(KernelPolicyEnforcementError, match="no BPF-LSM guard loaded"):
+            run_governed(
+                command=[sys.executable, str(standin_agent)],
+                mission="Enforce mode aborts on daemon rejection.",
+                allowed_tools=["Read"],
+                forbidden_tools=["Bash"],
+                max_tool_calls=10,
+                home=tmp_path / "enforce-reject-home",
+                via="env",
+                enforce=True,
+            )
+    finally:
+        daemon.close()
+
+    methods = [req.get("method") for req in daemon.received]
+    assert methods.count("apply_policy") == 1
+    # Cleanup still runs (finally-block end_session) even though the run aborted.
+    assert "end_session" in methods
 
 
 def test_run_governed_rejects_empty_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

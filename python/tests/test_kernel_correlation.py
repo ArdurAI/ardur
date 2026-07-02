@@ -272,3 +272,94 @@ def test_session_status_response_without_enforcement_key(sockdir: Path) -> None:
         daemon.close()
 
     assert "enforcement" not in resp
+
+
+# ── apply_policy (Slice 4.2 wiring) ─────────────────────────────────────────────
+
+
+def test_apply_policy_encodes_and_sends_lowered_plan(sockdir: Path) -> None:
+    """The plan is encoded into the exact wire shape the Go daemon expects."""
+    from vibap.bpf_lower import lower_to_bpf_policy_plan
+    from vibap.bpf_types import ACT_ALLOWLIST, ACT_DENY, ENFORCE_MODE_ENFORCE, OP_EXEC, OP_FILE_READ
+
+    sock = sockdir / "c.sock"
+    daemon = _FakeDaemon(
+        sock,
+        {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "apply_policy",
+            "session_id": "sess-apply-1",
+            "status": "applied",
+        },
+    )
+    daemon.start()
+    plan = lower_to_bpf_policy_plan(
+        forbidden_tools=["bash"],
+        resource_scope=["/data"],
+        enforce_mode=ENFORCE_MODE_ENFORCE,
+    )
+    try:
+        client = kc.KernelCaptureClient(sock)
+        resp = client.apply_policy(session_id="sess-apply-1", plan=plan, generation=1)
+    finally:
+        daemon.close()
+
+    assert resp["status"] == "applied"
+    assert daemon.received is not None
+    assert daemon.received["method"] == "apply_policy"
+    payload = daemon.received["apply_policy"]
+    assert payload["session_id"] == "sess-apply-1"
+    assert payload["generation"] == 1
+    assert payload["enforce_mode"] == ENFORCE_MODE_ENFORCE
+    assert payload["path_allow"] == ["/data"]
+    assert "net_allow" not in payload  # omitted (empty) rather than sent as []
+
+    op_by_code = {entry["op"]: entry for entry in payload["op_policies"]}
+    assert op_by_code[OP_EXEC]["action"] == ACT_DENY  # forbidden_tools:bash -> OP_EXEC deny
+    assert op_by_code[OP_FILE_READ]["action"] == ACT_ALLOWLIST  # resource_scope -> allowlist
+
+
+def test_apply_policy_raises_on_daemon_rejection(sockdir: Path) -> None:
+    from vibap.bpf_lower import lower_to_bpf_policy_plan
+
+    sock = sockdir / "c.sock"
+    daemon = _FakeDaemon(
+        sock,
+        {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": False,
+            "method": "apply_policy",
+            "error": "apply_policy generation must be non-zero (0 is reserved for uninitialized)",
+        },
+    )
+    daemon.start()
+    plan = lower_to_bpf_policy_plan(forbidden_tools=["bash"])
+    try:
+        client = kc.KernelCaptureClient(sock)
+        with pytest.raises(kc.DaemonProtocolError, match="generation must be non-zero"):
+            client.apply_policy(session_id="sess-1", plan=plan, generation=1)
+    finally:
+        daemon.close()
+
+
+def test_apply_policy_raises_unavailable_when_daemon_absent(tmp_path: Path) -> None:
+    from vibap.bpf_lower import lower_to_bpf_policy_plan
+
+    plan = lower_to_bpf_policy_plan(forbidden_tools=["bash"])
+    client = kc.KernelCaptureClient(tmp_path / "absent.sock")
+    with pytest.raises(kc.DaemonUnavailable):
+        client.apply_policy(session_id="sess-1", plan=plan, generation=1)
+
+
+def test_apply_policy_validates_inputs(tmp_path: Path) -> None:
+    from vibap.bpf_lower import lower_to_bpf_policy_plan
+
+    plan = lower_to_bpf_policy_plan(forbidden_tools=["bash"])
+    client = kc.KernelCaptureClient(tmp_path / "x.sock")
+    with pytest.raises(ValueError, match="session_id"):
+        client.apply_policy(session_id="", plan=plan, generation=1)
+    with pytest.raises(ValueError, match="generation"):
+        client.apply_policy(session_id="s", plan=plan, generation=0)
+    with pytest.raises(ValueError, match="generation"):
+        client.apply_policy(session_id="s", plan=plan, generation=-1)

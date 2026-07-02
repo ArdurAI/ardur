@@ -39,9 +39,12 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import kernel_correlation as kc
+
+if TYPE_CHECKING:
+    from .passport import MissionPassport
 
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
@@ -57,6 +60,12 @@ DEFAULT_MAX_TOOL_CALLS = 250
 DEFAULT_MAX_DURATION_S = 86400
 
 VALID_VIA_MODES = ("auto", "env", "claude-code", "intercept")
+
+
+class KernelPolicyEnforcementError(RuntimeError):
+    """Raised when ``--enforce`` requires kernel-level BPF policy and it cannot
+    be installed (daemon absent, cgroup uncorrelated, or the daemon rejected
+    the plan). Callers must treat this as a hard abort of the run."""
 
 
 # ── agent adapters ─────────────────────────────────────────────────────────────
@@ -359,6 +368,7 @@ class GovernanceRunResult:
     receipts_path: str
     receipt_count: int
     correlation: dict[str, Any]
+    kernel_policy: dict[str, Any]
     notes: list[str] = field(default_factory=list)
 
 
@@ -480,6 +490,74 @@ def _kernel_enforcement_claim(
     return enforcement
 
 
+def _apply_kernel_policy(
+    *,
+    session_id: str,
+    passport: "MissionPassport",
+    correlation: kc.CorrelationResult,
+    enforce: bool,
+) -> dict[str, Any]:
+    """Lower the passport's policy and push it to the daemon's BPF maps.
+
+    Loud-abort contract: when ``enforce`` is True, any failure to install
+    kernel-level enforcement — the cgroup never got correlated with the
+    daemon, or the daemon rejected the plan — raises
+    :class:`KernelPolicyEnforcementError` so the caller aborts the run instead
+    of letting the agent proceed unguarded. When ``enforce`` is False the same
+    failures degrade to a recorded reason in the returned dict; the hook/proxy
+    path still governs the run.
+
+    ``bpf_lower`` (and the mission compiler it builds on) is only imported
+    once a live daemon correlation exists. That keeps the common degraded
+    path — no kernelcapture daemon on the host, the default on most installs
+    — free of the mission-compiler's optional dependencies (e.g.
+    ``biscuit-python``, a ``[dev]`` extra) so a plain ``ardur run`` never pays
+    for kernel-enforcement machinery it isn't using.
+    """
+    if not correlation.available:
+        reason = f"kernel policy not applied: {correlation.reason}"
+        if enforce:
+            raise KernelPolicyEnforcementError(reason)
+        return {"applied": False, "reason": reason, "tier2_ops": []}
+
+    from .bpf_lower import lower_to_bpf_policy_plan
+    from .bpf_types import ENFORCE_MODE_ENFORCE, ENFORCE_MODE_PERMISSIVE
+
+    plan = lower_to_bpf_policy_plan(
+        allowed_side_effect_classes=passport.allowed_side_effect_classes,
+        forbidden_tools=passport.forbidden_tools,
+        allowed_tools=passport.allowed_tools,
+        resource_scope=passport.resource_scope,
+        enforce_mode=ENFORCE_MODE_ENFORCE if enforce else ENFORCE_MODE_PERMISSIVE,
+    )
+    tier2_ops = list(plan.tier2_ops)
+
+    if not plan.op_policies and not plan.path_allow and not plan.net_allow:
+        return {
+            "applied": False,
+            "reason": "mission has no kernel-enforceable policy dimensions",
+            "tier2_ops": tier2_ops,
+        }
+
+    generation = 1  # first (and only) apply for this fresh session/cgroup pair.
+    try:
+        kc.KernelCaptureClient(kc.daemon_socket_path()).apply_policy(
+            session_id=session_id, plan=plan, generation=generation
+        )
+    except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError) as exc:
+        reason = f"kernel policy apply rejected: {exc}"
+        if enforce:
+            raise KernelPolicyEnforcementError(reason) from exc
+        return {"applied": False, "reason": reason, "tier2_ops": tier2_ops}
+
+    return {
+        "applied": True,
+        "reason": "kernel BPF policy installed",
+        "generation": generation,
+        "tier2_ops": tier2_ops,
+    }
+
+
 # ── main entry ─────────────────────────────────────────────────────────────────
 
 
@@ -496,6 +574,7 @@ def run_governed(
     agent_id: str = DEFAULT_AGENT_ID,
     env: dict[str, str] | None = None,
     enable_kernel_correlation: bool = True,
+    enforce: bool = False,
     cwd: Path | None = None,
     stdout: Any | None = None,
     stderr: Any | None = None,
@@ -503,8 +582,11 @@ def run_governed(
     """Launch ``command`` under a fresh, fully-governed Ardur session.
 
     Returns a :class:`GovernanceRunResult` once the agent exits. Raises
-    ``ValueError`` for invalid input (empty command, bad ``via``) and
-    ``NotImplementedError`` for the scaffolded intercept path.
+    ``ValueError`` for invalid input (empty command, bad ``via``),
+    ``NotImplementedError`` for the scaffolded intercept path, and
+    :class:`KernelPolicyEnforcementError` when ``enforce=True`` and
+    kernel-level BPF policy enforcement could not be installed — the launched
+    agent is killed before the error propagates.
     """
     from .passport import MissionPassport, generate_keypair, issue_passport
 
@@ -620,6 +702,24 @@ def run_governed(
         )
         daemon_registered = correlation.available
 
+        # 5b. Push the mission's lowered BPF policy to the daemon now that the
+        # cgroup is registered. Under --enforce a failure here kills the agent
+        # and aborts the run; under permissive it degrades to a recorded note.
+        try:
+            kernel_policy = _apply_kernel_policy(
+                session_id=session_id,
+                passport=passport,
+                correlation=correlation,
+                enforce=enforce,
+            )
+        except KernelPolicyEnforcementError as exc:
+            notes.append(f"ENFORCE abort: {exc}")
+            proc.kill()
+            proc.wait()
+            raise
+        if not kernel_policy["applied"]:
+            notes.append(kernel_policy["reason"])
+
         # 6. Wait for the agent to exit (bounded by the mission duration budget).
         try:
             exit_code = proc.wait(timeout=max_duration_s)
@@ -672,6 +772,7 @@ def run_governed(
         receipts_path=str(receipts_path),
         receipt_count=_count_lines(receipts_path),
         correlation=correlation.to_dict(),
+        kernel_policy=dict(kernel_policy),
         notes=notes,
     )
     return result
@@ -712,6 +813,7 @@ def format_summary(result: GovernanceRunResult) -> str:
         f"  receipts      {result.receipt_count} signed → {result.receipts_path}",
         f"  attestation   {result.attestation_digest}",
         f"  kernel link   {result.correlation.get('reason')}",
+        f"  kernel policy {result.kernel_policy.get('reason')}",
         f"  agent exit    {result.exit_code}",
     ]
     for note in result.notes:
@@ -787,10 +889,14 @@ def run_governed_cli(args: Any) -> int:
             home=getattr(args, "home", None),
             via=getattr(args, "via", None) or "auto",
             enable_kernel_correlation=not getattr(args, "no_kernel_correlation", False),
+            enforce=bool(getattr(args, "enforce", False)),
         )
     except NotImplementedError as exc:
         print(f"ardur run: {exc}", file=sys.stderr)
         return 2
+    except KernelPolicyEnforcementError as exc:
+        print(f"ardur run: --enforce requires kernel-level policy enforcement: {exc}", file=sys.stderr)
+        return 3
     except ValueError as exc:
         print(f"ardur run: {exc}", file=sys.stderr)
         return 2
