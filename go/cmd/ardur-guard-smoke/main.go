@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -283,7 +284,20 @@ func runInCgroup(cgFile *os.File, name string, args ...string) error {
 		UseCgroupFD: true,
 		CgroupFD:    int(cgFile.Fd()),
 	}
-	return cmd.Run()
+	// Captured (not just discarded to /dev/null, exec.Cmd's default for a
+	// nil Stderr) so a failure's error message includes *why* — an opaque
+	// exit code alone isn't enough to tell an ENFORCE-caused denial apart
+	// from an unrelated shell/environment error, and this test needs that
+	// distinction to be trustworthy.
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			return fmt.Errorf("%w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		}
+		return err
+	}
+	return nil
 }
 
 // probeContent is written by writeExpectSuccess/writeExpectBlocked via a
@@ -364,13 +378,17 @@ func writeExpectBlocked(handles *kernelcapture.ProcessGuardHandles, cgroupID uin
 	return waitForEvent(denyEvent)
 }
 
-// writeViaShellRedirect runs `sh -c "printf '%s' > path"` in the cgroup.
-// Shell redirection (not touch(1), see writeExpectBlocked's doc comment) so
-// a failed open() has no fallback path that could mask a correctly-enforced
-// denial as a false failure — or, in the touch(1) case this replaced, mask
-// it as a false SUCCESS.
+// writeViaShellRedirect runs `sh -c "printf '%s' '<content>' > path"` in the
+// cgroup. Shell redirection (not touch(1), see writeExpectBlocked's doc
+// comment) so a failed open() has no fallback path that could mask a
+// correctly-enforced denial as a false failure — or, in the touch(1) case
+// this replaced, mask it as a false SUCCESS. probeContent is passed as
+// printf's ARGUMENT, not its format string (`printf '%s' content`, not
+// `printf content`) — printf treats its first operand as a format string,
+// so passing arbitrary content there directly is a latent bug waiting for
+// content that happens to contain a `%`.
 func writeViaShellRedirect(cgFile *os.File, path string) error {
-	return runInCgroup(cgFile, "sh", "-c", fmt.Sprintf("printf '%s' > %q", probeContent, path))
+	return runInCgroup(cgFile, "sh", "-c", fmt.Sprintf("printf '%%s' %q > %q", probeContent, path))
 }
 
 // waitForEvent blocks until the watcher goroutine reports a match or times
