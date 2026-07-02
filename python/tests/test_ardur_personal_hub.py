@@ -308,6 +308,40 @@ def test_hub_html_responses_carry_no_store_security_headers(tmp_path):
     assert response_body == html_body.encode("utf-8")
 
 
+def test_hub_metrics_response_carries_no_store_security_headers(tmp_path, monkeypatch):
+    handler = object.__new__(_HubRequestHandler)
+    hub = PersonalHub(tmp_path)
+    sent_headers: list[tuple[str, str]] = []
+    statuses: list[int] = []
+    wfile = io.BytesIO()
+    metrics_body = "ardur_personal_hub_test_metric 1\n"
+    monkeypatch.setattr(personal_hub.ardur_metrics, "render", lambda: metrics_body)
+
+    setattr(handler, "path", "/v1/metrics")
+    setattr(handler, "headers", {personal_hub.HUB_TOKEN_HEADER: hub.hub_token})
+    setattr(handler, "server", SimpleNamespace(hub=hub))
+    setattr(handler, "wfile", wfile)
+    setattr(handler, "send_response", lambda status: statuses.append(status))
+    setattr(
+        handler,
+        "send_header",
+        lambda name, value: sent_headers.append((name.lower(), value)),
+    )
+    setattr(handler, "end_headers", lambda: None)
+
+    handler.do_GET()
+
+    header_map = {name: value for name, value in sent_headers}
+    response_body = wfile.getvalue()
+    assert statuses == [200]
+    assert header_map["content-type"] == "text/plain; charset=utf-8"
+    assert header_map["cache-control"] == "no-store"
+    assert header_map["pragma"] == "no-cache"
+    assert header_map["x-content-type-options"] == "nosniff"
+    assert header_map["content-length"] == str(len(response_body))
+    assert response_body == metrics_body.encode("utf-8")
+
+
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
 

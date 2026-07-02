@@ -1125,10 +1125,7 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
             self._send_json(self.hub.export())
             return
         if path == "/v1/metrics":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(ardur_metrics.render().encode("utf-8"))
+            self._send_metrics()
             return
         self._send_json({"ok": False, "error": "not found"}, status=404)
 
@@ -1294,6 +1291,17 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         self.send_header("pragma", "no-cache")
         self.send_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
         self.send_header("referrer-policy", "no-referrer")
+        self.send_header("x-content-type-options", "nosniff")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_metrics(self) -> None:
+        data = ardur_metrics.render().encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "text/plain; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        self.send_header("pragma", "no-cache")
         self.send_header("x-content-type-options", "nosniff")
         self.send_header("content-length", str(len(data)))
         self.end_headers()
