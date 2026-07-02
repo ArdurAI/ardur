@@ -42,6 +42,9 @@ _internal/
 go/operator
 go/webhook
 
+# `make bench` output (go/cmd/benchcheck writes here; see the `bench` target).
+go/bench-results/
+
 # Hugo site build output.
 site/public/
 site/resources/_gen/
