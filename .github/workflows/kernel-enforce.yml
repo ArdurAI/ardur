@@ -182,7 +182,9 @@ jobs:
           VNG="$(command -v vng)"
           test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }
           KERNEL_IMG="/boot/vmlinuz-$(uname -r)"
-          test -r "$KERNEL_IMG" || { echo "::error::$KERNEL_IMG not readable"; ls -la /boot; exit 1; }
+          # vmlinuz is root-only (0600) on Ubuntu; check as root, since that's
+          # what actually reads it below.
+          sudo test -r "$KERNEL_IMG" || { echo "::error::$KERNEL_IMG not readable as root"; sudo ls -la /boot; exit 1; }
           sudo "$VNG" \
             --verbose \
             --kernel "$KERNEL_IMG" \
