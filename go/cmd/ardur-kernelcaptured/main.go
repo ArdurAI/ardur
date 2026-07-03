@@ -136,6 +136,11 @@ type daemon struct {
 	// cgroup_net_allow maps, so a re-apply that drops an entry can delete the
 	// stale one and session end can release them all. Guarded by mu.
 	appliedAllow map[string]*appliedAllowRecord
+
+	// cgroupVerifier gates register_session on the peer owning the claimed
+	// cgroup/root_pid. Injected so tests (which register synthetic PIDs) can
+	// substitute a no-op; production wires verifyRegisterSessionCgroup.
+	cgroupVerifier func(kernelcapture.DaemonProtocolPeerHandshake, *kernelcapture.DaemonRegisterSessionRequest, *slog.Logger) error
 }
 
 // appliedAllowRecord is the last allowlist set written for a session.
@@ -197,6 +202,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		seccompListeners:     make(map[string]context.CancelFunc),
 		activeTier:           daemonTierNone,
 		appliedAllow:         make(map[string]*appliedAllowRecord),
+		cgroupVerifier:       verifyRegisterSessionCgroup,
 	}, nil
 }
 
@@ -248,7 +254,7 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 	// it, so a peer cannot register (and then govern/tamper) a cgroup belonging
 	// to another workload.
 	if req.Method == kernelcapture.DaemonProtocolMethodRegisterSession && req.RegisterSession != nil {
-		if err := verifyRegisterSessionCgroup(handshake, req.RegisterSession, d.log); err != nil {
+		if err := d.cgroupVerifier(handshake, req.RegisterSession, d.log); err != nil {
 			return kernelcapture.DaemonProtocolResponse{
 				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
 				Method:          req.Method,
