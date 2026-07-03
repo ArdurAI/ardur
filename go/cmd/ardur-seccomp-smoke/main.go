@@ -142,6 +142,12 @@ func run(daemonBin, shimBin string) error {
 		"--state-dir", stateDir,
 		"--debug",
 		"--guard-ready-timeout=2s",
+		// Force the seccomp tier regardless of the host kernel's BPF-LSM
+		// availability. GitHub-hosted runners (and Docker Desktop's kernel)
+		// boot with "bpf" in the active LSM list, so without this the daemon
+		// would prefer the BPF-LSM tier and this smoke — which exercises the
+		// seccomp user-notify path specifically — could never reach it.
+		"--disable-bpf-lsm",
 	)
 	daemonCmd.Stdout = daemonLog
 	daemonCmd.Stderr = daemonLog

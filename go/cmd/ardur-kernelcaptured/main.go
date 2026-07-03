@@ -694,6 +694,7 @@ func main() {
 		evidenceDir       = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
 		stateDir          = flag.String("state-dir", defaultStateDir, "Daemon state directory")
 		noRingbuf         = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
+		disableBPFLSM     = flag.Bool("disable-bpf-lsm", false, "Skip the BPF-LSM guard tier and force the seccomp user-notify fallback, even on hosts where BPF-LSM is available. Exec/exit observation still runs; only the BPF-LSM enforcement tier is suppressed. Used to exercise the seccomp path where BPF-LSM would otherwise win tier selection.")
 		debug             = flag.Bool("debug", false, "Enable debug-level logging")
 		pruneEvery        = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
 		guardReadyTimeout = flag.Duration("guard-ready-timeout", 10*time.Second, "How long to wait for the BPF-LSM guard to report load success/failure before falling back to the seccomp tier")
@@ -798,27 +799,32 @@ func main() {
 
 		// BPF-LSM enforcement consumer: loads process_guard, populates policyMaps.
 		// Degrades gracefully on kernels without BPF-LSM (warn, not fatal).
-		guardOutcome := make(chan error, 1)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := runGuardConsumer(ctx, d, log, guardOutcome); err != nil && ctx.Err() == nil {
-				log.Warn("BPF-LSM guard unavailable (enforcement degraded to seccomp-advertised)",
-					"error", err)
-			}
-		}()
+		// Skipped entirely when --disable-bpf-lsm forces the seccomp tier.
+		if !*disableBPFLSM {
+			guardOutcome := make(chan error, 1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := runGuardConsumer(ctx, d, log, guardOutcome); err != nil && ctx.Err() == nil {
+					log.Warn("BPF-LSM guard unavailable (enforcement degraded to seccomp-advertised)",
+						"error", err)
+				}
+			}()
 
-		select {
-		case err := <-guardOutcome:
-			if err == nil {
-				d.activeTier = daemonTierBPFLSM
-			} else {
-				log.Warn("BPF-LSM tier not active, falling back to seccomp tier", "error", err)
+			select {
+			case err := <-guardOutcome:
+				if err == nil {
+					d.activeTier = daemonTierBPFLSM
+				} else {
+					log.Warn("BPF-LSM tier not active, falling back to seccomp tier", "error", err)
+				}
+			case <-time.After(*guardReadyTimeout):
+				log.Warn("BPF-LSM guard did not report readiness in time, falling back to seccomp tier",
+					"timeout", guardReadyTimeout.String())
+			case <-ctx.Done():
 			}
-		case <-time.After(*guardReadyTimeout):
-			log.Warn("BPF-LSM guard did not report readiness in time, falling back to seccomp tier",
-				"timeout", guardReadyTimeout.String())
-		case <-ctx.Done():
+		} else {
+			log.Warn("BPF-LSM guard tier disabled via --disable-bpf-lsm; forcing seccomp user-notify tier")
 		}
 
 		if d.activeTier != daemonTierBPFLSM && ctx.Err() == nil {
