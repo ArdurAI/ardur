@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "9edecb222e877edaf5c263233cafcf7f3e1b6f7a4d0b54c9e0634779940200cf"
+source_sha256: "7397e610f8e916969f9af2ab158cc56d2df024658c1e61fe689c8dff7938eb6d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -540,6 +540,20 @@ ardur profile init --template TEMPLATE
 ```
 
 Templates: `read-only`, `safe-coding`. Default path: `./ARDUR.md`.
+
+Empty, whitespace-only, or traversal-escaping paths are rejected **before any
+filesystem operation**. `ardur profile init` rejects paths that are empty,
+whitespace-only, have leading or trailing whitespace on a path component, or
+contain `..` traversal that escapes the current working directory. The command
+returns JSON with `ok: false`, `error: "profile_path_invalid"`,
+`condition: "profile_path_invalid"`, the message `Profile path is not a valid
+Markdown file path.`, a `detail` naming the specific reason (empty,
+whitespace-only, leading or trailing whitespace, or traversal escape), and
+placeholder-only `next_steps` guiding you to a non-empty Markdown file path
+with no leading or trailing whitespace and no `..` traversal components. Human
+output prints the same guidance under "Next steps". This is local/no-key setup
+validation only; it does not prove universal filesystem safety, live provider
+behavior, or release readiness.
 
 Directory targets, including symlinks to directories, are never treated as
 existing profiles to replace. With or without `--force`, `ardur profile init`
