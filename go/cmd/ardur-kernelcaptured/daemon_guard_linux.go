@@ -32,13 +32,22 @@ import (
 // Returns nil on graceful context cancellation; returns a non-nil error if
 // the guard fails to load (in which case the daemon degrades gracefully —
 // enforcement is unavailable but the exec tracepoint consumer still runs).
-func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
+//
+// ready receives exactly one value — nil once the guard has loaded and
+// d.policyMaps is live, or the load error otherwise — before this function
+// does anything that can block for the rest of the daemon's lifetime. main()
+// blocks on it (with a timeout) to make the BPF-LSM-vs-seccomp tier decision
+// (plan E4) without guessing from preflight alone, since preflight can pass
+// while the actual load still fails for reasons preflight doesn't check.
+func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready chan<- error) error {
 	// Preflight: check BTF and BPF-LSM availability.
 	preflightReport := kernelcapture.InspectBPFLSMPreflight()
 	for _, f := range preflightReport.Findings {
 		switch f.Verdict {
 		case kernelcapture.DaemonPreflightVerdictFail:
-			return fmt.Errorf("BPF-LSM preflight failed (%s): %s; %s", f.CheckName, f.Details, f.Remediation)
+			err := fmt.Errorf("BPF-LSM preflight failed (%s): %s; %s", f.CheckName, f.Details, f.Remediation)
+			ready <- err
+			return err
 		case kernelcapture.DaemonPreflightVerdictWarn:
 			log.Warn("BPF-LSM preflight warning",
 				"check", f.CheckName, "detail", f.Details, "remediation", f.Remediation)
@@ -47,7 +56,9 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 
 	handles, err := kernelcapture.LoadAndAttachProcessGuardEBPF()
 	if err != nil {
-		return fmt.Errorf("load process_guard BPF-LSM: %w", err)
+		err = fmt.Errorf("load process_guard BPF-LSM: %w", err)
+		ready <- err
+		return err
 	}
 	defer func() {
 		// Clear policy maps reference so subsequent apply_policy calls fail safely.
@@ -61,6 +72,7 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 	log.Info("BPF-LSM process_guard loaded",
 		"hooks", "bprm_check_security, lsm.s/file_open, socket_connect",
 	)
+	ready <- nil
 
 	// ringbuf.Reader.Read() blocks with no context awareness of its own; close
 	// it on ctx cancellation to unblock a pending read, the same pattern
