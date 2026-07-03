@@ -56,6 +56,17 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	if rootPID == peerPID {
 		return nil
 	}
+	// A root (uid 0) peer is already fully privileged on the host — it can move
+	// any process between cgroups directly, so this ancestry check adds nothing
+	// against it. The check exists to constrain a NON-root allowed peer (the
+	// sandboxed-workload threat) from binding a session to a process tree it did
+	// not spawn. Skipping root also lets tiers that register a placeholder
+	// root_pid (the seccomp tier enforces per-shim'd-process, not by cgroup, and
+	// its smoke registers root_pid=1) work when the daemon and client are root.
+	// Per-session ownership on apply_policy still applies to every peer.
+	if handshake.Authorization.UID == 0 {
+		return nil
+	}
 	// Confirm the peer itself is visible in the daemon's /proc view. If it is
 	// not (an unusual cross-PID-namespace deployment where the daemon cannot
 	// see client PIDs at all), we cannot establish ancestry either way — skip

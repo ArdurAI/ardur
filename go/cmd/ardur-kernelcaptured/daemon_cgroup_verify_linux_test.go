@@ -15,9 +15,18 @@ func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// hsWithPID builds a NON-root peer handshake so the register-time ancestry
+// check actually runs (it is skipped for uid-0 peers, which are already fully
+// privileged — see verifyRegisterSessionCgroup).
 func hsWithPID(pid uint32) kernelcapture.DaemonProtocolPeerHandshake {
 	return kernelcapture.DaemonProtocolPeerHandshake{
-		Authorization: kernelcapture.DaemonPeerAuthorization{PID: pid},
+		Authorization: kernelcapture.DaemonPeerAuthorization{PID: pid, UID: 501},
+	}
+}
+
+func hsRootWithPID(pid uint32) kernelcapture.DaemonProtocolPeerHandshake {
+	return kernelcapture.DaemonProtocolPeerHandshake{
+		Authorization: kernelcapture.DaemonPeerAuthorization{PID: pid, UID: 0},
 	}
 }
 
@@ -65,5 +74,13 @@ func TestVerifyRegisterSessionCgroup_PeerNotVisibleSkips(t *testing.T) {
 	// ancestry can't be established either way — skip rather than break.
 	if err := verifyRegisterSessionCgroup(hsWithPID(1<<30), regReq(1, 12345), quietLogger()); err != nil {
 		t.Fatalf("unresolvable peer should skip the check, got: %v", err)
+	}
+}
+
+func TestVerifyRegisterSessionCgroup_RootPeerSkips(t *testing.T) {
+	// A root peer is already fully privileged; the ancestry check is skipped for
+	// it (a non-root peer with the same args is rejected — see above).
+	if err := verifyRegisterSessionCgroup(hsRootWithPID(uint32(os.Getpid())), regReq(1, 12345), quietLogger()); err != nil {
+		t.Fatalf("root peer should skip the ancestry check, got: %v", err)
 	}
 }
