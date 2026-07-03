@@ -1,0 +1,97 @@
+# Epic A — Completion Assessment (host agent: detect → attest → enforce)
+
+**Scope reviewed:** the consolidated enforcement stack at `dev @ 91aefe9` — daemon
+(`ardur-kernelcaptured`), BPF-LSM guard (`process_guard.bpf.c`), seccomp tier
+(`ardur-exec-shim` + daemon servicing), enforce-receipt pipeline, and the
+`ardur run` → `apply_policy` → kernel → attestation flow.
+
+**Method:** holistic, systems-level review of the *seams between* the merged
+PRs — not a re-audit of any single PR. The per-PR reviews were thorough within
+each slice; this asks whether the slices compose into a sound whole.
+
+**Verdict: NOT DONE as a whole.** The BPF-LSM enforcement lane is genuinely
+complete and sound end-to-end — a real achievement. But Epic A's stated scope is
+a host agent that *enforces on any host, with gap-free attestable evidence and no
+fail-open windows*, and that whole-system claim is not yet met. Specific blockers
+below.
+
+---
+
+## What is solid
+
+- **BPF-LSM tier, end to end.** `ardur run --enforce` → cgroup create/adopt →
+  `register_session` → `apply_policy` (lowered plan → BPF maps) → per-cgroup
+  BPF-LSM enforcement (exec/file/connect) → `enforce_events` ringbuf →
+  decode/sequence/**hash-chain** → per-session `Correlator` → session
+  attestation with `kernel_enforcement.chain_digest` → **offline verify**
+  (`enforce-verify`). Proven working on a real BPF-LSM kernel (the `#113`
+  e2e demo: exec blocked with EPERM, `chain intact = true`,
+  `attestation digest match = true`).
+- **Both tiers share one receipt pipeline.** Seccomp connect-denials route
+  through the *same* `processEnforceEvent` (sequencing, hash-chaining,
+  correlation, evidence-log append) as BPF-LSM denials — so a seccomp deny is a
+  first-class, attestable receipt, not a second-class path.
+- **Attestation fold covers both tiers.** `run_bridge._kernel_enforcement_claim`
+  → `session_status` → `issue_attestation_for_session(kernel_enforcement=…)`
+  commits the per-session enforcement summary + chain digest into the signed
+  attestation, for whichever tier produced the events.
+- **Orphans are preserved, not dropped.** enforce_events for an unregistered
+  cgroup are hash-chained to a dedicated orphan log and counted.
+- **Defense-in-depth:** tamper self-audit ticker (links + kill-switch state,
+  hash-chained); TOCTOU-safe installer (`openat2 RESOLVE_NO_SYMLINKS|BENEATH`);
+  fail-closed seccomp decisions; graceful degrade when BPF-LSM is unavailable.
+- **Authz hardening** (missing per-session authorization, stale policy state,
+  double-buffer race) is owned by the `#115` lane — assumed to land; not
+  re-audited here.
+
+## Integration gaps that block "DONE"
+
+| # | Sev | Gap | Issue |
+|---|-----|-----|-------|
+| 1 | **BLOCKER** | **Seccomp fallback tier is unreachable via `ardur run`.** The daemon side (shim, handoff, servicing, `seccomp-smoke`) is built (#103), but `run_bridge` never invokes `ardur-exec-shim` and never checks the advertised tier. On a seccomp-only host (no `bpf` in `lsm=` — the *majority* per this tier's own rationale), `apply_policy` returns `applied_seccomp_tier` (OK), `_apply_kernel_policy` marks `applied=True` ("kernel BPF policy installed"), and `ardur run --enforce` reports success — **while no filter wraps the agent and nothing is enforced.** A false-success on the common host case. | #104 (comment) |
+| 2 | HIGH | **Fail-open if the guard consumer dies after startup.** Tier selection is one-shot; if `runGuardConsumer` returns mid-run, its `defer` detaches the guard + clears `policyMaps`, but `activeTier` stays `bpf_lsm` and health keeps advertising it. Enforcement is gone; the daemon still says it's enforcing. | #121 |
+| 3 | MED | **enforce_events silently dropped on ringbuf overflow.** `bpf_ringbuf_reserve` NULL → in-kernel drop, no counter; the adapter always reports `LostSamples: 0`. Under a burst, denials are lost and the hash chain can't reveal the gap (no kernel sequence/drop counter). The "no gaps" property holds only for *recorded* events. | #122 |
+| 4 | MED | **Kill-switch changes aren't in a signed receipt.** The one action that disables *all* enforcement (fail-open) is recorded only on stderr + 15 s tamper snapshots — not a first-class attestable event with attribution, and blind to sub-15 s toggles. | #123 |
+| 5 | MED | **Guard is unpinned → restart drops all enforcement.** The tracepoint got pinning (#99); the enforcement guard did not. A daemon restart detaches the LSM programs and builds fresh empty maps; nothing re-applies policy for still-live sessions, and the launcher applies only once. A governed agent whose daemon restarted mid-session runs unenforced for the rest of its life. | #124 |
+
+## Honest remaining limitations (documented; not by themselves "DONE" blockers)
+
+- **Linux-only enforcement.** macOS Endpoint Security is a scaffold
+  (`NewESClient` always returns unavailable); Windows ETW is detect-only and not
+  built (Epic B plan #114). "Any OS" enforcement is not delivered.
+- **Path truncation.** File allowlist keys truncate paths at ~248–256 bytes.
+- **248/file-op allowlist caveat.** `bpf_lower`'s file-op `ACT_ALLOWLIST`
+  lowering vs `guard_file_open`'s fail-closed LPM restriction (#105) is still
+  open — file-subpath allowlists currently fail closed (safe, but not what was
+  requested).
+- **Docs drift.** `daemon_enforce.go`'s header still says the pipeline is
+  "blocked pending #92" and unwired; it is live-wired via `runGuardConsumer`.
+
+## Privileged CI status
+
+- **Green in CI:** `bpf-generate` (drift + build/test/-race), `kernel-smoke`
+  (real BPF-LSM enforce via virtme-ng), `seccomp-smoke` (real seccomp deny/allow).
+- **NOT in CI:** the pinned-restart smoke and the tamper-audit smoke (both
+  `ARDUR_RUN_EBPF_SMOKE`-gated, run manually), and — most importantly — **no
+  `ardur run`-level end-to-end** (the full launcher → kernel → attest → verify
+  flow exists only as a manual demo, #113). The gaps above (#104 false-success,
+  #121 fail-open, #124 restart) are exactly the class a full-flow e2e would catch.
+
+## Path to DONE
+
+1. **Close #104's launcher half** — wire `ardur run` through `ardur-exec-shim`
+   on seccomp hosts and make "advertised seccomp but no handoff" a loud abort
+   under `--enforce`. This is the #1 blocker: without it, enforcement only
+   actually works on the minority of hosts.
+2. **Close #121** (correct the tier / re-load on guard death) and **at least
+   count drops (#122)** so the daemon never claims enforcement it isn't
+   providing and never silently under-reports.
+3. **Harden evidence/availability:** #123 (kill-switch receipts), #124 (guard
+   pinning / restart re-apply).
+4. **Add an `ardur run` full-flow e2e to CI** on both a BPF-LSM host and a
+   seccomp host — the single highest-leverage integration test.
+
+Until #104 and #121 land, Epic A is **NOT DONE**: the BPF-LSM slice is complete,
+but the "enforces on any host, no fail-open, gap-free evidence" whole is not.
+
+Refs: #63 (Epic A), #104, #105, #115, #119, #121, #122, #123, #124.

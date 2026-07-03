@@ -15,4 +15,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 ## Hosted Docs
 
+- [`epic-a-completion-assessment.md`](/__ardur_internal__/source/docs/roadmap/epic-a-completion-assessment/)
 - [`epic-b-auto-detection-plan.md`](/__ardur_internal__/source/docs/roadmap/epic-b-auto-detection-plan/)
