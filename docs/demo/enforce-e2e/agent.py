@@ -13,7 +13,6 @@ none of which are hooked operations — so STRICT fail-closed does not brick it.
 """
 import errno
 import os
-import sys
 import time
 
 DELAY = float(os.environ.get("AGENT_DELAY", "4"))

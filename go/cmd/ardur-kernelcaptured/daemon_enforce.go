@@ -251,9 +251,9 @@ func (d *daemon) processEnforceEvent(ev kernelcapture.BpfEnforceEvent, tier stri
 
 	procEvt := bpfEnforceEventToProcessEvent(ev, sid)
 	receipt := correlator.Correlate(procEvt, kernelcapture.EventContext{})
-	// The kernel's enforcement action is a fact, independent of how
-	// confidently the event correlates to a specific tool-call receipt.
-	receipt.Verdict = verdict
+	// The kernel's enforcement action is authoritative and is recorded via
+	// the local verdict variable below; receipt's CorrelationMethod and
+	// CorrelationConfidence are still read for attribution confidence.
 
 	entry := kernelcapture.EnforceReceiptEntry{
 		SchemaVersion:         kernelcapture.EnforceReceiptSchema,
