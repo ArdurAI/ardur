@@ -123,6 +123,18 @@ func ApplyPolicyMaps(maps PolicyMaps, cgroupID uint64, req DaemonApplyPolicyRequ
 
 	newSlot := nextPolicySlot(maps.CgroupManaged, cgroupID)
 
+	// 0. Clear the INACTIVE slot before writing the new generation into it.
+	// The slot is a double buffer reused every other apply for this cgroup, so
+	// without this an op rule written two generations ago (same slot) but
+	// omitted from req survives — and becomes live again on the flip below,
+	// silently mis-enforcing (e.g. a dropped NET_CONNECT:ALLOW lingering). The
+	// slot is not the active one, so deleting from it is invisible to readers.
+	for _, op := range allKnownBpfOps {
+		if err := maps.CgroupOpPolicy.Delete(cgroupOpKey(cgroupID, op, newSlot)); err != nil && !isNotFound(err) {
+			return fmt.Errorf("kernelcapture: apply_policy clear inactive slot (op=%s): %w", op, err)
+		}
+	}
+
 	// 1. Write per-op policy entries into the INACTIVE slot.
 	for _, p := range req.OpPolicies {
 		k := cgroupOpKey(cgroupID, p.Op, newSlot)
@@ -194,7 +206,7 @@ func RemovePolicyMaps(maps PolicyMaps, cgroupID uint64) error {
 	}
 
 	// Delete op policy entries for all known ops, in both double-buffer slots.
-	for _, op := range []BpfOp{BpfOpExec, BpfOpFileRead, BpfOpFileWrite, BpfOpNetConnect, BpfOpExternalSend} {
+	for _, op := range allKnownBpfOps {
 		for _, slot := range [2]uint32{0, 1} {
 			k := cgroupOpKey(cgroupID, op, slot)
 			if err := maps.CgroupOpPolicy.Delete(k); err != nil && !isNotFound(err) {
@@ -208,6 +220,51 @@ func RemovePolicyMaps(maps PolicyMaps, cgroupID uint64) error {
 	}
 	return nil
 }
+
+// DeleteAllowlistEntries removes specific path (cgroup_file_allow) and net
+// (cgroup_net_allow) allowlist entries for cgroupID. Unlike cgroup_op_policy,
+// these maps are NOT double-buffered — a re-apply only Puts the new entries, so
+// an entry from a prior generation that the new policy drops would otherwise
+// linger and stay allowed (silently defeating a tightened allowlist), and
+// nothing removes them at session end. The daemon tracks what it applied per
+// session and calls this with the stale (or, at session end, the full) set;
+// deletes are best-effort (a missing key is not an error). Building the exact
+// keys from the same path/CIDR strings avoids having to iterate the maps.
+func DeleteAllowlistEntries(maps PolicyMaps, cgroupID uint64, paths []string, cidrs []string) error {
+	if maps.CgroupFileAllow == nil || maps.CgroupNetAllow == nil {
+		return ErrPolicyMapsUnavailable
+	}
+	var errs []string
+	for _, path := range paths {
+		k, err := fileAllowKey(cgroupID, path)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("file_allow key (%q): %v", path, err))
+			continue
+		}
+		if err := maps.CgroupFileAllow.Delete(k); err != nil && !isNotFound(err) {
+			errs = append(errs, fmt.Sprintf("cgroup_file_allow (%q): %v", path, err))
+		}
+	}
+	for _, cidr := range cidrs {
+		k, err := netLpmKey(cgroupID, cidr)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("net_allow key (%q): %v", cidr, err))
+			continue
+		}
+		if err := maps.CgroupNetAllow.Delete(k); err != nil && !isNotFound(err) {
+			errs = append(errs, fmt.Sprintf("cgroup_net_allow (%q): %v", cidr, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("kernelcapture: delete_allowlist_entries for cgroup %d: %s", cgroupID, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// allKnownBpfOps is every op the enforcement layer recognises. Used to clear a
+// double-buffer slot before writing (ApplyPolicyMaps) and to release all op
+// entries on session end (RemovePolicyMaps).
+var allKnownBpfOps = []BpfOp{BpfOpExec, BpfOpFileRead, BpfOpFileWrite, BpfOpNetConnect, BpfOpExternalSend}
 
 // SetKillSwitch writes the global kill-switch value.
 // engaged=true suspends all enforcement (all ops pass through); false re-enables.

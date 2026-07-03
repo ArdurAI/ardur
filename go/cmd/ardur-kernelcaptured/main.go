@@ -123,6 +123,26 @@ type daemon struct {
 	// process through ardur-exec-shim (the seccomp tier's on-ramp) is
 	// necessary at all. One of the daemonTier* constants.
 	activeTier string
+
+	// applyMu serializes every BPF policy-map mutation — ApplyPolicyMaps,
+	// RemovePolicyMaps, SetKillSwitch. Those run in per-connection goroutines
+	// (and RemovePolicyMaps also on session-end), and ApplyPolicyMaps' double
+	// buffer is a read-active-slot / write-inactive-slot / flip sequence that is
+	// only atomic if writers are serialized. Distinct from mu (routing index).
+	applyMu sync.Mutex
+
+	// appliedAllow tracks, per session, the path/net allowlist entries most
+	// recently written to the (non-double-buffered) cgroup_file_allow /
+	// cgroup_net_allow maps, so a re-apply that drops an entry can delete the
+	// stale one and session end can release them all. Guarded by mu.
+	appliedAllow map[string]*appliedAllowRecord
+}
+
+// appliedAllowRecord is the last allowlist set written for a session.
+type appliedAllowRecord struct {
+	cgroupID uint64
+	paths    map[string]struct{}
+	nets     map[string]struct{}
 }
 
 const (
@@ -176,6 +196,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
 		seccompListeners:     make(map[string]context.CancelFunc),
 		activeTier:           daemonTierNone,
+		appliedAllow:         make(map[string]*appliedAllowRecord),
 	}, nil
 }
 
@@ -210,12 +231,32 @@ func (d *daemon) unregisterSeccompListener(sessionID string) {
 // index as a side effect of successful register/end-session responses.
 func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
 	// apply_policy and set_kill_switch are handled locally — the registry has
-	// no BPF awareness.
+	// no BPF awareness. Both take the peer handshake so they can enforce
+	// per-session ownership (apply_policy) / admin identity (set_kill_switch)
+	// rather than trusting any authorized-UID peer with a client-supplied
+	// session_id or the global kill switch.
 	switch req.Method {
 	case kernelcapture.DaemonProtocolMethodApplyPolicy:
-		return d.handleApplyPolicy(req)
+		return d.handleApplyPolicy(req, handshake)
 	case kernelcapture.DaemonProtocolMethodSetKillSwitch:
-		return d.handleSetKillSwitch(req)
+		return d.handleSetKillSwitch(req, handshake)
+	}
+
+	// register_session binds a client-supplied cgroup_id (and root_pid) to a
+	// session; apply_policy later writes BPF enforcement to that cgroup. Verify
+	// the claim is one the peer legitimately owns before the registry accepts
+	// it, so a peer cannot register (and then govern/tamper) a cgroup belonging
+	// to another workload.
+	if req.Method == kernelcapture.DaemonProtocolMethodRegisterSession && req.RegisterSession != nil {
+		if err := verifyRegisterSessionCgroup(handshake, req.RegisterSession, d.log); err != nil {
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          req.Method,
+				SessionID:       req.RegisterSession.SessionID,
+				OK:              false,
+				Error:           fmt.Sprintf("register_session cgroup ownership check failed: %v", err),
+			}
+		}
 	}
 
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
@@ -268,7 +309,7 @@ func (d *daemon) enforcementTier() string {
 
 // handleApplyPolicy validates the session, resolves its cgroup_id, and writes
 // the policy into the BPF enforcement maps.
-func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kernelcapture.DaemonProtocolResponse {
+func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
 	ap := req.ApplyPolicy
 	errResp := func(msg string) kernelcapture.DaemonProtocolResponse {
 		return kernelcapture.DaemonProtocolResponse{
@@ -279,10 +320,20 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 		}
 	}
 
-	record, err := d.registry.ActiveSession(ap.SessionID)
+	// Ownership gate: only the peer that registered this session may rewrite its
+	// policy — mirrors end_session/session_status. Without this, any authorized-
+	// UID peer could apply policy to a session (and thus a cgroup) it does not
+	// own, including neutralizing another workload's enforcement or a sandboxed
+	// process disabling its own.
+	record, err := d.registry.ActiveSessionForPeer(ap.SessionID, handshake)
 	if err != nil {
-		return errResp(fmt.Sprintf("session not found or not active: %v", err))
+		return errResp(fmt.Sprintf("session not found, not active, or not owned by this peer: %v", err))
 	}
+
+	// Serialize all BPF policy-map mutations so a concurrent apply/remove for the
+	// same cgroup cannot interleave the double-buffer slot read-modify-write.
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
 	if record.CgroupID == 0 {
 		return errResp("session has no cgroup_id; cannot apply BPF policy")
 	}
@@ -342,6 +393,12 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 		return errResp(fmt.Sprintf("apply policy maps: %v", err))
 	}
 
+	// Revoke any allowlist entries this session had that the new policy drops,
+	// and record the new set. Runs only on the BPF-write success path (the
+	// degraded/seccomp returns above never reach the cgroup_file_allow /
+	// cgroup_net_allow maps). Under applyMu, so serialized with other applies.
+	d.pruneAndRecordAllowlists(ap.SessionID, record.CgroupID, ap.PathAllow, ap.NetAllow)
+
 	d.log.Info("policy applied",
 		"session_id", ap.SessionID,
 		"cgroup_id", record.CgroupID,
@@ -356,6 +413,64 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest) kern
 		OK:              true,
 		SessionID:       ap.SessionID,
 	}
+}
+
+// pruneAndRecordAllowlists deletes the path/net allowlist entries this session
+// previously wrote that are absent from the new set (revoking them from the BPF
+// maps, which — unlike op_policy — are not double-buffered and would otherwise
+// keep a dropped path/host allowed), then records the new set. Caller holds
+// applyMu; this briefly takes mu for the appliedAllow map.
+func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, newPaths, newNets []string) {
+	newPathSet := stringSet(newPaths)
+	newNetSet := stringSet(newNets)
+
+	d.mu.Lock()
+	prev := d.appliedAllow[sessionID]
+	d.mu.Unlock()
+
+	var stalePaths, staleNets []string
+	if prev != nil {
+		for p := range prev.paths {
+			if _, keep := newPathSet[p]; !keep {
+				stalePaths = append(stalePaths, p)
+			}
+		}
+		for n := range prev.nets {
+			if _, keep := newNetSet[n]; !keep {
+				staleNets = append(staleNets, n)
+			}
+		}
+	}
+	if len(stalePaths) > 0 || len(staleNets) > 0 {
+		if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, cgroupID, stalePaths, staleNets); err != nil {
+			d.log.Warn("prune stale allowlist entries on re-apply",
+				"session_id", sessionID, "cgroup_id", cgroupID, "error", err)
+		}
+	}
+
+	d.mu.Lock()
+	d.appliedAllow[sessionID] = &appliedAllowRecord{cgroupID: cgroupID, paths: newPathSet, nets: newNetSet}
+	d.mu.Unlock()
+}
+
+// stringSet builds a set from a slice, ignoring empties.
+func stringSet(items []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(items))
+	for _, it := range items {
+		if it != "" {
+			set[it] = struct{}{}
+		}
+	}
+	return set
+}
+
+// setKeys returns a set's members as a slice.
+func setKeys(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	return out
 }
 
 // seccompFullyCoversPolicy reports whether every op an apply_policy request
@@ -376,7 +491,25 @@ func seccompFullyCoversPolicy(ap *kernelcapture.DaemonApplyPolicyRequest) bool {
 // Unlike apply_policy, a missing guard is always a hard failure here: there
 // is no "degraded" reading of "the caller asked to change enforcement state
 // and nothing happened" — the caller must know the call had no effect.
-func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest) kernelcapture.DaemonProtocolResponse {
+//
+// The kill switch is GLOBAL and fail-open (engaged ⇒ every op passes on every
+// governed cgroup), so it is gated to an admin identity — a UID-0 (root) peer —
+// rather than any UID on the socket's allowlist. A non-root allowed peer (e.g.
+// the very workload being sandboxed, which typically shares the launching UID)
+// must not be able to disable enforcement host-wide.
+func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
+	if handshake.Authorization.UID != 0 {
+		d.log.Warn("set_kill_switch denied: caller is not root",
+			"peer_uid", handshake.Authorization.UID, "peer_pid", handshake.Authorization.PID, "engaged", req.SetKillSwitch != nil && req.SetKillSwitch.Engaged)
+		return kernelcapture.DaemonProtocolResponse{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+			OK:              false,
+			Error:           "set_kill_switch requires an admin (uid 0) peer; the global kill switch is not delegable to non-root callers",
+		}
+	}
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
 	sw := req.SetKillSwitch
 	if err := kernelcapture.SetKillSwitch(d.policyMaps, sw.Engaged); err != nil {
 		d.log.Error("set_kill_switch failed", "engaged", sw.Engaged, "error", err)
@@ -437,18 +570,33 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	if sessionID == "" {
 		return
 	}
+	// applyMu is acquired OUTSIDE d.mu (same order as handleApplyPolicy/
+	// handleSetKillSwitch) so the RemovePolicyMaps below is serialized against
+	// concurrent apply_policy for the same cgroup, with no lock-order inversion.
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
 	d.mu.Lock()
 
-	if scope, ok := d.treeScopes[sessionID]; ok {
-		if scope.CgroupID != 0 {
-			delete(d.cgroupIndex, scope.CgroupID)
-			// Best-effort: remove enforcement state from BPF maps.
-			if err := kernelcapture.RemovePolicyMaps(d.policyMaps, scope.CgroupID); err != nil {
-				d.log.Warn("remove policy maps on session end",
-					"session_id", sessionID, "cgroup_id", scope.CgroupID, "error", err)
-			}
+	// Best-effort: remove enforcement state from BPF maps — op_policy + managed
+	// gate (keyed by the routing scope's cgroup), then the (non-double-buffered)
+	// path/net allowlist entries this session applied, keyed by the cgroup they
+	// were actually written under (tracked in appliedAllow), so they don't
+	// linger allowed for a future session that reuses the cgroup id.
+	prevAllow := d.appliedAllow[sessionID]
+	if scope, ok := d.treeScopes[sessionID]; ok && scope.CgroupID != 0 {
+		delete(d.cgroupIndex, scope.CgroupID)
+		if err := kernelcapture.RemovePolicyMaps(d.policyMaps, scope.CgroupID); err != nil {
+			d.log.Warn("remove policy maps on session end",
+				"session_id", sessionID, "cgroup_id", scope.CgroupID, "error", err)
 		}
 	}
+	if prevAllow != nil && prevAllow.cgroupID != 0 {
+		if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, prevAllow.cgroupID, setKeys(prevAllow.paths), setKeys(prevAllow.nets)); err != nil {
+			d.log.Warn("remove allowlist entries on session end",
+				"session_id", sessionID, "cgroup_id", prevAllow.cgroupID, "error", err)
+		}
+	}
+	delete(d.appliedAllow, sessionID)
 	delete(d.treeScopes, sessionID)
 	delete(d.correlators, sessionID)
 	delete(d.enforceChains, sessionID)
@@ -611,14 +759,27 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent, loss kernelc
 // pruneExpiredSessions removes sessions that the registry has expired so the
 // cgroup index does not leak indefinitely.
 func (d *daemon) pruneExpiredSessions() {
+	type expiredPolicy struct {
+		cgroupID uint64
+		paths    []string
+		nets     []string
+	}
 	d.mu.Lock()
 	var expiredSeccompCancels []context.CancelFunc
 	var expiredSessionIDs []string
+	var expiredPolicies []expiredPolicy
 	for sid, scope := range d.treeScopes {
 		if _, err := d.registry.ActiveSession(sid); err != nil {
 			if scope.CgroupID != 0 {
 				delete(d.cgroupIndex, scope.CgroupID)
+				ep := expiredPolicy{cgroupID: scope.CgroupID}
+				if prev := d.appliedAllow[sid]; prev != nil {
+					ep.paths = setKeys(prev.paths)
+					ep.nets = setKeys(prev.nets)
+				}
+				expiredPolicies = append(expiredPolicies, ep)
 			}
+			delete(d.appliedAllow, sid)
 			delete(d.treeScopes, sid)
 			delete(d.correlators, sid)
 			delete(d.enforceChains, sid)
@@ -632,6 +793,25 @@ func (d *daemon) pruneExpiredSessions() {
 		}
 	}
 	d.mu.Unlock()
+
+	// Release BPF enforcement state for expired sessions (op_policy + managed
+	// gate + allowlist entries), so a TTL-expired session's policy doesn't
+	// linger in the kernel. applyMu is taken alone here (d.mu already released),
+	// serializing with concurrent apply_policy.
+	if len(expiredPolicies) > 0 {
+		d.applyMu.Lock()
+		for _, ep := range expiredPolicies {
+			if err := kernelcapture.RemovePolicyMaps(d.policyMaps, ep.cgroupID); err != nil {
+				d.log.Warn("remove policy maps on session expiry", "cgroup_id", ep.cgroupID, "error", err)
+			}
+			if len(ep.paths) > 0 || len(ep.nets) > 0 {
+				if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, ep.cgroupID, ep.paths, ep.nets); err != nil {
+					d.log.Warn("remove allowlist entries on session expiry", "cgroup_id", ep.cgroupID, "error", err)
+				}
+			}
+		}
+		d.applyMu.Unlock()
+	}
 
 	for _, sid := range expiredSessionIDs {
 		kernelcapture.RemoveSeccompPolicy(d.seccompPolicy, sid)

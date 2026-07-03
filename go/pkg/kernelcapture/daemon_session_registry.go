@@ -110,6 +110,25 @@ func (r *DaemonSessionRegistry) ActiveSession(sessionID string) (DaemonSessionRe
 	return record, nil
 }
 
+// ActiveSessionForPeer is like ActiveSession but additionally requires that the
+// supplied peer handshake OWNS the session — i.e. it matches the UID/GID/PID/
+// process-start-time/credential-source recorded at register_session. This is the
+// same ownership gate handleEndSession/handleSessionStatus already enforce; it is
+// exported so out-of-package daemon handlers that resolve a session by
+// client-supplied session_id (apply_policy, set_kill_switch) can enforce it too,
+// instead of letting any authorized-UID peer mutate a session another peer
+// registered (see the missing-authorization finding these callers close).
+func (r *DaemonSessionRegistry) ActiveSessionForPeer(sessionID string, handshake DaemonProtocolPeerHandshake) (DaemonSessionRecord, error) {
+	record, _, err := r.lookupActiveSession(sessionID, r.currentTime())
+	if err != nil {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: %v", ErrDaemonSessionRegistry, err)
+	}
+	if !daemonSessionRegistryPeerOwnsRecord(record, handshake) {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q is owned by a different peer", ErrDaemonSessionRegistry, sessionID)
+	}
+	return record, nil
+}
+
 // BuildActiveSessionHandoffPlan projects an active registered session into the
 // existing no-mutation handoff plan using daemon-owned custody paths. It performs
 // no filesystem writes, cgroup assignment, BPF map mutation, or live enforcement.

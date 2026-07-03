@@ -70,6 +70,7 @@ func newTestDaemon(t *testing.T) *daemon {
 		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
 		seccompListeners:     make(map[string]context.CancelFunc),
 		activeTier:           daemonTierNone,
+		appliedAllow:         make(map[string]*appliedAllowRecord),
 	}
 }
 
