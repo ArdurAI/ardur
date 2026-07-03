@@ -33,6 +33,10 @@ jobs:
           #   signed in to GitHub; unauthenticated lychee gets a redirect
           #   that GitHub then 404s. Cannot be unblocked without
           #   authenticating the lychee runner.
+          # - developers.redhat.com, medium.com: these sites block
+          #   automated requests with 403 Forbidden. The URLs are
+          #   legitimate research citations, so the domains are excluded
+          #   rather than removing the references.
           # (Discussions exclude removed 2026-04-28: Discussions are now
           # enabled on the repo so the discussions tab and category URLs
           # return 200 to unauthenticated callers.)
@@ -42,6 +46,8 @@ jobs:
             --no-progress
             --accept 200,206,429
             --exclude 'github\.com/.*/security/advisories/new(/.*)?$'
+            --exclude 'developers\.redhat\.com'
+            --exclude 'medium\.com'
             --exclude-path '^site/content/'
             './**/*.md'
           fail: true
