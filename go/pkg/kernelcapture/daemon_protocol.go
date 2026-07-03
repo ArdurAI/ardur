@@ -57,9 +57,10 @@ type DaemonSetKillSwitchRequest struct {
 }
 
 // DaemonApplyPolicyRequest installs or replaces the BPF enforcement policy for
-// one session's cgroup. The daemon writes the supplied entries to the six BPF
-// maps in the order: op_policies → path_allow → net_allow → cgroup_managed
-// (generation-atomic, managed flag written last per ValidateCgroupFilterSequence).
+// one session's cgroup. The daemon writes the supplied entries to the BPF
+// maps in the order: op_policies → path_allow (into cgroup_file_allow, see
+// PolicyMaps.CgroupFileAllow) → net_allow → cgroup_managed (generation-atomic,
+// managed flag written last per ValidateCgroupFilterSequence).
 //
 // Generation must be non-zero and strictly increasing relative to the previous
 // apply for this session.  The BPF program uses the generation to detect stale

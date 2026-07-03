@@ -56,6 +56,7 @@ func PolicyMapsFromHandles(h *ProcessGuardHandles) PolicyMaps {
 	return PolicyMaps{
 		CgroupOpPolicy:  h.objs.CgroupOpPolicy,
 		CgroupPathAllow: h.objs.CgroupPathAllow,
+		CgroupFileAllow: h.objs.CgroupFileAllow,
 		CgroupNetAllow:  h.objs.CgroupNetAllow,
 		CgroupManaged:   h.objs.CgroupManaged,
 		KillSwitch:      h.objs.KillSwitch,

@@ -16,11 +16,17 @@ name: kernel-enforce
 #
 #   kernel-smoke — boots the runner's own kernel inside a disposable
 #     KVM+virtme-ng VM with BPF-LSM explicitly enabled on the command line,
-#     then runs ardur-guard-smoke as root inside it: load process_guard,
-#     apply an OP_EXEC:DENY policy to a fresh cgroup, spawn a child directly
-#     into that cgroup, and assert (a) its execve fails EPERM and (b) a
-#     matching DENY record lands on the enforce_events ringbuf. This is the
-#     one thing bpf-generate cannot prove: that the compiled program actually
+#     then runs ardur-guard-smoke as root inside it, two scenarios:
+#     (a) apply an OP_EXEC:DENY policy to a fresh cgroup, spawn a child
+#     directly into it, assert its execve fails EPERM and a matching DENY
+#     record lands on enforce_events; (b) apply an OP_FILE_WRITE:ALLOWLIST
+#     policy scoped to one directory, assert a write under that directory
+#     succeeds (ALLOW event) and a write outside it fails (DENY event) — this
+#     is the Slice 4.1/4.2 reconciliation proof that guard_file_open's
+#     sleepable hook, which cannot use the cgroup_path_allow LPM trie the
+#     other hooks use, actually enforces path_allow via cgroup_file_allow
+#     instead of failing every allowlisted file op closed. This is the one
+#     thing bpf-generate cannot prove: that the compiled program actually
 #     enforces on a live kernel, not just that it loads.
 #
 # kernel-smoke starts as continue-on-error: true — promote it to a required

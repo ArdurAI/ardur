@@ -14,7 +14,8 @@
 // Map write ordering (enforced by daemon apply_policy):
 //   1. Write cgroup_op_policy entries into the INACTIVE double-buffer slot
 //      (the slot not referenced by the current cgroup_managed.active_slot),
-//      then cgroup_path_allow, cgroup_net_allow entries.
+//      then cgroup_file_allow, cgroup_net_allow entries (cgroup_path_allow
+//      too, if a future caller ever populates it — see its doc comment).
 //   2. Write cgroup_managed LAST, pointing active_slot at the slot just
 //      populated. This is the atomic gate: readers never observe a partially
 //      written generation, because the slot they're reading from is never
@@ -22,12 +23,29 @@
 //      *other* slot until this final flip.
 //
 // Until cgroup_managed is written, the cgroup is ungoverned and all ops pass.
+//
+// Path allowlisting uses two different map types depending on which hook
+// checks it: cgroup_path_allow (LPM_TRIE, byte-prefix match) for the two
+// non-sleepable hooks, cgroup_file_allow (HASH, directory-boundary-aware
+// ancestor walk) for the sleepable lsm.s/file_open hook, which cannot touch
+// an LPM_TRIE at all. See ardur_file_allow_key's doc comment below for the
+// full explanation — this split exists because of a real kernel constraint,
+// not a design preference.
 
 #include <linux/bpf.h>
 #include <linux/types.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
+
+// barrier_var: opaque compiler barrier on a single scalar, the standard
+// kernel/BPF idiom for when a value is genuinely bounded but the compiler's
+// own optimizer proves that bound so thoroughly it discards the very
+// instructions (e.g. a redundant-looking mask) the *verifier* needs to see
+// in order to independently re-derive the same bound at a given use site.
+// Used once below, at exactly the spot that needed it — see the comment
+// there for the concrete failure this fixes.
+#define barrier_var(var) asm volatile("" : "+r"(var))
 
 // ---------------------------------------------------------------------------
 // Constants — must match bpf_enforce_types.go and bpf_types.py
@@ -67,7 +85,26 @@
 // path field gets 8 fewer bytes than ARDUR_PATH_LEN to stay under the cap.
 // Longer paths are truncated for allowlist matching only; the full path
 // still reaches the ringbuf event via ARDUR_PATH_LEN-sized buffers elsewhere.
+//
+// NOTE: this LPM trie is reachable only from decide() (guard_bprm_check /
+// guard_socket_connect, both non-sleepable). guard_file_open is sleepable
+// and cannot use it at all — see cgroup_file_allow below, which is what
+// actually backs OP_FILE_READ/OP_FILE_WRITE ACT_ALLOWLIST today.
 #define ARDUR_PATH_LPM_DATA_LEN (256 - 8)
+
+// cgroup_file_allow (below) walks a resolved path's ancestor directory
+// boundaries from the root outward, probing each one against the hash map,
+// via file_allow_walk_cb + bpf_loop() (Linux 5.17+ — see
+// file_path_is_allowed's doc comment for why a bpf_loop() callback, not a
+// plain `for` loop, is what actually loads: every plain-loop version tried
+// blew the verifier's ~1M-instruction complexity budget, regardless of this
+// bound's value). 32 ancestor matches covers any realistic policy root depth
+// (SubpathPolicy roots are typically 2-6 components, e.g.
+// /home/user/project); a root nested deeper than this is rejected at
+// lowering time instead of silently never matching — see bpf_lower.py's
+// ancestor-depth guard (_FILE_ALLOW_MAX_ANCESTOR_DEPTH, which must be kept
+// equal to this constant).
+#define ARDUR_FILE_ALLOW_MAX_ANCESTORS 32
 
 // Network constants
 #define AF_INET  2
@@ -169,6 +206,28 @@ struct ardur_net_lpm_key {
 	__u8  addr[16];
 };
 
+// File allow hash key: {cgroup_raw[8], path[ARDUR_PATH_LEN]}.
+// Unlike ardur_path_lpm_key, this is an EXACT-match key for a HASH map, not a
+// byte-prefix key for an LPM trie: the value stored at a given path is either
+// present (that exact path string, zero-padded, is an allowed directory or
+// file) or absent. Directory-prefix ("subpath") matching is implemented by
+// the *caller* (file_path_is_allowed) probing this map once per ancestor
+// directory boundary of the resolved path, not by the map itself doing
+// prefix matching — this is what makes it usable from a sleepable program
+// (BPF_MAP_TYPE_HASH is one of the map types sleepable programs may touch;
+// BPF_MAP_TYPE_LPM_TRIE is not) and, as a side effect, what makes matching
+// directory-boundary-aware: probing only ever tests strings that end exactly
+// at a '/' or at the full path, so an entry for "/data" can never spuriously
+// match a query for "/database" the way LPM byte-prefix matching would. This
+// mirrors the boundary-aware semantics SubpathPolicy already documents and
+// the Biscuit/proxy layer already enforces (mission_compile.py, 2026-04-21
+// audit fix) — this map brings the BPF layer's matching in line with that,
+// not just the sleepable-vs-LPM constraint.
+struct ardur_file_allow_key {
+	__u8 cgroup_raw[8];
+	char path[ARDUR_PATH_LEN];
+};
+
 // Ringbuf event emitted on each policy decision for a governed cgroup.
 struct ardur_enforce_event {
 	__u64 cgroup_id;
@@ -210,6 +269,20 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 } cgroup_net_allow SEC(".maps");
 
+// cgroup_file_allow backs OP_FILE_READ / OP_FILE_WRITE ACT_ALLOWLIST for
+// guard_file_open (the sleepable hook — see ardur_file_allow_key's doc
+// comment for why this is a HASH map, not the LPM trie the other allowlists
+// use). One entry per (cgroup, allowed-path) pair, same population as
+// cgroup_path_allow would have held for file ops before this map existed;
+// max_entries mirrors cgroup_path_allow's budget for the same reason (one
+// entry per SubpathPolicy/resource_scope root across all governed cgroups).
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key,   struct ardur_file_allow_key);
+	__type(value, __u64);
+} cgroup_file_allow SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
@@ -244,6 +317,40 @@ struct {
 	__type(key,   __u32);
 	__type(value, struct ardur_net_lpm_key);
 } net_lpm_scratch SEC(".maps");
+
+// Per-CPU scratch value for file_allow_scratch: the current lookup
+// candidate key (key, reused once per candidate probed) plus a separate
+// resolved-path scan buffer (path_copy, filled once). These must be
+// DISTINCT fields, not the same buffer reused for both purposes:
+// file_allow_lookup zeroes `key` (including key.path) before reading its
+// path argument INTO key.path — if that argument pointer aliased key.path
+// itself, the zero would land before the read, silently corrupting every
+// lookup into an empty-string probe. Both fields live in this PERCPU_ARRAY
+// map, not on the BPF program's stack: `key` mirrors path_lpm_scratch's
+// existing "avoid a large stack alloc" pattern, and path_copy specifically
+// exists because file_path_is_allowed's ancestor walk needs a byte-indexable
+// local copy of the resolved path — see that function's doc comment for why
+// indexing the path_src pointer PARAMETER directly, instead of a local
+// copy, doesn't load, and why that copy can't be a plain stack array either
+// (single-function stack use is small, but BPF caps cumulative stack across
+// the whole guard_file_open → decide_file_open → file_path_is_allowed call
+// chain at 512 bytes, and path_buf in guard_file_open already spends 256 of
+// that on its own).
+struct ardur_file_allow_scratch {
+	struct ardur_file_allow_key key;
+	char path_copy[ARDUR_PATH_LEN];
+};
+
+// Per-CPU scratch map for the file allow key + path scan buffer.
+// BPF_MAP_TYPE_PERCPU_ARRAY is itself one of the map types sleepable
+// programs may use (it's an ARRAY), so this is safe to touch from
+// guard_file_open alongside cgroup_file_allow.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key,   __u32);
+	__type(value, struct ardur_file_allow_scratch);
+} file_allow_scratch SEC(".maps");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -337,6 +444,233 @@ static int net_is_allowed(__u64 cgroup_id, const __u8 *addr_bytes, int addr_len)
 
 	__u64 *allowed = bpf_map_lookup_elem(&cgroup_net_allow, lk);
 	return allowed && *allowed != 0;
+}
+
+// file_allow_lookup probes cgroup_file_allow for the exact string
+// path_src[0:len). Shared by every candidate check in file_path_is_allowed
+// so the scratch-key fill logic (zero, stamp cgroup, copy) lives in one
+// place. len must be <= ARDUR_PATH_LEN (the scratch key's path field size);
+// callers are responsible for that bound.
+static __always_inline int file_allow_lookup(
+	struct ardur_file_allow_key *fk, __u64 cgroup_id,
+	const char *path_src, __u32 len)
+{
+	__builtin_memset(fk, 0, sizeof(*fk));
+	__builtin_memcpy(fk->cgroup_raw, &cgroup_id, 8);
+	bpf_probe_read_kernel(fk->path, len, path_src);
+	__u64 *allowed = bpf_map_lookup_elem(&cgroup_file_allow, fk);
+	return allowed && *allowed != 0;
+}
+
+// file_allow_walk_ctx carries file_path_is_allowed's loop state into
+// file_allow_walk_cb across the bpf_loop() call — see file_path_is_allowed's
+// doc comment for why this indirection (a kfunc callback) exists instead of
+// a plain `for` loop.
+struct file_allow_walk_ctx {
+	struct ardur_file_allow_key *fk;
+	__u64 cgroup_id;
+	char *local;
+	int full_len;
+	int checked;
+	int found;
+};
+
+// file_allow_walk_cb is bpf_loop()'s per-iteration callback: idx runs
+// 0..nr_loops-1, mapped to ancestor scan position i = idx+1 (skipping index
+// 0, the leading '/', which never marks a useful ancestor boundary on its
+// own — see file_path_is_allowed's root-path special case instead). Returns
+// 1 to stop the loop (match found, or scan/ancestor-cap exhausted), 0 to
+// continue. Signature is bpf_loop()'s required
+// `long (*callback_fn)(u32 index, void *ctx)`.
+static long file_allow_walk_cb(__u32 idx, void *ctx_)
+{
+	struct file_allow_walk_ctx *ctx = ctx_;
+
+	// Clamp idx itself before any arithmetic on it: file_path_is_allowed
+	// calls bpf_loop(full_len - 1, ...), so idx is only ever < full_len - 1
+	// (< ARDUR_PATH_LEN - 1) at runtime, but the verifier does not carry
+	// that caller-side bound into the callback body — without this check,
+	// load fails with "invalid argument: value -2147483648 makes map_value
+	// pointer be out of bounds" (idx treated as an unbounded __u32, so
+	// (int)idx + 1 can appear to overflow to INT_MIN from the verifier's
+	// point of view). Bounded to ARDUR_PATH_LEN - 1, not ARDUR_PATH_LEN: i
+	// (= idx + 1) must stay a valid index into ctx->local's ARDUR_PATH_LEN
+	// bytes, i.e. i <= ARDUR_PATH_LEN - 1, i.e. idx <= ARDUR_PATH_LEN - 2.
+	if (idx >= ARDUR_PATH_LEN - 1)
+		return 1;
+	int i = (int)idx + 1;
+
+	if (i >= ctx->full_len)
+		return 1;
+	if (ctx->checked >= ARDUR_FILE_ALLOW_MAX_ANCESTORS)
+		return 1;
+
+	// A direct ctx->local[i] dereference here is rejected at load ("R6
+	// unbounded memory access, make sure to bounds check any such access"):
+	// ctx->local is a `char *` loaded from a struct field inside a
+	// bpf_loop() callback, and the verifier does not carry forward the
+	// "this points into a fixed ARDUR_PATH_LEN-byte scratch buffer"
+	// provenance through that indirection the way it would for a pointer
+	// declared directly in this function — even with `i` itself fully
+	// bounded (see above). bpf_probe_read_kernel doesn't have this
+	// problem: unlike a raw load, its whole purpose is reading through a
+	// pointer whose bounds the verifier can't fully prove up front, with
+	// the length argument (1 byte, here) checked instead. Confirmed on a
+	// real BPF-LSM kernel: this is what actually loads.
+	char b = 0;
+	bpf_probe_read_kernel(&b, 1, ctx->local + i);
+	if (b != '/')
+		return 0;
+	ctx->checked++;
+
+	// Re-clamp i (both bounds) right at this use site rather than trusting
+	// the range narrowed above to still be visible to the verifier here:
+	// bpf_probe_read_kernel below is called via file_allow_lookup with i as
+	// its length argument, and confirmed on a real kernel that without this,
+	// load fails with "R2 min value is negative, either use unsigned or
+	// 'var &= const'" — the verifier's full log showed exactly what that
+	// hint means here: R2's 32-bit sub-register was correctly bounded
+	// (smax32=255) but its 64-bit smin showed as 0xffffffff80000000 (i.e.
+	// sign-extended, not zero-extended). An `& (ARDUR_PATH_LEN - 1)` mask
+	// (a no-op numerically: blen is already < ARDUR_PATH_LEN, and
+	// ARDUR_PATH_LEN is a power of 2, so this can't wrap a valid value to
+	// something smaller the way masking warns against elsewhere in this
+	// file — see path_is_allowed's clamp-not-mask comment, which is about a
+	// non-power-of-2 bound) is the right fix in principle, forcing a
+	// zero-extending AND. In practice the first attempt at exactly that
+	// mask made no difference at all: -O2 proved the mask redundant (blen
+	// was already known <= 255) and deleted it, regenerating the identical
+	// instructions the verifier had already rejected. barrier_var forces an
+	// opaque round-trip through an empty asm statement between establishing
+	// the bound and using it, so the compiler can no longer treat the mask
+	// as provably redundant and elide it. Confirmed on a real kernel: this
+	// combination — clamp, barrier, THEN mask — is what actually loads.
+	__u32 blen = (i > 0 && i < ARDUR_PATH_LEN) ? (__u32)i : 0;
+	barrier_var(blen);
+	blen &= (ARDUR_PATH_LEN - 1);
+	if (blen == 0)
+		return 1;
+	if (file_allow_lookup(ctx->fk, ctx->cgroup_id, ctx->local, blen)) {
+		ctx->found = 1;
+		return 1;
+	}
+	return 0;
+}
+
+// file_path_is_allowed reports whether path_src (a resolved, absolute path
+// of path_len bytes, as produced by bpf_d_path in guard_file_open) falls
+// under any directory registered in cgroup_file_allow, or is itself exactly
+// registered. Safe to call from a sleepable program: cgroup_file_allow and
+// file_allow_scratch are both sleepable-compatible map types (HASH, ARRAY) —
+// see ardur_file_allow_key's doc comment for why this replaces LPM-trie
+// prefix matching instead of reusing path_is_allowed/cgroup_path_allow.
+//
+// Checks, in order:
+//   1. The literal root path "/" (an allow-everything policy).
+//   2. The full resolved path (an exact-file allow entry).
+//   3. Each ancestor directory boundary from the root outward — i.e. for
+//      "/a/b/c/file.txt", "/a", "/a/b", "/a/b/c" — up to
+//      ARDUR_FILE_ALLOW_MAX_ANCESTORS matches, via file_allow_walk_cb.
+//      Candidates only ever end exactly at a '/' or at the full path, so
+//      this can't spuriously match a sibling with a shared string prefix
+//      (e.g. an allowed "/data" does NOT match a query for "/database").
+// Returns 1 on the first match, 0 if none of the above hit.
+//
+// Why a bpf_loop() callback instead of a plain `for` loop over `local`: it
+// isn't. Four different plain-loop shapes were tried first, and every one
+// of them failed to load on a real kernel with "argument list too long: BPF
+// program is too large. Processed 1000001 insn" (the verifier's ~1M
+// processed-instruction/state complexity budget) — confirmed empirically
+// via kernel-smoke-equivalent local testing, not a theoretical concern (a
+// darwin build or a non-privileged Linux CI run can't catch any of this):
+//  1. Scan-and-lookup in one loop, indexing path_src[i] directly (path_src
+//     being a `const char *` parameter of this BPF-to-BPF subprogram): too
+//     large regardless of ARDUR_FILE_ALLOW_MAX_ANCESTORS (32, then 8) or
+//     the scan bound (256, then 32).
+//  2. Splitting the scan (cheap: byte compares) from the lookups
+//     (expensive: a helper call each) into two loops, passing found offsets
+//     through a stack array: worse, not better — the verifier lost the
+//     provable range on the loop induction variable once it round-tripped
+//     through the array.
+//  3. Copying path_src into a local buffer first (this function still does
+//     this part — see below) so the scan indexes memory this function
+//     fully owns instead of a pointer parameter: still too large. Bisecting
+//     down to `for (i=1;i<256;i++) { if (i<full_len && checked<MAX &&
+//     local[i]=='/') checked++; }` — no break, no continue, a single
+//     non-data-dependent loop-exit condition, ONE conditional increment,
+//     NO helper call at all in the body — still too large. This ruled out
+//     "the lookup call" and "early-exit branch shape" as the cause: the
+//     verifier's state-space exploration of ANY loop that repeatedly reads
+//     memory through a map-lookup-derived pointer, with a per-iteration
+//     branch on the loaded value, exceeded budget on this kernel,
+//     regardless of how simple the branch was.
+// bpf_loop() (Linux 5.17+, comfortably below what BPF-LSM sleepable
+// programs already require) exists precisely for this: the verifier checks
+// file_allow_walk_cb's body ONCE, with a complexity independent of
+// nr_loops's runtime value, then trusts the kernel's own bounded-loop
+// implementation to actually iterate. Confirmed on a real BPF-LSM kernel:
+// this loads and enforces correctly where every plain-loop version did not
+// even load.
+static int file_path_is_allowed(__u64 cgroup_id, const char *path_src, int path_len)
+{
+	if (path_len <= 0)
+		return 0;
+
+	__u32 scratch_idx = 0;
+	struct ardur_file_allow_scratch *scratch =
+		bpf_map_lookup_elem(&file_allow_scratch, &scratch_idx);
+	if (!scratch)
+		return 0;
+	struct ardur_file_allow_key *fk = &scratch->key;
+
+	if (file_allow_lookup(fk, cgroup_id, "/", 1))
+		return 1;
+
+	// barrier_var + mask: same fix, same reason, as file_allow_walk_cb's
+	// `blen` a few functions below — a signed-int-to-__u32 ternary like this
+	// one leaves the verifier unable to prove the register's upper 32 bits
+	// are zero at the bpf_probe_read_kernel call sites below, even though
+	// the value is provably small. See that comment for the full story.
+	//
+	// Clamped to ARDUR_PATH_LEN - 1, not ARDUR_PATH_LEN: the mask below is
+	// only a numeric no-op if full_len is strictly LESS than ARDUR_PATH_LEN
+	// (a power of 2) going in — masking an already-exact ARDUR_PATH_LEN
+	// (256) by (ARDUR_PATH_LEN - 1) (255) would silently produce 0, turning
+	// a full-length read into a zero-length one for any path at or beyond
+	// the buffer size. One byte of extra truncation on the longest possible
+	// paths is negligible and consistent with this file's existing
+	// truncate-oversize-paths behavior elsewhere (e.g. pathLpmKey/
+	// bpfPathLpmDataLen on the Go side).
+	__u32 full_len = path_len < ARDUR_PATH_LEN ? (__u32)path_len : (__u32)(ARDUR_PATH_LEN - 1);
+	barrier_var(full_len);
+	full_len &= (ARDUR_PATH_LEN - 1);
+	if (file_allow_lookup(fk, cgroup_id, path_src, full_len))
+		return 1;
+
+	// Copy into scratch memory (file_allow_scratch, a PERCPU_ARRAY map, not
+	// the BPF stack — see ardur_file_allow_scratch's doc comment: adding a
+	// 256-byte stack array here pushed guard_file_open's cumulative stack
+	// usage, shared across its whole call chain, over BPF's 512-byte cap)
+	// so file_allow_walk_cb indexes memory this function fully owns, one
+	// bounded bpf_probe_read_kernel call, instead of path_src (a pointer
+	// parameter) directly.
+	char *local = scratch->path_copy;
+	__builtin_memset(local, 0, ARDUR_PATH_LEN);
+	bpf_probe_read_kernel(local, full_len, path_src);
+
+	struct file_allow_walk_ctx wctx = {
+		.fk = fk,
+		.cgroup_id = cgroup_id,
+		.local = local,
+		.full_len = (int)full_len,
+	};
+	// full_len - 1 iterations: ancestor position i ranges 1..full_len-1
+	// (file_allow_walk_cb maps idx -> i = idx+1). full_len is always >= 1
+	// here (path_len > 0 was checked above, and full_len is path_len
+	// clamped to a smaller-or-equal positive bound), so this never
+	// underflows.
+	bpf_loop(full_len - 1, file_allow_walk_cb, &wctx, 0);
+	return wctx.found;
 }
 
 // emit_event writes one decision record to the enforce_events ringbuf.
@@ -452,15 +786,15 @@ static int decide(struct decide_ctx *ctx)
 }
 
 // decide_file_open is decide()'s counterpart for guard_file_open (the only
-// sleepable hook). Identical except its ACT_ALLOWLIST branch never calls
-// path_is_allowed — see decide()'s doc comment for why sleepable programs
-// can't reach cgroup_path_allow (LPM_TRIE) at all. Path allowlisting for
-// OP_FILE_READ/OP_FILE_WRITE fails closed instead: logged and denied under
-// ENFORCE_STRICT, logged and allowed under PERMISSIVE — the same fallback
-// the "no rule" case below already uses. OP_EXEC and OP_NET_CONNECT
-// allowlisting (bprm_check, socket_connect — both non-sleepable, both still
-// call decide() above) are unaffected by this; only file-op path-prefix
-// allowlisting is unavailable, and only because of this kernel constraint.
+// sleepable hook). Identical except its ACT_ALLOWLIST branch calls
+// file_path_is_allowed (cgroup_file_allow, a HASH map) instead of
+// path_is_allowed (cgroup_path_allow, an LPM_TRIE) — see decide()'s doc
+// comment for why sleepable programs can't reach LPM_TRIE maps at all, and
+// ardur_file_allow_key's doc comment for how the HASH-map ancestor walk
+// restores allowlist enforcement here without needing one. OP_NET_CONNECT
+// never reaches this function (guard_file_open only fires OP_FILE_READ /
+// OP_FILE_WRITE), so unlike decide() there is no net_is_allowed branch to
+// worry about.
 static int decide_file_open(struct decide_ctx *ctx)
 {
 	__u64 cgroup_id = ctx->cgroup_id;
@@ -495,12 +829,17 @@ static int decide_file_open(struct decide_ctx *ctx)
 	}
 
 	if (pol->action == ARDUR_ACT_ALLOWLIST) {
-		// No LPM access from a sleepable program (see function doc comment
-		// above) — fail closed rather than silently pass every file open
-		// through unchecked.
-		emit_event(cgroup_id, op, ARDUR_ACT_DENY, pol->enforce_mode, path_src);
-		if (pol->enforce_mode == ARDUR_ENFORCE_ENFORCE)
-			return -1;
+		int ok = 0;
+		if (path_src && ctx->path_len > 0)
+			ok = file_path_is_allowed(cgroup_id, path_src, ctx->path_len);
+
+		if (!ok) {
+			emit_event(cgroup_id, op, ARDUR_ACT_DENY, pol->enforce_mode, path_src);
+			if (pol->enforce_mode == ARDUR_ENFORCE_ENFORCE)
+				return -1;
+			return 0;
+		}
+		emit_event(cgroup_id, op, ARDUR_ACT_ALLOW, pol->enforce_mode, path_src);
 		return 0;
 	}
 
