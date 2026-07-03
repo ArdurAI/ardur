@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from vibap import kernel_correlation as kc
+from vibap import run_bridge
 from vibap.attestation import verify_attestation
 from vibap.passport import load_public_key
 from vibap.receipt import verify_chain
@@ -32,8 +33,12 @@ from vibap.run_bridge import (
     EnvProxyAdapter,
     KernelPolicyEnforcementError,
     RunContext,
+    SeccompShimPlan,
     TransparentInterceptAdapter,
     _kernel_enforcement_claim,
+    _plan_seccomp_shim,
+    _verify_seccomp_listener_attached,
+    _wrap_command_with_seccomp_shim,
     run_governed,
     run_governed_cli,
     select_adapter,
@@ -77,6 +82,27 @@ sys.stdout.write(json.dumps(decisions))
 def standin_agent(tmp_path: Path) -> Path:
     path = tmp_path / "standin_agent.py"
     path.write_text(STANDIN_AGENT, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def fake_exec_shim(tmp_path: Path) -> Path:
+    """A stand-in ``ardur-exec-shim``: parses the real CLI shape
+    (``--session-id ID --seccomp-socket PATH --control-socket PATH --
+    CMD ARGS...``) and execs the remainder unmodified.
+
+    It installs no real seccomp filter and talks to no daemon — tests using
+    it prove the *orchestration* wiring around the shim (issue #104: is it
+    invoked at all, does the run correctly notice when its handoff never
+    completes), not the shim binary's own kernel behavior. That is covered
+    separately by go/cmd/ardur-seccomp-smoke.
+    """
+    path = tmp_path / "fake-exec-shim.sh"
+    path.write_text(
+        "#!/bin/sh\nset -e\nshift 6\nshift\nexec \"$@\"\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
     return path
 
 
@@ -414,6 +440,367 @@ def test_ardur_run_enforce_aborts_when_daemon_rejects_policy(
     assert methods.count("apply_policy") == 1
     # Cleanup still runs (finally-block end_session) even though the run aborted.
     assert "end_session" in methods
+
+
+# ── seccomp-tier shim wiring (issue #104: false-success on seccomp-only hosts) ──
+
+
+def _seccomp_health_response() -> dict:
+    return {
+        "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+        "ok": True,
+        "method": "health",
+        "enforcement_tier": kc.ENFORCEMENT_TIER_SECCOMP,
+    }
+
+
+def test_plan_seccomp_shim_disabled_by_caller() -> None:
+    plan = _plan_seccomp_shim(enabled=False)
+    assert plan == SeccompShimPlan(tier=None, wrapped=False, reason="kernel correlation disabled by caller")
+
+
+def test_plan_seccomp_shim_no_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(tmp_path / "no-such-daemon.sock"))
+    plan = _plan_seccomp_shim(enabled=True)
+    assert plan.tier is None
+    assert plan.wrapped is False
+    assert "socket not present" in plan.reason
+
+
+def test_plan_seccomp_shim_bpf_lsm_tier_does_not_wrap(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
+    socket_path = sockdir / "daemon.sock"
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
+    daemon = _FakeKernelDaemon(
+        socket_path,
+        responses={
+            "health": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "health",
+                "enforcement_tier": kc.ENFORCEMENT_TIER_BPF_LSM,
+            }
+        },
+    )
+    daemon.start()
+    try:
+        plan = _plan_seccomp_shim(enabled=True)
+    finally:
+        daemon.close()
+    assert plan.tier == kc.ENFORCEMENT_TIER_BPF_LSM
+    assert plan.wrapped is False
+
+
+def test_plan_seccomp_shim_seccomp_tier_resolves_shim(
+    monkeypatch: pytest.MonkeyPatch, sockdir: Path, fake_exec_shim: Path
+) -> None:
+    socket_path = sockdir / "daemon.sock"
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
+    daemon = _FakeKernelDaemon(socket_path, responses={"health": _seccomp_health_response()})
+    daemon.start()
+    try:
+        plan = _plan_seccomp_shim(enabled=True)
+    finally:
+        daemon.close()
+    assert plan.tier == kc.ENFORCEMENT_TIER_SECCOMP
+    assert plan.wrapped is True
+    assert plan.shim_path == fake_exec_shim
+
+
+def test_plan_seccomp_shim_seccomp_tier_missing_binary(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
+    socket_path = sockdir / "daemon.sock"
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: None)
+    daemon = _FakeKernelDaemon(socket_path, responses={"health": _seccomp_health_response()})
+    daemon.start()
+    try:
+        plan = _plan_seccomp_shim(enabled=True)
+    finally:
+        daemon.close()
+    assert plan.tier == kc.ENFORCEMENT_TIER_SECCOMP
+    assert plan.wrapped is False
+    assert "not found" in plan.reason
+
+
+def test_wrap_command_with_seccomp_shim_builds_expected_argv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(kc.SECCOMP_SOCKET_ENV, "/run/ardur/kernelcapture/seccomp.sock")
+    shim_path = tmp_path / "ardur-exec-shim"
+    ready_file = tmp_path / "seccomp-ready-sess-1"
+    wrapped = _wrap_command_with_seccomp_shim(
+        ["claude", "--foo"], session_id="sess-1", shim_path=shim_path, ready_file=ready_file
+    )
+    assert wrapped == [
+        str(shim_path),
+        "--session-id",
+        "sess-1",
+        "--seccomp-socket",
+        "/run/ardur/kernelcapture/seccomp.sock",
+        "--ready-file",
+        str(ready_file),
+        "--",
+        "claude",
+        "--foo",
+    ]
+
+
+def test_verify_seccomp_listener_attached_true(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
+    sock = sockdir / "c.sock"
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(sock))
+    daemon = _FakeSessionStatusDaemon(
+        sock,
+        {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "session_status",
+            "session_id": "sess-1",
+            "seccomp_listener_attached": True,
+        },
+    )
+    try:
+        assert _verify_seccomp_listener_attached("sess-1", timeout_s=1.0, poll_interval_s=0.05) is True
+    finally:
+        daemon.close()
+
+
+def test_verify_seccomp_listener_attached_times_out_when_never_true(
+    monkeypatch: pytest.MonkeyPatch, sockdir: Path
+) -> None:
+    sock = sockdir / "c.sock"
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(sock))
+    daemon = _FakeKernelDaemon(
+        sock,
+        responses={
+            "session_status": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "session_status",
+                "session_id": "sess-1",
+                "seccomp_listener_attached": False,
+            }
+        },
+    )
+    daemon.start()
+    try:
+        assert _verify_seccomp_listener_attached("sess-1", timeout_s=0.3, poll_interval_s=0.05) is False
+    finally:
+        daemon.close()
+    # Genuinely polled more than once before giving up, not just a single
+    # failed round trip — proves the retry loop actually ran, not just that
+    # a connection failure short-circuited it.
+    assert len([r for r in daemon.received if r.get("method") == "session_status"]) >= 2
+
+
+def test_verify_seccomp_listener_attached_false_when_daemon_unreachable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(tmp_path / "no-such-daemon.sock"))
+    assert _verify_seccomp_listener_attached("sess-1", timeout_s=1.0, poll_interval_s=0.05) is False
+
+
+def _seccomp_daemon_responses(*, listener_attached: bool) -> dict[str, dict]:
+    return {
+        "health": _seccomp_health_response(),
+        "register_session": {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "register_session",
+            "status": "registered",
+        },
+        "apply_policy": {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "apply_policy",
+            "status": "applied_seccomp_tier",
+        },
+        "session_status": {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "session_status",
+            "seccomp_listener_attached": listener_attached,
+        },
+    }
+
+
+def test_ardur_run_launches_via_shim_and_confirms_enforcement_on_seccomp_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+) -> None:
+    """The headline #104 fix, the success path: on a seccomp-tier host the
+    agent actually runs *through* ardur-exec-shim, and a genuinely-attached
+    listener is confirmed before the run reports enforcement as applied.
+    """
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
+    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=True))
+    daemon.start()
+    try:
+        result = run_governed(
+            command=[sys.executable, str(standin_agent)],
+            mission="Seccomp tier launches through the shim.",
+            allowed_tools=["Read", "Glob", "Grep"],
+            forbidden_tools=["Bash"],
+            max_tool_calls=10,
+            home=tmp_path / "seccomp-home",
+            via="env",
+            enforce=True,
+        )
+    finally:
+        daemon.close()
+
+    assert result.exit_code == 0
+    assert result.kernel_policy["applied"] is True
+    assert any("ardur-exec-shim" in note for note in result.notes)
+    # The standin agent still ran correctly *through* the fake shim's exec
+    # passthrough — proves the wrapping didn't break the governed launch.
+    assert result.total_events == 3
+    assert result.denials == 1
+
+
+def test_no_resource_scope_omits_file_ops_from_lowered_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+) -> None:
+    """``no_resource_scope=True`` is what makes a mission genuinely
+    seccomp-tier-coverable end to end: without it, every mission's default
+    cwd-based file resource_scope adds OP_FILE_READ/OP_FILE_WRITE entries the
+    seccomp tier can never satisfy, so apply_policy would reject it outright
+    regardless of the shim wiring this test suite otherwise verifies.
+    """
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
+    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=True))
+    daemon.start()
+    try:
+        result = run_governed(
+            command=[sys.executable, str(standin_agent)],
+            mission="Network-only mission, no file scope needed.",
+            allowed_tools=["Read", "Glob", "Grep"],
+            forbidden_tools=["fetch"],
+            max_tool_calls=10,
+            home=tmp_path / "seccomp-net-only-home",
+            via="env",
+            enforce=True,
+            no_resource_scope=True,
+        )
+    finally:
+        daemon.close()
+
+    assert result.kernel_policy["applied"] is True
+    apply_req = next(req["apply_policy"] for req in daemon.received if req.get("method") == "apply_policy")
+    assert "path_allow" not in apply_req
+    ops = {entry["op"] for entry in apply_req["op_policies"]}
+    from vibap.bpf_types import OP_FILE_READ, OP_FILE_WRITE, OP_NET_CONNECT
+
+    assert ops == {OP_NET_CONNECT}
+    assert OP_FILE_READ not in ops
+    assert OP_FILE_WRITE not in ops
+
+
+def test_ardur_run_enforce_aborts_when_seccomp_listener_never_attaches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+) -> None:
+    """The false-success bug (#104), closed: apply_policy reporting
+    ``applied_seccomp_tier`` must not be trusted on its own. Here the shim
+    resolves and "runs" (the fake shim is a pure passthrough — exactly what
+    a shim binary that never actually talks to the daemon would look like
+    from the outside), but no listener ever attaches; --enforce must abort
+    loudly instead of reporting success.
+    """
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
+    monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S", 0.05)
+    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=False))
+    daemon.start()
+    try:
+        with pytest.raises(KernelPolicyEnforcementError, match="seccomp listener never attached"):
+            run_governed(
+                command=[sys.executable, str(standin_agent)],
+                mission="Seccomp listener never attaches, must abort under --enforce.",
+                allowed_tools=["Read"],
+                forbidden_tools=["Bash"],
+                max_tool_calls=10,
+                home=tmp_path / "seccomp-unattached-home",
+                via="env",
+                enforce=True,
+            )
+    finally:
+        daemon.close()
+
+
+def test_ardur_run_permissive_degrades_when_seccomp_listener_never_attaches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+) -> None:
+    """Same unattached-listener scenario, permissive mode: a recorded
+    degrade, not an abort — the run still completes and still governs via
+    the hook/env path, matching every other kernel-policy degrade case.
+    """
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
+    monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S", 0.05)
+    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=False))
+    daemon.start()
+    try:
+        result = run_governed(
+            command=[sys.executable, str(standin_agent)],
+            mission="Seccomp listener never attaches, permissive degrade.",
+            allowed_tools=["Read", "Glob", "Grep"],
+            forbidden_tools=["Bash"],
+            max_tool_calls=10,
+            home=tmp_path / "seccomp-permissive-home",
+            via="env",
+            # enforce defaults to False
+        )
+    finally:
+        daemon.close()
+
+    assert result.exit_code == 0
+    assert result.kernel_policy["applied"] is False
+    assert "listener never attached" in result.kernel_policy["reason"]
+
+
+def test_ardur_run_enforce_aborts_when_seccomp_tier_active_but_shim_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path
+) -> None:
+    """A different way #104's tier-not-wired case can happen: the daemon is
+    on the seccomp tier but ``ardur-exec-shim`` was never installed
+    (``exec_shim_path()`` returns ``None``) — no shim, no wrapping, but the
+    mission still has kernel-enforceable policy. --enforce must abort.
+    """
+    socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
+    monkeypatch.setattr(kc, "exec_shim_path", lambda: None)
+    daemon = _FakeKernelDaemon(
+        socket_path,
+        responses={
+            "health": _seccomp_health_response(),
+            "register_session": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "register_session",
+                "status": "registered",
+            },
+            "apply_policy": {
+                "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+                "ok": True,
+                "method": "apply_policy",
+                "status": "applied_seccomp_tier",
+            },
+        },
+    )
+    daemon.start()
+    try:
+        with pytest.raises(KernelPolicyEnforcementError, match="seccomp tier active but not wired"):
+            run_governed(
+                command=[sys.executable, str(standin_agent)],
+                mission="Seccomp tier active, shim missing, must abort under --enforce.",
+                allowed_tools=["Read"],
+                forbidden_tools=["Bash"],
+                max_tool_calls=10,
+                home=tmp_path / "seccomp-no-shim-home",
+                via="env",
+                enforce=True,
+            )
+    finally:
+        daemon.close()
 
 
 def test_run_governed_rejects_empty_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -31,6 +31,32 @@
 // mechanism, and refusing to run the target at all would only be a *weaker*
 // guarantee (no filter, but also no program) for a caller who asked to run
 // something.
+//
+// Startup race, and why it needs its own pre-flight step: the launcher
+// spawns this shim and then calls register_session on the daemon
+// concurrently (it cannot register first — root_pid is this shim's own PID,
+// only known once it has actually started). The seccomp handoff itself is a
+// one-shot attempt once the filter is installed (see run's comment on why it
+// cannot be retried after that point without risking a self-deadlock), so if
+// register_session hasn't landed yet at that moment, the handoff fails
+// permanently for this run — caught empirically running the real
+// ardur-exec-shim through `ardur run` for the first time (issue #104's
+// verification), not by any unit test.
+//
+// waitForReadyFile below closes this: the launcher creates a marker file
+// right after its own register_session call succeeds, and this shim polls
+// for that file's existence before doing anything seccomp-related. A first
+// attempt at this used a daemon round trip (session_status) instead, but
+// that check enforces exact-PID peer ownership on the session record
+// (daemonSessionRegistryPeerOwnsRecord) — the launcher process registered
+// the session, so this shim (a different PID) can never pass that check no
+// matter how long it waits; that approach was replaced before it shipped. A
+// signal-based handshake (launcher signals this process once ready) was
+// also considered and rejected: the default disposition of most signals is
+// to terminate the process, so a signal arriving before this process has
+// installed its handler would kill it outright — a race with a fatal
+// failure mode, not just a slow one. Plain file existence has neither
+// problem: checking is always safe, whether the file exists yet or not.
 package main
 
 import (
@@ -63,6 +89,13 @@ const (
 	// succeeds.
 	handoffAttempts  = 3
 	handoffRetryWait = 500 * time.Millisecond
+
+	// readyFileTimeout bounds waitForReadyFile's pre-flight poll — generous
+	// relative to a single register_session round trip (a millisecond-scale
+	// Unix-socket call) since it only needs to absorb launcher-side
+	// scheduling delay, not any real workload.
+	readyFileTimeout  = 5 * time.Second
+	readyFileInterval = 50 * time.Millisecond
 )
 
 func main() {
@@ -79,6 +112,7 @@ func main() {
 	var (
 		sessionID     = flag.String("session-id", "", "ardur session_id this shim's connect(2) decisions are evaluated against (required)")
 		seccompSocket = flag.String("seccomp-socket", defaultSeccompSocketPath, "ardur-kernelcaptured's seccomp handoff socket path")
+		readyFile     = flag.String("ready-file", "", "path the launcher creates once its own register_session call has succeeded (optional; skips the pre-flight wait if empty)")
 	)
 	flag.Usage = usage
 	flag.Parse()
@@ -89,7 +123,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(*sessionID, *seccompSocket, args); err != nil {
+	if err := run(*sessionID, *seccompSocket, *readyFile, args); err != nil {
 		fmt.Fprintf(os.Stderr, "ardur-exec-shim: %v\n", err)
 		os.Exit(1)
 	}
@@ -98,14 +132,23 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: %s --session-id ID [--seccomp-socket PATH] -- COMMAND [ARGS...]\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "usage: %s --session-id ID [--seccomp-socket PATH] [--ready-file PATH] -- COMMAND [ARGS...]\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
-func run(sessionID, seccompSocketPath string, args []string) error {
+func run(sessionID, seccompSocketPath, readyFilePath string, args []string) error {
 	target, err := lookupTarget(args[0])
 	if err != nil {
 		return err
+	}
+
+	// Wait for the launcher's register_session to land before doing
+	// anything seccomp-related — see the package doc comment's "Startup
+	// race" section.
+	if readyFilePath != "" {
+		if err := waitForReadyFile(readyFilePath, readyFileTimeout, readyFileInterval); err != nil {
+			fmt.Fprintf(os.Stderr, "ardur-exec-shim: warning: %v; proceeding anyway (handoff may still race)\n", err)
+		}
 	}
 
 	// Establish (and retry, if needed) the handoff connection to the
@@ -169,6 +212,27 @@ func lookupTarget(name string) (string, error) {
 		return "", fmt.Errorf("resolve %q in PATH: %w", name, err)
 	}
 	return resolved, nil
+}
+
+// waitForReadyFile polls for readyFilePath's existence until the launcher
+// creates it (right after its own register_session call succeeds) or
+// timeout elapses. See the package doc comment's "Startup race" section for
+// why this exists, and why it's a file rather than a daemon round trip or a
+// signal.
+//
+// Returns an error (never fatal to the caller — see run's warn-and-proceed
+// handling) if the file never appears in time.
+func waitForReadyFile(readyFilePath string, timeout, interval time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(readyFilePath); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("ready file %s did not appear within %s", readyFilePath, timeout)
+		}
+		time.Sleep(interval)
+	}
 }
 
 // seccompHandoffRequest/seccompHandoffResponse mirror (by JSON shape only —

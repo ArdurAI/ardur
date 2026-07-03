@@ -21,12 +21,13 @@ const (
 
 	DaemonProtocolEventProcessLifecycle = "process_lifecycle"
 
-	// EnforcementTierBPFLSM/EnforcementTierNone are the values a health
-	// response's EnforcementTier field takes. Forward-compatible with future
-	// tiers (seccomp unotify, plan E4) — a new tier adds a new constant here,
-	// not a breaking change to the field's meaning.
-	EnforcementTierBPFLSM = "bpf_lsm"
-	EnforcementTierNone   = "none"
+	// EnforcementTierBPFLSM/EnforcementTierSeccomp/EnforcementTierNone are the
+	// values a health response's EnforcementTier field takes. Forward-
+	// compatible with future tiers — a new tier adds a new constant here, not
+	// a breaking change to the field's meaning.
+	EnforcementTierBPFLSM  = "bpf_lsm"
+	EnforcementTierSeccomp = "seccomp"
+	EnforcementTierNone    = "none"
 
 	MaxDaemonProtocolTTLSeconds = 24 * 60 * 60
 
@@ -126,16 +127,39 @@ type DaemonProtocolResponse struct {
 	// has to learn what kernel-level enforcement happened.
 	Enforcement *EnforceEventSummary `json:"enforcement,omitempty"`
 	// EnforcementTier carries which kernel enforcement tier is currently
-	// active — "bpf_lsm", "seccomp", or "none" (EnforcementTierBPFLSM /
-	// EnforcementTierNone; seccomp is plan E4) — on successful health
-	// responses. The daemon decides this once at startup (BPF-LSM preferred,
-	// seccomp as fallback) and never changes it while running; a launcher
-	// queries it to decide whether a governed process needs to be routed
-	// through ardur-exec-shim (the seccomp tier's on-ramp) before spawning
-	// one, or can rely on BPF-LSM's cgroup-scoped enforcement with no
-	// per-process wrapper at all. session_status responses use Enforcement
-	// (per-session) instead.
+	// active — EnforcementTierBPFLSM, EnforcementTierSeccomp, or
+	// EnforcementTierNone — on successful health responses. The daemon
+	// decides this once at startup (BPF-LSM preferred, seccomp as fallback)
+	// and never changes it while running; a launcher queries it to decide
+	// whether a governed process needs to be routed through ardur-exec-shim
+	// (the seccomp tier's on-ramp) before spawning one, or can rely on
+	// BPF-LSM's cgroup-scoped enforcement with no per-process wrapper at all.
+	// session_status responses use Enforcement (per-session) instead.
 	EnforcementTier string `json:"enforcement_tier,omitempty"`
+	// SeccompListenerAttached is populated on successful session_status
+	// responses (never on health — attachment is per-session, not
+	// daemon-wide) to report whether a seccomp user-notify listener is
+	// *currently* supervising this session, i.e. whether some
+	// ardur-exec-shim's handoff for it actually completed.
+	//
+	// This exists because EnforcementTier=="seccomp" alone is not proof that
+	// enforcement is live for any given session: it only says the daemon
+	// *would* enforce net-connect policy via seccomp if a listener attaches.
+	// apply_policy syncing the seccomp policy store (handleApplyPolicy) is
+	// similarly necessary but not sufficient — the store update and the
+	// shim's handoff are two independent operations that can each succeed or
+	// fail on their own. A launcher that only checked the first two and
+	// declared success (issue #104) would silently govern nothing: no shim
+	// wraps the agent, no filter traps its connect(2) calls, and yet
+	// apply_policy honestly (not falsely) reported the tier-side policy as
+	// applied. This field lets a caller confirm the *third*, session-scoped
+	// fact before trusting that a run is actually enforced.
+	//
+	// No omitempty: false is a meaningful, load-bearing answer here, and a
+	// client must be able to tell "not attached" apart from "field absent
+	// because this daemon predates it" — always emitting it removes that
+	// ambiguity on the wire.
+	SeccompListenerAttached bool `json:"seccomp_listener_attached"`
 }
 
 // CgroupFilterSequence describes daemon-side map sequencing. Enabling

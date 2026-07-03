@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -58,10 +59,25 @@ DAEMON_PROTOCOL_VERSION = "kernelcapture.daemon.v1"
 EVENT_CLASS_PROCESS_LIFECYCLE = "process_lifecycle"
 MAX_TTL_SECONDS = 24 * 60 * 60
 
+# Enforcement tier values a health response's "enforcement_tier" field takes.
+# Must track the EnforcementTier* constants in
+# go/pkg/kernelcapture/daemon_protocol.go.
+ENFORCEMENT_TIER_BPF_LSM = "bpf_lsm"
+ENFORCEMENT_TIER_SECCOMP = "seccomp"
+ENFORCEMENT_TIER_NONE = "none"
+
 # Defaults mirror DaemonCustodyPlan.SocketPath in the Go daemon. Override with
 # ARDUR_KERNELCAPTURE_SOCKET for tests or a non-default deployment.
 DEFAULT_DAEMON_SOCKET = "/run/ardur/kernelcapture/control.sock"
 DAEMON_SOCKET_ENV = "ARDUR_KERNELCAPTURE_SOCKET"
+
+# Default mirrors defaultSeccompSocketPath in
+# go/cmd/ardur-kernelcaptured/main.go — the fd-handoff socket ardur-exec-shim
+# connects to when the daemon's active tier is seccomp (plan E4). Override
+# with ARDUR_KERNELCAPTURE_SECCOMP_SOCKET for tests or a non-default
+# deployment, the same way DAEMON_SOCKET_ENV overrides the control socket.
+DEFAULT_SECCOMP_SOCKET = "/run/ardur/kernelcapture/seccomp.sock"
+SECCOMP_SOCKET_ENV = "ARDUR_KERNELCAPTURE_SECCOMP_SOCKET"
 
 # cgroup v2 unified hierarchy root. Override with ARDUR_RUN_CGROUP_ROOT (used by
 # tests to point at a writable temp dir without root, and by deployments that
@@ -71,6 +87,14 @@ CGROUP_ROOT_ENV = "ARDUR_RUN_CGROUP_ROOT"
 
 # Subdirectory under the cgroup root that holds Ardur's per-run cgroups.
 RUN_CGROUP_NAMESPACE = "ardur.run"
+
+# ardur-exec-shim (plan E4's seccomp-tier on-ramp) resolution. ARDUR_EXEC_SHIM_PATH
+# overrides discovery entirely (tests, non-default install layouts); otherwise
+# this looks on PATH, then at the same install location the daemon itself
+# uses in packaging/systemd/ardur-kernelcaptured.service.
+EXEC_SHIM_BINARY_NAME = "ardur-exec-shim"
+EXEC_SHIM_PATH_ENV = "ARDUR_EXEC_SHIM_PATH"
+_WELL_KNOWN_EXEC_SHIM_PATHS = (Path("/usr/local/bin/ardur-exec-shim"),)
 
 
 class DaemonProtocolError(RuntimeError):
@@ -86,6 +110,17 @@ def daemon_socket_path() -> Path:
     return Path(os.environ.get(DAEMON_SOCKET_ENV, DEFAULT_DAEMON_SOCKET)).expanduser()
 
 
+def seccomp_handoff_socket_path() -> Path:
+    """Resolve the daemon's seccomp user-notify fd-handoff socket path.
+
+    This is a distinct socket from ``daemon_socket_path()`` — see
+    go/cmd/ardur-kernelcaptured/daemon_seccomp_linux.go's header comment for
+    why fd-passing needed its own listener rather than reusing the JSON-line
+    control socket.
+    """
+    return Path(os.environ.get(SECCOMP_SOCKET_ENV, DEFAULT_SECCOMP_SOCKET)).expanduser()
+
+
 def daemon_available(socket_path: Path | None = None) -> bool:
     """Return True only when a Unix-socket file exists at the daemon path.
 
@@ -98,6 +133,28 @@ def daemon_available(socket_path: Path | None = None) -> bool:
         return path.is_socket()
     except OSError:
         return False
+
+
+def exec_shim_path() -> Path | None:
+    """Locate the ``ardur-exec-shim`` binary (plan E4's seccomp-tier on-ramp).
+
+    Returns ``None`` (never raises) when it cannot be found — the seccomp
+    tier then cannot be wired for this run; the caller (``run_bridge``)
+    decides whether that is a permissive degrade or a hard ``--enforce``
+    abort. Resolution order: ``ARDUR_EXEC_SHIM_PATH`` override, ``PATH``
+    lookup, then the well-known systemd-packaged install location.
+    """
+    override = os.environ.get(EXEC_SHIM_PATH_ENV)
+    if override:
+        path = Path(override).expanduser()
+        return path if path.is_file() and os.access(path, os.X_OK) else None
+    which = shutil.which(EXEC_SHIM_BINARY_NAME)
+    if which:
+        return Path(which)
+    for candidate in _WELL_KNOWN_EXEC_SHIM_PATHS:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 class KernelCaptureClient:

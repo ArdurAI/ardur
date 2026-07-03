@@ -232,6 +232,22 @@ func (d *daemon) unregisterSeccompListener(sessionID string) {
 	}
 }
 
+// seccompListenerAttached reports whether sessionID currently has a live
+// seccomp supervisor goroutine — i.e. whether some ardur-exec-shim's handoff
+// for it has actually completed (registerSeccompListener succeeded) and
+// hasn't since torn down (session end, listener error, daemon shutdown).
+// Backs DaemonProtocolResponse.SeccompListenerAttached on session_status
+// (issue #104: apply_policy succeeding is not proof of this).
+func (d *daemon) seccompListenerAttached(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	_, ok := d.seccompListeners[sessionID]
+	return ok
+}
+
 // handleAuthorizedRequest is the DaemonAuthorizedProtocolHandler wired into the
 // socket server. It delegates to the registry and maintains the cgroup routing
 // index as a side effect of successful register/end-session responses.
@@ -282,6 +298,7 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		if summary, ok := d.enforceSummaryForScope(resp.SessionID); ok {
 			resp.Enforcement = &summary
 		}
+		resp.SeccompListenerAttached = d.seccompListenerAttached(resp.SessionID)
 	case kernelcapture.DaemonProtocolMethodHealth:
 		// Advertise which enforcement tier is live so a launcher can decide
 		// whether routing a governed process through ardur-exec-shim (the
