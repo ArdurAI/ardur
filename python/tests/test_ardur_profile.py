@@ -10,7 +10,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vibap.ardur_profile import load_ardur_profile
+import pytest
+
+from vibap.ardur_profile import InvalidProfilePathError, load_ardur_profile, write_profile_template
 from vibap.cli import (
     claude_code_doctor,
     cmd_profile_init,
@@ -641,6 +643,44 @@ def test_profile_init_forced_directory_path_human_has_next_steps(tmp_path, capsy
     assert "ardur protect claude-code --profile <profile-file>" in captured.out
     assert str(tmp_path) not in captured.out
     assert list(profile_dir.iterdir()) == []
+
+
+def test_profile_init_non_regular_file_rejected(tmp_path):
+    """A FIFO (non-regular file) must be rejected as path_invalid, not profile_exists."""
+    fifo_path = tmp_path / "ARDUR.md"
+    os.mkfifo(fifo_path)
+
+    with pytest.raises(InvalidProfilePathError):
+        write_profile_template(fifo_path, template="safe-coding")
+
+
+def test_profile_init_non_regular_file_cli_json(tmp_path, capsys):
+    """CLI JSON response for a non-regular file must say path_invalid, not profile_exists."""
+    fifo_path = tmp_path / "ARDUR.md"
+    os.mkfifo(fifo_path)
+
+    exit_code = cmd_profile_init(
+        argparse.Namespace(
+            template="safe-coding",
+            path=fifo_path,
+            force=False,
+            json=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Traceback" not in captured.err
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_path_invalid"
+    assert response["condition"] == "profile_path_invalid"
+    assert "regular file" in response["detail"]
+    # Must NOT suggest --force for non-regular files
+    commands = [step.get("command", "") for step in response["next_steps"]]
+    assert not any("--force" in c for c in commands)
+    assert str(tmp_path) not in captured.out
 
 
 def test_profile_init_symlink_to_directory_json_has_path_invalid_next_steps(tmp_path, capsys):

@@ -548,6 +548,13 @@ steps". The local recovery commands use placeholders only: choose a writable
 Markdown profile path such as `<profile-file>`, then run
 `ardur protect claude-code --profile <profile-file>` to use that profile.
 
+Non-regular files (device files, FIFOs, sockets, and other special files) are
+also rejected as `profile_path_invalid` before the existing-file recovery
+logic, so `--force` is never suggested for system files. The command returns
+JSON with `ok: false`, `error: "profile_path_invalid"`,
+`condition: "profile_path_invalid"`, and placeholder-only `next_steps` guiding
+you to a writable Markdown file path.
+
 If the target profile is an existing regular file and `--force` is omitted, the
 command fails closed instead of overwriting local guardrails. JSON output
 includes `ok: false`, `error: "profile_exists"`,

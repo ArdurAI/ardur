@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "7397e610f8e916969f9af2ab158cc56d2df024658c1e61fe689c8dff7938eb6d"
+source_sha256: "da4905a9542c7f43081820787d4f6d81b1f67e00b9c73ea28cb9551c898dc149"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -564,6 +564,13 @@ writable Markdown file.` Human output prints the same guidance under "Next
 steps". The local recovery commands use placeholders only: choose a writable
 Markdown profile path such as `<profile-file>`, then run
 `ardur protect claude-code --profile <profile-file>` to use that profile.
+
+Non-regular files (device files, FIFOs, sockets, and other special files) are
+also rejected as `profile_path_invalid` before the existing-file recovery
+logic, so `--force` is never suggested for system files. The command returns
+JSON with `ok: false`, `error: "profile_path_invalid"`,
+`condition: "profile_path_invalid"`, and placeholder-only `next_steps` guiding
+you to a writable Markdown file path.
 
 If the target profile is an existing regular file and `--force` is omitted, the
 command fails closed instead of overwriting local guardrails. JSON output

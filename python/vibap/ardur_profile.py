@@ -245,6 +245,14 @@ def write_profile_template(
     _validate_profile_path(target)
     if target.exists() and target.is_dir():
         raise IsADirectoryError(f"{target} is a directory; choose a Markdown file path")
+    # Reject non-regular files (devices, FIFOs, sockets) that exist but are
+    # neither directories nor regular files.  Suggesting --force for these
+    # would be destructive and misleading.
+    if target.exists() and not target.is_file():
+        raise InvalidProfilePathError(
+            "profile path exists but is not a regular file; "
+            "choose a writable Markdown file path such as ARDUR.md"
+        )
     if target.exists() and not force:
         raise FileExistsError(f"{target} already exists; use --force to replace it")
     _validate_profile_parent_path(target)
