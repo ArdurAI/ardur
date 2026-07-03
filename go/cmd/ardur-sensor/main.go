@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -86,11 +87,18 @@ func cmdPreflight(args []string) error {
 	if err != nil {
 		return fmt.Errorf("custody preflight: %w", err)
 	}
+	// Both enforcement-tier capability checks are cross-platform-safe to call
+	// unconditionally: each reports "not applicable"/informative-fail on a
+	// host that can't use it rather than requiring a build-tag branch here.
+	bpfLSM := kernelcapture.InspectBPFLSMPreflight()
+	endpointSecurity := kernelcapture.InspectEndpointSecurityPreflight()
 
 	if *jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"kernel_caps": caps,
-			"custody":     preflight,
+			"kernel_caps":       caps,
+			"custody":           preflight,
+			"bpf_lsm":           bpfLSM,
+			"endpoint_security": endpointSecurity,
 		})
 	}
 
@@ -115,6 +123,14 @@ func cmdPreflight(args []string) error {
 	}
 	_ = tw.Flush()
 
+	fmt.Println()
+	fmt.Fprintln(tw, "ENFORCEMENT TIER CAPABILITY (which tier could be live)")
+	fmt.Fprintln(tw, "CHECK\tVERDICT\tDETAIL")
+	for _, f := range append(append([]kernelcapture.DaemonPreflightFinding{}, bpfLSM.Findings...), endpointSecurity.Findings...) {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", f.CheckName, f.Verdict, f.Details)
+	}
+	_ = tw.Flush()
+
 	if !caps.CanInstall {
 		fmt.Fprintln(os.Stderr, "\npreflight: host does not meet requirements for installation")
 		os.Exit(1)
@@ -130,6 +146,8 @@ func cmdInstall(args []string) error {
 	unitSrc := fs_.String("unit-src", "", "Path to ardur-kernelcaptured.service to install (default: bundled)")
 	noEnable := fs_.Bool("no-enable", false, "Do not enable and start the systemd unit after install")
 	dryRun := fs_.Bool("dry-run", false, "Print what would be done without making changes")
+	allowDowngrade := fs_.Bool("allow-downgrade", false,
+		"Allow installing this binary's version over a newer version already installed (default: refuse)")
 	_ = fs_.Parse(args)
 
 	cfg := kernelcapture.DefaultDaemonCustodyConfig()
@@ -163,9 +181,14 @@ func cmdInstall(args []string) error {
 		return fmt.Errorf("host does not meet requirements")
 	}
 
-	// Install daemon custody paths.
-	result, err := kernelcapture.InstallDaemonCustody(cfg)
+	// Install daemon custody paths. Refuses to downgrade an already-installed
+	// newer version unless --allow-downgrade is passed (upgrade-in-place safety).
+	result, err := kernelcapture.InstallDaemonCustody(cfg, kernelcapture.WithAllowDowngrade(*allowDowngrade))
 	if err != nil {
+		if errors.Is(err, kernelcapture.ErrSensorVersionDowngradeRefused) {
+			fmt.Fprintf(os.Stderr, "install: %v\n", err)
+			fmt.Fprintln(os.Stderr, "Rerun with --allow-downgrade if this is intentional.")
+		}
 		return fmt.Errorf("custody install: %w", err)
 	}
 	for _, p := range result.PathsCreated {
@@ -242,6 +265,8 @@ func systemctlRun(args ...string) error {
 func cmdUninstall(args []string) error {
 	fs_ := flag.NewFlagSet("uninstall", flag.ExitOnError)
 	noStop := fs_.Bool("no-stop", false, "Do not stop/disable the systemd unit before uninstall")
+	purge := fs_.Bool("purge", false,
+		"Also remove the state/evidence directory tree (default: preserve it for operator review)")
 	_ = fs_.Parse(args)
 
 	cfg := kernelcapture.DefaultDaemonCustodyConfig()
@@ -250,10 +275,15 @@ func cmdUninstall(args []string) error {
 		_ = systemctlRun("disable", "--now", "ardur-kernelcaptured.service")
 	}
 
-	if err := kernelcapture.UninstallDaemonCustody(cfg); err != nil {
+	if err := kernelcapture.UninstallDaemonCustody(cfg, *purge); err != nil {
 		return err
 	}
 	fmt.Printf("  removed: %s\n", cfg.ConfigPath)
+	if *purge {
+		fmt.Printf("  purged: %s (state + evidence)\n", cfg.StateDir)
+	} else {
+		fmt.Printf("  preserved: %s (state + evidence; rerun with --purge to remove)\n", cfg.StateDir)
+	}
 
 	if err := os.Remove(unitInstallPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove unit %s: %w", unitInstallPath, err)
@@ -278,9 +308,13 @@ func cmdStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+	live := queryLiveDaemonStatus(cfg.SocketPath)
 
 	if *jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(report)
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"custody": report,
+			"live":    live,
+		})
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -290,6 +324,13 @@ func cmdStatus(args []string) error {
 	}
 	_ = tw.Flush()
 
+	fmt.Println()
+	if live.Reachable {
+		fmt.Printf("daemon: running, enforcement tier = %s\n", live.EnforcementTier)
+	} else {
+		fmt.Printf("daemon: not reachable (%s)\n", live.Error)
+	}
+
 	if report.CanContinue {
 		fmt.Println("\nstatus: daemon custody paths look healthy")
 	} else {
@@ -298,4 +339,24 @@ func cmdStatus(args []string) error {
 		os.Exit(1)
 	}
 	return nil
+}
+
+// sensorLiveStatus is the live-daemon half of `ardur-sensor status`: whether
+// the control socket is currently reachable and, if so, which enforcement
+// tier (kernelcapture.EnforcementTierBPFLSM / EnforcementTierNone) the
+// running daemon reports. An unreachable daemon (not started, or still being
+// set up) is a normal, expected state — queryLiveDaemonStatus never returns
+// an error; status must report it clearly, not fail the whole command.
+type sensorLiveStatus struct {
+	Reachable       bool   `json:"reachable"`
+	EnforcementTier string `json:"enforcement_tier,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+func queryLiveDaemonStatus(socketPath string) sensorLiveStatus {
+	resp, err := kernelcapture.SendDaemonHealthRequest(socketPath)
+	if err != nil {
+		return sensorLiveStatus{Reachable: false, Error: err.Error()}
+	}
+	return sensorLiveStatus{Reachable: true, EnforcementTier: resp.EnforcementTier}
 }

@@ -98,6 +98,15 @@ func policyMapsReady(maps PolicyMaps) bool {
 		maps.KillSwitch != nil
 }
 
+// PolicyMapsReady reports whether the BPF-LSM guard is currently loaded —
+// i.e. whether maps has every handle needed for a full apply_policy write.
+// Exported for callers outside this package (e.g. the daemon's health
+// response, see EnforcementTier) that need to know kernel-enforcement
+// availability without attempting a write.
+func PolicyMapsReady(maps PolicyMaps) bool {
+	return policyMapsReady(maps)
+}
+
 // ApplyPolicyMaps writes the policy described by req into maps for cgroupID.
 // cgroupID must be the kernel cgroup_id for the session (from register_session).
 //

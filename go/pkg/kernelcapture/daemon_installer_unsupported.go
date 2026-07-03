@@ -15,11 +15,11 @@ type InstallResult struct {
 var ErrDaemonInstallerNotRoot = errors.New("kernelcapture: installer requires root (UID 0)")
 
 // InstallDaemonCustody is unavailable on non-Linux platforms.
-func InstallDaemonCustody(cfg DaemonCustodyConfig) (*InstallResult, error) {
+func InstallDaemonCustody(cfg DaemonCustodyConfig, optFns ...InstallOption) (*InstallResult, error) {
 	return nil, errors.New("kernelcapture: daemon installer is Linux-only")
 }
 
 // UninstallDaemonCustody is unavailable on non-Linux platforms.
-func UninstallDaemonCustody(cfg DaemonCustodyConfig) error {
+func UninstallDaemonCustody(cfg DaemonCustodyConfig, purge bool) error {
 	return errors.New("kernelcapture: daemon installer is Linux-only")
 }

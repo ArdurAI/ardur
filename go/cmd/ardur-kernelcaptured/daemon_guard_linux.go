@@ -15,16 +15,30 @@ package main
 // active LSM list, or capability failure), the guard is skipped with a warning.
 // The exec tracepoint consumer (daemon_linux.go/runEBPFConsumer) and the socket
 // control plane continue to operate normally.
+//
+// Slice 2 remainder: once the guard is loaded, runGuardConsumer also starts a
+// tamper self-audit ticker (tamperAuditInterval, kept in lockstep with the
+// systemd watchdog cadence in daemon_linux.go) that re-verifies the loaded
+// links and kill-switch state each tick via kernelcapture.RunTamperAudit and
+// records the result through d.recordTamperAudit — see tamper_audit.go for
+// what this can and cannot detect.
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 	"github.com/cilium/ebpf/ringbuf"
 )
+
+// tamperAuditInterval is the cadence for re-verifying the loaded guard's
+// links and kill-switch state. Matches runWatchdog's interval (daemon_linux.go)
+// intentionally: both exist to catch problems within half of the systemd
+// WatchdogSec window, and reusing the constant keeps them from drifting apart.
+const tamperAuditInterval = 15 * time.Second
 
 // runGuardConsumer loads the process_guard BPF-LSM program and streams
 // enforce_events to registered sessions until ctx is cancelled.
@@ -87,7 +101,27 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 	}()
 	defer close(stop)
 
+	go runTamperAuditTicker(ctx, handles, d, log)
+
 	return consumeEnforceEvents(ctx, ringbufEnforceEventReader{handles.Reader()}, d, log)
+}
+
+// runTamperAuditTicker re-verifies the loaded guard's links and kill-switch
+// state every tamperAuditInterval until ctx is cancelled. Each tick's result
+// is hash-chained and written to evidence via d.recordTamperAudit, drift or
+// not — see that method's doc comment for why a clean tick is still recorded.
+func runTamperAuditTicker(ctx context.Context, handles *kernelcapture.ProcessGuardHandles, d *daemon, log *slog.Logger) {
+	ticker := time.NewTicker(tamperAuditInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			result := kernelcapture.RunTamperAudit(handles, d.expectedKillSwitch())
+			d.recordTamperAudit(result, log)
+		}
+	}
 }
 
 // ringbufEnforceEventReader adapts *ringbuf.Reader to the enforceEventReader

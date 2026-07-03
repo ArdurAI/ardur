@@ -98,6 +98,14 @@ type daemon struct {
 	// ApplyPolicyMaps / RemovePolicyMaps return an error immediately.
 	policyMaps kernelcapture.PolicyMaps
 
+	// tamperChain hash-chains every tamper-audit tick (see daemon_guard_linux.go
+	// on Linux); nil until the guard has loaded at least once. expectedKillSwitchEngaged
+	// tracks what the daemon itself last set via set_kill_switch (or apply_policy's
+	// degraded path never engages it), so a self-audit tick can tell a legitimate
+	// state change from external tampering.
+	tamperChain               *kernelcapture.TamperReceiptChain
+	expectedKillSwitchEngaged bool
+
 	// seccompPolicy holds the seccomp tier's OP_NET_CONNECT policy (plan
 	// E4) — always kept in sync by handleApplyPolicy regardless of which
 	// tier is active, so a session's policy is already in place by the time
@@ -164,6 +172,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
 		fs:                   osEvidenceFS{},
+		tamperChain:          kernelcapture.NewTamperReceiptChain(),
 		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
 		seccompListeners:     make(map[string]context.CancelFunc),
 		activeTier:           daemonTierNone,
@@ -230,9 +239,31 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		// Advertise which enforcement tier is live so a launcher can decide
 		// whether routing a governed process through ardur-exec-shim (the
 		// seccomp tier's on-ramp) is necessary before it ever spawns one.
-		resp.EnforcementTier = d.activeTier
+		resp.EnforcementTier = d.enforcementTier()
 	}
 	return resp
+}
+
+// enforcementTier reports which kernel-enforcement backend is currently live —
+// EnforcementTierBPFLSM, daemonTierSeccomp, or EnforcementTierNone.
+//
+// The authoritative source is activeTier, which main()'s startup tier selection
+// sets to bpf_lsm, seccomp, or none (E4 added the seccomp fallback; a plain
+// PolicyMapsReady probe can't tell seccomp from none, since the seccomp tier
+// holds no BPF policy maps). When activeTier hasn't been decided yet — the
+// zero value or the daemonTierNone default, e.g. a unit test that populates
+// policyMaps directly without going through startup — fall back to a live
+// policyMaps probe so a loaded guard still reports bpf_lsm. In real runtime
+// activeTier is set to bpf_lsm exactly when the maps load, so the two never
+// disagree there; the fallback only matters for that bypass path.
+func (d *daemon) enforcementTier() string {
+	if d.activeTier != "" && d.activeTier != daemonTierNone {
+		return d.activeTier
+	}
+	if kernelcapture.PolicyMapsReady(d.policyMaps) {
+		return kernelcapture.EnforcementTierBPFLSM
+	}
+	return kernelcapture.EnforcementTierNone
 }
 
 // handleApplyPolicy validates the session, resolves its cgroup_id, and writes
@@ -356,6 +387,9 @@ func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest) ke
 			Error:           fmt.Sprintf("set kill switch: %v", err),
 		}
 	}
+	d.mu.Lock()
+	d.expectedKillSwitchEngaged = sw.Engaged
+	d.mu.Unlock()
 	d.log.Warn("kill switch changed", "engaged", sw.Engaged)
 	return kernelcapture.DaemonProtocolResponse{
 		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
@@ -493,6 +527,59 @@ func (d *daemon) appendKernelReceipt(sessionID string, evt kernelcapture.Process
 	}
 	if err := d.fs.AppendFile(path, line, 0o600); err != nil {
 		d.log.Warn("append kernel receipt", "path", path, "error", err)
+	}
+}
+
+// expectedKillSwitch returns the kill-switch state the daemon itself last
+// set (via set_kill_switch), for a tamper-audit tick to compare the live map
+// value against. Defaults to false (disengaged): a freshly loaded guard
+// starts disengaged and no set_kill_switch call has happened yet.
+func (d *daemon) expectedKillSwitch() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.expectedKillSwitchEngaged
+}
+
+// recordTamperAudit hash-chains one tamper-audit tick and appends it as a
+// JSONL line to <evidenceDir>/_tamper/tamper_audit.jsonl. Every tick is
+// chained and written regardless of Drift, so the chain itself is evidence
+// that audits kept running — a gap in Seq is as suspicious as a drift entry.
+func (d *daemon) recordTamperAudit(result kernelcapture.TamperAuditResult, log *slog.Logger) {
+	entry := kernelcapture.TamperReceiptEntry{
+		SchemaVersion: kernelcapture.TamperReceiptSchema,
+		RecordedAt:    time.Now().UTC(),
+		Result:        result,
+	}
+	finalized, err := d.tamperChain.Append(entry)
+	if err != nil {
+		log.Warn("hash-chain tamper receipt", "error", err)
+		return
+	}
+	if result.Drift {
+		log.Error("tamper audit detected drift", "seq", finalized.Seq, "checks", result.Checks)
+	} else {
+		log.Debug("tamper audit tick clean", "seq", finalized.Seq)
+	}
+
+	line, err := json.Marshal(finalized)
+	if err != nil {
+		log.Warn("marshal tamper receipt", "error", err)
+		return
+	}
+	line = append(line, '\n')
+
+	dir := filepath.Join(d.evidenceDir, "_tamper")
+	path := filepath.Join(dir, "tamper_audit.jsonl")
+	if err := prevalidateKernelReceiptAppendPath(d.fs, d.evidenceDir, dir, path); err != nil {
+		log.Warn("prevalidate tamper receipt path", "path", path, "error", err)
+		return
+	}
+	if err := d.fs.MkdirAll(dir, 0o700); err != nil {
+		log.Warn("create evidence dir for tamper receipt", "path", dir, "error", err)
+		return
+	}
+	if err := d.fs.AppendFile(path, line, 0o600); err != nil {
+		log.Warn("append tamper receipt", "path", path, "error", err)
 	}
 }
 

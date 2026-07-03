@@ -66,6 +66,7 @@ func newTestDaemon(t *testing.T) *daemon {
 		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
 		fs:                   osEvidenceFS{},
+		tamperChain:          kernelcapture.NewTamperReceiptChain(),
 		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
 		seccompListeners:     make(map[string]context.CancelFunc),
 		activeTier:           daemonTierNone,

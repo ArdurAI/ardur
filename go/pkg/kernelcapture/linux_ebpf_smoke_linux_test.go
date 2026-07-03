@@ -386,3 +386,52 @@ func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
 		t.Fatalf("restart handles observed no events for pid %d: exec=%t exit=%t", targetPID, haveExec, haveExit)
 	}
 }
+
+// TestLinuxEBPFGuardTamperAuditSmoke proves RunTamperAudit against a real
+// BPF-LSM guard load: a freshly attached guard reports no drift, and both
+// tamper vectors the audit claims to catch — a kill_switch value written
+// outside SetKillSwitch, and a force-detached LSM link — are actually
+// detected against the live kernel. Requires BPF-LSM (see
+// InspectBPFLSMPreflight); gated the same way as the other privileged smokes
+// in this file.
+func TestLinuxEBPFGuardTamperAuditSmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF guard tamper-audit smoke")
+	}
+
+	handles, err := LoadAndAttachProcessGuardEBPF()
+	if err != nil {
+		t.Fatalf("LoadAndAttachProcessGuardEBPF: %v", err)
+	}
+	defer handles.Close()
+
+	baseline := RunTamperAudit(handles, false)
+	if baseline.Drift {
+		t.Fatalf("expected no drift on freshly attached guard, checks=%+v", baseline.Checks)
+	}
+
+	// Tamper vector 1: kill_switch written outside SetKillSwitch (e.g. a
+	// privileged external `bpftool map update`). SetKillSwitch is the closest
+	// available stand-in for that external write; what matters for the audit
+	// is that the map value diverges from what the daemon itself expects.
+	if err := SetKillSwitch(PolicyMapsFromHandles(handles), true); err != nil {
+		t.Fatalf("engage kill switch: %v", err)
+	}
+	killSwitchDrift := RunTamperAudit(handles, false) // still expects disengaged
+	if !killSwitchDrift.Drift {
+		t.Fatalf("expected drift after kill switch was engaged outside expectation, checks=%+v", killSwitchDrift.Checks)
+	}
+	if err := SetKillSwitch(PolicyMapsFromHandles(handles), false); err != nil {
+		t.Fatalf("restore kill switch: %v", err)
+	}
+
+	// Tamper vector 2: a force-detached LSM link (e.g. `bpftool link detach`).
+	// link.Link.Detach() is the Go-side equivalent of that external action.
+	if err := handles.bprmLink.Detach(); err != nil {
+		t.Fatalf("detach lsm/bprm_check_security link: %v", err)
+	}
+	detachDrift := RunTamperAudit(handles, false)
+	if !detachDrift.Drift {
+		t.Fatalf("expected drift after force-detaching lsm/bprm_check_security, checks=%+v", detachDrift.Checks)
+	}
+}
