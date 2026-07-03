@@ -1560,3 +1560,131 @@ def test_claude_code_doctor_sanitizes_plugin_validate_local_paths(tmp_path, monk
     assert validate_step["command"] == "claude plugin validate <claude-code-plugin>"
     assert "<claude-code-plugin>/.claude-plugin/plugin.json" in validate_step["detail"]
     assert str(manifest) not in validate_step["detail"]
+
+
+def _profile_init_args(path, *, template="safe-coding", force=False, json_output=True):
+    return argparse.Namespace(
+        template=template,
+        path=Path(path) if not isinstance(path, Path) else path,
+        force=force,
+        json=json_output,
+    )
+
+
+def _assert_profile_path_invalid_json(capsys, *, exit_code, tmp_path):
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err == ""
+    assert "Traceback" not in captured.err
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["error"] == "profile_path_invalid"
+    assert response["condition"] == "profile_path_invalid"
+    # next_steps must be placeholder-only, never leak local temp paths
+    serialized = json.dumps(response, sort_keys=True)
+    assert str(tmp_path) not in serialized
+    assert "/Users/" not in serialized
+    return response
+
+
+def test_profile_init_whitespace_only_path_rejected_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path("   ")))
+    response = _assert_profile_path_invalid_json(capsys, exit_code=exit_code, tmp_path=tmp_path)
+    commands = [step["command"] for step in response["next_steps"]]
+    assert any("ardur profile init --path <profile-file>" in c for c in commands)
+    # No file/dir created with whitespace name
+    assert not (tmp_path / "   ").exists()
+    assert not (tmp_path / ".vibap").exists()
+
+
+def test_profile_init_tab_only_path_rejected_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path("\t")))
+    _assert_profile_path_invalid_json(capsys, exit_code=exit_code, tmp_path=tmp_path)
+    assert not (tmp_path / "\t").exists()
+
+
+def test_profile_init_leading_space_path_rejected_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path(" foo/ARDUR.md")))
+    _assert_profile_path_invalid_json(capsys, exit_code=exit_code, tmp_path=tmp_path)
+    assert not (tmp_path / " foo").exists()
+    assert not (tmp_path / " foo" / "ARDUR.md").exists()
+
+
+def test_profile_init_trailing_space_path_rejected_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path("ARDUR.md ")))
+    _assert_profile_path_invalid_json(capsys, exit_code=exit_code, tmp_path=tmp_path)
+    assert not (tmp_path / "ARDUR.md ").exists()
+
+
+def test_profile_init_relative_traversal_rejected_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    # Create a sibling outside tmp_path to detect traversal-created dirs
+    sibling_marker = tmp_path.parent / f"ardur-traversal-marker-{os.getpid()}"
+    if sibling_marker.exists():
+        shutil.rmtree(sibling_marker)
+    traversal_target = sibling_marker / "passwd" / "ARDUR.md"
+    try:
+        exit_code = cmd_profile_init(
+            _profile_init_args(Path(f"../{sibling_marker.name}/passwd/ARDUR.md"))
+        )
+        _assert_profile_path_invalid_json(capsys, exit_code=exit_code, tmp_path=tmp_path)
+        # Critical: no directories created outside intended scope
+        assert not sibling_marker.exists()
+        assert not traversal_target.exists()
+    finally:
+        if sibling_marker.exists():
+            shutil.rmtree(sibling_marker)
+
+
+def test_profile_init_empty_path_rejected_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path("")))
+    _assert_profile_path_invalid_json(capsys, exit_code=exit_code, tmp_path=tmp_path)
+
+
+def test_profile_init_whitespace_only_human_rejected_no_traceback(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path("   "), json_output=False))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err == ""
+    assert "Traceback" not in captured.err
+    assert "Ardur profile was not created." in captured.out
+    assert not (tmp_path / "   ").exists()
+
+
+def test_profile_init_bare_filename_still_succeeds(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exit_code = cmd_profile_init(_profile_init_args(Path("ARDUR.md")))
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert (tmp_path / "ARDUR.md").exists()
+
+
+def test_profile_init_existing_directory_target_rejected(tmp_path, capsys):
+    target_dir = tmp_path / "existing-dir"
+    target_dir.mkdir()
+    exit_code = cmd_profile_init(_profile_init_args(target_dir))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err == ""
+    # Directory target remains an IsADirectoryError -> profile_path_invalid
+    response = json.loads(captured.out)
+    assert response["condition"] == "profile_path_invalid"
+
+
+def test_profile_init_existing_file_target_rejected(tmp_path, capsys):
+    existing = tmp_path / "existing.md"
+    existing.write_text("keep me\n", encoding="utf-8")
+    exit_code = cmd_profile_init(_profile_init_args(existing))
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.err == ""
+    response = json.loads(captured.out)
+    assert response["condition"] == "profile_exists"
+    assert existing.read_text(encoding="utf-8") == "keep me\n"

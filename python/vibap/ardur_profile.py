@@ -72,6 +72,10 @@ Duration: 1d
 }
 
 
+class InvalidProfilePathError(ValueError):
+    """Raised when a profile path is empty, whitespace-only, or escapes intended scope."""
+
+
 def _validate_profile_parent_path(target: Path) -> None:
     """Fail before mkdir can turn parent-path failures into profile collisions."""
 
@@ -85,6 +89,55 @@ def _validate_profile_parent_path(target: Path) -> None:
         if not parent.is_dir():
             raise NotADirectoryError("Ardur profile parent path is not a directory")
         return
+
+
+def _validate_profile_path(target: Path) -> None:
+    """Reject empty, whitespace-only, or traversal-escaping profile paths.
+
+    Runs before any filesystem operation so that invalid inputs cannot create
+    files with whitespace names or directory structures outside intended scope.
+    """
+
+    # Normalize the raw parts the caller supplied. We must NOT call resolve()
+    # first because resolve() on a non-existent relative path anchors to cwd and
+    # can mask the caller's intent; we inspect the literal path string instead.
+    parts = target.parts
+
+    # Reject empty path. Path("") has parts == ("",) on POSIX; treat that and a
+    # genuinely empty parts tuple both as invalid.
+    if not parts or all(part == "" for part in parts):
+        raise InvalidProfilePathError("Ardur profile path is empty")
+
+    # Reject whitespace-only paths and whitespace-only path components.
+    # Path("   ") has parts == ("   ",); Path(" foo/ARDUR.md") has leading space.
+    if all(part.strip() == "" for part in parts):
+        raise InvalidProfilePathError("Ardur profile path must not be whitespace-only")
+
+    for part in parts:
+        if part != "" and part.strip() == "":
+            raise InvalidProfilePathError(
+                "Ardur profile path must not contain whitespace-only components"
+            )
+        # Catch leading/trailing whitespace in a non-empty component.
+        if part != part.strip():
+            raise InvalidProfilePathError(
+                "Ardur profile path components must not have leading or trailing whitespace"
+            )
+
+    # Reject relative path traversal that escapes the current working directory.
+    # ``..`` components in a relative path can create directories outside the
+    # intended scope before the profile write fails; reject them up front.
+    if not target.is_absolute():
+        depth = 0
+        for part in parts:
+            if part == "..":
+                depth -= 1
+                if depth < 0:
+                    raise InvalidProfilePathError(
+                        "Ardur profile relative path must not escape the current directory"
+                    )
+            elif part not in ("", "."):
+                depth += 1
 
 
 _SCALAR_KEYS = {
@@ -187,6 +240,9 @@ def write_profile_template(
     if template not in PROFILE_TEMPLATES:
         raise ValueError(f"unknown Ardur profile template: {template}")
     target = Path(path).expanduser()
+    # Validate path shape before ANY filesystem operation so that empty,
+    # whitespace-only, or traversal-escaping inputs cannot create artifacts.
+    _validate_profile_path(target)
     if target.exists() and target.is_dir():
         raise IsADirectoryError(f"{target} is a directory; choose a Markdown file path")
     if target.exists() and not force:

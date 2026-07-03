@@ -19,7 +19,13 @@ from typing import Sequence
 import jwt
 
 from . import __version__
-from .ardur_profile import PROFILE_TEMPLATES, ArdurProfile, load_ardur_profile, write_profile_template
+from .ardur_profile import (
+    PROFILE_TEMPLATES,
+    ArdurProfile,
+    InvalidProfilePathError,
+    load_ardur_profile,
+    write_profile_template,
+)
 from .ardur_personal_native_host import (
     NativeHostManifestValidationError,
     build_native_host_manifest,
@@ -2899,6 +2905,32 @@ def _profile_init_existing_profile_response() -> dict[str, object]:
     }
 
 
+def _profile_init_path_invalid_response(exc: InvalidProfilePathError) -> dict[str, object]:
+    condition = "profile_path_invalid"
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": "Profile path is not a valid Markdown file path.",
+        "detail": str(exc),
+        "next_steps": [
+            {
+                "action": "choose_profile_file",
+                "command": "ardur profile init --path <profile-file>",
+                "detail": (
+                    "Use a non-empty Markdown file path with no leading or trailing "
+                    "whitespace and no '..' traversal components."
+                ),
+            },
+            {
+                "action": "use_profile_file",
+                "command": "ardur protect claude-code --profile <profile-file>",
+                "detail": "Use the created editable profile when configuring Claude Code protection.",
+            },
+        ],
+    }
+
+
 def _profile_init_path_failure_response(exc: OSError) -> dict[str, object]:
     if isinstance(exc, IsADirectoryError):
         condition = "profile_path_invalid"
@@ -2930,6 +2962,16 @@ def _profile_init_path_failure_response(exc: OSError) -> dict[str, object]:
 def cmd_profile_init(args: argparse.Namespace) -> int:
     try:
         path = write_profile_template(args.path, template=args.template, force=args.force)
+    except InvalidProfilePathError as exc:
+        result = _profile_init_path_invalid_response(exc)
+        if args.json:
+            _print_json(result)
+        else:
+            print("Ardur profile was not created.")
+            print(str(result["message"]))
+            print(str(result["detail"]))
+            _print_report_next_steps(result)
+        return 1
     except FileExistsError:
         result = _profile_init_existing_profile_response()
         if args.json:
