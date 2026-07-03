@@ -36,4 +36,6 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`demo/`](/__ardur_internal__/source/docs/demo/)
 - [`guides/`](/__ardur_internal__/source/docs/guides/)
 - [`reference/`](/__ardur_internal__/source/docs/reference/)
+- [`research/`](/__ardur_internal__/source/docs/research/)
+- [`roadmap/`](/__ardur_internal__/source/docs/roadmap/)
 - [`specs/`](/__ardur_internal__/source/docs/specs/)
