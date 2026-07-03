@@ -70,6 +70,13 @@ func newTestDaemon(t *testing.T) *daemon {
 		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
 		seccompListeners:     make(map[string]context.CancelFunc),
 		activeTier:           daemonTierNone,
+		appliedAllow:         make(map[string]*appliedAllowRecord),
+		// No-op cgroup verifier: daemon-flow tests register synthetic PIDs that
+		// aren't real /proc descendants. The real check is covered directly by
+		// daemon_cgroup_verify_linux_test.go.
+		cgroupVerifier: func(kernelcapture.DaemonProtocolPeerHandshake, *kernelcapture.DaemonRegisterSessionRequest, *slog.Logger) error {
+			return nil
+		},
 	}
 }
 

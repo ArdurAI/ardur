@@ -20,11 +20,20 @@ import (
 // registry's authorized-request path (mirrors
 // daemonSessionRegistryTestHandshake in the kernelcapture package's own
 // tests) so handleApplyPolicy's d.registry.ActiveSession lookup succeeds.
-func registerTestSession(t *testing.T, d *daemon, sessionID string, cgroupID uint64) {
-	t.Helper()
-	handshake := kernelcapture.DaemonProtocolPeerHandshake{
+// testPeerHandshake returns a valid allow-verdict handshake for a fixed test
+// peer (uid 501). registerTestSession and the apply_policy call sites use the
+// SAME peer identity so the ownership gate handleApplyPolicy now enforces
+// (session must be owned by the calling peer) is satisfied on the happy path.
+// Use testPeerHandshakeUID with uid=0 to exercise the admin identity
+// set_kill_switch requires, or a different uid/pid to simulate a foreign peer.
+func testPeerHandshake(sessionID, method string) kernelcapture.DaemonProtocolPeerHandshake {
+	return testPeerHandshakeUID(sessionID, method, 501)
+}
+
+func testPeerHandshakeUID(sessionID, method string, uid uint32) kernelcapture.DaemonProtocolPeerHandshake {
+	return kernelcapture.DaemonProtocolPeerHandshake{
 		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
-		Method:                kernelcapture.DaemonProtocolMethodRegisterSession,
+		Method:                method,
 		SessionID:             sessionID,
 		SocketPath:            "/run/ardur/kernelcapture/control.sock",
 		CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
@@ -32,13 +41,18 @@ func registerTestSession(t *testing.T, d *daemon, sessionID string, cgroupID uin
 		Authorization: kernelcapture.DaemonPeerAuthorization{
 			Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
 			Reason:                "test",
-			UID:                   501,
+			UID:                   uid,
 			GID:                   20,
 			PID:                   4321,
 			ProcessStartTimeTicks: 900001,
 			Matched:               "uid",
 		},
 	}
+}
+
+func registerTestSession(t *testing.T, d *daemon, sessionID string, cgroupID uint64) {
+	t.Helper()
+	handshake := testPeerHandshake(sessionID, kernelcapture.DaemonProtocolMethodRegisterSession)
 	req := kernelcapture.DaemonProtocolRequest{
 		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
 		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
@@ -82,7 +96,7 @@ func TestHandleApplyPolicy_EnforceStrictFailsLoudlyWithoutGuard(t *testing.T) {
 	d := newTestDaemon(t)
 	registerTestSession(t, d, "ses-strict", 111)
 
-	resp := d.handleApplyPolicy(applyPolicyReqFor("ses-strict", kernelcapture.BpfEnforceModeEnforce))
+	resp := d.handleApplyPolicy(applyPolicyReqFor("ses-strict", kernelcapture.BpfEnforceModeEnforce), testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if resp.OK {
 		t.Fatalf("apply_policy under ENFORCE with no guard loaded: OK = true, want false (must fail loudly): %+v", resp)
 	}
@@ -100,7 +114,7 @@ func TestHandleApplyPolicy_PermissiveDegradesWithoutFailingRequest(t *testing.T)
 	d := newTestDaemon(t)
 	registerTestSession(t, d, "ses-permissive", 112)
 
-	resp := d.handleApplyPolicy(applyPolicyReqFor("ses-permissive", kernelcapture.BpfEnforceModePermissive))
+	resp := d.handleApplyPolicy(applyPolicyReqFor("ses-permissive", kernelcapture.BpfEnforceModePermissive), testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if !resp.OK {
 		t.Fatalf("apply_policy under PERMISSIVE with no guard loaded: OK = false, want true (degrade, don't block): %+v", resp)
 	}
@@ -112,7 +126,7 @@ func TestHandleApplyPolicy_PermissiveDegradesWithoutFailingRequest(t *testing.T)
 func TestHandleApplyPolicy_UnknownSessionFailsCleanly(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
-	resp := d.handleApplyPolicy(applyPolicyReqFor("does-not-exist", kernelcapture.BpfEnforceModeEnforce))
+	resp := d.handleApplyPolicy(applyPolicyReqFor("does-not-exist", kernelcapture.BpfEnforceModeEnforce), testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if resp.OK {
 		t.Fatal("apply_policy for an unregistered session: OK = true, want false")
 	}
@@ -147,7 +161,7 @@ func TestHandleApplyPolicy_SyncsSeccompStoreEvenWhenBPFTierHardFails(t *testing.
 	d := newTestDaemon(t)
 	registerTestSession(t, d, "ses-net-enforce", 113)
 
-	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-net-enforce", kernelcapture.BpfActionAllow, kernelcapture.BpfEnforceModeEnforce))
+	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-net-enforce", kernelcapture.BpfActionAllow, kernelcapture.BpfEnforceModeEnforce), testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if resp.OK {
 		t.Fatalf("apply_policy under ENFORCE with no active tier: OK = true, want false: %+v", resp)
 	}
@@ -170,7 +184,7 @@ func TestHandleApplyPolicy_AppliesViaSeccompTierWhenActive(t *testing.T) {
 	d.activeTier = daemonTierSeccomp
 	registerTestSession(t, d, "ses-net-seccomp", 114)
 
-	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-net-seccomp", kernelcapture.BpfActionDeny, kernelcapture.BpfEnforceModeEnforce))
+	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-net-seccomp", kernelcapture.BpfActionDeny, kernelcapture.BpfEnforceModeEnforce), testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if !resp.OK {
 		t.Fatalf("apply_policy under ENFORCE with active seccomp tier: OK = false, want true: %+v", resp)
 	}
@@ -209,7 +223,7 @@ func TestHandleApplyPolicy_SeccompTierDoesNotCoverNonNetOps(t *testing.T) {
 		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
 		ApplyPolicy:     ap,
 	}
-	resp := d.handleApplyPolicy(req)
+	resp := d.handleApplyPolicy(req, testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if resp.OK {
 		t.Fatalf("apply_policy mixing OP_EXEC into a seccomp-tier-only host: OK = true, want false: %+v", resp)
 	}
@@ -220,7 +234,7 @@ func TestHandleApplyPolicy_InvalidNetAllowFailsBeforeAnyStoreWrite(t *testing.T)
 	d := newTestDaemon(t)
 	registerTestSession(t, d, "ses-bad-cidr", 116)
 
-	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-bad-cidr", kernelcapture.BpfActionAllowlist, kernelcapture.BpfEnforceModePermissive, "not-a-cidr"))
+	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-bad-cidr", kernelcapture.BpfActionAllowlist, kernelcapture.BpfEnforceModePermissive, "not-a-cidr"), testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy))
 	if resp.OK {
 		t.Fatalf("apply_policy with a malformed net_allow entry: OK = true, want false: %+v", resp)
 	}
@@ -240,7 +254,7 @@ func TestHandleSetKillSwitch_FailsCleanlyWithoutGuard(t *testing.T) {
 		Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
 		SetKillSwitch:   &kernelcapture.DaemonSetKillSwitchRequest{Engaged: true},
 	}
-	resp := d.handleSetKillSwitch(req)
+	resp := d.handleSetKillSwitch(req, testPeerHandshakeUID("", kernelcapture.DaemonProtocolMethodSetKillSwitch, 0))
 	if resp.OK {
 		t.Fatalf("set_kill_switch with no guard loaded: OK = true, want false: %+v", resp)
 	}
