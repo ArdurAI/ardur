@@ -263,6 +263,20 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 				Error:           fmt.Sprintf("register_session cgroup ownership check failed: %v", err),
 			}
 		}
+		// #119 collision guard: even a claim that passes ownership verification
+		// must not be allowed to bind a cgroup_id that another live session
+		// already holds — two sessions must never be able to govern the same
+		// cgroup concurrently. See checkCgroupCollision's doc comment for the
+		// residual race this does not fully close.
+		if err := d.checkCgroupCollision(req.RegisterSession); err != nil {
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          req.Method,
+				SessionID:       req.RegisterSession.SessionID,
+				OK:              false,
+				Error:           fmt.Sprintf("register_session cgroup collision check failed: %v", err),
+			}
+		}
 	}
 
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
@@ -535,6 +549,42 @@ func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest, ha
 		Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
 		OK:              true,
 	}
+}
+
+// checkCgroupCollision (issue #119) rejects a register_session whose claimed
+// cgroup_id is already bound to another live session, so two sessions can
+// never claim enforcement authority over the same cgroup at once — even a
+// claim that independently passes cgroupVerifier's ownership check. Platform-
+// neutral: this is a plain index lookup, no /proc dependency, so it applies
+// (and is tested) on every platform, unlike the Linux-only ownership check.
+//
+// Re-registering the SAME session_id against the SAME cgroup_id it already
+// holds is not a collision (a client may legitimately retry register_session
+// for its own session) and is allowed through.
+//
+// Residual race, accepted: there is a narrow window between this check and
+// onSessionRegistered's index write (below) where two concurrent
+// register_session calls for the identical cgroup_id could both pass this
+// check before either commits. Closing that fully would require moving
+// session admission under the same lock as the registry's own accept path —
+// out of scope for this fix. cgroupVerifier's ownership check is the primary
+// defense against the actual #119 threat (a peer cannot fabricate "root_pid
+// is really a member of this cgroup"); this guard is defense-in-depth on top
+// of that, not the last line, so the residual window is a low-severity gap
+// between two requests that would BOTH have to already be making a
+// legitimately-ownership-verified claim to the same cgroup — an unusual
+// double-registration, not an unauthorized one.
+func (d *daemon) checkCgroupCollision(reg *kernelcapture.DaemonRegisterSessionRequest) error {
+	if reg == nil || reg.CgroupID == 0 {
+		return nil
+	}
+	d.mu.RLock()
+	existing, ok := d.cgroupIndex[reg.CgroupID]
+	d.mu.RUnlock()
+	if ok && existing != reg.SessionID {
+		return fmt.Errorf("cgroup_id %d is already bound to session %q", reg.CgroupID, existing)
+	}
+	return nil
 }
 
 // onSessionRegistered adds the session to the cgroup routing index.
