@@ -10,6 +10,7 @@ import pytest
 
 from vibap.bpf_lower import (
     BpfLowerError,
+    _FILE_ALLOW_MAX_ANCESTOR_DEPTH,
     lower_to_bpf_policy_plan,
 )
 from vibap.bpf_types import (
@@ -340,6 +341,82 @@ class TestResourcePoliciesTyped:
         )
         assert "10.0.0.1" in plan.net_allow
         assert expected_tier2 in plan.tier2_ops
+
+
+# ---------------------------------------------------------------------------
+# Slice 4.1/4.2 reconciliation — file-allow ancestor-depth bound.
+#
+# guard_file_open's sleepable hook enforces path_allow via a bounded
+# ancestor-directory walk (ARDUR_FILE_ALLOW_MAX_ANCESTORS in
+# process_guard.bpf.c), not the LPM trie the non-sleepable hooks use. A
+# path_allow root nested deeper than that bound can never be matched by a
+# real file access under it, so bpf_lower must not silently promise it's
+# enforced — see _FILE_ALLOW_MAX_ANCESTOR_DEPTH's doc comment.
+# ---------------------------------------------------------------------------
+
+
+def _path_at_depth(depth: int) -> str:
+    return "/" + "/".join(f"level{i}" for i in range(depth))
+
+
+class TestFileAllowDepthBound:
+    def test_shallow_resource_scope_path_is_enforceable(self) -> None:
+        plan = lower_to_bpf_policy_plan(resource_scope=["/workspace/project"])
+        assert "/workspace/project" in plan.path_allow
+        assert not any("too_deep" in t for t in plan.tier2_ops)
+
+    def test_path_at_exact_depth_bound_is_enforceable(self) -> None:
+        at_bound = _path_at_depth(_FILE_ALLOW_MAX_ANCESTOR_DEPTH)
+        plan = lower_to_bpf_policy_plan(resource_scope=[at_bound])
+        assert at_bound in plan.path_allow
+        assert not any("too_deep" in t for t in plan.tier2_ops)
+
+    def test_resource_scope_path_past_depth_bound_goes_to_tier2(self) -> None:
+        too_deep = _path_at_depth(_FILE_ALLOW_MAX_ANCESTOR_DEPTH + 1)
+        plan = lower_to_bpf_policy_plan(resource_scope=[too_deep])
+        assert too_deep not in plan.path_allow
+        assert any(too_deep in t and "too_deep" in t for t in plan.tier2_ops)
+
+    def test_subpath_policy_root_past_depth_bound_goes_to_tier2(self) -> None:
+        too_deep = _path_at_depth(_FILE_ALLOW_MAX_ANCESTOR_DEPTH + 1)
+        plan = lower_to_bpf_policy_plan(
+            resource_policies=[{"type": "subpath", "root": too_deep}]
+        )
+        assert too_deep not in plan.path_allow
+        assert any(too_deep in t and "too_deep" in t for t in plan.tier2_ops)
+
+    def test_root_slash_is_always_enforceable_regardless_of_depth_bound(self) -> None:
+        plan = lower_to_bpf_policy_plan(resource_scope=["/"])
+        assert "/" in plan.path_allow
+        assert not any("too_deep" in t for t in plan.tier2_ops)
+
+    def test_enforce_strict_raises_on_deep_resource_scope_path(self) -> None:
+        too_deep = _path_at_depth(_FILE_ALLOW_MAX_ANCESTOR_DEPTH + 1)
+        with pytest.raises(MissionPolicyNotImplementedError, match="nested"):
+            lower_to_bpf_policy_plan(
+                resource_scope=[too_deep], enforce_mode=ENFORCE_MODE_ENFORCE
+            )
+
+    def test_enforce_strict_raises_on_deep_subpath_policy_root(self) -> None:
+        too_deep = _path_at_depth(_FILE_ALLOW_MAX_ANCESTOR_DEPTH + 1)
+        with pytest.raises(MissionPolicyNotImplementedError, match="nested"):
+            lower_to_bpf_policy_plan(
+                resource_policies=[{"type": "subpath", "root": too_deep}],
+                enforce_mode=ENFORCE_MODE_ENFORCE,
+            )
+
+    def test_enforce_strict_tolerates_shallow_resource_scope_path(self) -> None:
+        plan = lower_to_bpf_policy_plan(
+            resource_scope=["/workspace"], enforce_mode=ENFORCE_MODE_ENFORCE
+        )
+        assert "/workspace" in plan.path_allow
+
+    def test_enforce_strict_tolerates_shallow_subpath_policy_root(self) -> None:
+        plan = lower_to_bpf_policy_plan(
+            resource_policies=[{"type": "subpath", "root": "/workspace"}],
+            enforce_mode=ENFORCE_MODE_ENFORCE,
+        )
+        assert "/workspace" in plan.path_allow
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ This section lists hosted documentation and mirrored artifacts generated from `.
 
 - [`codeql.yml`](/__ardur_internal__/repo/.github/workflows/codeql.yml)
 - [`hugo-site.yml`](/__ardur_internal__/repo/.github/workflows/hugo-site.yml)
+- [`kernel-enforce.yml`](/__ardur_internal__/repo/.github/workflows/kernel-enforce.yml)
 - [`link-check.yml`](/__ardur_internal__/repo/.github/workflows/link-check.yml)
 - [`secret-scan.yml`](/__ardur_internal__/repo/.github/workflows/secret-scan.yml)
 - [`tests.yml`](/__ardur_internal__/repo/.github/workflows/tests.yml)

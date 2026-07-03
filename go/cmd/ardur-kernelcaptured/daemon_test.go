@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -66,6 +67,9 @@ func newTestDaemon(t *testing.T) *daemon {
 		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
 		fs:                   osEvidenceFS{},
 		tamperChain:          kernelcapture.NewTamperReceiptChain(),
+		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
+		seccompListeners:     make(map[string]context.CancelFunc),
+		activeTier:           daemonTierNone,
 	}
 }
 
@@ -141,6 +145,149 @@ func TestOnSessionRegisteredAndEnded(t *testing.T) {
 	}
 	if inCorr {
 		t.Error("correlator entry not removed after end_session")
+	}
+}
+
+// TestOnSessionEnded_ClearsSeccompState guards the E4 cleanup wiring:
+// onSessionEnded must clear the session's seccomp policy and cancel (and
+// forget) its seccomp listener supervisor, mirroring the existing
+// RemovePolicyMaps/cgroupIndex cleanup this test's sibling
+// (TestOnSessionRegisteredAndEnded) already covers for the BPF tier.
+func TestOnSessionEnded_ClearsSeccompState(t *testing.T) {
+	d := newTestDaemon(t)
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID:    "sec-session-001",
+		RootPID:      222,
+		CgroupID:     555,
+		EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+		TTLSeconds:   60,
+	}, "sec-session-001")
+
+	if err := kernelcapture.ApplySeccompPolicy(d.seccompPolicy, "sec-session-001",
+		kernelcapture.DaemonApplyPolicyRequest{
+			SessionID: "sec-session-001",
+			OpPolicies: []kernelcapture.DaemonOpPolicy{
+				{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllow, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+			},
+		}); err != nil {
+		t.Fatalf("ApplySeccompPolicy: %v", err)
+	}
+
+	cancelled := false
+	if !d.registerSeccompListener("sec-session-001", func() { cancelled = true }) {
+		t.Fatal("registerSeccompListener: expected first registration to succeed")
+	}
+
+	d.onSessionEnded("sec-session-001")
+
+	if !cancelled {
+		t.Error("onSessionEnded did not cancel the session's seccomp listener")
+	}
+	d.mu.RLock()
+	_, stillRegistered := d.seccompListeners["sec-session-001"]
+	d.mu.RUnlock()
+	if stillRegistered {
+		t.Error("onSessionEnded left the seccomp listener registered")
+	}
+	decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, "sec-session-001", net.ParseIP("1.2.3.4"))
+	if decision.HasPolicy {
+		t.Errorf("onSessionEnded did not clear the session's seccomp policy: %+v", decision)
+	}
+}
+
+// TestPruneExpiredSessions_ClearsSeccompState is TestPruneExpiredSessions'
+// seccomp-tier counterpart.
+func TestPruneExpiredSessions_ClearsSeccompState(t *testing.T) {
+	d := newTestDaemon(t)
+
+	d.mu.Lock()
+	scope := kernelcapture.NewProcessTreeScope(1, 89)
+	scope.SessionID = "phantom-seccomp-session"
+	d.treeScopes["phantom-seccomp-session"] = &scope
+	d.cgroupIndex[89] = "phantom-seccomp-session"
+	d.correlators["phantom-seccomp-session"] = kernelcapture.NewCorrelator(kernelcapture.CorrelatorOptions{})
+	d.mu.Unlock()
+
+	if err := kernelcapture.ApplySeccompPolicy(d.seccompPolicy, "phantom-seccomp-session",
+		kernelcapture.DaemonApplyPolicyRequest{
+			SessionID: "phantom-seccomp-session",
+			OpPolicies: []kernelcapture.DaemonOpPolicy{
+				{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionDeny, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+			},
+		}); err != nil {
+		t.Fatalf("ApplySeccompPolicy: %v", err)
+	}
+	cancelled := false
+	if !d.registerSeccompListener("phantom-seccomp-session", func() { cancelled = true }) {
+		t.Fatal("registerSeccompListener: expected first registration to succeed")
+	}
+
+	d.pruneExpiredSessions()
+
+	if !cancelled {
+		t.Error("pruneExpiredSessions did not cancel the phantom session's seccomp listener")
+	}
+	d.mu.RLock()
+	_, stillRegistered := d.seccompListeners["phantom-seccomp-session"]
+	d.mu.RUnlock()
+	if stillRegistered {
+		t.Error("pruneExpiredSessions left the phantom session's seccomp listener registered")
+	}
+	decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, "phantom-seccomp-session", net.ParseIP("1.2.3.4"))
+	if decision.HasPolicy {
+		t.Errorf("pruneExpiredSessions did not clear the phantom session's seccomp policy: %+v", decision)
+	}
+}
+
+// TestRegisterSeccompListener_RejectsDuplicate guards against two
+// supervisor goroutines racing to answer the same session's notifications —
+// see daemon_seccomp_linux.go's handleSeccompHandoffConnection, which relies
+// on this to refuse a retried/duplicate handoff.
+func TestRegisterSeccompListener_RejectsDuplicate(t *testing.T) {
+	d := newTestDaemon(t)
+	if !d.registerSeccompListener("dup-session", func() {}) {
+		t.Fatal("first registerSeccompListener call: expected success")
+	}
+	if d.registerSeccompListener("dup-session", func() {}) {
+		t.Error("second registerSeccompListener call for the same session: expected rejection")
+	}
+}
+
+// TestHandleAuthorizedRequest_HealthAdvertisesActiveTier guards "advertise
+// which tier is live in the daemon status" from the E4 plan.
+func TestHandleAuthorizedRequest_HealthAdvertisesActiveTier(t *testing.T) {
+	for _, tier := range []string{daemonTierNone, daemonTierBPFLSM, daemonTierSeccomp} {
+		t.Run(tier, func(t *testing.T) {
+			d := newTestDaemon(t)
+			d.activeTier = tier
+			req := kernelcapture.DaemonProtocolRequest{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          kernelcapture.DaemonProtocolMethodHealth,
+				Health:          &kernelcapture.DaemonHealthRequest{},
+			}
+			handshake := kernelcapture.DaemonProtocolPeerHandshake{
+				ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
+				Method:                kernelcapture.DaemonProtocolMethodHealth,
+				SocketPath:            "/run/ardur/kernelcapture/control.sock",
+				CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
+				ProcessStartTimeTicks: 1,
+				Authorization: kernelcapture.DaemonPeerAuthorization{
+					Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
+					Reason:                "test",
+					UID:                   501,
+					PID:                   4242,
+					ProcessStartTimeTicks: 1,
+					Matched:               "uid",
+				},
+			}
+			resp := d.handleAuthorizedRequest(context.Background(), req, handshake)
+			if !resp.OK {
+				t.Fatalf("health request failed: %+v", resp)
+			}
+			if resp.EnforcementTier != tier {
+				t.Errorf("EnforcementTier = %q, want %q", resp.EnforcementTier, tier)
+			}
+		})
 	}
 }
 

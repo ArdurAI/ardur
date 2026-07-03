@@ -52,8 +52,13 @@ func sdNotify(_ string) error { return nil }
 // runWatchdog is a no-op on macOS (no systemd watchdog).
 func runWatchdog(_ context.Context, _ time.Duration, _ *slog.Logger) {}
 
-// runGuardConsumer: BPF-LSM has no macOS equivalent in this slice.
-func runGuardConsumer(_ context.Context, _ *daemon, log *slog.Logger) error {
+// runGuardConsumer: BPF-LSM has no macOS equivalent in this slice. Mirrors the
+// 4-arg contract (E4): signal load failure on ready so main()'s tier-selection
+// select unblocks immediately and falls through to the (also-unavailable-here)
+// seccomp path rather than waiting out guard-ready-timeout.
+func runGuardConsumer(_ context.Context, _ *daemon, log *slog.Logger, ready chan<- error) error {
 	log.Warn("BPF-LSM guard is Linux-only; enforcement unavailable on this platform")
-	return fmt.Errorf("BPF-LSM guard unavailable on this platform")
+	err := fmt.Errorf("BPF-LSM guard unavailable on this platform")
+	ready <- err
+	return err
 }

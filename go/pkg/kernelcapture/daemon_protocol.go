@@ -64,9 +64,10 @@ type DaemonSetKillSwitchRequest struct {
 }
 
 // DaemonApplyPolicyRequest installs or replaces the BPF enforcement policy for
-// one session's cgroup. The daemon writes the supplied entries to the six BPF
-// maps in the order: op_policies → path_allow → net_allow → cgroup_managed
-// (generation-atomic, managed flag written last per ValidateCgroupFilterSequence).
+// one session's cgroup. The daemon writes the supplied entries to the BPF
+// maps in the order: op_policies → path_allow (into cgroup_file_allow, see
+// PolicyMaps.CgroupFileAllow) → net_allow → cgroup_managed (generation-atomic,
+// managed flag written last per ValidateCgroupFilterSequence).
 //
 // Generation must be non-zero and strictly increasing relative to the previous
 // apply for this session.  The BPF program uses the generation to detect stale
@@ -124,10 +125,16 @@ type DaemonProtocolResponse struct {
 	// directories are root-0700, so this is the only channel a non-root client
 	// has to learn what kernel-level enforcement happened.
 	Enforcement *EnforceEventSummary `json:"enforcement,omitempty"`
-	// EnforcementTier reports which kernel-enforcement backend is currently
-	// live on this daemon: EnforcementTierBPFLSM or EnforcementTierNone.
-	// Populated on successful health responses only — session_status responses
-	// use Enforcement (per-session) instead.
+	// EnforcementTier carries which kernel enforcement tier is currently
+	// active — "bpf_lsm", "seccomp", or "none" (EnforcementTierBPFLSM /
+	// EnforcementTierNone; seccomp is plan E4) — on successful health
+	// responses. The daemon decides this once at startup (BPF-LSM preferred,
+	// seccomp as fallback) and never changes it while running; a launcher
+	// queries it to decide whether a governed process needs to be routed
+	// through ardur-exec-shim (the seccomp tier's on-ramp) before spawning
+	// one, or can rely on BPF-LSM's cgroup-scoped enforcement with no
+	// per-process wrapper at all. session_status responses use Enforcement
+	// (per-session) instead.
 	EnforcementTier string `json:"enforcement_tier,omitempty"`
 }
 

@@ -99,7 +99,7 @@ func consumeEnforceEvents(ctx context.Context, reader enforceEventReader, d *dae
 			continue
 		}
 
-		d.processEnforceEvent(ev, log)
+		d.processEnforceEvent(ev, enforceEventTier(ev), log)
 	}
 }
 
@@ -230,9 +230,18 @@ func enforceEventTier(ev kernelcapture.BpfEnforceEvent) string {
 // enforcement summary, and appends the receipt to evidence. Events that
 // cannot be attributed to a registered session are routed to the orphan
 // scope instead of being dropped.
-func (d *daemon) processEnforceEvent(ev kernelcapture.BpfEnforceEvent, log *slog.Logger) {
+//
+// tier identifies the enforcement backend + mode that produced ev (e.g.
+// "bpf_lsm:enforce", "seccomp:enforce") for the summary's TierCoverage
+// breakdown. Callers supply it explicitly rather than this function deriving
+// it from ev alone: ev's shape (BpfOp/BpfAction/BpfEnforceMode) is shared
+// across every enforcement tier by design, so which tier actually produced a
+// given event is knowledge only the caller has — consumeEnforceEvents (the
+// BPF-LSM ringbuf consumer) always saw bpf_lsm:*, but a future or concurrent
+// tier's events must not be mislabeled as bpf_lsm just because they use the
+// same event shape.
+func (d *daemon) processEnforceEvent(ev kernelcapture.BpfEnforceEvent, tier string, log *slog.Logger) {
 	verdict := enforceEventVerdict(ev)
-	tier := enforceEventTier(ev)
 
 	sid, correlator := d.routeEnforceEvent(ev.CgroupID)
 	if sid == "" || correlator == nil {

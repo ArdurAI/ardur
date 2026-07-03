@@ -70,6 +70,7 @@ func TestHandleAuthorizedRequest_HealthReportsBPFLSMWhenGuardLoaded(t *testing.T
 	d.policyMaps = kernelcapture.PolicyMaps{
 		CgroupOpPolicy:  &fakeHealthPolicyMap{},
 		CgroupPathAllow: &fakeHealthPolicyMap{},
+		CgroupFileAllow: &fakeHealthPolicyMap{},
 		CgroupNetAllow:  &fakeHealthPolicyMap{},
 		CgroupManaged:   &fakeHealthPolicyMap{},
 		KillSwitch:      &fakeHealthPolicyMap{},
