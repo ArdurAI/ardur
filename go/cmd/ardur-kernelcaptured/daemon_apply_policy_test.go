@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
@@ -114,6 +115,118 @@ func TestHandleApplyPolicy_UnknownSessionFailsCleanly(t *testing.T) {
 	resp := d.handleApplyPolicy(applyPolicyReqFor("does-not-exist", kernelcapture.BpfEnforceModeEnforce))
 	if resp.OK {
 		t.Fatal("apply_policy for an unregistered session: OK = true, want false")
+	}
+}
+
+// --- seccomp tier (plan E4) ---------------------------------------------
+
+func applyNetConnectPolicyReqFor(sessionID string, action kernelcapture.BpfAction, mode kernelcapture.BpfEnforceMode, netAllow ...string) kernelcapture.DaemonProtocolRequest {
+	ap := &kernelcapture.DaemonApplyPolicyRequest{
+		SessionID:   sessionID,
+		Generation:  1,
+		EnforceMode: mode,
+		OpPolicies: []kernelcapture.DaemonOpPolicy{
+			{Op: kernelcapture.BpfOpNetConnect, Action: action, EnforceMode: mode},
+		},
+		NetAllow: netAllow,
+	}
+	return kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+		ApplyPolicy:     ap,
+	}
+}
+
+// TestHandleApplyPolicy_SyncsSeccompStoreEvenWhenBPFTierHardFails asserts the
+// seccomp tier's in-memory policy is populated as a side effect of
+// handleApplyPolicy regardless of the overall response: a session's seccomp
+// policy must already be in place by the time — if ever — a listener
+// attaches for it, and apply_policy commonly runs well before that handoff.
+func TestHandleApplyPolicy_SyncsSeccompStoreEvenWhenBPFTierHardFails(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	registerTestSession(t, d, "ses-net-enforce", 113)
+
+	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-net-enforce", kernelcapture.BpfActionAllow, kernelcapture.BpfEnforceModeEnforce))
+	if resp.OK {
+		t.Fatalf("apply_policy under ENFORCE with no active tier: OK = true, want false: %+v", resp)
+	}
+
+	decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, "ses-net-enforce", net.ParseIP("1.2.3.4"))
+	if !decision.HasPolicy || !decision.Allowed {
+		t.Errorf("seccomp store not populated despite the overall apply_policy failure: %+v", decision)
+	}
+}
+
+// TestHandleApplyPolicy_AppliesViaSeccompTierWhenActive is the E4 success
+// path: on a host where the seccomp tier (not BPF-LSM) is active, an
+// apply_policy request whose ops are entirely within the seccomp tier's
+// scope (OP_NET_CONNECT) must be reported as genuinely applied, not
+// degraded — BPF-LSM being unavailable isn't a degradation when it was never
+// the active tier to begin with.
+func TestHandleApplyPolicy_AppliesViaSeccompTierWhenActive(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.activeTier = daemonTierSeccomp
+	registerTestSession(t, d, "ses-net-seccomp", 114)
+
+	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-net-seccomp", kernelcapture.BpfActionDeny, kernelcapture.BpfEnforceModeEnforce))
+	if !resp.OK {
+		t.Fatalf("apply_policy under ENFORCE with active seccomp tier: OK = false, want true: %+v", resp)
+	}
+	if resp.Status != "applied_seccomp_tier" {
+		t.Errorf("Status = %q, want %q", resp.Status, "applied_seccomp_tier")
+	}
+
+	decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, "ses-net-seccomp", net.ParseIP("1.2.3.4"))
+	if !decision.HasPolicy || decision.Allowed {
+		t.Errorf("seccomp store should reflect the DENY policy: %+v", decision)
+	}
+}
+
+// TestHandleApplyPolicy_SeccompTierDoesNotCoverNonNetOps confirms the
+// applied_seccomp_tier success branch only fires when the request is fully
+// within the seccomp tier's scope — a request that also asks for OP_EXEC
+// enforcement can't be satisfied by this tier and must still fail loudly
+// under ENFORCE mode, exactly like the no-tier-active case.
+func TestHandleApplyPolicy_SeccompTierDoesNotCoverNonNetOps(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.activeTier = daemonTierSeccomp
+	registerTestSession(t, d, "ses-mixed-ops", 115)
+
+	ap := &kernelcapture.DaemonApplyPolicyRequest{
+		SessionID:   "ses-mixed-ops",
+		Generation:  1,
+		EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+		OpPolicies: []kernelcapture.DaemonOpPolicy{
+			{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllow, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+			{Op: kernelcapture.BpfOpExec, Action: kernelcapture.BpfActionDeny, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+		},
+	}
+	req := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+		ApplyPolicy:     ap,
+	}
+	resp := d.handleApplyPolicy(req)
+	if resp.OK {
+		t.Fatalf("apply_policy mixing OP_EXEC into a seccomp-tier-only host: OK = true, want false: %+v", resp)
+	}
+}
+
+func TestHandleApplyPolicy_InvalidNetAllowFailsBeforeAnyStoreWrite(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	registerTestSession(t, d, "ses-bad-cidr", 116)
+
+	resp := d.handleApplyPolicy(applyNetConnectPolicyReqFor("ses-bad-cidr", kernelcapture.BpfActionAllowlist, kernelcapture.BpfEnforceModePermissive, "not-a-cidr"))
+	if resp.OK {
+		t.Fatalf("apply_policy with a malformed net_allow entry: OK = true, want false: %+v", resp)
+	}
+	decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, "ses-bad-cidr", net.ParseIP("1.2.3.4"))
+	if decision.HasPolicy {
+		t.Errorf("a rejected apply_policy must not leave a partial seccomp policy in place: %+v", decision)
 	}
 }
 

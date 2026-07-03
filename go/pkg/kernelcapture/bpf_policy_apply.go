@@ -62,8 +62,21 @@ type policyMapReadWriter interface {
 // Fields are nil (not merely unusable) when the BPF-LSM guard has not been
 // loaded — see policyMapsReady.
 type PolicyMaps struct {
-	CgroupOpPolicy  policyMapWriter
+	CgroupOpPolicy policyMapWriter
+	// CgroupPathAllow is the cgroup_path_allow LPM trie. Nothing in this
+	// codebase writes to it today — ApplyPolicyMaps routes req.PathAllow to
+	// CgroupFileAllow instead, because the only hook that currently gets
+	// ACT_ALLOWLIST path entries (guard_file_open, via bpf_lower.py's
+	// SubpathPolicy/resource_scope lowering) is sleepable and cannot use an
+	// LPM trie (see process_guard.bpf.c). This field, and the map behind it,
+	// are kept wired for a hypothetical future OP_EXEC path-allowlist, which
+	// WOULD go through the non-sleepable guard_bprm_check → decide() →
+	// path_is_allowed path and could use LPM prefix matching correctly.
 	CgroupPathAllow policyMapWriter
+	// CgroupFileAllow is the cgroup_file_allow HASH map backing
+	// OP_FILE_READ/OP_FILE_WRITE ACT_ALLOWLIST — see fileAllowKey and
+	// process_guard.bpf.c's ardur_file_allow_key doc comment.
+	CgroupFileAllow policyMapWriter
 	CgroupNetAllow  policyMapWriter
 	CgroupManaged   policyMapReadWriter
 	KillSwitch      policyMapWriter
@@ -73,12 +86,25 @@ type PolicyMaps struct {
 // apply_policy write is present. A partially populated PolicyMaps (which
 // should never happen in practice — PolicyMapsFromHandles sets all fields
 // together) is treated as not-ready to stay fail-closed.
+//
+// CgroupPathAllow is deliberately NOT checked here: nothing currently writes
+// to it (see its doc comment on PolicyMaps), so requiring it would make
+// every apply_policy call fail on a real daemon that never populates it.
 func policyMapsReady(maps PolicyMaps) bool {
 	return maps.CgroupOpPolicy != nil &&
-		maps.CgroupPathAllow != nil &&
+		maps.CgroupFileAllow != nil &&
 		maps.CgroupNetAllow != nil &&
 		maps.CgroupManaged != nil &&
 		maps.KillSwitch != nil
+}
+
+// PolicyMapsReady reports whether the BPF-LSM guard is currently loaded —
+// i.e. whether maps has every handle needed for a full apply_policy write.
+// Exported for callers outside this package (e.g. the daemon's health
+// response, see EnforcementTier) that need to know kernel-enforcement
+// availability without attempting a write.
+func PolicyMapsReady(maps PolicyMaps) bool {
+	return policyMapsReady(maps)
 }
 
 // ApplyPolicyMaps writes the policy described by req into maps for cgroupID.
@@ -106,15 +132,19 @@ func ApplyPolicyMaps(maps PolicyMaps, cgroupID uint64, req DaemonApplyPolicyRequ
 		}
 	}
 
-	// 2. Write path allow trie entries.
+	// 2. Write file allow hash entries. Targets CgroupFileAllow (HASH), not
+	// CgroupPathAllow (LPM trie) — see PolicyMaps.CgroupPathAllow's doc
+	// comment for why: req.PathAllow only ever carries OP_FILE_READ/WRITE
+	// allowlist entries today, and the hook that enforces those
+	// (guard_file_open) is sleepable and cannot reach an LPM trie.
 	for _, path := range req.PathAllow {
-		k, err := pathLpmKey(cgroupID, path)
+		k, err := fileAllowKey(cgroupID, path)
 		if err != nil {
 			return fmt.Errorf("kernelcapture: apply_policy path_allow put (%q): %w", path, err)
 		}
 		var v uint64 = 1
-		if err := maps.CgroupPathAllow.Put(k, &v); err != nil {
-			return fmt.Errorf("kernelcapture: apply_policy cgroup_path_allow put (%q): %w", path, err)
+		if err := maps.CgroupFileAllow.Put(k, &v); err != nil {
+			return fmt.Errorf("kernelcapture: apply_policy cgroup_file_allow put (%q): %w", path, err)
 		}
 	}
 
@@ -267,6 +297,40 @@ func nextPolicySlot(cm policyMapReadWriter, cgroupID uint64) uint32 {
 		return 0
 	}
 	return 1 - (mv.ActiveSlot & 1)
+}
+
+// fileAllowKeyLayout matches struct ardur_file_allow_key: cgroup_raw[8] +
+// path[bpfPathLen]. Unlike pathLpmKeyLayout there is no prefixlen field —
+// this is a HASH map key (exact match on the full fixed-size struct,
+// zero-padding included), not an LPM trie key. See ardur_file_allow_key's
+// doc comment in process_guard.bpf.c for the directory-boundary-aware
+// ancestor-walk matching this enables on the read (BPF) side.
+const bpfPathLen = 256
+
+type fileAllowKeyLayout struct {
+	CgroupRaw [8]byte
+	Path      [bpfPathLen]byte
+}
+
+// fileAllowKey builds a cgroup_file_allow lookup/write key for one allowed
+// path (a directory root or an exact file). Longer-than-bpfPathLen paths are
+// truncated the same way pathLpmKey truncates oversize LPM entries — the
+// truncated form just won't be found by the ancestor walk in
+// file_path_is_allowed if the walk's cap (ARDUR_FILE_ALLOW_MAX_ANCESTORS)
+// would have stopped short of it first anyway.
+func fileAllowKey(cgroupID uint64, pathPrefix string) (unsafe.Pointer, error) {
+	if !strings.HasPrefix(pathPrefix, "/") {
+		return nil, fmt.Errorf("path must be absolute, got %q", pathPrefix)
+	}
+	pathBytes := []byte(pathPrefix)
+	if len(pathBytes) > bpfPathLen {
+		pathBytes = pathBytes[:bpfPathLen]
+	}
+
+	var k fileAllowKeyLayout
+	binary.NativeEndian.PutUint64(k.CgroupRaw[:], cgroupID)
+	copy(k.Path[:], pathBytes)
+	return unsafe.Pointer(&k), nil
 }
 
 // pathLpmKeyLayout matches struct ardur_path_lpm_key:

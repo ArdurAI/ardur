@@ -26,6 +26,8 @@ from vibap.attestation import verify_attestation
 from vibap.passport import load_public_key
 from vibap.receipt import verify_chain
 from vibap.run_bridge import (
+    DEFAULT_MAX_DURATION_S,
+    DEFAULT_MAX_TOOL_CALLS,
     ClaudeCodeAdapter,
     EnvProxyAdapter,
     KernelPolicyEnforcementError,
@@ -537,6 +539,55 @@ class TestKernelEnforcementClaim:
             shutil.rmtree(sock_dir, ignore_errors=True)
 
         assert result is None
+
+
+@pytest.mark.parametrize("unset_field", ["max_tool_calls", "max_duration_s"])
+def test_run_governed_cli_coerces_unset_numeric_budgets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unset_field: str
+) -> None:
+    """A plain `ardur run` (no --max-tool-calls / --max-duration-s) must not crash.
+
+    The `run` subparser defaults these to None so an explicit 0 is
+    distinguishable from "unset"; run_governed_cli must coerce None to the
+    documented default rather than calling ``int(None)`` (which raised
+    TypeError before the fix, aborting every default-flag `ardur run`).
+    """
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_run_governed(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fake_run_governed)
+
+    fields = {"max_tool_calls": 7, "max_duration_s": 123}
+    fields[unset_field] = None  # simulate the argparse default for the run subparser
+
+    with pytest.raises(_Stop):
+        run_governed_cli(
+            Namespace(
+                command=["--", "true"],
+                mission="budget coercion smoke",
+                allowed_tools=["Read"],
+                forbidden_tools=None,
+                home=tmp_path / "h",
+                via="env",
+                no_kernel_correlation=True,
+                enforce=False,
+                **fields,
+            )
+        )
+
+    # The unset field falls back to its module default; the other is passed through.
+    assert captured["max_tool_calls"] == (
+        DEFAULT_MAX_TOOL_CALLS if unset_field == "max_tool_calls" else 7
+    )
+    assert captured["max_duration_s"] == (
+        DEFAULT_MAX_DURATION_S if unset_field == "max_duration_s" else 123
+    )
 
 
 @pytest.mark.parametrize("command", ([], ["--"]))

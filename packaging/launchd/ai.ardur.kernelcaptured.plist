@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ai.ardur.kernelcaptured.plist — macOS LaunchDaemon unit for
+  ardur-kernelcaptured (Epic A #63, Slice 2 remainder).
+
+  Install as root at /Library/LaunchDaemons/ai.ardur.kernelcaptured.plist
+  (mode 0644, owned by root:wheel — launchd refuses to load a LaunchDaemon
+  plist that is group- or world-writable), then:
+
+      sudo launchctl bootstrap system /Library/LaunchDaemons/ai.ardur.kernelcaptured.plist
+      sudo launchctl enable system/ai.ardur.kernelcaptured
+
+  Claim boundary — what running this daemon on macOS provides today:
+    - The Unix-socket control plane (register_session/end_session/health/
+      session_status) and the in-memory session registry. Any launcher that
+      can dial the socket (e.g. `ardur run`'s kernel-correlation bridge) gets
+      the detect-to-session link's non-kernel half.
+    - health reports enforcement_tier="none": macOS has no eBPF, so there is
+      no process_guard BPF-LSM guard to load. See daemon_unsupported.go
+      (ardur-kernelcaptured) — the exec/exit tracepoint consumer and the
+      BPF-LSM guard are both Linux-only and are simply absent here.
+
+  What this does NOT provide on macOS (out of scope for this file):
+    - Kernel-level process/file/network visibility. On macOS that requires
+      the Endpoint Security System Extension scaffold (see
+      packaging/macos/systemextension/ and go/pkg/kernelcapture/
+      es_client_darwin.go) — which itself cannot run until Apple grants the
+      com.apple.developer.endpoint-security.client entitlement for the
+      ardur-kernelcaptured code-signing identity. That extension is not yet
+      wired to feed events into this daemon; it is scaffolding for the day
+      the entitlement is granted.
+    - launchd has no direct equivalent of the systemd unit's extensive
+      sandboxing (ProtectSystem=, CapabilityBoundingSet=, SystemCallFilter=,
+      etc. — see packaging/systemd/ardur-kernelcaptured.service). macOS's
+      analogous privilege boundary is code-signing + hardened runtime +
+      narrow entitlements on the binary itself, not something expressible in
+      a LaunchDaemon plist.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.ardur.kernelcaptured</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/ardur-kernelcaptured</string>
+		<string>--socket</string>
+		<string>/var/run/ardur/kernelcapture/control.sock</string>
+		<string>--evidence-dir</string>
+		<string>/usr/local/var/ardur/kernelcapture/evidence</string>
+		<string>--state-dir</string>
+		<string>/usr/local/var/ardur/kernelcapture/state</string>
+	</array>
+
+	<!-- Root is required to create/own the control-socket directory tree
+	     under /var/run and /usr/local/var; also the expected posture once
+	     the Endpoint Security extension is wired in (ES clients run
+	     privileged). LaunchDaemons under /Library/LaunchDaemons run as root
+	     by default; UserName is set explicitly for clarity. -->
+	<key>UserName</key>
+	<string>root</string>
+	<key>GroupName</key>
+	<string>wheel</string>
+
+	<!-- Start at boot (parity with systemd's [Install] WantedBy=multi-user.target
+	     plus `systemctl enable`). -->
+	<key>RunAtLoad</key>
+	<true/>
+
+	<!-- Always restart, matching the unit's Restart=always. launchd has no
+	     watchdog-keepalive concept analogous to systemd's WatchdogSec; a
+	     hung-but-alive process is not detected and restarted the way it
+	     would be under systemd. -->
+	<key>KeepAlive</key>
+	<true/>
+
+	<!-- Minimum seconds between respawns, avoiding a respawn storm if the
+	     daemon crash-loops (e.g. custody paths never got installed). Rough
+	     parity with the unit's RestartSec=2s, rounded up to launchd's
+	     documented safe minimum. -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<!-- Background: a headless daemon with no UI, matching how launchd
+	     tunes scheduling/resource priority for LaunchDaemons of this kind. -->
+	<key>ProcessType</key>
+	<string>Background</string>
+
+	<key>StandardOutPath</key>
+	<string>/Library/Logs/Ardur/ardur-kernelcaptured.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/Ardur/ardur-kernelcaptured.err.log</string>
+</dict>
+</plist>

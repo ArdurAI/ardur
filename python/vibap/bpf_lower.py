@@ -36,6 +36,18 @@ Lowering rules (what each input field maps to):
     scope for Slice 4.1).  If a caller pre-resolves a domain to an IP/CIDR and
     passes it through ``net_prefixes``, that goes directly into net_allow.
 
+    ``path_allow`` entries (from either source above) are enforced at the
+    kernel by ``guard_file_open``'s sleepable hook via a bounded ancestor-
+    directory walk (see ``ARDUR_FILE_ALLOW_MAX_ANCESTORS`` in
+    ``process_guard.bpf.c``) — a root nested deeper than that bound
+    (``_FILE_ALLOW_MAX_ANCESTOR_DEPTH`` here, kept in sync with the C
+    constant) can never actually be matched by a real file access under it.
+    Such roots are diverted to tier2_ops instead of silently entering
+    path_allow; under ENFORCE_STRICT this raises
+    ``MissionPolicyNotImplementedError`` rather than accepting a policy that
+    would fail closed on every access at the kernel layer while claiming to
+    be a kernel-enforced allowlist.
+
 ``effect_policies``, ``flow_policies``, ``lineage_budgets``
     These are semantic / budget constraints evaluated at the proxy layer. BPF
     cannot express them. → tier2_ops.
@@ -135,9 +147,13 @@ class BpfPolicyPlan:
         by ``(cgroup_id, op)``.
 
     path_allow
-        Absolute path prefixes permitted when OP_FILE_READ or OP_FILE_WRITE is
-        set to ACT_ALLOWLIST.  The daemon writes these into the
-        ``cgroup_path_allow`` LPM trie.
+        Absolute path prefixes (directory roots or exact files) permitted
+        when OP_FILE_READ or OP_FILE_WRITE is set to ACT_ALLOWLIST.  Each
+        entry has already been checked against ``_FILE_ALLOW_MAX_ANCESTOR_DEPTH``
+        — deeper roots are diverted to tier2_ops instead.  The daemon writes
+        these into the ``cgroup_file_allow`` HASH map (not the
+        ``cgroup_path_allow`` LPM trie — see ``ardur_file_allow_key`` in
+        process_guard.bpf.c for why).
 
     net_allow
         IP/CIDR strings (IPv4 or IPv6) permitted when OP_NET_CONNECT is set to
@@ -264,6 +280,45 @@ def _normalize_path_prefix(path: str) -> str | None:
     return path.rstrip("/") or "/"
 
 
+# Must match ARDUR_FILE_ALLOW_MAX_ANCESTORS in process_guard.bpf.c. The
+# sleepable file_open hook enforces OP_FILE_READ/OP_FILE_WRITE ACT_ALLOWLIST
+# by walking a resolved path's ancestor directory boundaries and probing a
+# HASH map at each one (it cannot use an LPM trie — see
+# ardur_file_allow_key's doc comment in process_guard.bpf.c). That walk is
+# bounded to this many ancestor checks per file access, so a path_allow root
+# nested deeper than this can never be matched by a real file access under
+# it — the kernel would fail-closed on every such access regardless of what
+# this lowering function claims. Depth is measured in path segments after
+# the leading "/" (e.g. "/a/b/c" has depth 3); the literal root "/" has
+# depth 0 and is always enforceable (checked directly by the BPF side, not
+# via the ancestor walk).
+_FILE_ALLOW_MAX_ANCESTOR_DEPTH = 32
+
+
+def _path_ancestor_depth(path: str) -> int:
+    """Return the number of path segments in ``path`` after the leading "/"."""
+    trimmed = path.strip("/")
+    return len(trimmed.split("/")) if trimmed else 0
+
+
+def _path_exceeds_enforceable_depth(path: str) -> bool:
+    return _path_ancestor_depth(path) > _FILE_ALLOW_MAX_ANCESTOR_DEPTH
+
+
+def _file_allow_depth_error(path: str) -> str:
+    return (
+        f"resource path {path!r} is nested {_path_ancestor_depth(path)} levels "
+        f"deep, past the {_FILE_ALLOW_MAX_ANCESTOR_DEPTH}-level bound the "
+        f"BPF-LSM file_open hook can enforce (ARDUR_FILE_ALLOW_MAX_ANCESTORS "
+        f"in process_guard.bpf.c). A real file access under this root would "
+        f"fail closed at the kernel regardless of this allowlist entry, so "
+        f"bpf_lower refuses to silently claim it's enforced. Move the "
+        f"allowlisted root closer to the filesystem root, or switch to "
+        f"ENFORCE_MODE_PERMISSIVE (the proxy/tier-2 layer can still enforce "
+        f"this dimension)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Primary lowering function
 # ---------------------------------------------------------------------------
@@ -374,8 +429,16 @@ def lower_to_bpf_policy_plan(
     # ------------------------------------------------------------------
     for raw_path in resource_scope:
         normalized = _normalize_path_prefix(raw_path)
-        if normalized:
-            path_allow.append(normalized)
+        if not normalized:
+            continue
+        if _path_exceeds_enforceable_depth(normalized):
+            if enforce_mode == ENFORCE_MODE_ENFORCE:
+                raise MissionPolicyNotImplementedError(
+                    _file_allow_depth_error(normalized)
+                )
+            tier2.append(f"file_allow_path_too_deep:{normalized}")
+            continue
+        path_allow.append(normalized)
 
     if path_allow:
         # Set both read and write ops to ACT_ALLOWLIST if not already denied.
@@ -393,8 +456,15 @@ def lower_to_bpf_policy_plan(
         policy = load_resource_policy(raw_policy)
         if isinstance(policy, SubpathPolicy):
             normalized = _normalize_path_prefix(policy.root)
-            if normalized and normalized not in path_allow:
-                path_allow.append(normalized)
+            if normalized:
+                if _path_exceeds_enforceable_depth(normalized):
+                    if enforce_mode == ENFORCE_MODE_ENFORCE:
+                        raise MissionPolicyNotImplementedError(
+                            _file_allow_depth_error(normalized)
+                        )
+                    tier2.append(f"file_allow_path_too_deep:{normalized}")
+                elif normalized not in path_allow:
+                    path_allow.append(normalized)
             for op in (OP_FILE_READ, OP_FILE_WRITE):
                 current = op_entries.get(op)
                 if current is None or current.action != ACT_DENY:

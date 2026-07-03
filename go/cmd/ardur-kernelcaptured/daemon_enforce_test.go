@@ -133,7 +133,7 @@ func TestProcessEnforceEvent_DeniedEventRoutesThroughCorrelator(t *testing.T) {
 		Comm:        "agent",
 		Path:        "/etc/shadow",
 	}
-	d.processEnforceEvent(ev, d.log)
+	d.processEnforceEvent(ev, enforceEventTier(ev), d.log)
 
 	path := filepath.Join(d.evidenceDir, sanitizeSessionID("enforce-session-1"), "enforce_events.jsonl")
 	entries := readEnforceReceiptLines(t, stub, path)
@@ -176,6 +176,50 @@ func TestProcessEnforceEvent_DeniedEventRoutesThroughCorrelator(t *testing.T) {
 	}
 }
 
+// TestProcessEnforceEvent_TierParamOverridesDerivedTier guards the E4 tier
+// refactor: processEnforceEvent must record whatever tier the caller passes,
+// not what enforceEventTier(ev) would derive from the event's own
+// EnforceMode. Without this, seccomp-tier events (which reuse the exact same
+// BpfEnforceEvent shape as the BPF-LSM tier) would get mislabeled
+// "bpf_lsm:*" in TierCoverage.
+func TestProcessEnforceEvent_TierParamOverridesDerivedTier(t *testing.T) {
+	d := newTestDaemon(t)
+	d.fs = newStubFS()
+
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID:    "enforce-session-tier",
+		RootPID:      100,
+		CgroupID:     42,
+		EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+		TTLSeconds:   300,
+	}, "enforce-session-tier")
+
+	ev := kernelcapture.BpfEnforceEvent{
+		CgroupID:    42,
+		PID:         100,
+		Op:          kernelcapture.BpfOpNetConnect,
+		ActionTaken: kernelcapture.BpfActionDeny,
+		EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+		ObservedNS:  123456789,
+	}
+	if derived := enforceEventTier(ev); derived != "bpf_lsm:enforce" {
+		t.Fatalf("test setup: enforceEventTier(ev) = %q, want %q so this test actually exercises an override", derived, "bpf_lsm:enforce")
+	}
+
+	d.processEnforceEvent(ev, "seccomp:enforce", d.log)
+
+	summary, ok := d.enforceSummaryForScope("enforce-session-tier")
+	if !ok {
+		t.Fatal("expected an enforcement summary for the registered session")
+	}
+	if summary.TierCoverage["seccomp:enforce"] != 1 {
+		t.Errorf("tier coverage = %+v, want seccomp:enforce=1 (the caller-supplied tier)", summary.TierCoverage)
+	}
+	if _, mislabeled := summary.TierCoverage["bpf_lsm:enforce"]; mislabeled {
+		t.Errorf("tier coverage = %+v, event was mislabeled under the derived bpf_lsm:enforce tier", summary.TierCoverage)
+	}
+}
+
 func TestProcessEnforceEvent_OrphanEventNotDropped(t *testing.T) {
 	d := newTestDaemon(t)
 	stub := newStubFS()
@@ -190,7 +234,7 @@ func TestProcessEnforceEvent_OrphanEventNotDropped(t *testing.T) {
 		EnforceMode: kernelcapture.BpfEnforceModeEnforce,
 		Comm:        "orphan-proc",
 	}
-	d.processEnforceEvent(ev, d.log)
+	d.processEnforceEvent(ev, enforceEventTier(ev), d.log)
 
 	orphanPath := filepath.Join(d.evidenceDir, sanitizeSessionID(enforceOrphanScope), "enforce_events.jsonl")
 	entries := readEnforceReceiptLines(t, stub, orphanPath)
@@ -346,12 +390,13 @@ func TestHandleAuthorizedRequest_SessionStatusIncludesEnforcementSummary(t *test
 		t.Fatalf("register_session failed: %+v", registerResp)
 	}
 
-	d.processEnforceEvent(kernelcapture.BpfEnforceEvent{
+	statusEvent := kernelcapture.BpfEnforceEvent{
 		CgroupID:    55,
 		PID:         100,
 		ActionTaken: kernelcapture.BpfActionDeny,
 		EnforceMode: kernelcapture.BpfEnforceModeEnforce,
-	}, d.log)
+	}
+	d.processEnforceEvent(statusEvent, enforceEventTier(statusEvent), d.log)
 
 	statusResp := d.handleAuthorizedRequest(context.Background(), kernelcapture.DaemonProtocolRequest{
 		ProtocolVersion: kernelcapture.DaemonProtocolVersion,

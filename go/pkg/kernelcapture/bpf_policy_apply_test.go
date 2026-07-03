@@ -9,6 +9,7 @@ package kernelcapture
 // reachable through the //go:build linux implementation and untested).
 
 import (
+	"encoding/binary"
 	"errors"
 	"reflect"
 	"testing"
@@ -97,6 +98,7 @@ const (
 	managedKeySize      = unsafe.Sizeof(managedKeyLayout{})
 	managedValueSize    = unsafe.Sizeof(managedValueLayout{})
 	pathLpmKeySize      = unsafe.Sizeof(pathLpmKeyLayout{})
+	fileAllowKeySize    = unsafe.Sizeof(fileAllowKeyLayout{})
 	netLpmKeySize       = unsafe.Sizeof(netLpmKeyLayout{})
 	lpmAllowedValueSize = unsafe.Sizeof(uint64(0))
 )
@@ -107,6 +109,7 @@ func fakePolicyMaps() (PolicyMaps, *[]string, map[string]*fakeBPFMap) {
 	calls := &[]string{}
 	opPolicy := newFakeMap("cgroup_op_policy", cgroupOpKeySize, cgroupOpValueSize, calls)
 	pathAllow := newFakeMap("cgroup_path_allow", pathLpmKeySize, lpmAllowedValueSize, calls)
+	fileAllow := newFakeMap("cgroup_file_allow", fileAllowKeySize, lpmAllowedValueSize, calls)
 	netAllow := newFakeMap("cgroup_net_allow", netLpmKeySize, lpmAllowedValueSize, calls)
 	managed := newFakeMap("cgroup_managed", managedKeySize, managedValueSize, calls)
 	killSwitch := newFakeMap("kill_switch", unsafe.Sizeof(uint32(0)), unsafe.Sizeof(uint32(0)), calls)
@@ -114,6 +117,7 @@ func fakePolicyMaps() (PolicyMaps, *[]string, map[string]*fakeBPFMap) {
 	maps := PolicyMaps{
 		CgroupOpPolicy:  opPolicy,
 		CgroupPathAllow: pathAllow,
+		CgroupFileAllow: fileAllow,
 		CgroupNetAllow:  netAllow,
 		CgroupManaged:   managed,
 		KillSwitch:      killSwitch,
@@ -121,6 +125,7 @@ func fakePolicyMaps() (PolicyMaps, *[]string, map[string]*fakeBPFMap) {
 	handles := map[string]*fakeBPFMap{
 		"cgroup_op_policy":  opPolicy,
 		"cgroup_path_allow": pathAllow,
+		"cgroup_file_allow": fileAllow,
 		"cgroup_net_allow":  netAllow,
 		"cgroup_managed":    managed,
 		"kill_switch":       killSwitch,
@@ -226,6 +231,56 @@ func TestApplyPolicyMaps_WritesManagedGateLast(t *testing.T) {
 		if c == "put:cgroup_managed" {
 			t.Errorf("cgroup_managed written before the end of the call sequence: %v", got)
 		}
+	}
+}
+
+// TestApplyPolicyMaps_PathAllowWritesToFileAllowMapNotLPM is the reconciliation
+// regression test: req.PathAllow must land in cgroup_file_allow (the HASH map
+// guard_file_open's sleepable ACT_ALLOWLIST branch can actually read), not
+// cgroup_path_allow (the LPM trie it cannot touch — see
+// ardur_file_allow_key's doc comment in process_guard.bpf.c). Before this
+// fix, ApplyPolicyMaps wrote path_allow entries into an LPM trie that no
+// live enforcement hook could ever read for file ops, so SubpathPolicy-based
+// file allowlisting silently never worked (fail-closed under ENFORCE_STRICT,
+// fail-open under PERMISSIVE) despite bpf_lower.py promising it was enforced.
+func TestApplyPolicyMaps_PathAllowWritesToFileAllowMapNotLPM(t *testing.T) {
+	t.Parallel()
+	maps, _, handles := fakePolicyMaps()
+	req := samplePolicyReq(1, BpfEnforceModeEnforce)
+	req.PathAllow = []string{"/workspace"}
+
+	if err := ApplyPolicyMaps(maps, 7, req); err != nil {
+		t.Fatalf("ApplyPolicyMaps: unexpected error: %v", err)
+	}
+
+	k, err := fileAllowKey(7, "/workspace")
+	if err != nil {
+		t.Fatalf("fileAllowKey: %v", err)
+	}
+	var v uint64
+	if err := handles["cgroup_file_allow"].Lookup(k, unsafe.Pointer(&v)); err != nil {
+		t.Fatalf("expected /workspace entry in cgroup_file_allow, lookup failed: %v", err)
+	}
+	if v == 0 {
+		t.Error("cgroup_file_allow entry for /workspace has value 0, want nonzero (allowed)")
+	}
+
+	if len(handles["cgroup_path_allow"].data) != 0 {
+		t.Errorf("cgroup_path_allow got %d entries, want 0 — path_allow must not also write the LPM trie no sleepable hook can read", len(handles["cgroup_path_allow"].data))
+	}
+}
+
+// TestApplyPolicyMaps_SucceedsWithNilCgroupPathAllow proves policyMapsReady
+// does not require CgroupPathAllow: PolicyMapsFromHandles always sets it (a
+// live map handle exists), but nothing writes to it anymore (see its doc
+// comment on PolicyMaps), so a hypothetical caller that leaves it nil must
+// not be treated as fail-closed the way a genuinely missing required map is.
+func TestApplyPolicyMaps_SucceedsWithNilCgroupPathAllow(t *testing.T) {
+	t.Parallel()
+	maps, _, _ := fakePolicyMaps()
+	maps.CgroupPathAllow = nil
+	if err := ApplyPolicyMaps(maps, 7, samplePolicyReq(1, BpfEnforceModeEnforce)); err != nil {
+		t.Fatalf("ApplyPolicyMaps with nil CgroupPathAllow: unexpected error: %v", err)
 	}
 }
 
@@ -483,6 +538,80 @@ func TestPathLpmKey_TruncatesOversizePath(t *testing.T) {
 	k := (*pathLpmKeyLayout)(p)
 	if k.Prefixlen > 64+uint32(bpfPathLpmDataLen-1)*8 {
 		t.Errorf("prefixlen = %d, exceeds max representable path length", k.Prefixlen)
+	}
+}
+
+// --- fileAllowKey ------------------------------------------------------
+
+func TestFileAllowKey_RejectsRelativePath(t *testing.T) {
+	t.Parallel()
+	if _, err := fileAllowKey(1, "relative/path"); err == nil {
+		t.Error("fileAllowKey with relative path: expected error, got nil")
+	}
+}
+
+func TestFileAllowKey_TruncatesOversizePath(t *testing.T) {
+	t.Parallel()
+	p, err := fileAllowKey(1, "/"+repeatByte('a', bpfPathLen*2))
+	if err != nil {
+		t.Fatalf("fileAllowKey: unexpected error: %v", err)
+	}
+	k := (*fileAllowKeyLayout)(p)
+	if len(k.Path) != bpfPathLen {
+		t.Fatalf("Path field size = %d, want %d", len(k.Path), bpfPathLen)
+	}
+}
+
+// TestFileAllowKey_FieldsRoundTrip mirrors TestCgroupOpKeyLayout_FieldsRoundTrip
+// for the new hash key: same cgroup scoping, and the path bytes land exactly
+// where ardur_file_allow_key (process_guard.bpf.c) expects them, with the
+// remainder zero-padded (required for exact-match HASH lookups: two keys
+// with the same path prefix but different padding would otherwise never
+// compare equal to what the BPF side writes via bpf_probe_read_kernel into a
+// zeroed scratch buffer).
+func TestFileAllowKey_FieldsRoundTrip(t *testing.T) {
+	t.Parallel()
+	p, err := fileAllowKey(1234, "/workspace")
+	if err != nil {
+		t.Fatalf("fileAllowKey: %v", err)
+	}
+	k := (*fileAllowKeyLayout)(p)
+
+	var wantCgroup [8]byte
+	binary.NativeEndian.PutUint64(wantCgroup[:], 1234)
+	if k.CgroupRaw != wantCgroup {
+		t.Errorf("CgroupRaw = %v, want %v", k.CgroupRaw, wantCgroup)
+	}
+
+	wantPath := "/workspace"
+	if got := string(k.Path[:len(wantPath)]); got != wantPath {
+		t.Errorf("Path prefix = %q, want %q", got, wantPath)
+	}
+	for i := len(wantPath); i < len(k.Path); i++ {
+		if k.Path[i] != 0 {
+			t.Fatalf("Path[%d] = %d, want 0 (zero-padded tail)", i, k.Path[i])
+		}
+	}
+}
+
+// TestFileAllowKey_DistinctPrefixesProduceDistinctKeys guards the exact-match
+// property a HASH map depends on: "/data" and "/database" must NOT collide,
+// unlike the LPM trie's byte-prefix matching (see ardur_file_allow_key's doc
+// comment on the SubpathPolicy boundary-matching fix this enables).
+func TestFileAllowKey_DistinctPrefixesProduceDistinctKeys(t *testing.T) {
+	t.Parallel()
+	p1, err := fileAllowKey(1, "/data")
+	if err != nil {
+		t.Fatalf("fileAllowKey(/data): %v", err)
+	}
+	p2, err := fileAllowKey(1, "/database")
+	if err != nil {
+		t.Fatalf("fileAllowKey(/database): %v", err)
+	}
+	k1 := (*fileAllowKeyLayout)(p1)
+	k2 := (*fileAllowKeyLayout)(p2)
+	if *k1 == *k2 {
+		t.Error("fileAllowKey(/data) == fileAllowKey(/database), want distinct keys")
 	}
 }
 

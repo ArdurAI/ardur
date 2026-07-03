@@ -878,14 +878,22 @@ def run_governed_cli(args: Any) -> int:
 
     allowed = _split_csv(getattr(args, "allowed_tools", None))
     forbidden = _split_csv(getattr(args, "forbidden_tools", None))
+    # The `run` subparser defaults --max-tool-calls to None (so an explicit 0 is
+    # distinguishable from "unset"), which means the attribute exists as None and
+    # getattr's fallback never fires. Coerce None to the default here rather than
+    # letting int(None) raise TypeError — otherwise a plain `ardur run` with no
+    # --max-tool-calls crashes before the run even starts. Same guard for
+    # --max-duration-s for symmetry.
+    max_tool_calls_arg = getattr(args, "max_tool_calls", None)
+    max_duration_s_arg = getattr(args, "max_duration_s", None)
     try:
         result = run_governed(
             command=command,
             mission=getattr(args, "mission", None),
             allowed_tools=allowed,
             forbidden_tools=forbidden,
-            max_tool_calls=int(getattr(args, "max_tool_calls", DEFAULT_MAX_TOOL_CALLS)),
-            max_duration_s=int(getattr(args, "max_duration_s", DEFAULT_MAX_DURATION_S)),
+            max_tool_calls=DEFAULT_MAX_TOOL_CALLS if max_tool_calls_arg is None else int(max_tool_calls_arg),
+            max_duration_s=DEFAULT_MAX_DURATION_S if max_duration_s_arg is None else int(max_duration_s_arg),
             home=getattr(args, "home", None),
             via=getattr(args, "via", None) or "auto",
             enable_kernel_correlation=not getattr(args, "no_kernel_correlation", False),
