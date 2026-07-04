@@ -1276,6 +1276,38 @@ def test_kill_switch_invalid_proxy_url_reports_placeholder_next_steps_without_ra
     assert "urlopen error" not in encoded
 
 
+def test_kill_switch_empty_proxy_url_returns_invalid(monkeypatch, capsys):
+    """An explicitly-passed empty --proxy-url must not silently fall back to the
+    default URL and reach the network layer; it must return proxy_url_invalid
+    with no urlopen call, matching the behavior of every other invalid URL.
+
+    Regression guard for the ``or`` fallback chain that treated '' as falsy.
+    """
+    from vibap import cli as cli_module
+
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("empty kill-switch proxy URL should fail before urlopen")
+
+    monkeypatch.setattr(urlrequest, "urlopen", fail_if_called)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="", api_token=None)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "proxy_url_invalid"
+    assert response["error_code"] == "proxy_url_invalid"
+    assert response["condition"] == "proxy_url_invalid"
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"check_proxy_url", "start_or_check_governance_proxy"} <= actions
+    encoded = json.dumps(response)
+    assert "urlopen error" not in encoded
+
+
 def test_kill_switch_valid_loopback_proxy_unavailable_keeps_proxy_unavailable_guidance(
     monkeypatch,
     capsys,

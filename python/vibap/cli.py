@@ -1883,11 +1883,14 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
     import urllib.error as urlerror
     import urllib.request as urlreq
 
-    proxy_url = (
-        args.proxy_url
-        or os.environ.get("ARDUR_PROXY_URL")
-        or "https://127.0.0.1:8443"
-    )
+    # Distinguish "user explicitly passed --proxy-url ''" from "user omitted
+    # the flag". An empty string is an invalid proxy URL and must reach the
+    # validator below (which rejects it as proxy_url_invalid) rather than be
+    # silently swallowed by an ``or`` fallback chain that treats '' as falsy.
+    if args.proxy_url is None:
+        proxy_url = os.environ.get("ARDUR_PROXY_URL") or "https://127.0.0.1:8443"
+    else:
+        proxy_url = args.proxy_url
     proxy_base_url = _validated_kill_switch_proxy_base_url(proxy_url)
     if proxy_base_url is None:
         _print_json(_kill_switch_invalid_proxy_url_response())
