@@ -2795,6 +2795,37 @@ def _protect_claude_code_missing_scope_response(profile_present: bool) -> dict[s
     }
 
 
+def _protect_claude_code_scope_invalid_response() -> dict[str, object]:
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_scope_invalid",
+        "condition": "protect_scope_invalid",
+        "message": "ardur protect claude-code --scope must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --scope was provided. Pass an explicit "
+            "project folder, or use `.` to protect the current working directory."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_scope",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Choose the local project folder Claude Code is allowed to work in.",
+            },
+            {
+                "action": "use_cwd",
+                "command": "ardur protect claude-code --scope .",
+                "detail": "Use `.` explicitly to protect the current working directory.",
+            },
+            {
+                "action": "create_profile",
+                "command": "ardur profile init --template safe-coding --path ARDUR.md",
+                "detail": "Create an editable profile that includes a `Protect folder:` line.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     return {
         "ok": False,
@@ -2841,6 +2872,13 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
             raw_scope = Path(args.profile).expanduser().parent / profile_scope
     if raw_scope is None:
         return _protect_claude_code_missing_scope_response(profile_present=bool(args.profile))
+    # Reject empty/whitespace-only --scope before any key generation or directory
+    # creation. ``args.scope`` is ``type=str`` so an empty or whitespace-only
+    # value survives here as-is (previously ``type=Path`` normalized ``""`` to
+    # ``PosixPath('.')`` which silently resolved to the CWD and created real
+    # signing keys for the wrong directory).
+    if isinstance(raw_scope, str) and not raw_scope.strip():
+        return _protect_claude_code_scope_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     home.mkdir(parents=True, exist_ok=True)
@@ -3465,7 +3503,7 @@ def build_parser() -> argparse.ArgumentParser:
         "claude-code",
         help="issue an active Mission Passport and print the Claude Code plugin command",
     )
-    protect_cc.add_argument("--scope", type=Path, help="folder Claude Code is allowed to work in")
+    protect_cc.add_argument("--scope", type=str, help="folder Claude Code is allowed to work in")
     protect_cc.add_argument("--profile", type=Path, help="Markdown Ardur profile, such as ARDUR.md")
     protect_cc.add_argument(
         "--mode",
