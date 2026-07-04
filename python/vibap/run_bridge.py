@@ -39,12 +39,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from . import kernel_correlation as kc
-
-if TYPE_CHECKING:
-    from .passport import MissionPassport
 
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
