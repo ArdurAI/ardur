@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "da4905a9542c7f43081820787d4f6d81b1f67e00b9c73ea28cb9551c898dc149"
+source_sha256: "12d36c0fb5d75b336121f58d59a3e2bb4244f55cd209ff696bdfaec65fb176cd"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -615,6 +615,16 @@ command exits nonzero without configuring Claude Code. JSON output includes
 `ok: false`, `error: "missing_scope"`, `condition: "missing_scope"`, and
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
+
+If `--scope` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_scope_invalid"`, `condition: "protect_scope_invalid"`, and
+placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project>` and
+`ardur protect claude-code --scope .`; human output prints the same recovery
+guidance. An explicit `--scope .` is still accepted and protects the current
+working directory.
 
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output

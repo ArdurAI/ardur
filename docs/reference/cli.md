@@ -599,6 +599,16 @@ command exits nonzero without configuring Claude Code. JSON output includes
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
 
+If `--scope` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_scope_invalid"`, `condition: "protect_scope_invalid"`, and
+placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project>` and
+`ardur protect claude-code --scope .`; human output prints the same recovery
+guidance. An explicit `--scope .` is still accepted and protects the current
+working directory.
+
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output
 includes `ok: false`, `error: "claude_code_plugin_incomplete"`,
