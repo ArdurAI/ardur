@@ -1055,7 +1055,64 @@ def _issue_budget_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
     return None
 
 
+def _issue_identity_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "rerun_issue_with_valid_identity",
+            "command": (
+                "ardur issue --agent-id <agent-id> --mission <mission> "
+                "--keys-dir <keys-dir>"
+            ),
+            "detail": (
+                "Provide a non-empty agent subject identifier and a non-empty "
+                "mission string after trimming whitespace before issuing a "
+                "Mission Passport."
+            ),
+        }
+    ]
+
+
+def _issue_identity_failure_response(condition: str, detail: str) -> dict:
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport issue identity is invalid.",
+        "detail": detail,
+        "next_steps": _issue_identity_failure_next_steps(condition),
+    }
+
+
+def _issue_identity_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
+    agent_id = args.agent_id
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        return (
+            _issue_identity_failure_response(
+                "issue_agent_id_invalid",
+                "--agent-id must be a non-empty string after trimming whitespace.",
+            ),
+            1,
+        )
+    mission = args.mission
+    if not isinstance(mission, str) or not mission.strip():
+        return (
+            _issue_identity_failure_response(
+                "issue_mission_invalid",
+                "--mission must be a non-empty string after trimming whitespace.",
+            ),
+            1,
+        )
+    return None
+
+
 def cmd_issue(args: argparse.Namespace) -> int:
+    issue_identity_failure = _issue_identity_failure(args)
+    if issue_identity_failure is not None:
+        response, exit_code = issue_identity_failure
+        _print_json(response)
+        return exit_code
     issue_budget_failure = _issue_budget_failure(args)
     if issue_budget_failure is not None:
         response, exit_code = issue_budget_failure

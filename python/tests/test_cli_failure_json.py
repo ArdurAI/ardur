@@ -1422,6 +1422,76 @@ def test_issue_non_integer_budget_returns_safe_json_usage_failure(tmp_path, caps
     assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
 
 
+@pytest.mark.parametrize(
+    ("agent_id", "mission", "condition"),
+    [
+        ("", "test mission", "issue_agent_id_invalid"),
+        ("   ", "test mission", "issue_agent_id_invalid"),
+        ("\t\n", "test mission", "issue_agent_id_invalid"),
+        ("test-agent", "", "issue_mission_invalid"),
+        ("test-agent", "   ", "issue_mission_invalid"),
+        ("test-agent", "\t\n", "issue_mission_invalid"),
+        ("   ", "   ", "issue_agent_id_invalid"),
+    ],
+)
+def test_issue_empty_or_whitespace_identity_returns_safe_json_failure(
+    tmp_path, capsys, agent_id, mission, condition
+):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            agent_id,
+            "--mission",
+            mission,
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == condition
+    assert payload["error"] == condition
+    assert payload["error_code"] == condition
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "claims" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No signing keys may be created when validation rejects the input.
+    assert not keys_dir.exists() or not any(keys_dir.iterdir())
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+
+
+def test_issue_valid_identity_still_succeeds(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["sub"] == "test-agent"
+    assert payload["claims"]["mission"] == "test mission"
+    assert (keys_dir / "passport_private.pem").exists()
+    assert (keys_dir / "passport_public.pem").exists()
+
+
 def test_issue_zero_tool_call_budget_remains_valid(tmp_path, capsys):
     rc, payload = _run_cli_and_read_json(
         [
