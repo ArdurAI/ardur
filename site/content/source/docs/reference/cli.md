@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "12d36c0fb5d75b336121f58d59a3e2bb4244f55cd209ff696bdfaec65fb176cd"
+source_sha256: "1910dbcc76a49ca505fcb59ace19a8c85b5d89e3c7c5e0e6758d1871b16796c1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -49,6 +49,18 @@ ardur start [--host HOST] [--port PORT] [--mission FILE]
 ```
 
 Defaults: bind `127.0.0.1:8080`. Auth required by default.
+
+Empty or whitespace-only path arguments (`--keys-dir`, `--state-dir`,
+`--log-path`, `--mission`, `--tls-cert`, `--tls-key`) fail closed before port,
+host, TLS, key, state, audit-log, session, or proxy startup work begins. They
+exit non-zero and write parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `path_arg_invalid`, a message, a
+detail, and placeholder-only `next_steps` such as
+`ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or secrets, and leaves no key, state,
+log, or session artifacts behind. An explicit `--keys-dir .` (current working
+directory) is still accepted.
 
 TLS setup is local loopback proxy configuration. By default Ardur can create
 local self-signed TLS material; `--tls-cert` and `--tls-key` select explicit
@@ -151,6 +163,15 @@ ardur issue --agent-id ID --mission TEXT
 
 Prints `{"token": "...", "claims": {...}}` to stdout.
 
+Empty or whitespace-only `--keys-dir` fails closed before key generation,
+identity validation, or signing. It exits non-zero and writes parseable stdout
+JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not create or print a token or private key, and does not copy
+local paths or secret material. An explicit `--keys-dir .` is still accepted.
+
 Invalid budget flags fail closed before key generation or signing:
 `--max-duration-s` and `--ttl-s` must be positive integers,
 `--max-tool-calls` must be zero or a positive integer, and
@@ -173,6 +194,15 @@ Verify a Mission Passport signature and decode its claims.
 ardur verify --token JWT [--keys-dir DIR]
 ```
 
+Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
+token verification, or any filesystem work. It exits non-zero and writes
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values of `path_arg_invalid`, a message, a detail, and placeholder-only
+`next_steps` such as `ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or secrets, and leaves no artifacts.
+An explicit `--keys-dir .` is still accepted.
+
 ### `ardur attest`
 
 Issue a behavioral attestation for a saved session, summarising the receipt
@@ -182,6 +212,16 @@ chain.
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
 ```
+
+Empty or whitespace-only path arguments (`--keys-dir`, `--state-dir`,
+`--log-path`) fail closed before state, session, audit-log, key, or
+attestation-token work begins. They exit non-zero and write parseable stdout
+JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or secrets, and leaves no artifacts.
+An explicit `--keys-dir .` is still accepted.
 
 Invalid attest state and audit-log write targets fail closed before Mission
 Passport key generation, state/session or log artifacts, and attestation token
