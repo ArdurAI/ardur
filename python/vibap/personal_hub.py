@@ -36,7 +36,7 @@ from urllib import request as urlrequest
 from cryptography.hazmat.primitives import serialization
 
 from . import __version__
-from .passport import DEFAULT_HOME, MissionPassport, generate_keypair, issue_passport
+from .passport import DEFAULT_HOME, MissionPassport, _ensure_default_home_dir, _is_under_default_home, generate_keypair, issue_passport
 from .proxy import Decision, GovernanceProxy
 from .metrics import metrics as ardur_metrics
 from .rate_limiter import RateLimiter
@@ -133,6 +133,11 @@ def validate_personal_home_directory(paths: HubPaths) -> None:
 
 def _ensure_personal_home_directory(paths: HubPaths) -> None:
     validate_personal_home_directory(paths)
+    # When the personal home is under DEFAULT_HOME, materialise the home
+    # with 0o700 first so the mkdir(parents=True) doesn't create it with
+    # the process umask.
+    if _is_under_default_home(paths.home):
+        _ensure_default_home_dir()
     try:
         paths.home.mkdir(parents=True, exist_ok=True)
     except FileExistsError as exc:

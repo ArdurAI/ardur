@@ -37,6 +37,7 @@ from .passport import (
     DEFAULT_KEYS_DIR,
     KeyDirectoryError,
     MissionPassport,
+    _ensure_default_home_dir,
     generate_keypair,
     load_existing_public_key,
     issue_passport,
@@ -2955,7 +2956,10 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         return _protect_claude_code_scope_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
-    home.mkdir(parents=True, exist_ok=True)
+    if args.home:
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    else:
+        _ensure_default_home_dir()
     plugin_dir = Path(args.plugin_dir).expanduser().resolve()
     failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
     if failed_plugin_checks:

@@ -85,8 +85,38 @@ def assert_iat_in_window(
         )
 
 
+def _try_chmod_0700_warn(target: Path) -> None:
+    """Best-effort chmod 0o700 with a stderr warning on failure.
+
+    Some filesystems (read-only bind mounts, certain container overlays,
+    NFS with no_root_squash off) reject chmod even when mkdir succeeds.
+    Don't fail home discovery on that — the home dir still exists and is
+    usable. But DO emit a stderr warning so operators see the security
+    trade-off: the dir may be world-readable under the caller's umask,
+    exposing private-key material that later lands inside.
+    Set VIBAP_HOME explicitly to a chmod-capable fs to silence.
+    """
+    try:
+        os.chmod(target, stat.S_IRWXU)
+    except OSError as exc:
+        import sys
+        print(
+            f"warning: could not chmod 0o700 on VIBAP home {target}: "
+            f"{exc}. Private-key material may be world-readable. "
+            f"Set VIBAP_HOME to a chmod-capable filesystem.",
+            file=sys.stderr,
+        )
+
+
 def _default_home_dir() -> Path:
-    explicit = os.environ.get("VIBAP_HOME")
+    """Pure path resolver — no filesystem mutation.
+
+    Returns ``$VIBAP_HOME`` (if set and non-empty) or the first viable
+    candidate from ``$CWD/.vibap`` / ``$HOME/.vibap``.  Does NOT create
+    directories or chmod anything; call :func:`_ensure_default_home_dir`
+    to materialise the home with 0o700 on first actual use.
+    """
+    explicit = os.environ.get("VIBAP_HOME", "").strip()
     if explicit:
         return Path(explicit).expanduser()
 
@@ -96,31 +126,49 @@ def _default_home_dir() -> Path:
     ]
     for candidate in candidates:
         target = candidate.expanduser()
+        # Pure resolver: return the first candidate whose parent exists
+        # (so we know the filesystem is reachable) without creating anything.
         try:
-            target.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+            if target.parent.is_dir():
+                return target
         except OSError:
             continue
-        # 2026-04-21 review comment #8 + PR-#13 external-review-G/augment: some
-        # filesystems (read-only bind mounts, certain container
-        # overlays, NFS with no_root_squash off) reject chmod even
-        # when mkdir succeeds. Don't fail home discovery on that —
-        # the home dir still exists and is usable. But DO emit a
-        # stderr warning so operators see the security trade-off:
-        # the dir may be world-readable under the caller's umask,
-        # exposing private-key material that later lands inside.
-        # Set VIBAP_HOME explicitly to a chmod-capable fs to silence.
-        try:
-            os.chmod(target, stat.S_IRWXU)
-        except OSError as exc:
-            import sys
-            print(
-                f"warning: could not chmod 0o700 on VIBAP home {target}: "
-                f"{exc}. Private-key material may be world-readable. "
-                f"Set VIBAP_HOME to a chmod-capable filesystem.",
-                file=sys.stderr,
-            )
-        return target
     raise OSError("unable to determine a writable VIBAP home directory")
+
+
+def _ensure_default_home_dir() -> Path:
+    """Materialise DEFAULT_HOME with 0o700 on first actual use.
+
+    Idempotent: if the directory already exists, ``mkdir(exist_ok=True)``
+    is a no-op and the mode of an *existing* directory is NOT changed
+    (preserving the legacy contract for explicit ``$VIBAP_HOME`` dirs).
+    Only a newly-created directory gets ``0o700``.
+    """
+    target = _default_home_dir()
+    already_existed = target.exists()
+    try:
+        target.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+    except OSError:
+        # If we can't even create the directory, the caller will get a
+        # follow-up error from whatever write path triggered this.
+        return target
+    if not already_existed:
+        _try_chmod_0700_warn(target)
+    return target
+
+
+def _is_under_default_home(path: Path) -> bool:
+    """Return True if *path* is equal to or lies under DEFAULT_HOME.
+
+    Uses unresolved string comparison — sufficient because DEFAULT_HOME
+    is always a concrete path (``$VIBAP_HOME``, ``$CWD/.vibap``, or
+    ``$HOME/.vibap``) with no symlink component in practice.
+    """
+    home_str = str(DEFAULT_HOME)
+    path_str = str(path)
+    if path_str == home_str:
+        return True
+    return path_str.startswith(home_str + os.sep)
 
 
 DEFAULT_HOME = _default_home_dir()
@@ -337,6 +385,11 @@ def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
     target = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
     if target.exists() and not target.is_dir():
         raise KeyDirectoryError()
+    # If the target is under DEFAULT_HOME, materialise the home with 0o700
+    # first so the leaf mkdir(parents=True) doesn't create it with the
+    # process umask.
+    if _is_under_default_home(target):
+        _ensure_default_home_dir()
     try:
         target.mkdir(parents=True, exist_ok=True)
     except (FileExistsError, NotADirectoryError) as exc:

@@ -16,7 +16,7 @@ from cryptography.x509.oid import NameOID
 
 
 def _default_tls_dir(home: Path | None = None) -> Path:
-    from .passport import DEFAULT_HOME
+    from .passport import DEFAULT_HOME, _is_under_default_home
 
     return (home or DEFAULT_HOME) / "tls"
 
@@ -29,6 +29,12 @@ def generate_self_signed_cert(
     cert_filename: str = "cert.pem",
 ) -> tuple[Path, Path, str]:
     """Generate a self-signed EC P-256 cert with a SHA-256 fingerprint."""
+    from .passport import _ensure_default_home_dir, _is_under_default_home
+
+    # When tls_dir is under DEFAULT_HOME, materialise the home with 0o700
+    # first so the mkdir(parents=True) doesn't create it with the process umask.
+    if _is_under_default_home(tls_dir):
+        _ensure_default_home_dir()
     tls_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     key_path = tls_dir / key_filename

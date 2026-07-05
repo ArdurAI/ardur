@@ -24,7 +24,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .claude_code_hook import MissionLoadError, load_active_passport
 from .denial import DenialReason
-from .passport import DEFAULT_HOME, load_private_key, load_public_key, resolve_keys_dir
+from .passport import DEFAULT_HOME, _ensure_default_home_dir, load_private_key, load_public_key, resolve_keys_dir
 from .receipt import build_receipt, sign_receipt, verify_chain
 from .shareable_redaction import path_aliases, redact_local_paths
 
@@ -150,6 +150,10 @@ def _trace_id_from_input(hook_input: Mapping[str, Any], claims: Mapping[str, Any
 
 def resolve_chain_state(*, trace_id: str) -> ChainState:
     base = Path(os.environ.get(CHAIN_DIR_ENV_VAR, str(DEFAULT_CHAIN_DIR))).expanduser().resolve(strict=False)
+    # When the chain dir falls through to the DEFAULT_HOME-derived default,
+    # materialise the home with 0o700 before creating trace directories.
+    if CHAIN_DIR_ENV_VAR not in os.environ:
+        _ensure_default_home_dir()
     state = ChainState(chain_dir=base, trace_id=trace_id, trace_dir_id=_trace_dir_id(trace_id))
     _ensure_under_chain_root(chain_root=base, path=state.file)
     _ensure_under_chain_root(chain_root=base, path=state.lock_file)
@@ -277,6 +281,10 @@ def build_local_fixture(
     project = Path(project_dir or Path.cwd()).expanduser().resolve(strict=False)
     ardur_chain = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser().resolve(strict=False)
     _validate_fixture_project_dir(project)
+    # When chain_dir falls through to the DEFAULT_HOME-derived default,
+    # materialise the home with 0o700 before creating directories inside it.
+    if chain_dir is None:
+        _ensure_default_home_dir()
     signing_keys = resolve_keys_dir(keys_dir)
 
     settings_path = gemini_home / "settings.json"
