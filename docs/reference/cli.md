@@ -290,6 +290,15 @@ with `ok: false`, stable `condition`/`error` values, and
 emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
 
+If `--home` is empty or whitespace-only, `ardur setup` and all Personal
+commands (`hub`, `doctor`, `status`, `uninstall`, `desktop-observe`) fail
+closed before writing setup state, generating or printing a token, creating
+keys, installing launch files, or starting a service. The command exits `1`
+and writes parseable stdout JSON with `ok: false`, stable `condition`/`error`
+values, and `error_code: setup_home_invalid`; stderr stays empty, no traceback
+is emitted, `next_steps` uses placeholders such as `<ardur-home>`, and no
+config, token, LaunchAgent, key, session, log, or state artifacts are created.
+
 Invalid setup bind inputs fail closed before writing config, generating or
 printing a Hub token, installing the LaunchAgent plist, creating setup state, or
 starting a service. `--port` must be an integer stable TCP port from `1` through

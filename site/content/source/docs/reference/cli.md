@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "1910dbcc76a49ca505fcb59ace19a8c85b5d89e3c7c5e0e6758d1871b16796c1"
+source_sha256: "a1e5cd449d96b2a1794cfe5dd4eda059ecccbabc765d4b700923d98b02c2da4a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -306,6 +306,15 @@ with `ok: false`, stable `condition`/`error` values, and
 `error_code: path_not_directory`; stderr stays empty, no traceback is
 emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
+
+If `--home` is empty or whitespace-only, `ardur setup` and all Personal
+commands (`hub`, `doctor`, `status`, `uninstall`, `desktop-observe`) fail
+closed before writing setup state, generating or printing a token, creating
+keys, installing launch files, or starting a service. The command exits `1`
+and writes parseable stdout JSON with `ok: false`, stable `condition`/`error`
+values, and `error_code: setup_home_invalid`; stderr stays empty, no traceback
+is emitted, `next_steps` uses placeholders such as `<ardur-home>`, and no
+config, token, LaunchAgent, key, session, log, or state artifacts are created.
 
 Invalid setup bind inputs fail closed before writing config, generating or
 printing a Hub token, installing the LaunchAgent plist, creating setup state, or
