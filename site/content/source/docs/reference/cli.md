@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "a1e5cd449d96b2a1794cfe5dd4eda059ecccbabc765d4b700923d98b02c2da4a"
+source_sha256: "f480caaa8299f8439ee31c6087c41d6f939ad4a9d5be903fac64b9b0c47520d5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -674,6 +674,27 @@ placeholder-only `next_steps` such as
 `ardur protect claude-code --scope .`; human output prints the same recovery
 guidance. An explicit `--scope .` is still accepted and protects the current
 working directory.
+
+If `--agent-id` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_agent_id_invalid"`, `condition: "protect_agent_id_invalid"`,
+and placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project> --agent-id <agent-id>` and
+`ardur protect claude-code --scope <your-project>`; human output prints the same
+recovery guidance. Omitting `--agent-id` uses the default subject and is not
+rejected.
+
+If `--mission` is supplied as a non-empty but whitespace-only string, the
+command exits nonzero without configuring Claude Code, generating keys, or
+writing `active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_mission_invalid"`, `condition: "protect_mission_invalid"`,
+and placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project> --mission <mission>` and
+`ardur protect claude-code --scope <your-project>`; human output prints the same
+recovery guidance. An empty-string `--mission ""` is falsy and falls through to
+the selected mode's default mission; only whitespace-only strings that would
+leak into the JWT are rejected.
 
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output
