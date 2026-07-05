@@ -63,6 +63,7 @@ HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
 PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
+SETUP_HOME_INVALID_CONDITION = "setup_home_invalid"
 SETUP_HOST_INVALID_CONDITION = "setup_host_invalid"
 SETUP_PORT_INVALID_CONDITION = "setup_port_invalid"
 _QUERY_TOKEN_LOG_RE = re.compile(
@@ -103,7 +104,7 @@ class HubPaths:
 
     @classmethod
     def from_home(cls, home: str | Path | None = None) -> "HubPaths":
-        root = Path(home).expanduser() if home is not None else DEFAULT_HUB_HOME
+        root = _resolve_personal_home(home)
         return cls(
             home=root,
             state_dir=root / "state",
@@ -114,6 +115,37 @@ class HubPaths:
             reviews=root / "session_reviews.json",
             config=root / "config.json",
         )
+
+
+def _is_empty_home_value(home: str | Path | None) -> bool:
+    """True when a CLI ``--home`` value is an empty or whitespace-only string.
+
+    ``--home`` uses ``type=str`` so the raw string reaches this helper before
+    any ``Path()`` normalisation. A literal empty string ``""`` normalises to
+    ``Path(".")`` (the current working directory) and a whitespace-only string
+    such as ``"   "`` becomes a literal whitespace-named directory; both must
+    be rejected before key/config/plist creation.
+
+    ``None`` (flag omitted) and existing ``Path`` callers (internal, already
+    validated) intentionally pass through. An explicit ``--home .`` is a valid
+    directory choice and is preserved.
+    """
+
+    if home is None:
+        return False
+    if isinstance(home, Path):
+        return False
+    return not str(home).strip()
+
+
+def _resolve_personal_home(home: str | Path | None) -> Path:
+    if _is_empty_home_value(home):
+        raise HubError(
+            "Ardur Personal home must be a non-empty path after trimming whitespace.",
+            status=400,
+            code=SETUP_HOME_INVALID_CONDITION,
+        )
+    return Path(home).expanduser() if home is not None else DEFAULT_HUB_HOME
 
 
 def _personal_home_not_directory_error() -> HubError:
@@ -193,6 +225,57 @@ def personal_home_failure_response() -> dict[str, Any]:
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
         "next_steps": personal_home_failure_next_steps(),
+    }
+
+
+def setup_home_invalid_next_steps() -> list[dict[str, str]]:
+    condition = SETUP_HOME_INVALID_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "choose_personal_home_directory",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "Choose a non-empty directory path for the local Ardur Personal home. "
+                "Empty strings, whitespace-only values, and unquoted empty environment "
+                "variables resolve to the current working directory and are rejected."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "After choosing a valid Ardur Personal home directory, start the loopback "
+                "Hub. Keep raw local paths and Hub tokens out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "rerun_doctor",
+            "command": "ardur doctor --home <ardur-home>",
+            "detail": (
+                "Re-run local setup diagnostics after supplying a non-empty home path. "
+                "This guidance is local/no-key recovery only."
+            ),
+        },
+    ]
+
+
+def setup_home_invalid_failure_response() -> dict[str, Any]:
+    condition = SETUP_HOME_INVALID_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal home must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "The supplied --home value is empty or whitespace-only. Pass a real directory "
+            "path (for example an absolute path or an explicit '.' for the current directory) "
+            "before running setup or Personal Hub commands."
+        ),
+        "next_steps": setup_home_invalid_next_steps(),
     }
 
 
@@ -343,6 +426,25 @@ def _setup_hub_url(host: str, port: int) -> str:
 
 def _is_personal_home_not_directory_error(exc: HubError) -> bool:
     return exc.code == PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+
+
+def _is_setup_home_invalid_error(exc: HubError) -> bool:
+    return exc.code == SETUP_HOME_INVALID_CONDITION
+
+
+def _personal_home_failure_response_for(exc: HubError) -> dict[str, Any] | None:
+    """Map a Personal-home ``HubError`` to its structured response, or None.
+
+    Used by command handlers that already catch ``HubError`` so they can
+    uniformly surface the right structured failure for either an empty/whitespace
+    home value or an existing non-directory home path.
+    """
+
+    if _is_setup_home_invalid_error(exc):
+        return setup_home_invalid_failure_response()
+    if _is_personal_home_not_directory_error(exc):
+        return personal_home_failure_response()
+    return None
 
 
 def _print_json_response(payload: dict[str, Any]) -> None:
@@ -643,7 +745,7 @@ def resolve_hub_token(
     try:
         token = _load_hub_config(paths).get("hub_token")
     except HubError as exc:
-        if _is_personal_home_not_directory_error(exc):
+        if _is_personal_home_not_directory_error(exc) or _is_setup_home_invalid_error(exc):
             raise
         return None
     return str(token) if token else None
@@ -1426,8 +1528,9 @@ def hub_request(
     try:
         token = resolve_hub_token(home=home, explicit=hub_token)
     except HubError as exc:
-        if _is_personal_home_not_directory_error(exc):
-            return personal_home_failure_response()
+        mapped = _personal_home_failure_response_for(exc)
+        if mapped is not None:
+            return mapped
         raise
     if token:
         headers["authorization"] = f"Bearer {token}"
@@ -1947,8 +2050,9 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     try:
         token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
     except HubError as exc:
-        if _is_personal_home_not_directory_error(exc):
-            return personal_home_failure_response()
+        mapped = _personal_home_failure_response_for(exc)
+        if mapped is not None:
+            return mapped
         raise
     hub = hub_request("GET", "/v1/status", hub_url=args.hub_url, hub_token=token, home=args.home)
     home_ok = paths.home.exists()
@@ -2087,8 +2191,9 @@ def run_under_hub(args: argparse.Namespace) -> int:
     try:
         token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
     except HubError as exc:
-        if _is_personal_home_not_directory_error(exc):
-            _print_json_response(personal_home_failure_response())
+        mapped = _personal_home_failure_response_for(exc)
+        if mapped is not None:
+            _print_json_response(mapped)
             return 1
         raise
     start = hub_request("POST", "/v1/sessions/start", start_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
@@ -2139,6 +2244,10 @@ def run_under_hub(args: argparse.Namespace) -> int:
 
 
 def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
+    # Validate the Personal home before any macOS Accessibility/Screen Recording
+    # probe: an empty/whitespace --home must fail closed with structured JSON
+    # rather than blocking on an osascript permission dialog first.
+    _resolve_personal_home(getattr(args, "home", None))
     app = args.app
     title = args.title
     permission_note = None
@@ -2180,8 +2289,9 @@ def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
     try:
         token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
     except HubError as exc:
-        if _is_personal_home_not_directory_error(exc):
-            return personal_home_failure_response()
+        mapped = _personal_home_failure_response_for(exc)
+        if mapped is not None:
+            return mapped
         raise
     response = hub_request("POST", "/v1/events/observe", payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
     response = desktop_observe_response_with_next_steps(response)

@@ -49,11 +49,13 @@ from .personal_hub import (
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
     HubError,
+    SETUP_HOME_INVALID_CONDITION,
     desktop_observe,
     doctor_personal,
     hub_request,
     run_under_hub,
     serve_hub,
+    setup_home_invalid_failure_response,
     setup_personal,
     status_response_with_next_steps,
     uninstall_personal,
@@ -157,6 +159,9 @@ def _path_not_directory_response() -> dict:
 
 
 def _path_failure_exit_code(exc: HubError) -> int:
+    if exc.code == SETUP_HOME_INVALID_CONDITION:
+        _print_json(setup_home_invalid_failure_response())
+        return 1
     if exc.code != _hub_path_error_code():
         raise exc
     _print_json(_path_not_directory_response())
@@ -2078,13 +2083,20 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    response = doctor_personal(args)
+    try:
+        response = doctor_personal(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
-    _print_json(uninstall_personal(args))
+    try:
+        response = uninstall_personal(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
+    _print_json(response)
     return 0
 
 
@@ -2109,7 +2121,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_observe(args: argparse.Namespace) -> int:
-    response = desktop_observe(args)
+    try:
+        response = desktop_observe(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
@@ -3396,7 +3411,7 @@ def build_parser() -> argparse.ArgumentParser:
     hub = subparsers.add_parser("hub", help="start the local Ardur Personal Hub")
     hub.add_argument("--host", default=DEFAULT_HUB_HOST, help="bind address")
     hub.add_argument("--port", type=int, default=DEFAULT_HUB_PORT, help="listen port")
-    hub.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    hub.add_argument("--home", type=str, help="Ardur Personal home directory")
     hub.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
     hub.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
     hub.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
@@ -3405,7 +3420,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup = subparsers.add_parser("setup", help="configure Ardur Personal on this Mac")
     setup.add_argument("--host", default=DEFAULT_HUB_HOST, help="Hub bind address")
     setup.add_argument("--port", default=DEFAULT_HUB_PORT, help="Hub port")
-    setup.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    setup.add_argument("--home", type=str, help="Ardur Personal home directory")
     setup.add_argument(
         "--rotate-token",
         action="store_true",
@@ -3422,11 +3437,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
     status.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     status.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    status.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    status.add_argument("--home", type=str, help="Ardur Personal home directory")
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
-    doctor.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    doctor.add_argument("--home", type=str, help="Ardur Personal home directory")
     doctor.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     doctor.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
     doctor.set_defaults(func=cmd_doctor)
@@ -3443,7 +3458,7 @@ def build_parser() -> argparse.ArgumentParser:
     kill_switch.set_defaults(func=cmd_kill_switch)
 
     uninstall = subparsers.add_parser("uninstall", help="remove Ardur Personal launch files")
-    uninstall.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    uninstall.add_argument("--home", type=str, help="Ardur Personal home directory")
     uninstall.add_argument(
         "--remove-data",
         action="store_true",
@@ -3515,7 +3530,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     desktop.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     desktop.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    desktop.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    desktop.add_argument("--home", type=str, help="Ardur Personal home directory")
     desktop.add_argument("--session-id", help="stable desktop session id")
     desktop.add_argument("--app", help="application name; autodetected on macOS when omitted")
     desktop.add_argument("--title", help="window title; autodetected on macOS when omitted")
@@ -3531,7 +3546,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     personal_native_host.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     personal_native_host.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    personal_native_host.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    personal_native_host.add_argument("--home", type=str, help="Ardur Personal home directory")
     personal_native_host.add_argument(
         "--once-json",
         type=Path,
