@@ -1615,6 +1615,207 @@ def test_protect_claude_code_explicit_dot_scope_still_succeeds(tmp_path, capsys)
     assert payload["ok"] is True
 
 
+@pytest.mark.parametrize(
+    ("agent_id",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_agent_id_returns_invalid(tmp_path, capsys, agent_id):
+    """Empty/whitespace-only --agent-id must fail closed with structured JSON
+    and must NOT create signing keys, active_mission.jwt, or home artifacts.
+
+    Regression: previously ``--agent-id ""`` or ``"   "`` overrode the argparse
+    default ``local-user:claude-code`` and flowed into the Mission Passport
+    ``agent_id`` (JWT ``sub`` claim) while generating real signing keys.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--agent-id",
+            agent_id,
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_agent_id_invalid"
+    assert payload["error"] == "protect_agent_id_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # agent-id is rejected.
+    assert not home.exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+@pytest.mark.parametrize(
+    ("mission",),
+    [
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_whitespace_mission_returns_invalid(tmp_path, capsys, mission):
+    """Explicitly-provided whitespace-only --mission must fail closed with
+    structured JSON and must NOT create signing keys, active_mission.jwt, or
+    home artifacts.
+
+    Note: an empty-string ``--mission ""`` is falsy and falls through to the
+    mode default via ``args.mission or (...)``; that fallback is acceptable and
+    only whitespace-only strings (truthy but meaningless) leak into the JWT.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mission",
+            mission,
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_mission_invalid"
+    assert payload["error"] == "protect_mission_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # mission is rejected.
+    assert not home.exists()
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+def test_protect_claude_code_empty_string_mission_falls_back_to_default(tmp_path, capsys):
+    """An empty-string ``--mission ""`` is falsy and must fall through to the
+    selected mode's default mission rather than be rejected. This preserves the
+    ``args.mission or (...)`` fallback documented in the fix boundary.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mission",
+            "",
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+    # The default read-only mode mission must be used (non-empty).
+    assert payload["claims"]["mission"]
+
+
+def test_protect_claude_code_omitted_agent_id_and_mission_still_succeeds(tmp_path, capsys):
+    """Omitting both --agent-id and --mission must continue to work: argparse
+    supplies the default agent-id and the mode default mission is used.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["claims"]["sub"] == "local-user:claude-code"
+    assert payload["claims"]["mission"]
+
+
+def test_protect_claude_code_valid_agent_id_and_mission_still_succeed(tmp_path, capsys):
+    """A non-empty valid --agent-id and --mission must continue to produce a
+    passport with those exact claim values.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--agent-id",
+            "ci-runner:pull-1234",
+            "--mission",
+            "run the focused test suite",
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["claims"]["sub"] == "ci-runner:pull-1234"
+    assert payload["claims"]["mission"] == "run the focused test suite"
+
+
 # ---------------------------------------------------------------------------
 # Path-arg validation: empty/whitespace --keys-dir, --state-dir, --log-path,
 # --tls-cert, --tls-key, and --mission (start only) are rejected before any

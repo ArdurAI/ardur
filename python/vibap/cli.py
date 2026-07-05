@@ -2916,6 +2916,62 @@ def _protect_claude_code_scope_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_identity_invalid_response(condition: str) -> dict[str, object]:
+    """Structured response for empty/whitespace ``--agent-id`` or ``--mission``.
+
+    Mirrors the ``protect_scope_invalid`` shape so all ``protect claude-code``
+    fail-closed branches share the same envelope. ``next_steps`` use
+    placeholder-only commands and details with no local paths or tokens.
+    """
+    if condition == "protect_agent_id_invalid":
+        message = "ardur protect claude-code --agent-id must be a non-empty string after trimming whitespace."
+        detail = (
+            "An empty or whitespace-only --agent-id was provided. The Mission "
+            "Passport subject must be a non-empty identifier after trimming "
+            "whitespace; omit the flag to use the default subject."
+        )
+        next_steps = [
+            {
+                "action": "pass_agent_id",
+                "command": "ardur protect claude-code --scope <your-project> --agent-id <agent-id>",
+                "detail": "Provide a non-empty agent subject identifier after trimming whitespace.",
+            },
+            {
+                "action": "omit_agent_id",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --agent-id to use the default subject.",
+            },
+        ]
+    else:  # protect_mission_invalid
+        message = "ardur protect claude-code --mission must be a non-empty string after trimming whitespace."
+        detail = (
+            "An explicitly-provided --mission was empty or whitespace-only. "
+            "Pass a non-empty mission string, or omit the flag to use the "
+            "selected mode's default mission."
+        )
+        next_steps = [
+            {
+                "action": "pass_mission",
+                "command": "ardur protect claude-code --scope <your-project> --mission <mission>",
+                "detail": "Provide a non-empty mission string after trimming whitespace.",
+            },
+            {
+                "action": "omit_mission",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --mission to use the selected mode's default mission.",
+            },
+        ]
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": next_steps,
+    }
+
+
 def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     return {
         "ok": False,
@@ -2969,6 +3025,18 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # signing keys for the wrong directory).
     if isinstance(raw_scope, str) and not raw_scope.strip():
         return _protect_claude_code_scope_invalid_response()
+    # Reject empty/whitespace-only --agent-id and explicitly-provided
+    # whitespace-only --mission before any key generation, Mission Passport JWT
+    # issuance, or plugin/hook artifact creation. ``--agent-id`` has an argparse
+    # default (``local-user:claude-code``) so only an explicitly-passed
+    # empty/whitespace string reaches here. ``--mission`` defaults to ``None``;
+    # reject only explicitly-provided whitespace-only strings (truthy values
+    # that leak into the JWT). An empty string ``""`` is falsy and falls through
+    # to the ``args.mission or (...)`` mode/profile default, which is acceptable.
+    if isinstance(args.agent_id, str) and not args.agent_id.strip():
+        return _protect_claude_code_identity_invalid_response("protect_agent_id_invalid")
+    if isinstance(args.mission, str) and args.mission and not args.mission.strip():
+        return _protect_claude_code_identity_invalid_response("protect_mission_invalid")
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
