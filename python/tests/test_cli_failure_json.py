@@ -1613,3 +1613,202 @@ def test_protect_claude_code_explicit_dot_scope_still_succeeds(tmp_path, capsys)
 
     assert rc == 0
     assert payload["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Path-arg validation: empty/whitespace --keys-dir, --state-dir, --log-path,
+# --tls-cert, --tls-key, and --mission (start only) are rejected before any
+# key generation, state creation, or directory resolution.
+# ---------------------------------------------------------------------------
+
+
+def test_start_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on start must be rejected before key/state creation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["start", "--keys-dir", "", "--port", "0"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_issue_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on issue must be rejected before key generation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            "",
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    assert "token" not in payload
+    assert "claims" not in payload
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_verify_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on verify must be rejected before key/state creation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--token", "not-a-jwt", "--keys-dir", ""],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_attest_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on attest must be rejected before key/state creation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "attest",
+            "--session",
+            "00000000-0000-0000-0000-000000000000",
+            "--keys-dir",
+            "",
+            "--state-dir",
+            str(tmp_path / "state"),
+            "--log-path",
+            str(tmp_path / "audit.jsonl"),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+@pytest.mark.parametrize("keys_dir_value", ["", "   ", "\t\n"])
+def test_issue_keys_dir_whitespace_rejected(tmp_path, capsys, keys_dir_value):
+    """Whitespace-only --keys-dir on issue must be rejected before key generation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            keys_dir_value,
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    assert "token" not in payload
+    assert "claims" not in payload
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_issue_keys_dir_dot_still_works(tmp_path, capsys):
+    """Explicit --keys-dir . (current working directory) must still succeed."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            str(cwd),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["sub"] == "test-agent"
+    assert payload["claims"]["mission"] == "test mission"
+    assert (cwd / "passport_private.pem").exists()
+    assert (cwd / "passport_public.pem").exists()

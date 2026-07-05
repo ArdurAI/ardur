@@ -873,7 +873,69 @@ def _start_mission_file_failure_response(exc: Exception) -> dict:
     }
 
 
+_PATH_ARG_SPECS = ("keys_dir", "state_dir", "log_path", "tls_cert", "tls_key")
+
+
+def _path_arg_is_empty(value: object) -> bool:
+    """True when a CLI path argument is an empty or whitespace-only string."""
+    return isinstance(value, str) and not value.strip()
+
+
+def _path_arg_invalid_response(arg_name: str) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": "path_arg_invalid",
+        "error_code": "path_arg_invalid",
+        "condition": "path_arg_invalid",
+        "message": f"ardur --{arg_name.replace('_', '-')} must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only path argument was provided. "
+            "Pass an explicit directory or file path, or use '.' for the current working directory."
+        ),
+        "next_steps": [
+            {
+                "action": f"pass_{arg_name}",
+                "command": f"ardur <command> --{arg_name.replace('_', '-')} <{arg_name.replace('_', '-')}>",
+                "detail": f"Provide an explicit --{arg_name.replace('_', '-')} path.",
+            },
+            {
+                "action": "use_cwd",
+                "command": f"ardur <command> --{arg_name.replace('_', '-')} .",
+                "detail": "Use '.' explicitly to target the current working directory.",
+            },
+        ],
+    }
+
+
+def _path_arg_invalid_failure(args: argparse.Namespace) -> dict[str, object] | None:
+    """Check all path-typed args for empty/whitespace strings.
+
+    Returns the first invalid response dict, or None if all are valid.
+    Coerces validated non-None str values back to Path on the namespace
+    so downstream Path | None consumers see identical types.
+    """
+    for name in _PATH_ARG_SPECS:
+        value = getattr(args, name, None)
+        if _path_arg_is_empty(value):
+            return _path_arg_invalid_response(name)
+    # Coerce validated str values back to Path for downstream type consistency.
+    for name in _PATH_ARG_SPECS:
+        value = getattr(args, name, None)
+        if isinstance(value, str):
+            setattr(args, name, Path(value))
+    return None
+
+
 def cmd_start(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+    # --mission on start is a JSON file path, guarded inline (on issue it is a
+    # description string already covered by _issue_identity_failure).
+    if isinstance(args.mission, str) and not args.mission.strip():
+        _print_json(_path_arg_invalid_response("mission"))
+        return 1
     port_failure = _start_port_failure_exit_code(args.port)
     if port_failure is not None:
         return port_failure
@@ -1108,6 +1170,10 @@ def _issue_identity_failure(args: argparse.Namespace) -> tuple[dict, int] | None
 
 
 def cmd_issue(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     issue_identity_failure = _issue_identity_failure(args)
     if issue_identity_failure is not None:
         response, exit_code = issue_identity_failure
@@ -1278,6 +1344,10 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
     if keys_dir_failure is not None:
         return keys_dir_failure
@@ -1408,6 +1478,10 @@ def _attest_session_failure_exit_code(session_id: str, state_dir: Path | None) -
 
 
 def cmd_attest(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
         return state_dir_failure
@@ -3122,13 +3196,13 @@ def build_parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start", help="start the VIBAP proxy HTTP service")
     start.add_argument("--host", default="127.0.0.1", help="bind address")
     start.add_argument("--port", type=int, default=8080, help="listen port")
-    start.add_argument("--mission", type=Path, help="optional mission JSON to issue and start immediately")
-    start.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
-    start.add_argument("--state-dir", type=Path, help="directory for persisted sessions")
-    start.add_argument("--log-path", type=Path, help="JSONL audit log path")
+    start.add_argument("--mission", type=str, help="optional mission JSON to issue and start immediately")
+    start.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    start.add_argument("--state-dir", type=str, help="directory for persisted sessions")
+    start.add_argument("--log-path", type=str, help="JSONL audit log path")
     start.add_argument("--api-token", help="Bearer token for clients; VIBAP_API_TOKEN still takes precedence")
-    start.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
-    start.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
+    start.add_argument("--tls-cert", type=str, help="TLS certificate PEM file")
+    start.add_argument("--tls-key", type=str, help="TLS private key PEM file")
     start.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
     auth_group = start.add_mutually_exclusive_group()
     auth_group.add_argument(
@@ -3156,19 +3230,19 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--delegation-allowed", action="store_true", help="allow one-step delegation")
     issue.add_argument("--max-delegation-depth", default=0, help="delegation depth budget")
     issue.add_argument("--ttl-s", help="override token TTL in seconds")
-    issue.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
+    issue.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     issue.set_defaults(func=cmd_issue)
 
     verify = subparsers.add_parser("verify", help="verify a mission passport JWT")
     verify.add_argument("--token", required=True, help="passport token to verify")
-    verify.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
+    verify.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     verify.set_defaults(func=cmd_verify)
 
     attest = subparsers.add_parser("attest", help="issue a behavioral attestation for a saved session")
     attest.add_argument("--session", required=True, help="session identifier / passport jti")
-    attest.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
-    attest.add_argument("--state-dir", type=Path, help="directory containing persisted sessions")
-    attest.add_argument("--log-path", type=Path, help="JSONL audit log path")
+    attest.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    attest.add_argument("--state-dir", type=str, help="directory containing persisted sessions")
+    attest.add_argument("--log-path", type=str, help="JSONL audit log path")
     attest.set_defaults(func=cmd_attest)
 
     cc_hook = subparsers.add_parser(
