@@ -862,6 +862,40 @@ def _print_run_governed_missing_command_next_steps() -> None:
             print(f"   {detail}", file=sys.stderr)
 
 
+def run_governed_mission_invalid_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for an invalid ``--mission`` value."""
+    return [
+        {
+            "condition": "run_mission_invalid",
+            "action": "supply_non_empty_mission",
+            "command": "ardur run --mission <mission> --allowed-tools <tools> -- <command>",
+            "detail": (
+                "Pass a non-empty mission description after --mission. The mission "
+                "text is embedded in the signed Mission Passport; empty or whitespace-only "
+                "values are rejected before any keys or passports are created."
+            ),
+        },
+        {
+            "condition": "run_mission_invalid",
+            "action": "omit_mission_for_default",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --mission to use the built-in default mission text for the "
+                "governed run."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_mission_invalid_next_steps() -> None:
+    print("Next steps:", file=sys.stderr)
+    for index, step in enumerate(run_governed_mission_invalid_next_steps(), start=1):
+        print(f"{index}. {step['command']}", file=sys.stderr)
+        detail = step.get("detail", "")
+        if detail:
+            print(f"   {detail}", file=sys.stderr)
+
+
 def run_governed_cli(args: Any) -> int:
     """Argparse entry point used by ``cmd_run`` when governance flags are present."""
     command = list(getattr(args, "command", None) or [])
@@ -871,6 +905,13 @@ def run_governed_cli(args: Any) -> int:
         print("ardur run requires a command to govern after --", file=sys.stderr)
         print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
         _print_run_governed_missing_command_next_steps()
+        return 2
+
+    mission_arg = getattr(args, "mission", None)
+    if isinstance(mission_arg, str) and not mission_arg.strip():
+        print("ardur run --mission must be a non-empty string.", file=sys.stderr)
+        print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
+        _print_run_governed_mission_invalid_next_steps()
         return 2
 
     allowed = _split_csv(getattr(args, "allowed_tools", None))

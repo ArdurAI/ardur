@@ -36,6 +36,7 @@ from vibap.run_bridge import (
     _kernel_enforcement_claim,
     run_governed,
     run_governed_cli,
+    run_governed_mission_invalid_next_steps,
     select_adapter,
 )
 
@@ -636,6 +637,65 @@ def test_run_governed_cli_missing_command_reports_placeholder_next_steps(
     assert raw_mission not in remediation
     assert str(home) not in remediation
     assert "Traceback" not in remediation
+
+
+@pytest.mark.parametrize("bad_mission", ["", "   ", "\t\n"])
+def test_run_governed_cli_empty_or_whitespace_mission_is_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    bad_mission: str,
+) -> None:
+    """Empty/whitespace --mission must fail before keys/passports are created."""
+    home = tmp_path / "raw-home-should-not-be-created"
+    sentinel = tmp_path / "child-ran.txt"
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("invalid mission must fail before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=["echo", "ok"],
+            mission=bad_mission,
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert not home.exists()
+    assert "ardur run --mission must be a non-empty string." in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur run --mission <mission> --allowed-tools <tools> -- <command>" in remediation
+    assert "ardur run -- <command>" in remediation
+    # Remediation must be placeholder-only: no raw user input leaked.
+    if bad_mission.strip():
+        assert bad_mission not in remediation
+    assert str(home) not in remediation
+    assert "Traceback" not in remediation
+
+
+def test_run_governed_mission_invalid_next_steps_are_deterministic() -> None:
+    steps = run_governed_mission_invalid_next_steps()
+    assert len(steps) == 2
+    assert steps[0]["condition"] == "run_mission_invalid"
+    assert steps[1]["condition"] == "run_mission_invalid"
+    for step in steps:
+        assert step["command"]
+        assert "<" in step["command"]  # placeholder-only
+        assert step["detail"]
 
 
 # ── adapter unit tests ─────────────────────────────────────────────────────────
