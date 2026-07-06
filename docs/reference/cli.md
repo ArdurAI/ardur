@@ -711,6 +711,22 @@ environment variables resolve to the current working directory and are rejected.
 Omitting `--home` entirely uses the default Ardur home directory and is not
 rejected. An explicit `--home .` is still accepted.
 
+If `--keys-dir` is supplied but is empty or whitespace-only, the command exits
+nonzero without generating keys, configuring Claude Code, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_keys_dir_invalid"`, `error_code: "protect_keys_dir_invalid"`,
+`condition: "protect_keys_dir_invalid"`, and placeholder-only `next_steps` such
+as `ardur protect claude-code --keys-dir <keys-dir> --scope <your-project>`,
+`ardur protect claude-code --scope <your-project>` (omit `--keys-dir` to use the
+default keys directory under the Ardur home), and
+`ardur protect claude-code --keys-dir . --scope <your-project>` (use `.`
+explicitly for the current working directory); human output prints the same
+recovery guidance. Empty strings, whitespace-only values, and unquoted empty
+environment variables resolve to the current working directory and are rejected,
+because they silently create real signing keys in unintended locations.
+Omitting `--keys-dir` entirely uses the default keys directory under the Ardur
+home and is not rejected. An explicit `--keys-dir .` is still accepted.
+
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output
 includes `ok: false`, `error: "claude_code_plugin_incomplete"`,

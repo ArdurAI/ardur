@@ -1838,6 +1838,124 @@ def test_protect_claude_code_omitted_home_still_succeeds(tmp_path, capsys, monke
     assert payload["ok"] is True
 
 
+@pytest.mark.parametrize(
+    ("keys_dir",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_keys_dir_returns_invalid(tmp_path, capsys, keys_dir):
+    """Empty/whitespace-only --keys-dir must fail closed with structured JSON and
+    must NOT create signing keys, active_mission.jwt, or keys-dir artifacts.
+
+    Regression: previously ``--keys-dir`` used ``type=Path`` which normalized
+    ``Path("")`` to ``PosixPath(".")`` (the CWD), silently creating real
+    signing keys in the current working directory instead of failing closed.
+    Whitespace-only values (``"   "``) created a literal whitespace directory
+    and wrote keys there.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--keys-dir",
+            keys_dir,
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_keys_dir_invalid"
+    assert payload["error"] == "protect_keys_dir_invalid"
+    assert payload["error_code"] == "protect_keys_dir_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No keys directory, keys, or active_mission.jwt may be created when the
+    # keys-dir is rejected. Artifacts must not appear in CWD either.
+    assert not (tmp_path / "passport_private.pem").exists()
+    assert not (tmp_path / "passport_public.pem").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+    assert not (tmp_path / ".vibap").exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+def test_protect_claude_code_explicit_dot_keys_dir_still_succeeds(tmp_path, capsys):
+    """Explicit ``--keys-dir .`` (current working directory) remains valid and
+    must not be rejected by the empty/whitespace guard. Only empty/whitespace-
+    only strings are rejected; an explicit ``.`` is a deliberate CWD choice.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    keys_dir = tmp_path / "keys-cwd"
+    keys_dir.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+def test_protect_claude_code_omitted_keys_dir_still_succeeds(tmp_path, capsys, monkeypatch):
+    """Omitting ``--keys-dir`` entirely must keep working and use the default
+    keys directory under the Ardur home. The empty/whitespace guard only fires
+    on an explicitly-provided invalid string, not on the ``args.keys_dir=None``
+    default.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    # Redirect HOME so the test does not write into the real user home.
+    fake_home = tmp_path / "default-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(fake_home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
 def test_protect_claude_code_empty_string_mission_falls_back_to_default(tmp_path, capsys):
     """An empty-string ``--mission ""`` is falsy and must fall through to the
     selected mode's default mission rather than be rejected. This preserves the

@@ -3041,6 +3041,52 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
+    """Structured response for empty/whitespace-only ``--keys-dir``.
+
+    Mirrors the ``protect_home_invalid`` / ``protect_scope_invalid`` shape so all
+    ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local paths
+    or tokens. Placed before any ``mkdir`` / ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid keys-dir value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_keys_dir_invalid",
+        "error_code": "protect_keys_dir_invalid",
+        "condition": "protect_keys_dir_invalid",
+        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --keys-dir was provided. Pass an "
+            "explicit signing keys directory, or omit --keys-dir to use the "
+            "default keys directory under the Ardur home. Empty strings, "
+            "whitespace-only values, and unquoted empty environment variables "
+            "resolve to the current working directory and are rejected, "
+            "because they silently create real signing keys in unintended "
+            "locations."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_keys_dir",
+                "command": "ardur protect claude-code --keys-dir <keys-dir> --scope <your-project>",
+                "detail": "Provide a non-empty signing keys directory after trimming whitespace.",
+            },
+            {
+                "action": "omit_keys_dir",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --keys-dir to use the default keys directory under the Ardur home.",
+            },
+            {
+                "action": "explicit_cwd",
+                "command": "ardur protect claude-code --keys-dir . --scope <your-project>",
+                "detail": "Use `.` explicitly to place signing keys in the current working directory.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     return {
         "ok": False,
@@ -3116,6 +3162,16 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # which falls through to ``DEFAULT_HOME`` and is acceptable.
     if isinstance(args.home, str) and not args.home.strip():
         return _protect_claude_code_home_invalid_response()
+    # Reject empty/whitespace-only --keys-dir before any directory creation or
+    # key generation. ``--keys-dir`` is ``type=str`` so an empty or
+    # whitespace-only value survives here as-is (previously ``type=Path``
+    # normalized ``""`` to ``PosixPath('.')`` which silently resolved to the
+    # CWD and created real signing keys there). An explicit ``--keys-dir .``
+    # (CWD) must remain valid, so only reject when the trimmed string is
+    # empty. Omitting ``--keys-dir`` entirely keeps ``args.keys_dir=None`` and
+    # the handler falls back to ``<home>/keys``.
+    if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
+        return _protect_claude_code_keys_dir_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
@@ -3135,7 +3191,8 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         additional_policies = _resolve_protect_policies(args, profile, home)
     except _ProtectPolicyInputError as exc:
         return _protect_policy_input_failure_response(exc)
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir or (home / "keys"))
+    keys_dir_resolved = Path(args.keys_dir).expanduser().resolve() if args.keys_dir else (home / "keys")
+    private_key, public_key = generate_keypair(keys_dir=keys_dir_resolved)
     if profile and profile.allowed_tools:
         # A profile with an explicit allowlist is authoritative: if the author
         # leaves the blocklist empty, that means "no explicit tool denylist" and
@@ -3758,7 +3815,11 @@ def build_parser() -> argparse.ArgumentParser:
     # stripped string before any directory creation or key generation.
     protect_cc.add_argument("--home", type=str, help="Ardur home that receives active_mission.jwt")
     protect_cc.add_argument("--plugin-dir", type=Path, default=_default_claude_plugin_dir(), help="Claude Code plugin directory")
-    protect_cc.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    # ``--keys-dir`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
+    # only values survive to the handler instead of being normalized to
+    # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
+    # stripped string before any directory creation or key generation.
+    protect_cc.add_argument("--keys-dir", type=str, help="signing keys directory")
     protect_cc.add_argument("--agent-id", default="local-user:claude-code", help="Mission Passport subject")
     protect_cc.add_argument("--mission", help="override the default mission text for the selected mode")
     protect_cc.add_argument("--max-tool-calls", type=int, default=250, help="maximum governed tool calls")

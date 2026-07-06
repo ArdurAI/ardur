@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "d51e32e3923bb89da94d59b5ff1f9fed95286685239f07c78a2f506ff787ea6e"
+source_sha256: "5cb13bd5bba48da957929c88feda8d1d0e8f0fd1742b436b15099752ac3c57a8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -727,6 +727,22 @@ recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected.
 Omitting `--home` entirely uses the default Ardur home directory and is not
 rejected. An explicit `--home .` is still accepted.
+
+If `--keys-dir` is supplied but is empty or whitespace-only, the command exits
+nonzero without generating keys, configuring Claude Code, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_keys_dir_invalid"`, `error_code: "protect_keys_dir_invalid"`,
+`condition: "protect_keys_dir_invalid"`, and placeholder-only `next_steps` such
+as `ardur protect claude-code --keys-dir <keys-dir> --scope <your-project>`,
+`ardur protect claude-code --scope <your-project>` (omit `--keys-dir` to use the
+default keys directory under the Ardur home), and
+`ardur protect claude-code --keys-dir . --scope <your-project>` (use `.`
+explicitly for the current working directory); human output prints the same
+recovery guidance. Empty strings, whitespace-only values, and unquoted empty
+environment variables resolve to the current working directory and are rejected,
+because they silently create real signing keys in unintended locations.
+Omitting `--keys-dir` entirely uses the default keys directory under the Ardur
+home and is not rejected. An explicit `--keys-dir .` is still accepted.
 
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output
