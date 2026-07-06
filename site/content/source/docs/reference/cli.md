@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "4960b95c9dbf667ba55aebbc7718ce0f12be2c550d084c6fca6f4090c093c9ba"
+source_sha256: "1eb2fca90741bd05e59bf048819e08378ff6a44c7d93f77c3858b36147da2c3c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -50,10 +50,10 @@ ardur start [--host HOST] [--port PORT] [--mission FILE]
 
 Defaults: bind `127.0.0.1:8080`. Auth required by default.
 
-Empty or whitespace-only path arguments (`--keys-dir`, `--state-dir`,
-`--log-path`, `--mission`, `--tls-cert`, `--tls-key`) fail closed before port,
-host, TLS, key, state, audit-log, session, or proxy startup work begins. They
-exit non-zero and write parseable stdout JSON with `ok: false`, stable
+Empty or whitespace-only directory path arguments (`--keys-dir`, `--state-dir`,
+`--log-path`, `--tls-cert`, `--tls-key`) fail closed before port, host, TLS,
+key, state, audit-log, session, or proxy startup work begins. They exit
+non-zero and write parseable stdout JSON with `ok: false`, stable
 `condition`/`error`/`error_code` values of `path_arg_invalid`, a message, a
 detail, and placeholder-only `next_steps` such as
 `ardur <command> --keys-dir <keys-dir>` and
@@ -61,6 +61,15 @@ detail, and placeholder-only `next_steps` such as
 traceback, does not echo raw local paths or secrets, and leaves no key, state,
 log, or session artifacts behind. An explicit `--keys-dir .` (current working
 directory) is still accepted.
+
+`--mission` on `ardur start` is a mission JSON file path, not a directory. An
+empty or whitespace-only `--mission` value on `start` returns
+`start_mission_path_invalid` (not `path_arg_invalid`) with placeholder-only
+`next_steps` pointing at `ardur start --mission <mission.json> ...`; it never
+suggests `--mission .` because that would fail with an `IsADirectoryError`.
+The failure path keeps stderr empty, emits no traceback, does not echo raw
+local paths or secrets, and leaves no key, state, log, or session artifacts
+behind.
 
 TLS setup is local loopback proxy configuration. By default Ardur can create
 local self-signed TLS material; `--tls-cert` and `--tls-key` select explicit

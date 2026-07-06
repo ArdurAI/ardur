@@ -879,6 +879,30 @@ def _start_mission_file_failure_response(exc: Exception) -> dict:
     }
 
 
+def _start_mission_path_invalid_response() -> dict[str, object]:
+    """Failure response for an empty/whitespace --mission path on start.
+
+    ``--mission`` on ``ardur start`` is a mission JSON file path, not a
+    directory, so the generic ``_path_arg_invalid_response`` hint that
+    suggests ``--mission .`` would mislead the user into an
+    ``IsADirectoryError``. Use the mission-file-specific guidance instead.
+    """
+    return {
+        "ok": False,
+        "error": "start_mission_path_invalid",
+        "error_code": "start_mission_path_invalid",
+        "condition": "start_mission_path_invalid",
+        "message": "ardur start --mission must be a mission JSON file path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --mission path was provided on start. "
+            "Provide an explicit mission JSON file path."
+        ),
+        "next_steps": _start_mission_file_failure_next_steps(
+            "start_mission_path_invalid"
+        ),
+    }
+
+
 _PATH_ARG_SPECS = ("keys_dir", "state_dir", "log_path", "tls_cert", "tls_key")
 
 
@@ -938,9 +962,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         _print_json(path_failure)
         return 1
     # --mission on start is a JSON file path, guarded inline (on issue it is a
-    # description string already covered by _issue_identity_failure).
+    # description string already covered by _issue_identity_failure). The file
+    # path is not a directory, so use the mission-file-specific guidance rather
+    # than the generic _path_arg_invalid_response hint that suggests '.'.
     if isinstance(args.mission, str) and not args.mission.strip():
-        _print_json(_path_arg_invalid_response("mission"))
+        _print_json(_start_mission_path_invalid_response())
         return 1
     port_failure = _start_port_failure_exit_code(args.port)
     if port_failure is not None:

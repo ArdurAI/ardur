@@ -2013,3 +2013,56 @@ def test_issue_keys_dir_dot_still_works(tmp_path, capsys):
     assert payload["claims"]["mission"] == "test mission"
     assert (cwd / "passport_private.pem").exists()
     assert (cwd / "passport_public.pem").exists()
+
+
+# ---------------------------------------------------------------------------
+# Start --mission empty/whitespace path guidance
+#
+# ``--mission`` on ``ardur start`` is a mission JSON file path, not a
+# directory. The generic ``path_arg_invalid`` hint suggests ``--mission .``,
+# which would fail with ``IsADirectoryError``. The ``start_mission_path_invalid``
+# response points the user at ``<mission.json>`` instead.
+# Uses placeholder model names to satisfy the model-name scan.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mission_value", ["", "   ", "\t\n"])
+def test_start_mission_empty_or_whitespace_returns_mission_path_invalid(
+    tmp_path, capsys, mission_value
+):
+    """Empty/whitespace --mission on start returns start_mission_path_invalid with mission-file next_steps."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["start", "--mission", mission_value, "--port", "0", "--no-tls"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_mission_path_invalid"
+    assert payload["error"] == "start_mission_path_invalid"
+    assert payload["error_code"] == "start_mission_path_invalid"
+    # Message and detail must mention mission file/path, not directory.
+    assert "mission" in payload["message"].lower()
+    assert "path" in payload["message"].lower()
+    assert "file" in payload["detail"].lower()
+    # Every next_step must point to <mission.json> and never suggest --mission .
+    assert payload["next_steps"]
+    rendered = json.dumps(payload)
+    assert "use '.'" not in rendered
+    for step in payload["next_steps"]:
+        assert "<mission.json>" in step["command"], step
+        assert "--mission ." not in step["command"], step
+        # Placeholder-only tokens, no raw local paths.
+        assert "<" in step["command"] and ">" in step["command"]
+    # No traceback, no raw cwd path in output.
+    assert str(cwd) not in rendered
+    assert "Traceback" not in rendered
+    # No key/state/session artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
