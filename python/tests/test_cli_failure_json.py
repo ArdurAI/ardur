@@ -1725,6 +1725,119 @@ def test_protect_claude_code_whitespace_mission_returns_invalid(tmp_path, capsys
         assert str(tmp_path) not in step.get("detail", "")
 
 
+@pytest.mark.parametrize(
+    ("home",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_home_returns_invalid(tmp_path, capsys, home):
+    """Empty/whitespace-only --home must fail closed with structured JSON and
+    must NOT create signing keys, active_mission.jwt, or home artifacts.
+
+    Regression: previously ``--home`` used ``type=Path`` which normalized
+    ``Path("")`` to ``PosixPath(".")`` (the CWD), silently creating real
+    signing keys and ``active_mission.jwt`` in the current working directory
+    instead of failing closed. Whitespace-only values (``"   "``) created a
+    literal whitespace directory and wrote the JWT there.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            home,
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_home_invalid"
+    assert payload["error"] == "protect_home_invalid"
+    assert payload["error_code"] == "protect_home_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # home is rejected. Artifacts must not appear in CWD either.
+    assert not (tmp_path / "home").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+    assert not (tmp_path / ".vibap").exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+def test_protect_claude_code_explicit_dot_home_still_succeeds(tmp_path, capsys):
+    """Explicit ``--home .`` (current working directory) remains valid and must
+    not be rejected by the empty/whitespace guard. Only empty/whitespace-only
+    strings are rejected; an explicit ``.`` is a deliberate CWD choice.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            ".",
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+def test_protect_claude_code_omitted_home_still_succeeds(tmp_path, capsys, monkeypatch):
+    """Omitting ``--home`` entirely must keep working and use DEFAULT_HOME.
+    The empty/whitespace guard only fires on an explicitly-provided invalid
+    string, not on the ``args.home=None`` default.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    # Redirect DEFAULT_HOME to a tmp path so the test does not write into the
+    # real user home. ``DEFAULT_HOME`` is imported from ``vibap.config``.
+    fake_home = tmp_path / "default-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
 def test_protect_claude_code_empty_string_mission_falls_back_to_default(tmp_path, capsys):
     """An empty-string ``--mission ""`` is falsy and must fall through to the
     selected mode's default mission rather than be rejected. This preserves the

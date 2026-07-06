@@ -2998,6 +2998,49 @@ def _protect_claude_code_identity_invalid_response(condition: str) -> dict[str, 
     }
 
 
+def _protect_claude_code_home_invalid_response() -> dict[str, object]:
+    """Structured response for empty/whitespace-only ``--home``.
+
+    Mirrors the ``protect_scope_invalid`` / ``protect_agent_id_invalid`` shape
+    so all ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local paths
+    or tokens. Placed before any ``home.mkdir`` / ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid home value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_home_invalid",
+        "error_code": "protect_home_invalid",
+        "condition": "protect_home_invalid",
+        "message": "ardur protect claude-code --home must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --home was provided. Pass an explicit "
+            "Ardur home directory, or omit --home to use the default home. Empty "
+            "strings, whitespace-only values, and unquoted empty environment "
+            "variables resolve to the current working directory and are rejected."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_home",
+                "command": "ardur protect claude-code --home <ardur-home> --scope <your-project>",
+                "detail": "Provide a non-empty Ardur home directory after trimming whitespace.",
+            },
+            {
+                "action": "omit_home",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --home to use the default Ardur home directory.",
+            },
+            {
+                "action": "explicit_cwd",
+                "command": "ardur protect claude-code --home . --scope <your-project>",
+                "detail": "Use `.` explicitly to place Ardur state in the current working directory.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     return {
         "ok": False,
@@ -3063,6 +3106,16 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         return _protect_claude_code_identity_invalid_response("protect_agent_id_invalid")
     if isinstance(args.mission, str) and args.mission and not args.mission.strip():
         return _protect_claude_code_identity_invalid_response("protect_mission_invalid")
+    # Reject empty/whitespace-only --home before any directory creation or key
+    # generation. ``--home`` is ``type=str`` so an empty or whitespace-only
+    # value survives here as-is (previously ``type=Path`` normalized ``""`` to
+    # ``PosixPath('.')`` which silently resolved to the CWD and created real
+    # signing keys + active_mission.jwt in the working directory). An explicit
+    # ``--home .`` (CWD) must remain valid, so only reject when the trimmed
+    # string is empty. Omitting ``--home`` entirely keeps ``args.home=None``
+    # which falls through to ``DEFAULT_HOME`` and is acceptable.
+    if isinstance(args.home, str) and not args.home.strip():
+        return _protect_claude_code_home_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
@@ -3699,7 +3752,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="plain-English policy template",
     )
     protect_cc.add_argument("--json", action="store_true", help="print machine-readable setup details")
-    protect_cc.add_argument("--home", type=Path, help="Ardur home that receives active_mission.jwt")
+    # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
+    # values survive to the handler instead of being normalized to
+    # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
+    # stripped string before any directory creation or key generation.
+    protect_cc.add_argument("--home", type=str, help="Ardur home that receives active_mission.jwt")
     protect_cc.add_argument("--plugin-dir", type=Path, default=_default_claude_plugin_dir(), help="Claude Code plugin directory")
     protect_cc.add_argument("--keys-dir", type=Path, help="signing keys directory")
     protect_cc.add_argument("--agent-id", default="local-user:claude-code", help="Mission Passport subject")

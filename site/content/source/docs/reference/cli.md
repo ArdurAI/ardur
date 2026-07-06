@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "1eb2fca90741bd05e59bf048819e08378ff6a44c7d93f77c3858b36147da2c3c"
+source_sha256: "d51e32e3923bb89da94d59b5ff1f9fed95286685239f07c78a2f506ff787ea6e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -713,6 +713,20 @@ and placeholder-only `next_steps` such as
 recovery guidance. An empty-string `--mission ""` is falsy and falls through to
 the selected mode's default mission; only whitespace-only strings that would
 leak into the JWT are rejected.
+
+If `--home` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_home_invalid"`, `error_code: "protect_home_invalid"`,
+`condition: "protect_home_invalid"`, and placeholder-only `next_steps` such as
+`ardur protect claude-code --home <ardur-home> --scope <your-project>`,
+`ardur protect claude-code --scope <your-project>` (omit `--home` to use the
+default), and `ardur protect claude-code --home . --scope <your-project>` (use
+`.` explicitly for the current working directory); human output prints the same
+recovery guidance. Empty strings, whitespace-only values, and unquoted empty
+environment variables resolve to the current working directory and are rejected.
+Omitting `--home` entirely uses the default Ardur home directory and is not
+rejected. An explicit `--home .` is still accepted.
 
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output
