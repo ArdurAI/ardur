@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f480caaa8299f8439ee31c6087c41d6f939ad4a9d5be903fac64b9b0c47520d5"
+source_sha256: "4960b95c9dbf667ba55aebbc7718ce0f12be2c550d084c6fca6f4090c093c9ba"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -471,6 +471,15 @@ local setup, Hub startup, Hub token supply/rotation, and `ardur doctor` using
 than copying raw temp homes or tokens. Blocked legacy commands still exit `126`
 with a receipt when policy evaluation succeeds; successful commands preserve
 stdout, stderr, and child exit-code streaming without remediation noise.
+
+If `--mission` is supplied as an empty or whitespace-only string, `ardur run`
+exits `2` without generating keys, creating a Mission Passport, or launching the
+governed command. Stderr prints a message, a usage line, and placeholder-only
+`Next steps:` guidance such as
+`ardur run --mission <mission> --allowed-tools <tools> -- <command>` and
+`ardur run -- <command>`; the remediation text never echoes the raw `--mission`
+value or local paths. Omitting `--mission` uses the built-in default mission
+text and is not rejected.
 
 The governance bridge is still local and bounded: the embedded proxy listens on
 loopback only for the launched run, kernel correlation is best effort and may be
