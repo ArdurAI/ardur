@@ -27,11 +27,13 @@ Passport from a JSON mission file and start a session immediately.
 ```text
 ardur start [--host HOST] [--port PORT] [--mission FILE]
             [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
-            [--require-auth | --no-require-auth]
+            [--api-token TOKEN] [--require-auth | --no-require-auth]
             [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
 
-Defaults: bind `127.0.0.1:8080`. Auth required by default.
+Defaults: bind `127.0.0.1:8080`. Auth required by default. When auth is
+required and `--api-token` is omitted, Ardur generates a random bearer token
+at startup.
 
 Empty or whitespace-only directory path arguments (`--keys-dir`, `--state-dir`,
 `--log-path`, `--tls-cert`, `--tls-key`) fail closed before port, host, TLS,
@@ -121,6 +123,23 @@ as JSON with `ok: false`, stable `condition`/`error`/`error_code` values, and
 placeholder-only `next_steps`, keep stderr empty, emit no traceback, do not echo
 raw local paths or secrets, and leave no Mission Passport signing keys, state,
 log, or session artifacts behind.
+
+A whitespace-only `--api-token` fails closed after port, host, TLS material,
+mission-file, and write-target validation but before key generation, state
+initialization, audit log creation, session creation, or proxy startup. The
+token is trimmed internally; a whitespace-only value is truthy before trimming
+but resolves to an empty bearer after, so it is rejected explicitly rather than
+silently enabling auth-on with an empty token. The failure exits non-zero and
+writes parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `start_api_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur start --api-token <api-token>` (supply an explicit token) and
+`ardur start` (omit `--api-token` so Ardur generates a random one). The failure
+path keeps stderr empty, emits no traceback, does not echo raw tokens or local
+paths, and leaves no key, state, log, or session artifacts behind. An unset
+`--api-token` (omitted) and an empty-string `--api-token ""` remain valid: in
+both cases Ardur generates a random bearer token at startup when auth is
+required.
 
 ### `ardur kill-switch`
 
