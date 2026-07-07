@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
+	"golang.org/x/sys/unix"
 )
 
 // runRestartSurvivalScenario applies an OP_EXEC:DENY policy against a fresh
@@ -28,15 +29,49 @@ import (
 // cgroup, which process_guard treats as "not managed" — default-allow. A
 // regression here shows up as execve unexpectedly *succeeding* post-restart,
 // not as an ambiguous error, so this scenario can't pass by accident.
+// ensureBpffsMounted makes /sys/fs/bpf a mounted bpf filesystem if it is not
+// already one. Idempotent: an already-mounted bpffs is success (detected via
+// statfs, with EBUSY from the mount call as a fallback). Needed because BPF
+// link/map pins can only be created on a bpf filesystem.
+func ensureBpffsMounted() error {
+	const bpffs = "/sys/fs/bpf"
+	if err := os.MkdirAll(bpffs, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", bpffs, err)
+	}
+	var st unix.Statfs_t
+	if err := unix.Statfs(bpffs, &st); err == nil && uint64(st.Type) == uint64(unix.BPF_FS_MAGIC) {
+		return nil // already a bpffs
+	}
+	if err := unix.Mount("bpf", bpffs, "bpf", 0, ""); err != nil && err != unix.EBUSY {
+		return fmt.Errorf("mount bpf at %s: %w", bpffs, err)
+	}
+	return nil
+}
+
 func runRestartSurvivalScenario() error {
 	const cgroupDir = "/sys/fs/cgroup/ardur-guard-smoke-restart"
+
+	// BPF pins require a mounted bpf filesystem. A minimal guest (the
+	// virtme-ng kernel-smoke VM) may not auto-mount /sys/fs/bpf, so ensure it
+	// before pinning — otherwise every pin silently fails and the restart
+	// survival this scenario proves is defeated.
+	if err := ensureBpffsMounted(); err != nil {
+		return fmt.Errorf("ensure bpffs mounted: %w", err)
+	}
 
 	// A dedicated, disposable pin directory (not DefaultPinnedGuardPaths'
 	// real /sys/fs/bpf/ardur/) so this smoke run never collides with an
 	// actual daemon's pins on the same host and cleans up after itself.
-	pinDir, err := resolvedTempDir("ardur-guard-smoke-pins-*")
-	if err != nil {
-		return fmt.Errorf("create pin directory: %w", err)
+	//
+	// It MUST live on a bpffs mount, not the tmpfs (/dev/shm) the other
+	// scenarios use for their regular file paths: BPF link/map pins can only
+	// be created on a bpf filesystem, and pinning to tmpfs fails with "is not
+	// on a bpf filesystem" — silently (each pin is non-fatal), which then
+	// detaches everything on Close and defeats the very restart survival this
+	// scenario exists to prove. Use a subdir under /sys/fs/bpf.
+	pinDir := fmt.Sprintf("/sys/fs/bpf/ardur-guard-smoke-pins-%d", os.Getpid())
+	if err := os.MkdirAll(pinDir, 0o700); err != nil {
+		return fmt.Errorf("create bpffs pin directory %s (is /sys/fs/bpf a mounted bpf filesystem?): %w", pinDir, err)
 	}
 	defer os.RemoveAll(pinDir)
 	paths := kernelcapture.PinnedGuardPaths{
