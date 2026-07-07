@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "9140a18394f0a0b10111374e3eea23e7d39d55d7a7b41b8ad683acb4ad25fd12"
+source_sha256: "f7704170108f2285e3dd4166c061cc7632fcec3120244ed96aacda67efaf7717"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -41,7 +41,7 @@ pull request; `link-check` runs on PRs and a weekly cron only.
 [`/.github/workflows/link-check.yml`](/__ardur_internal__/repo/.github/workflows/link-check.yml)
 
 - Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.8.0` (commit-pinned).
-- Currently excludes one URL pattern that 404s for an unauthenticated checker: `security/advisories/new` (the page requires being signed in to GitHub). The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
+- Currently excludes five URL patterns/domains. One (`security/advisories/new`) requires being signed in to GitHub, so an unauthenticated checker gets a 404. Four bot-blocking domains (`developers.redhat.com`, `medium.com`, `answers.uillinois.edu`, `theregister.com`) return 403 to automated requests; these are legitimate research citations excluded rather than removed. The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
 
 ### `validate-formats` — JSON and YAML parsers
 

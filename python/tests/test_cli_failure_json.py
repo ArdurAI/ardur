@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 
@@ -1422,6 +1423,76 @@ def test_issue_non_integer_budget_returns_safe_json_usage_failure(tmp_path, caps
     assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
 
 
+@pytest.mark.parametrize(
+    ("agent_id", "mission", "condition"),
+    [
+        ("", "test mission", "issue_agent_id_invalid"),
+        ("   ", "test mission", "issue_agent_id_invalid"),
+        ("\t\n", "test mission", "issue_agent_id_invalid"),
+        ("test-agent", "", "issue_mission_invalid"),
+        ("test-agent", "   ", "issue_mission_invalid"),
+        ("test-agent", "\t\n", "issue_mission_invalid"),
+        ("   ", "   ", "issue_agent_id_invalid"),
+    ],
+)
+def test_issue_empty_or_whitespace_identity_returns_safe_json_failure(
+    tmp_path, capsys, agent_id, mission, condition
+):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            agent_id,
+            "--mission",
+            mission,
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == condition
+    assert payload["error"] == condition
+    assert payload["error_code"] == condition
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "claims" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No signing keys may be created when validation rejects the input.
+    assert not keys_dir.exists() or not any(keys_dir.iterdir())
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+
+
+def test_issue_valid_identity_still_succeeds(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["sub"] == "test-agent"
+    assert payload["claims"]["mission"] == "test mission"
+    assert (keys_dir / "passport_private.pem").exists()
+    assert (keys_dir / "passport_public.pem").exists()
+
+
 def test_issue_zero_tool_call_budget_remains_valid(tmp_path, capsys):
     rc, payload = _run_cli_and_read_json(
         [
@@ -1465,3 +1536,843 @@ def test_issue_positive_ttl_override_remains_valid(tmp_path, capsys):
     assert payload["claims"]["exp"] - payload["claims"]["iat"] == 60
     assert payload["claims"]["max_tool_calls"] == 50
     assert payload["claims"]["max_duration_s"] == 600
+
+
+@pytest.mark.parametrize(
+    ("scope",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_scope_returns_invalid(tmp_path, capsys, scope):
+    """Empty/whitespace-only --scope must fail closed with structured JSON and
+    must NOT create signing keys or active_mission.jwt.
+
+    Regression: previously ``--scope`` used ``type=Path`` which normalized
+    ``Path("")`` to ``PosixPath(".")`` (the CWD), silently creating real
+    signing keys for the wrong directory.
+    """
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            scope,
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_scope_invalid"
+    assert payload["error"] == "protect_scope_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # scope is rejected.
+    assert not home.exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+def test_protect_claude_code_explicit_dot_scope_still_succeeds(tmp_path, capsys):
+    """Explicit ``--scope .`` (current working directory) remains valid and must
+    not be rejected by the empty/whitespace guard.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            ".",
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("agent_id",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_agent_id_returns_invalid(tmp_path, capsys, agent_id):
+    """Empty/whitespace-only --agent-id must fail closed with structured JSON
+    and must NOT create signing keys, active_mission.jwt, or home artifacts.
+
+    Regression: previously ``--agent-id ""`` or ``"   "`` overrode the argparse
+    default ``local-user:claude-code`` and flowed into the Mission Passport
+    ``agent_id`` (JWT ``sub`` claim) while generating real signing keys.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--agent-id",
+            agent_id,
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_agent_id_invalid"
+    assert payload["error"] == "protect_agent_id_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # agent-id is rejected.
+    assert not home.exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+@pytest.mark.parametrize(
+    ("mission",),
+    [
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_whitespace_mission_returns_invalid(tmp_path, capsys, mission):
+    """Explicitly-provided whitespace-only --mission must fail closed with
+    structured JSON and must NOT create signing keys, active_mission.jwt, or
+    home artifacts.
+
+    Note: an empty-string ``--mission ""`` is falsy and falls through to the
+    mode default via ``args.mission or (...)``; that fallback is acceptable and
+    only whitespace-only strings (truthy but meaningless) leak into the JWT.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mission",
+            mission,
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_mission_invalid"
+    assert payload["error"] == "protect_mission_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # mission is rejected.
+    assert not home.exists()
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+@pytest.mark.parametrize(
+    ("home",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_home_returns_invalid(tmp_path, capsys, home):
+    """Empty/whitespace-only --home must fail closed with structured JSON and
+    must NOT create signing keys, active_mission.jwt, or home artifacts.
+
+    Regression: previously ``--home`` used ``type=Path`` which normalized
+    ``Path("")`` to ``PosixPath(".")`` (the CWD), silently creating real
+    signing keys and ``active_mission.jwt`` in the current working directory
+    instead of failing closed. Whitespace-only values (``"   "``) created a
+    literal whitespace directory and wrote the JWT there.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            home,
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_home_invalid"
+    assert payload["error"] == "protect_home_invalid"
+    assert payload["error_code"] == "protect_home_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # home is rejected. Artifacts must not appear in CWD either.
+    assert not (tmp_path / "home").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+    assert not (tmp_path / ".vibap").exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+def test_protect_claude_code_explicit_dot_home_still_succeeds(tmp_path, capsys):
+    """Explicit ``--home .`` (current working directory) remains valid and must
+    not be rejected by the empty/whitespace guard. Only empty/whitespace-only
+    strings are rejected; an explicit ``.`` is a deliberate CWD choice.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            ".",
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+def test_protect_claude_code_omitted_home_still_succeeds(tmp_path, capsys, monkeypatch):
+    """Omitting ``--home`` entirely must keep working and use DEFAULT_HOME.
+    The empty/whitespace guard only fires on an explicitly-provided invalid
+    string, not on the ``args.home=None`` default.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    # Redirect DEFAULT_HOME to a tmp path so the test does not write into the
+    # real user home. ``DEFAULT_HOME`` is imported from ``vibap.config``.
+    fake_home = tmp_path / "default-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("keys_dir",),
+    [
+        ("",),
+        ("   ",),
+        ("\t\n",),
+    ],
+)
+def test_protect_claude_code_empty_keys_dir_returns_invalid(tmp_path, capsys, keys_dir):
+    """Empty/whitespace-only --keys-dir must fail closed with structured JSON and
+    must NOT create signing keys, active_mission.jwt, or keys-dir artifacts.
+
+    Regression: previously ``--keys-dir`` used ``type=Path`` which normalized
+    ``Path("")`` to ``PosixPath(".")`` (the CWD), silently creating real
+    signing keys in the current working directory instead of failing closed.
+    Whitespace-only values (``"   "``) created a literal whitespace directory
+    and wrote keys there.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--keys-dir",
+            keys_dir,
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_keys_dir_invalid"
+    assert payload["error"] == "protect_keys_dir_invalid"
+    assert payload["error_code"] == "protect_keys_dir_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No keys directory, keys, or active_mission.jwt may be created when the
+    # keys-dir is rejected. Artifacts must not appear in CWD either.
+    assert not (tmp_path / "passport_private.pem").exists()
+    assert not (tmp_path / "passport_public.pem").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+    assert not (tmp_path / ".vibap").exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
+def test_protect_claude_code_explicit_dot_keys_dir_still_succeeds(tmp_path, capsys):
+    """Explicit ``--keys-dir .`` (current working directory) remains valid and
+    must not be rejected by the empty/whitespace guard. Only empty/whitespace-
+    only strings are rejected; an explicit ``.`` is a deliberate CWD choice.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    keys_dir = tmp_path / "keys-cwd"
+    keys_dir.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+def test_protect_claude_code_omitted_keys_dir_still_succeeds(tmp_path, capsys, monkeypatch):
+    """Omitting ``--keys-dir`` entirely must keep working and use the default
+    keys directory under the Ardur home. The empty/whitespace guard only fires
+    on an explicitly-provided invalid string, not on the ``args.keys_dir=None``
+    default.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    # Redirect HOME so the test does not write into the real user home.
+    fake_home = tmp_path / "default-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(fake_home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+
+
+def test_protect_claude_code_empty_string_mission_falls_back_to_default(tmp_path, capsys):
+    """An empty-string ``--mission ""`` is falsy and must fall through to the
+    selected mode's default mission rather than be rejected. This preserves the
+    ``args.mission or (...)`` fallback documented in the fix boundary.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mission",
+            "",
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+    # The default read-only mode mission must be used (non-empty).
+    assert payload["claims"]["mission"]
+
+
+def test_protect_claude_code_omitted_agent_id_and_mission_still_succeeds(tmp_path, capsys):
+    """Omitting both --agent-id and --mission must continue to work: argparse
+    supplies the default agent-id and the mode default mission is used.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["claims"]["sub"] == "local-user:claude-code"
+    assert payload["claims"]["mission"]
+
+
+def test_protect_claude_code_valid_agent_id_and_mission_still_succeed(tmp_path, capsys):
+    """A non-empty valid --agent-id and --mission must continue to produce a
+    passport with those exact claim values.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--agent-id",
+            "ci-runner:pull-1234",
+            "--mission",
+            "run the focused test suite",
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["claims"]["sub"] == "ci-runner:pull-1234"
+    assert payload["claims"]["mission"] == "run the focused test suite"
+
+
+# ---------------------------------------------------------------------------
+# Path-arg validation: empty/whitespace --keys-dir, --state-dir, --log-path,
+# --tls-cert, --tls-key, and --mission (start only) are rejected before any
+# key generation, state creation, or directory resolution.
+# ---------------------------------------------------------------------------
+
+
+def test_start_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on start must be rejected before key/state creation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["start", "--keys-dir", "", "--port", "0"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_issue_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on issue must be rejected before key generation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            "",
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    assert "token" not in payload
+    assert "claims" not in payload
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_verify_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on verify must be rejected before key/state creation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--token", "not-a-jwt", "--keys-dir", ""],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_attest_keys_dir_empty_rejected(tmp_path, capsys):
+    """Empty --keys-dir on attest must be rejected before key/state creation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "attest",
+            "--session",
+            "00000000-0000-0000-0000-000000000000",
+            "--keys-dir",
+            "",
+            "--state-dir",
+            str(tmp_path / "state"),
+            "--log-path",
+            str(tmp_path / "audit.jsonl"),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+@pytest.mark.parametrize("keys_dir_value", ["", "   ", "\t\n"])
+def test_issue_keys_dir_whitespace_rejected(tmp_path, capsys, keys_dir_value):
+    """Whitespace-only --keys-dir on issue must be rejected before key generation."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            keys_dir_value,
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "keys-dir" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    assert "token" not in payload
+    assert "claims" not in payload
+    # No artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_issue_keys_dir_dot_still_works(tmp_path, capsys):
+    """Explicit --keys-dir . (current working directory) must still succeed."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--keys-dir",
+            str(cwd),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["sub"] == "test-agent"
+    assert payload["claims"]["mission"] == "test mission"
+    assert (cwd / "passport_private.pem").exists()
+    assert (cwd / "passport_public.pem").exists()
+
+
+# ---------------------------------------------------------------------------
+# Start --mission empty/whitespace path guidance
+#
+# ``--mission`` on ``ardur start`` is a mission JSON file path, not a
+# directory. The generic ``path_arg_invalid`` hint suggests ``--mission .``,
+# which would fail with ``IsADirectoryError``. The ``start_mission_path_invalid``
+# response points the user at ``<mission.json>`` instead.
+# Uses placeholder model names to satisfy the model-name scan.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mission_value", ["", "   ", "\t\n"])
+def test_start_mission_empty_or_whitespace_returns_mission_path_invalid(
+    tmp_path, capsys, mission_value
+):
+    """Empty/whitespace --mission on start returns start_mission_path_invalid with mission-file next_steps."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["start", "--mission", mission_value, "--port", "0", "--no-tls"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_mission_path_invalid"
+    assert payload["error"] == "start_mission_path_invalid"
+    assert payload["error_code"] == "start_mission_path_invalid"
+    # Message and detail must mention mission file/path, not directory.
+    assert "mission" in payload["message"].lower()
+    assert "path" in payload["message"].lower()
+    assert "file" in payload["detail"].lower()
+    # Every next_step must point to <mission.json> and never suggest --mission .
+    assert payload["next_steps"]
+    rendered = json.dumps(payload)
+    assert "use '.'" not in rendered
+    for step in payload["next_steps"]:
+        assert "<mission.json>" in step["command"], step
+        assert "--mission ." not in step["command"], step
+        # Placeholder-only tokens, no raw local paths.
+        assert "<" in step["command"] and ">" in step["command"]
+    # No traceback, no raw cwd path in output.
+    assert str(cwd) not in rendered
+    assert "Traceback" not in rendered
+    # No key/state/session artifacts created in cwd.
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+# ---------------------------------------------------------------------------
+# Start --api-token whitespace rejection
+#
+# ``--api-token`` is stripped inside ``serve_proxy``. An explicit whitespace-
+# only argument is truthy before stripping but resolves to an empty bearer
+# token after, silently starting the server with auth-on and an empty token
+# (same silent-empty bug class closed for ``--proxy-url`` in 4d98a01). The
+# guard in ``cmd_start`` rejects whitespace-only tokens before key generation.
+# An empty string ``""`` is falsy and intentionally falls through to
+# autogeneration; only whitespace-only strings are rejected.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_start_api_token_whitespace_returns_api_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --api-token on start returns start_api_token_invalid before keys are created."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["start", "--api-token", token_value, "--port", "0", "--no-tls"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_api_token_invalid"
+    assert payload["error"] == "start_api_token_invalid"
+    assert payload["error_code"] == "start_api_token_invalid"
+    assert "api-token" in payload["message"].lower().replace("-", "-")
+    assert "whitespace" in payload["message"].lower()
+    assert payload["next_steps"]
+    rendered = json.dumps(payload)
+    for step in payload["next_steps"]:
+        # Placeholder-only tokens or the omit-the-flag step; no raw local paths.
+        command = step["command"]
+        is_omit_step = step["action"] == "omit_api_token_to_autogenerate"
+        assert is_omit_step or ("<" in command and ">" in command), step
+    # No traceback, no raw cwd path in output.
+    assert str(cwd) not in rendered
+    assert "Traceback" not in rendered
+    # No key/state/session artifacts created in cwd (guard fires pre-keygen).
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_start_api_token_empty_string_is_not_rejected_like_whitespace():
+    """An empty-string --api-token \"\" is falsy and must NOT hit the whitespace guard.
+
+    It falls through to autogeneration (token_source=generated), which is the
+    documented, acceptable behavior for empty-but-not-whitespace. Only
+    whitespace-only truthy strings are rejected. This pins the boundary so a
+    future tightening (rejecting \"\" too) is a deliberate change, not a drift.
+
+    We test the guard helper directly because exercising the full ``cmd_start``
+    path with a valid token would actually start the HTTP server.
+    """
+    ns_unset = argparse.Namespace(api_token=None)
+    assert cli._start_api_token_invalid_failure(ns_unset) is None
+
+    ns_empty = argparse.Namespace(api_token="")
+    assert cli._start_api_token_invalid_failure(ns_empty) is None
+
+    ns_valid = argparse.Namespace(api_token="real-token-value")
+    assert cli._start_api_token_invalid_failure(ns_valid) is None
+
+    # Whitespace-only is the only rejected shape.
+    ns_ws = argparse.Namespace(api_token="   ")
+    failure = cli._start_api_token_invalid_failure(ns_ws)
+    assert failure is not None
+    assert failure["condition"] == "start_api_token_invalid"

@@ -24,7 +24,7 @@ pull request; `link-check` runs on PRs and a weekly cron only.
 [`/.github/workflows/link-check.yml`](../.github/workflows/link-check.yml)
 
 - Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.8.0` (commit-pinned).
-- Currently excludes one URL pattern that 404s for an unauthenticated checker: `security/advisories/new` (the page requires being signed in to GitHub). The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
+- Currently excludes five URL patterns/domains. One (`security/advisories/new`) requires being signed in to GitHub, so an unauthenticated checker gets a 404. Four bot-blocking domains (`developers.redhat.com`, `medium.com`, `answers.uillinois.edu`, `theregister.com`) return 403 to automated requests; these are legitimate research citations excluded rather than removed. The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
 
 ### `validate-formats` — JSON and YAML parsers
 

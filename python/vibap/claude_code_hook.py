@@ -25,6 +25,7 @@ import jwt
 
 from .passport import (
     DEFAULT_HOME,
+    _ensure_default_home_dir,
     generate_keypair,
     load_private_key,
     resolve_keys_dir,
@@ -118,6 +119,10 @@ def resolve_chain_state(*, trace_id: str) -> ChainState:
     safe_trace_id = _normalize_trace_id(trace_id)
     if safe_trace_id is None:
         raise ValueError(f"unsafe Claude Code trace id: {trace_id!r}")
+    # When the chain dir falls through to the DEFAULT_HOME-derived default,
+    # materialise the home with 0o700 before creating trace directories.
+    if CHAIN_DIR_ENV_VAR not in os.environ:
+        _ensure_default_home_dir()
     state = ChainState(chain_dir=base, trace_id=safe_trace_id)
     state.trace_dir.mkdir(parents=True, exist_ok=True)
     _contained_trace_dir(chain_dir=state.chain_dir, trace_id=state.trace_id)

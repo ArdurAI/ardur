@@ -39,12 +39,9 @@ import urllib.request
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from . import kernel_correlation as kc
-
-if TYPE_CHECKING:
-    from .passport import MissionPassport
 
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
@@ -865,6 +862,85 @@ def _print_run_governed_missing_command_next_steps() -> None:
             print(f"   {detail}", file=sys.stderr)
 
 
+def run_governed_mission_invalid_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for an invalid ``--mission`` value."""
+    return [
+        {
+            "condition": "run_mission_invalid",
+            "action": "supply_non_empty_mission",
+            "command": "ardur run --mission <mission> --allowed-tools <tools> -- <command>",
+            "detail": (
+                "Pass a non-empty mission description after --mission. The mission "
+                "text is embedded in the signed Mission Passport; empty or whitespace-only "
+                "values are rejected before any keys or passports are created."
+            ),
+        },
+        {
+            "condition": "run_mission_invalid",
+            "action": "omit_mission_for_default",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --mission to use the built-in default mission text for the "
+                "governed run."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_mission_invalid_next_steps() -> None:
+    print("Next steps:", file=sys.stderr)
+    for index, step in enumerate(run_governed_mission_invalid_next_steps(), start=1):
+        print(f"{index}. {step['command']}", file=sys.stderr)
+        detail = step.get("detail", "")
+        if detail:
+            print(f"   {detail}", file=sys.stderr)
+
+
+def _run_governed_budget_failure(
+    condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
+) -> int:
+    """Emit a structured JSON failure response and return exit code 2.
+
+    Uses ``json.dump`` directly to avoid a circular import of ``cli._print_json``.
+    """
+    response: dict[str, object] = {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": next_steps,
+    }
+    json.dump(response, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 2
+
+
+def _run_max_duration_invalid_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "action": "provide_positive_max_duration_s",
+            "command": "ardur run --mission <mission> --max-duration-s <positive-seconds> -- <command>",
+            "detail": (
+                "--max-duration-s must be a positive integer number of seconds."
+            ),
+        },
+    ]
+
+
+def _run_max_tool_calls_invalid_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "action": "provide_valid_max_tool_calls",
+            "command": "ardur run --mission <mission> --max-tool-calls <zero-or-positive-count> -- <command>",
+            "detail": (
+                "--max-tool-calls must be zero or a positive integer."
+            ),
+        },
+    ]
+
+
 def run_governed_cli(args: Any) -> int:
     """Argparse entry point used by ``cmd_run`` when governance flags are present."""
     command = list(getattr(args, "command", None) or [])
@@ -874,6 +950,13 @@ def run_governed_cli(args: Any) -> int:
         print("ardur run requires a command to govern after --", file=sys.stderr)
         print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
         _print_run_governed_missing_command_next_steps()
+        return 2
+
+    mission_arg = getattr(args, "mission", None)
+    if isinstance(mission_arg, str) and not mission_arg.strip():
+        print("ardur run --mission must be a non-empty string.", file=sys.stderr)
+        print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
+        _print_run_governed_mission_invalid_next_steps()
         return 2
 
     allowed = _split_csv(getattr(args, "allowed_tools", None))
@@ -886,6 +969,45 @@ def run_governed_cli(args: Any) -> int:
     # --max-duration-s for symmetry.
     max_tool_calls_arg = getattr(args, "max_tool_calls", None)
     max_duration_s_arg = getattr(args, "max_duration_s", None)
+
+    # Validate budget arguments BEFORE calling run_governed so invalid values
+    # are rejected without creating key material or issuing a passport.
+    if max_duration_s_arg is not None:
+        try:
+            parsed = int(max_duration_s_arg)
+        except (TypeError, ValueError):
+            return _run_governed_budget_failure(
+                "run_max_duration_invalid",
+                "Run governance max-duration-s is invalid.",
+                "--max-duration-s must be a positive integer number of seconds.",
+                _run_max_duration_invalid_next_steps("run_max_duration_invalid"),
+            )
+        if parsed <= 0:
+            return _run_governed_budget_failure(
+                "run_max_duration_invalid",
+                "Run governance max-duration-s is invalid.",
+                "--max-duration-s must be a positive integer number of seconds.",
+                _run_max_duration_invalid_next_steps("run_max_duration_invalid"),
+            )
+
+    if max_tool_calls_arg is not None:
+        try:
+            parsed = int(max_tool_calls_arg)
+        except (TypeError, ValueError):
+            return _run_governed_budget_failure(
+                "run_max_tool_calls_invalid",
+                "Run governance max-tool-calls is invalid.",
+                "--max-tool-calls must be zero or a positive integer.",
+                _run_max_tool_calls_invalid_next_steps("run_max_tool_calls_invalid"),
+            )
+        if parsed < 0:
+            return _run_governed_budget_failure(
+                "run_max_tool_calls_invalid",
+                "Run governance max-tool-calls is invalid.",
+                "--max-tool-calls must be zero or a positive integer.",
+                _run_max_tool_calls_invalid_next_steps("run_max_tool_calls_invalid"),
+            )
+
     try:
         result = run_governed(
             command=command,

@@ -93,6 +93,7 @@ from .passport import (
     DEFAULT_HOME,
     MAX_DELEGATION_DEPTH,
     MissionPassport,
+    _ensure_default_home_dir,
     delegation_chain_entries,
     derive_child_passport,
     generate_keypair,
@@ -1845,6 +1846,15 @@ class GovernanceProxy:
         else:
             self.receipts_log_path = DEFAULT_RECEIPTS_LOG_PATH
         self.state_dir = Path(state_dir).expanduser() if state_dir is not None else DEFAULT_STATE_DIR
+        # When any path falls through to a DEFAULT_HOME-derived default,
+        # materialise the home with 0o700 before we start creating state
+        # directories inside it.
+        if (
+            log_path is None
+            or state_dir is None
+            or receipts_log_path is None
+        ):
+            _ensure_default_home_dir()
         self._ensure_private_state_directory(self.state_dir, label="state_dir")
         self.sessions_dir = self.state_dir / "sessions"
         self._ensure_private_state_directory(self.sessions_dir, label="sessions_dir")
