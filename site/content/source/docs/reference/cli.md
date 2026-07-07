@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "da4905a9542c7f43081820787d4f6d81b1f67e00b9c73ea28cb9551c898dc149"
+source_sha256: "3d8d0243bcd43af8c792f49ae58d2955fdccc348a413ff9f458c710b95876d9f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -44,11 +44,34 @@ Passport from a JSON mission file and start a session immediately.
 ```text
 ardur start [--host HOST] [--port PORT] [--mission FILE]
             [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
-            [--require-auth | --no-require-auth]
+            [--api-token TOKEN] [--require-auth | --no-require-auth]
             [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
 
-Defaults: bind `127.0.0.1:8080`. Auth required by default.
+Defaults: bind `127.0.0.1:8080`. Auth required by default. When auth is
+required and `--api-token` is omitted, Ardur generates a random bearer token
+at startup.
+
+Empty or whitespace-only directory path arguments (`--keys-dir`, `--state-dir`,
+`--log-path`, `--tls-cert`, `--tls-key`) fail closed before port, host, TLS,
+key, state, audit-log, session, or proxy startup work begins. They exit
+non-zero and write parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `path_arg_invalid`, a message, a
+detail, and placeholder-only `next_steps` such as
+`ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or secrets, and leaves no key, state,
+log, or session artifacts behind. An explicit `--keys-dir .` (current working
+directory) is still accepted.
+
+`--mission` on `ardur start` is a mission JSON file path, not a directory. An
+empty or whitespace-only `--mission` value on `start` returns
+`start_mission_path_invalid` (not `path_arg_invalid`) with placeholder-only
+`next_steps` pointing at `ardur start --mission <mission.json> ...`; it never
+suggests `--mission .` because that would fail with an `IsADirectoryError`.
+The failure path keeps stderr empty, emits no traceback, does not echo raw
+local paths or secrets, and leaves no key, state, log, or session artifacts
+behind.
 
 TLS setup is local loopback proxy configuration. By default Ardur can create
 local self-signed TLS material; `--tls-cert` and `--tls-key` select explicit
@@ -118,6 +141,23 @@ placeholder-only `next_steps`, keep stderr empty, emit no traceback, do not echo
 raw local paths or secrets, and leave no Mission Passport signing keys, state,
 log, or session artifacts behind.
 
+A whitespace-only `--api-token` fails closed after port, host, TLS material,
+mission-file, and write-target validation but before key generation, state
+initialization, audit log creation, session creation, or proxy startup. The
+token is trimmed internally; a whitespace-only value is truthy before trimming
+but resolves to an empty bearer after, so it is rejected explicitly rather than
+silently enabling auth-on with an empty token. The failure exits non-zero and
+writes parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `start_api_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur start --api-token <api-token>` (supply an explicit token) and
+`ardur start` (omit `--api-token` so Ardur generates a random one). The failure
+path keeps stderr empty, emits no traceback, does not echo raw tokens or local
+paths, and leaves no key, state, log, or session artifacts behind. An unset
+`--api-token` (omitted) and an empty-string `--api-token ""` remain valid: in
+both cases Ardur generates a random bearer token at startup when auth is
+required.
+
 ### `ardur kill-switch`
 
 Activate or deactivate the emergency kill switch on a running governance proxy.
@@ -151,6 +191,15 @@ ardur issue --agent-id ID --mission TEXT
 
 Prints `{"token": "...", "claims": {...}}` to stdout.
 
+Empty or whitespace-only `--keys-dir` fails closed before key generation,
+identity validation, or signing. It exits non-zero and writes parseable stdout
+JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not create or print a token or private key, and does not copy
+local paths or secret material. An explicit `--keys-dir .` is still accepted.
+
 Invalid budget flags fail closed before key generation or signing:
 `--max-duration-s` and `--ttl-s` must be positive integers,
 `--max-tool-calls` must be zero or a positive integer, and
@@ -173,6 +222,15 @@ Verify a Mission Passport signature and decode its claims.
 ardur verify --token JWT [--keys-dir DIR]
 ```
 
+Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
+token verification, or any filesystem work. It exits non-zero and writes
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values of `path_arg_invalid`, a message, a detail, and placeholder-only
+`next_steps` such as `ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or secrets, and leaves no artifacts.
+An explicit `--keys-dir .` is still accepted.
+
 ### `ardur attest`
 
 Issue a behavioral attestation for a saved session, summarising the receipt
@@ -182,6 +240,16 @@ chain.
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
 ```
+
+Empty or whitespace-only path arguments (`--keys-dir`, `--state-dir`,
+`--log-path`) fail closed before state, session, audit-log, key, or
+attestation-token work begins. They exit non-zero and write parseable stdout
+JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur <command> --keys-dir <keys-dir>` and
+`ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
+traceback, does not echo raw local paths or secrets, and leaves no artifacts.
+An explicit `--keys-dir .` is still accepted.
 
 Invalid attest state and audit-log write targets fail closed before Mission
 Passport key generation, state/session or log artifacts, and attestation token
@@ -266,6 +334,15 @@ with `ok: false`, stable `condition`/`error` values, and
 `error_code: path_not_directory`; stderr stays empty, no traceback is
 emitted, `next_steps` uses placeholders such as `<ardur-dir>`, and the failure
 does not copy raw local paths or tokens into the output.
+
+If `--home` is empty or whitespace-only, `ardur setup` and all Personal
+commands (`hub`, `doctor`, `status`, `uninstall`, `desktop-observe`) fail
+closed before writing setup state, generating or printing a token, creating
+keys, installing launch files, or starting a service. The command exits `1`
+and writes parseable stdout JSON with `ok: false`, stable `condition`/`error`
+values, and `error_code: setup_home_invalid`; stderr stays empty, no traceback
+is emitted, `next_steps` uses placeholders such as `<ardur-home>`, and no
+config, token, LaunchAgent, key, session, log, or state artifacts are created.
 
 Invalid setup bind inputs fail closed before writing config, generating or
 printing a Hub token, installing the LaunchAgent plist, creating setup state, or
@@ -388,7 +465,10 @@ ardur run [--home DIR]
 `--allowed-tools` and `--forbidden-tools` are repeatable and each value may be a
 comma-separated list. `--max-tool-calls` sets the governed tool-call budget
 (default `250` when governing), while `--max-duration-s` sets the wall-clock run
-budget. `--via auto` chooses the adapter automatically, `--via claude-code` uses
+budget. Invalid budget flags (negative `--max-duration-s`, negative
+`--max-tool-calls`) are rejected with structured JSON before key generation,
+consistent with `ardur issue`. `--via auto` chooses the adapter automatically,
+`--via claude-code` uses
 the Claude Code hook path, `--via env` exposes governance details to a
 cooperating command through environment variables, and `--via intercept` is only
 a scaffolded transparent-intercept path today; it fails closed rather than
@@ -422,6 +502,15 @@ local setup, Hub startup, Hub token supply/rotation, and `ardur doctor` using
 than copying raw temp homes or tokens. Blocked legacy commands still exit `126`
 with a receipt when policy evaluation succeeds; successful commands preserve
 stdout, stderr, and child exit-code streaming without remediation noise.
+
+If `--mission` is supplied as an empty or whitespace-only string, `ardur run`
+exits `2` without generating keys, creating a Mission Passport, or launching the
+governed command. Stderr prints a message, a usage line, and placeholder-only
+`Next steps:` guidance such as
+`ardur run --mission <mission> --allowed-tools <tools> -- <command>` and
+`ardur run -- <command>`; the remediation text never echoes the raw `--mission`
+value or local paths. Omitting `--mission` uses the built-in default mission
+text and is not rejected.
 
 The governance bridge is still local and bounded: the embedded proxy listens on
 loopback only for the launched run, kernel correlation is best effort and may be
@@ -615,6 +704,67 @@ command exits nonzero without configuring Claude Code. JSON output includes
 `ok: false`, `error: "missing_scope"`, `condition: "missing_scope"`, and
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
+
+If `--scope` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_scope_invalid"`, `condition: "protect_scope_invalid"`, and
+placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project>` and
+`ardur protect claude-code --scope .`; human output prints the same recovery
+guidance. An explicit `--scope .` is still accepted and protects the current
+working directory.
+
+If `--agent-id` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_agent_id_invalid"`, `condition: "protect_agent_id_invalid"`,
+and placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project> --agent-id <agent-id>` and
+`ardur protect claude-code --scope <your-project>`; human output prints the same
+recovery guidance. Omitting `--agent-id` uses the default subject and is not
+rejected.
+
+If `--mission` is supplied as a non-empty but whitespace-only string, the
+command exits nonzero without configuring Claude Code, generating keys, or
+writing `active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_mission_invalid"`, `condition: "protect_mission_invalid"`,
+and placeholder-only `next_steps` such as
+`ardur protect claude-code --scope <your-project> --mission <mission>` and
+`ardur protect claude-code --scope <your-project>`; human output prints the same
+recovery guidance. An empty-string `--mission ""` is falsy and falls through to
+the selected mode's default mission; only whitespace-only strings that would
+leak into the JWT are rejected.
+
+If `--home` is supplied but is empty or whitespace-only, the command exits
+nonzero without configuring Claude Code, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_home_invalid"`, `error_code: "protect_home_invalid"`,
+`condition: "protect_home_invalid"`, and placeholder-only `next_steps` such as
+`ardur protect claude-code --home <ardur-home> --scope <your-project>`,
+`ardur protect claude-code --scope <your-project>` (omit `--home` to use the
+default), and `ardur protect claude-code --home . --scope <your-project>` (use
+`.` explicitly for the current working directory); human output prints the same
+recovery guidance. Empty strings, whitespace-only values, and unquoted empty
+environment variables resolve to the current working directory and are rejected.
+Omitting `--home` entirely uses the default Ardur home directory and is not
+rejected. An explicit `--home .` is still accepted.
+
+If `--keys-dir` is supplied but is empty or whitespace-only, the command exits
+nonzero without generating keys, configuring Claude Code, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_keys_dir_invalid"`, `error_code: "protect_keys_dir_invalid"`,
+`condition: "protect_keys_dir_invalid"`, and placeholder-only `next_steps` such
+as `ardur protect claude-code --keys-dir <keys-dir> --scope <your-project>`,
+`ardur protect claude-code --scope <your-project>` (omit `--keys-dir` to use the
+default keys directory under the Ardur home), and
+`ardur protect claude-code --keys-dir . --scope <your-project>` (use `.`
+explicitly for the current working directory); human output prints the same
+recovery guidance. Empty strings, whitespace-only values, and unquoted empty
+environment variables resolve to the current working directory and are rejected,
+because they silently create real signing keys in unintended locations.
+Omitting `--keys-dir` entirely uses the default keys directory under the Ardur
+home and is not rejected. An explicit `--keys-dir .` is still accepted.
 
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output

@@ -19,6 +19,9 @@
 //     walk that replaces it for file ops (see ardur_file_allow_key's doc
 //     comment in process_guard.bpf.c).
 //  4. Both cases produce a matching record on the enforce_events ringbuf.
+//  5. Issue #124: a pinned guard load's policy survives a simulated daemon
+//     restart (Close, then load again from the same bpffs pins) with no
+//     re-apply — runRestartSurvivalScenario, restart_survival_scenario.go.
 //
 // Not part of `go test ./...`: this mutates real kernel state (loads a
 // BPF-LSM program, creates cgroups) and requires CAP_BPF/CAP_SYS_ADMIN,
@@ -50,7 +53,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("PASS: process_guard enforced both the exec-deny and file-allowlist scenarios with matching enforce_events")
+	fmt.Println("PASS: process_guard enforced the exec-deny, file-allowlist, and restart-survival scenarios with matching enforce_events")
 }
 
 func run() error {
@@ -82,6 +85,13 @@ func run() error {
 		return fmt.Errorf("file-allowlist scenario: %w", err)
 	}
 	fmt.Println("file-allowlist scenario: PASS")
+
+	// Uses its own pinned load(s), independent of the shared `handles` above
+	// (see runRestartSurvivalScenario's doc comment for why).
+	if err := runRestartSurvivalScenario(); err != nil {
+		return fmt.Errorf("restart-survival scenario: %w", err)
+	}
+	fmt.Println("restart-survival scenario: PASS")
 
 	return nil
 }

@@ -122,6 +122,14 @@ type daemon struct {
 	// health responses so a launcher can decide whether routing a governed
 	// process through ardur-exec-shim (the seccomp tier's on-ramp) is
 	// necessary at all. One of the daemonTier* constants.
+	//
+	// Not just startup-once, though: if the BPF-LSM guard consumer exits
+	// mid-run (issue #121 — e.g. the ringbuf closes because the guard was
+	// force-detached externally, or a real error), degradeGuardTier moves
+	// this back to daemonTierNone so health never keeps advertising bpf_lsm
+	// once nothing is actually attached. Read/write only via getActiveTier /
+	// setActiveTier, which take mu — this field is written from the guard
+	// goroutine and read from every socket-handling goroutine concurrently.
 	activeTier string
 
 	// applyMu serializes every BPF policy-map mutation — ApplyPolicyMaps,
@@ -279,6 +287,20 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 				Error:           fmt.Sprintf("register_session cgroup ownership check failed: %v", err),
 			}
 		}
+		// #119 collision guard: even a claim that passes ownership verification
+		// must not be allowed to bind a cgroup_id that another live session
+		// already holds — two sessions must never be able to govern the same
+		// cgroup concurrently. See checkCgroupCollision's doc comment for the
+		// residual race this does not fully close.
+		if err := d.checkCgroupCollision(req.RegisterSession); err != nil {
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          req.Method,
+				SessionID:       req.RegisterSession.SessionID,
+				OK:              false,
+				Error:           fmt.Sprintf("register_session cgroup collision check failed: %v", err),
+			}
+		}
 	}
 
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
@@ -321,13 +343,83 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 // activeTier is set to bpf_lsm exactly when the maps load, so the two never
 // disagree there; the fallback only matters for that bypass path.
 func (d *daemon) enforcementTier() string {
-	if d.activeTier != "" && d.activeTier != daemonTierNone {
-		return d.activeTier
+	if tier := d.getActiveTier(); tier != "" && tier != daemonTierNone {
+		return tier
 	}
 	if kernelcapture.PolicyMapsReady(d.policyMaps) {
 		return kernelcapture.EnforcementTierBPFLSM
 	}
 	return kernelcapture.EnforcementTierNone
+}
+
+// getActiveTier returns the current activeTier under mu. See activeTier's
+// doc comment: this is read from every socket-handling goroutine and written
+// from both main()'s startup tier selection and degradeGuardTier.
+func (d *daemon) getActiveTier() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.activeTier
+}
+
+// setActiveTier atomically updates activeTier under mu.
+func (d *daemon) setActiveTier(tier string) {
+	d.mu.Lock()
+	d.activeTier = tier
+	d.mu.Unlock()
+}
+
+// degradeGuardTier handles the guard consumer goroutine returning while ctx
+// is still live — i.e. NOT normal shutdown (issue #121).
+//
+// This fires for two distinct causes, both of which mean the same thing to a
+// health caller: process_guard is no longer attached and enforce_events is no
+// longer flowing. (a) cause != nil: a real read/decode failure. (b) cause ==
+// nil: consumeEnforceEvents returned via a clean io.EOF, which
+// ringbufEnforceEventReader also produces when the ringbuf was closed for a
+// reason OTHER than this daemon's own ctx-cancellation watcher — e.g. the
+// guard was force-detached externally (bpftool link detach, or the same
+// external-tamper class RunTamperAudit checks for on its own timer). Either
+// way, d.policyMaps was already cleared to its zero value by runGuardConsumer's
+// defer by the time this runs; activeTier must not keep claiming bpf_lsm past
+// that point.
+//
+// No-op if activeTier was never actually bpf_lsm — covers the startup-load-
+// failure case, where runGuardConsumer returns immediately (before this
+// goroutine's caller's ready-channel select has run) and there is nothing to
+// degrade from.
+//
+// Deliberately does not attempt to stand up the seccomp fallback tier
+// retroactively: that tier's supervisor goroutine and socket lifecycle are
+// wired only at startup (main()'s "if activeTier != bpf_lsm" branch), and
+// retrofitting a second start site here would need its own careful
+// wg/cancellation handling for a case that is already rare and already
+// correctly reported once this function returns. Loudly signalling the true
+// (degraded) tier — never silently keeping a stale bpf_lsm claim alive — is
+// the fix; auto-failover is a larger, separate change.
+func (d *daemon) degradeGuardTier(cause error, log *slog.Logger) {
+	previous := d.getActiveTier()
+	if previous != daemonTierBPFLSM {
+		return
+	}
+	d.setActiveTier(daemonTierNone)
+
+	detail := fmt.Sprintf(
+		"guard consumer exited while the daemon is still running; enforcement tier downgraded from %q to %q",
+		previous, daemonTierNone,
+	)
+	if cause != nil {
+		detail = fmt.Sprintf("%s: %v", detail, cause)
+	}
+	log.Error("BPF-LSM guard consumer exited mid-run: enforcement tier degraded", "cause", cause, "previous_tier", previous)
+	d.recordTamperAudit(kernelcapture.TamperAuditResult{
+		CheckedAt: time.Now().UTC(),
+		Drift:     true,
+		Checks: []kernelcapture.TamperCheckResult{{
+			Name:   "guard_consumer",
+			OK:     false,
+			Detail: detail,
+		}},
+	}, log)
 }
 
 // handleApplyPolicy validates the session, resolves its cgroup_id, and writes
@@ -376,7 +468,7 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 
 	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, *ap); err != nil {
 		if errors.Is(err, kernelcapture.ErrPolicyMapsUnavailable) {
-			if d.activeTier == daemonTierSeccomp && seccompFullyCoversPolicy(ap) {
+			if d.getActiveTier() == daemonTierSeccomp && seccompFullyCoversPolicy(ap) {
 				// BPF-LSM being unavailable isn't a degradation here: the
 				// active tier on this host is seccomp user-notify, and every
 				// op this request asks for (OP_NET_CONNECT only) is within
@@ -552,6 +644,42 @@ func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest, ha
 		Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
 		OK:              true,
 	}
+}
+
+// checkCgroupCollision (issue #119) rejects a register_session whose claimed
+// cgroup_id is already bound to another live session, so two sessions can
+// never claim enforcement authority over the same cgroup at once — even a
+// claim that independently passes cgroupVerifier's ownership check. Platform-
+// neutral: this is a plain index lookup, no /proc dependency, so it applies
+// (and is tested) on every platform, unlike the Linux-only ownership check.
+//
+// Re-registering the SAME session_id against the SAME cgroup_id it already
+// holds is not a collision (a client may legitimately retry register_session
+// for its own session) and is allowed through.
+//
+// Residual race, accepted: there is a narrow window between this check and
+// onSessionRegistered's index write (below) where two concurrent
+// register_session calls for the identical cgroup_id could both pass this
+// check before either commits. Closing that fully would require moving
+// session admission under the same lock as the registry's own accept path —
+// out of scope for this fix. cgroupVerifier's ownership check is the primary
+// defense against the actual #119 threat (a peer cannot fabricate "root_pid
+// is really a member of this cgroup"); this guard is defense-in-depth on top
+// of that, not the last line, so the residual window is a low-severity gap
+// between two requests that would BOTH have to already be making a
+// legitimately-ownership-verified claim to the same cgroup — an unusual
+// double-registration, not an unauthorized one.
+func (d *daemon) checkCgroupCollision(reg *kernelcapture.DaemonRegisterSessionRequest) error {
+	if reg == nil || reg.CgroupID == 0 {
+		return nil
+	}
+	d.mu.RLock()
+	existing, ok := d.cgroupIndex[reg.CgroupID]
+	d.mu.RUnlock()
+	if ok && existing != reg.SessionID {
+		return fmt.Errorf("cgroup_id %d is already bound to session %q", reg.CgroupID, existing)
+	}
+	return nil
 }
 
 // onSessionRegistered adds the session to the cgroup routing index.
@@ -1095,16 +1223,26 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := runGuardConsumer(ctx, d, log, guardOutcome); err != nil && ctx.Err() == nil {
+				err := runGuardConsumer(ctx, d, log, guardOutcome)
+				if ctx.Err() != nil {
+					return // normal shutdown
+				}
+				if err != nil {
 					log.Warn("BPF-LSM guard unavailable (enforcement degraded to seccomp-advertised)",
 						"error", err)
 				}
+				// Reached whether runGuardConsumer failed mid-run (err != nil)
+				// or its ringbuf closed cleanly for a reason other than our
+				// own shutdown watcher (err == nil — e.g. an external force-
+				// detach); either way the guard is no longer attached. Issue
+				// #121: never leave activeTier claiming bpf_lsm past this point.
+				d.degradeGuardTier(err, log)
 			}()
 
 			select {
 			case err := <-guardOutcome:
 				if err == nil {
-					d.activeTier = daemonTierBPFLSM
+					d.setActiveTier(daemonTierBPFLSM)
 				} else {
 					log.Warn("BPF-LSM tier not active, falling back to seccomp tier", "error", err)
 				}
@@ -1117,8 +1255,8 @@ func main() {
 			log.Warn("BPF-LSM guard tier disabled via --disable-bpf-lsm; forcing seccomp user-notify tier")
 		}
 
-		if d.activeTier != daemonTierBPFLSM && ctx.Err() == nil {
-			d.activeTier = daemonTierSeccomp
+		if d.getActiveTier() != daemonTierBPFLSM && ctx.Err() == nil {
+			d.setActiveTier(daemonTierSeccomp)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -1127,7 +1265,7 @@ func main() {
 				}
 			}()
 		}
-		log.Info("enforcement tier selected", "tier", d.activeTier, "seccomp_socket", *seccompSocketPath)
+		log.Info("enforcement tier selected", "tier", d.getActiveTier(), "seccomp_socket", *seccompSocketPath)
 	} else {
 		log.Info("eBPF ringbuf consumers disabled (--no-ringbuf); enforcement tiers unavailable")
 	}

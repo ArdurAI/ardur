@@ -41,6 +41,7 @@ from vibap.run_bridge import (
     _wrap_command_with_seccomp_shim,
     run_governed,
     run_governed_cli,
+    run_governed_mission_invalid_next_steps,
     select_adapter,
 )
 
@@ -1025,6 +1026,65 @@ def test_run_governed_cli_missing_command_reports_placeholder_next_steps(
     assert "Traceback" not in remediation
 
 
+@pytest.mark.parametrize("bad_mission", ["", "   ", "\t\n"])
+def test_run_governed_cli_empty_or_whitespace_mission_is_rejected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    bad_mission: str,
+) -> None:
+    """Empty/whitespace --mission must fail before keys/passports are created."""
+    home = tmp_path / "raw-home-should-not-be-created"
+    sentinel = tmp_path / "child-ran.txt"
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("invalid mission must fail before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=["echo", "ok"],
+            mission=bad_mission,
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert not home.exists()
+    assert "ardur run --mission must be a non-empty string." in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur run --mission <mission> --allowed-tools <tools> -- <command>" in remediation
+    assert "ardur run -- <command>" in remediation
+    # Remediation must be placeholder-only: no raw user input leaked.
+    if bad_mission.strip():
+        assert bad_mission not in remediation
+    assert str(home) not in remediation
+    assert "Traceback" not in remediation
+
+
+def test_run_governed_mission_invalid_next_steps_are_deterministic() -> None:
+    steps = run_governed_mission_invalid_next_steps()
+    assert len(steps) == 2
+    assert steps[0]["condition"] == "run_mission_invalid"
+    assert steps[1]["condition"] == "run_mission_invalid"
+    for step in steps:
+        assert step["command"]
+        assert "<" in step["command"]  # placeholder-only
+        assert step["detail"]
+
+
 # ── adapter unit tests ─────────────────────────────────────────────────────────
 
 
@@ -1141,3 +1201,185 @@ def test_run_dispatch_legacy_vs_governance() -> None:
     ):
         args = parser.parse_args(argv)
         assert _run_has_governance_intent(args) is True, argv
+
+
+# ── run governance budget validation ────────────────────────────────────────────
+
+
+def test_run_governed_cli_negative_max_duration_returns_structured_json_without_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative --max-duration-s must fail with structured JSON BEFORE key generation."""
+    home = tmp_path / "ardur-home"
+    sentinel = tmp_path / "child-ran.txt"
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("invalid budget must fail before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=-5,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert not sentinel.exists()
+    assert not home.exists()
+
+    # stdout must be structured JSON
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["condition"] == "run_max_duration_invalid"
+    assert response["error"] == "run_max_duration_invalid"
+    assert "next_steps" in response
+    assert len(response["next_steps"]) >= 1
+    for step in response["next_steps"]:
+        assert "<" in step["command"]  # placeholder-only
+
+    # stderr must be empty
+    assert captured.err == ""
+
+    # No traceback or raw ValueError in either stream
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    assert "ttl_s must be positive" not in captured.out
+    assert "ttl_s must be positive" not in captured.err
+
+    # No local absolute paths leaked
+    assert "/Users/" not in captured.out
+    assert "/tmp/" not in captured.out
+
+
+def test_run_governed_cli_negative_max_tool_calls_returns_structured_json_without_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative --max-tool-calls must fail with structured JSON BEFORE key generation."""
+    home = tmp_path / "ardur-home"
+    sentinel = tmp_path / "child-ran.txt"
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("invalid budget must fail before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=-5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert not sentinel.exists()
+    assert not home.exists()
+
+    response = json.loads(captured.out)
+    assert response["ok"] is False
+    assert response["condition"] == "run_max_tool_calls_invalid"
+    assert response["error"] == "run_max_tool_calls_invalid"
+    assert "next_steps" in response
+    assert len(response["next_steps"]) >= 1
+    for step in response["next_steps"]:
+        assert "<" in step["command"]
+
+    assert captured.err == ""
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    assert "/Users/" not in captured.out
+    assert "/tmp/" not in captured.out
+
+
+def test_run_governed_cli_zero_max_tool_calls_still_valid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--max-tool-calls 0 must NOT be rejected by the new check (consistent with cmd_issue)."""
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_run_governed(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fake_run_governed)
+
+    with pytest.raises(_Stop):
+        run_governed_cli(
+            Namespace(
+                command=["echo", "hi"],
+                mission="example-mission-placeholder",
+                allowed_tools=["Read"],
+                forbidden_tools=None,
+                max_tool_calls=0,
+                max_duration_s=60,
+                home=tmp_path / "h",
+                via="env",
+                no_kernel_correlation=True,
+            )
+        )
+
+    # run_governed was reached with max_tool_calls=0 (not rejected)
+    assert captured["max_tool_calls"] == 0
+
+
+def test_run_governed_cli_negative_max_duration_no_stderr_traceback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative --max-duration-s must not leak a traceback or raw ValueError to stderr."""
+    home = tmp_path / "ardur-home"
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        raise AssertionError("invalid budget must fail before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=-5,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.err == ""
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    assert "ttl_s must be positive" not in captured.out
+    assert "ttl_s must be positive" not in captured.err

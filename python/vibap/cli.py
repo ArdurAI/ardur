@@ -37,6 +37,7 @@ from .passport import (
     DEFAULT_KEYS_DIR,
     KeyDirectoryError,
     MissionPassport,
+    _ensure_default_home_dir,
     generate_keypair,
     load_existing_public_key,
     issue_passport,
@@ -48,11 +49,13 @@ from .personal_hub import (
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
     HubError,
+    SETUP_HOME_INVALID_CONDITION,
     desktop_observe,
     doctor_personal,
     hub_request,
     run_under_hub,
     serve_hub,
+    setup_home_invalid_failure_response,
     setup_personal,
     status_response_with_next_steps,
     uninstall_personal,
@@ -61,18 +64,22 @@ from .claude_code_report import build_claude_code_report
 from .claude_code_hook import main as claude_code_hook_main
 from .gemini_cli_hook import (
     FixtureProjectDirError as GeminiFixtureProjectDirError,
+    FixturePathError as GeminiFixturePathError,
     build_local_fixture as build_gemini_local_fixture,
     build_shareable_context as build_gemini_shareable_context,
     build_shareable_report as build_gemini_shareable_report,
     fixture_project_dir_failure_response as gemini_fixture_project_dir_failure_response,
+    _fixture_path_failure_response as gemini_fixture_path_failure_response,
     main as gemini_cli_hook_main,
 )
 from .codex_app_server_fixture import (
     FixtureProjectDirError as CodexFixtureProjectDirError,
+    FixturePathError as CodexFixturePathError,
     build_local_fixture as build_codex_local_fixture,
     build_shareable_context as build_codex_shareable_context,
     build_shareable_report as build_codex_shareable_report,
     fixture_project_dir_failure_response as codex_fixture_project_dir_failure_response,
+    _fixture_path_failure_response as codex_fixture_path_failure_response,
     handle_host_event as handle_codex_host_event,
 )
 from .posture_index import build_posture_index, format_posture_report
@@ -156,6 +163,9 @@ def _path_not_directory_response() -> dict:
 
 
 def _path_failure_exit_code(exc: HubError) -> int:
+    if exc.code == SETUP_HOME_INVALID_CONDITION:
+        _print_json(setup_home_invalid_failure_response())
+        return 1
     if exc.code != _hub_path_error_code():
         raise exc
     _print_json(_path_not_directory_response())
@@ -873,7 +883,149 @@ def _start_mission_file_failure_response(exc: Exception) -> dict:
     }
 
 
+def _start_mission_path_invalid_response() -> dict[str, object]:
+    """Failure response for an empty/whitespace --mission path on start.
+
+    ``--mission`` on ``ardur start`` is a mission JSON file path, not a
+    directory, so the generic ``_path_arg_invalid_response`` hint that
+    suggests ``--mission .`` would mislead the user into an
+    ``IsADirectoryError``. Use the mission-file-specific guidance instead.
+    """
+    return {
+        "ok": False,
+        "error": "start_mission_path_invalid",
+        "error_code": "start_mission_path_invalid",
+        "condition": "start_mission_path_invalid",
+        "message": "ardur start --mission must be a mission JSON file path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --mission path was provided on start. "
+            "Provide an explicit mission JSON file path."
+        ),
+        "next_steps": _start_mission_file_failure_next_steps(
+            "start_mission_path_invalid"
+        ),
+    }
+
+
+def _start_api_token_invalid_response() -> dict[str, object]:
+    """Failure response for an empty/whitespace --api-token on start.
+
+    ``--api-token`` is stripped inside ``serve_proxy`` (mirroring the env-var
+    and Go TrimSpace paths), but an explicit whitespace-only argument is
+    truthy before stripping and falsy after, so it entered the argument
+    branch and resolved to an empty bearer token. Reject it here, before any
+    key material is generated, with the same structured shape the other
+    ``start`` validation helpers use. An unset ``--api-token`` (None) and an
+    empty string ``""`` (falsy, falls through to ``_generate_api_token``)
+    remain valid: only whitespace-only strings are rejected, matching the
+    silent-empty-token bug class closed for ``--proxy-url`` in 4d98a01.
+    """
+    return {
+        "ok": False,
+        "error": "start_api_token_invalid",
+        "error_code": "start_api_token_invalid",
+        "condition": "start_api_token_invalid",
+        "message": "ardur start --api-token must be a non-empty token after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --api-token was provided on start. "
+            "Provide an explicit bearer token, or omit --api-token to have "
+            "ardur generate a random one."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_explicit_api_token",
+                "command": "ardur start --api-token <api-token>",
+                "detail": "Provide an explicit --api-token bearer token.",
+            },
+            {
+                "action": "omit_api_token_to_autogenerate",
+                "command": "ardur start",
+                "detail": (
+                    "Omit --api-token so ardur generates a random bearer token. "
+                    "VIBAP_API_TOKEN still takes precedence when set."
+                ),
+            },
+        ],
+    }
+
+
+def _start_api_token_invalid_failure(args: argparse.Namespace) -> dict[str, object] | None:
+    """Return the api-token-invalid response when --api-token is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to autogeneration), or a real token.
+    """
+    value = getattr(args, "api_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _start_api_token_invalid_response()
+    return None
+
+
+_PATH_ARG_SPECS = ("keys_dir", "state_dir", "log_path", "tls_cert", "tls_key")
+
+
+def _path_arg_is_empty(value: object) -> bool:
+    """True when a CLI path argument is an empty or whitespace-only string."""
+    return isinstance(value, str) and not value.strip()
+
+
+def _path_arg_invalid_response(arg_name: str) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": "path_arg_invalid",
+        "error_code": "path_arg_invalid",
+        "condition": "path_arg_invalid",
+        "message": f"ardur --{arg_name.replace('_', '-')} must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only path argument was provided. "
+            "Pass an explicit directory or file path, or use '.' for the current working directory."
+        ),
+        "next_steps": [
+            {
+                "action": f"pass_{arg_name}",
+                "command": f"ardur <command> --{arg_name.replace('_', '-')} <{arg_name.replace('_', '-')}>",
+                "detail": f"Provide an explicit --{arg_name.replace('_', '-')} path.",
+            },
+            {
+                "action": "use_cwd",
+                "command": f"ardur <command> --{arg_name.replace('_', '-')} .",
+                "detail": "Use '.' explicitly to target the current working directory.",
+            },
+        ],
+    }
+
+
+def _path_arg_invalid_failure(args: argparse.Namespace) -> dict[str, object] | None:
+    """Check all path-typed args for empty/whitespace strings.
+
+    Returns the first invalid response dict, or None if all are valid.
+    Coerces validated non-None str values back to Path on the namespace
+    so downstream Path | None consumers see identical types.
+    """
+    for name in _PATH_ARG_SPECS:
+        value = getattr(args, name, None)
+        if _path_arg_is_empty(value):
+            return _path_arg_invalid_response(name)
+    # Coerce validated str values back to Path for downstream type consistency.
+    for name in _PATH_ARG_SPECS:
+        value = getattr(args, name, None)
+        if isinstance(value, str):
+            setattr(args, name, Path(value))
+    return None
+
+
 def cmd_start(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+    # --mission on start is a JSON file path, guarded inline (on issue it is a
+    # description string already covered by _issue_identity_failure). The file
+    # path is not a directory, so use the mission-file-specific guidance rather
+    # than the generic _path_arg_invalid_response hint that suggests '.'.
+    if isinstance(args.mission, str) and not args.mission.strip():
+        _print_json(_start_mission_path_invalid_response())
+        return 1
     port_failure = _start_port_failure_exit_code(args.port)
     if port_failure is not None:
         return port_failure
@@ -914,6 +1066,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
     if log_path_parent_failure is not None:
         return log_path_parent_failure
+    api_token_failure = _start_api_token_invalid_failure(args)
+    if api_token_failure is not None:
+        _print_json(api_token_failure)
+        return 1
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
@@ -1055,7 +1211,68 @@ def _issue_budget_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
     return None
 
 
+def _issue_identity_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "rerun_issue_with_valid_identity",
+            "command": (
+                "ardur issue --agent-id <agent-id> --mission <mission> "
+                "--keys-dir <keys-dir>"
+            ),
+            "detail": (
+                "Provide a non-empty agent subject identifier and a non-empty "
+                "mission string after trimming whitespace before issuing a "
+                "Mission Passport."
+            ),
+        }
+    ]
+
+
+def _issue_identity_failure_response(condition: str, detail: str) -> dict:
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Mission Passport issue identity is invalid.",
+        "detail": detail,
+        "next_steps": _issue_identity_failure_next_steps(condition),
+    }
+
+
+def _issue_identity_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
+    agent_id = args.agent_id
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        return (
+            _issue_identity_failure_response(
+                "issue_agent_id_invalid",
+                "--agent-id must be a non-empty string after trimming whitespace.",
+            ),
+            1,
+        )
+    mission = args.mission
+    if not isinstance(mission, str) or not mission.strip():
+        return (
+            _issue_identity_failure_response(
+                "issue_mission_invalid",
+                "--mission must be a non-empty string after trimming whitespace.",
+            ),
+            1,
+        )
+    return None
+
+
 def cmd_issue(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+    issue_identity_failure = _issue_identity_failure(args)
+    if issue_identity_failure is not None:
+        response, exit_code = issue_identity_failure
+        _print_json(response)
+        return exit_code
     issue_budget_failure = _issue_budget_failure(args)
     if issue_budget_failure is not None:
         response, exit_code = issue_budget_failure
@@ -1221,6 +1438,10 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
     if keys_dir_failure is not None:
         return keys_dir_failure
@@ -1351,6 +1572,10 @@ def _attest_session_failure_exit_code(session_id: str, state_dir: Path | None) -
 
 
 def cmd_attest(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     state_dir_failure = _state_dir_failure_exit_code(args.state_dir)
     if state_dir_failure is not None:
         return state_dir_failure
@@ -1447,6 +1672,20 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
         )
     except GeminiFixtureProjectDirError:
         _print_json(gemini_fixture_project_dir_failure_response())
+        return 1
+    except GeminiFixturePathError as exc:
+        _print_json(gemini_fixture_path_failure_response(
+            condition=exc.condition,
+            label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
+            arg_name="--" + exc.condition.replace("gemini_cli_fixture_", "").replace("_not_directory", "").replace("_", "-"),
+        ))
+        return 1
+    except KeyDirectoryError:
+        _print_json(gemini_fixture_path_failure_response(
+            condition="gemini_cli_fixture_keys_dir_not_directory",
+            label="keys dir",
+            arg_name="--keys-dir",
+        ))
         return 1
     _print_json(build_gemini_shareable_context(fixture))
     return 0
@@ -1549,6 +1788,20 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
         )
     except CodexFixtureProjectDirError:
         _print_json(codex_fixture_project_dir_failure_response())
+        return 1
+    except CodexFixturePathError as exc:
+        _print_json(codex_fixture_path_failure_response(
+            condition=exc.condition,
+            label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
+            arg_name="--" + exc.condition.replace("codex_app_server_fixture_", "").replace("_not_directory", "").replace("_", "-"),
+        ))
+        return 1
+    except KeyDirectoryError:
+        _print_json(codex_fixture_path_failure_response(
+            condition="codex_app_server_fixture_keys_dir_not_directory",
+            label="keys dir",
+            arg_name="--keys-dir",
+        ))
         return 1
     _print_json(build_codex_shareable_context(fixture))
     return 0
@@ -1883,11 +2136,14 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
     import urllib.error as urlerror
     import urllib.request as urlreq
 
-    proxy_url = (
-        args.proxy_url
-        or os.environ.get("ARDUR_PROXY_URL")
-        or "https://127.0.0.1:8443"
-    )
+    # Distinguish "user explicitly passed --proxy-url ''" from "user omitted
+    # the flag". An empty string is an invalid proxy URL and must reach the
+    # validator below (which rejects it as proxy_url_invalid) rather than be
+    # silently swallowed by an ``or`` fallback chain that treats '' as falsy.
+    if args.proxy_url is None:
+        proxy_url = os.environ.get("ARDUR_PROXY_URL") or "https://127.0.0.1:8443"
+    else:
+        proxy_url = args.proxy_url
     proxy_base_url = _validated_kill_switch_proxy_base_url(proxy_url)
     if proxy_base_url is None:
         _print_json(_kill_switch_invalid_proxy_url_response())
@@ -1943,13 +2199,20 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    response = doctor_personal(args)
+    try:
+        response = doctor_personal(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
-    _print_json(uninstall_personal(args))
+    try:
+        response = uninstall_personal(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
+    _print_json(response)
     return 0
 
 
@@ -1974,7 +2237,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_desktop_observe(args: argparse.Namespace) -> int:
-    response = desktop_observe(args)
+    try:
+        response = desktop_observe(args)
+    except HubError as exc:
+        return _path_failure_exit_code(exc)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
@@ -2735,6 +3001,182 @@ def _protect_claude_code_missing_scope_response(profile_present: bool) -> dict[s
     }
 
 
+def _protect_claude_code_scope_invalid_response() -> dict[str, object]:
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_scope_invalid",
+        "condition": "protect_scope_invalid",
+        "message": "ardur protect claude-code --scope must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --scope was provided. Pass an explicit "
+            "project folder, or use `.` to protect the current working directory."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_scope",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Choose the local project folder Claude Code is allowed to work in.",
+            },
+            {
+                "action": "use_cwd",
+                "command": "ardur protect claude-code --scope .",
+                "detail": "Use `.` explicitly to protect the current working directory.",
+            },
+            {
+                "action": "create_profile",
+                "command": "ardur profile init --template safe-coding --path ARDUR.md",
+                "detail": "Create an editable profile that includes a `Protect folder:` line.",
+            },
+        ],
+    }
+
+
+def _protect_claude_code_identity_invalid_response(condition: str) -> dict[str, object]:
+    """Structured response for empty/whitespace ``--agent-id`` or ``--mission``.
+
+    Mirrors the ``protect_scope_invalid`` shape so all ``protect claude-code``
+    fail-closed branches share the same envelope. ``next_steps`` use
+    placeholder-only commands and details with no local paths or tokens.
+    """
+    if condition == "protect_agent_id_invalid":
+        message = "ardur protect claude-code --agent-id must be a non-empty string after trimming whitespace."
+        detail = (
+            "An empty or whitespace-only --agent-id was provided. The Mission "
+            "Passport subject must be a non-empty identifier after trimming "
+            "whitespace; omit the flag to use the default subject."
+        )
+        next_steps = [
+            {
+                "action": "pass_agent_id",
+                "command": "ardur protect claude-code --scope <your-project> --agent-id <agent-id>",
+                "detail": "Provide a non-empty agent subject identifier after trimming whitespace.",
+            },
+            {
+                "action": "omit_agent_id",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --agent-id to use the default subject.",
+            },
+        ]
+    else:  # protect_mission_invalid
+        message = "ardur protect claude-code --mission must be a non-empty string after trimming whitespace."
+        detail = (
+            "An explicitly-provided --mission was empty or whitespace-only. "
+            "Pass a non-empty mission string, or omit the flag to use the "
+            "selected mode's default mission."
+        )
+        next_steps = [
+            {
+                "action": "pass_mission",
+                "command": "ardur protect claude-code --scope <your-project> --mission <mission>",
+                "detail": "Provide a non-empty mission string after trimming whitespace.",
+            },
+            {
+                "action": "omit_mission",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --mission to use the selected mode's default mission.",
+            },
+        ]
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": next_steps,
+    }
+
+
+def _protect_claude_code_home_invalid_response() -> dict[str, object]:
+    """Structured response for empty/whitespace-only ``--home``.
+
+    Mirrors the ``protect_scope_invalid`` / ``protect_agent_id_invalid`` shape
+    so all ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local paths
+    or tokens. Placed before any ``home.mkdir`` / ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid home value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_home_invalid",
+        "error_code": "protect_home_invalid",
+        "condition": "protect_home_invalid",
+        "message": "ardur protect claude-code --home must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --home was provided. Pass an explicit "
+            "Ardur home directory, or omit --home to use the default home. Empty "
+            "strings, whitespace-only values, and unquoted empty environment "
+            "variables resolve to the current working directory and are rejected."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_home",
+                "command": "ardur protect claude-code --home <ardur-home> --scope <your-project>",
+                "detail": "Provide a non-empty Ardur home directory after trimming whitespace.",
+            },
+            {
+                "action": "omit_home",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --home to use the default Ardur home directory.",
+            },
+            {
+                "action": "explicit_cwd",
+                "command": "ardur protect claude-code --home . --scope <your-project>",
+                "detail": "Use `.` explicitly to place Ardur state in the current working directory.",
+            },
+        ],
+    }
+
+
+def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
+    """Structured response for empty/whitespace-only ``--keys-dir``.
+
+    Mirrors the ``protect_home_invalid`` / ``protect_scope_invalid`` shape so all
+    ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local paths
+    or tokens. Placed before any ``mkdir`` / ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid keys-dir value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_keys_dir_invalid",
+        "error_code": "protect_keys_dir_invalid",
+        "condition": "protect_keys_dir_invalid",
+        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --keys-dir was provided. Pass an "
+            "explicit signing keys directory, or omit --keys-dir to use the "
+            "default keys directory under the Ardur home. Empty strings, "
+            "whitespace-only values, and unquoted empty environment variables "
+            "resolve to the current working directory and are rejected, "
+            "because they silently create real signing keys in unintended "
+            "locations."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_keys_dir",
+                "command": "ardur protect claude-code --keys-dir <keys-dir> --scope <your-project>",
+                "detail": "Provide a non-empty signing keys directory after trimming whitespace.",
+            },
+            {
+                "action": "omit_keys_dir",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --keys-dir to use the default keys directory under the Ardur home.",
+            },
+            {
+                "action": "explicit_cwd",
+                "command": "ardur protect claude-code --keys-dir . --scope <your-project>",
+                "detail": "Use `.` explicitly to place signing keys in the current working directory.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     return {
         "ok": False,
@@ -2781,9 +3223,51 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
             raw_scope = Path(args.profile).expanduser().parent / profile_scope
     if raw_scope is None:
         return _protect_claude_code_missing_scope_response(profile_present=bool(args.profile))
+    # Reject empty/whitespace-only --scope before any key generation or directory
+    # creation. ``args.scope`` is ``type=str`` so an empty or whitespace-only
+    # value survives here as-is (previously ``type=Path`` normalized ``""`` to
+    # ``PosixPath('.')`` which silently resolved to the CWD and created real
+    # signing keys for the wrong directory).
+    if isinstance(raw_scope, str) and not raw_scope.strip():
+        return _protect_claude_code_scope_invalid_response()
+    # Reject empty/whitespace-only --agent-id and explicitly-provided
+    # whitespace-only --mission before any key generation, Mission Passport JWT
+    # issuance, or plugin/hook artifact creation. ``--agent-id`` has an argparse
+    # default (``local-user:claude-code``) so only an explicitly-passed
+    # empty/whitespace string reaches here. ``--mission`` defaults to ``None``;
+    # reject only explicitly-provided whitespace-only strings (truthy values
+    # that leak into the JWT). An empty string ``""`` is falsy and falls through
+    # to the ``args.mission or (...)`` mode/profile default, which is acceptable.
+    if isinstance(args.agent_id, str) and not args.agent_id.strip():
+        return _protect_claude_code_identity_invalid_response("protect_agent_id_invalid")
+    if isinstance(args.mission, str) and args.mission and not args.mission.strip():
+        return _protect_claude_code_identity_invalid_response("protect_mission_invalid")
+    # Reject empty/whitespace-only --home before any directory creation or key
+    # generation. ``--home`` is ``type=str`` so an empty or whitespace-only
+    # value survives here as-is (previously ``type=Path`` normalized ``""`` to
+    # ``PosixPath('.')`` which silently resolved to the CWD and created real
+    # signing keys + active_mission.jwt in the working directory). An explicit
+    # ``--home .`` (CWD) must remain valid, so only reject when the trimmed
+    # string is empty. Omitting ``--home`` entirely keeps ``args.home=None``
+    # which falls through to ``DEFAULT_HOME`` and is acceptable.
+    if isinstance(args.home, str) and not args.home.strip():
+        return _protect_claude_code_home_invalid_response()
+    # Reject empty/whitespace-only --keys-dir before any directory creation or
+    # key generation. ``--keys-dir`` is ``type=str`` so an empty or
+    # whitespace-only value survives here as-is (previously ``type=Path``
+    # normalized ``""`` to ``PosixPath('.')`` which silently resolved to the
+    # CWD and created real signing keys there). An explicit ``--keys-dir .``
+    # (CWD) must remain valid, so only reject when the trimmed string is
+    # empty. Omitting ``--keys-dir`` entirely keeps ``args.keys_dir=None`` and
+    # the handler falls back to ``<home>/keys``.
+    if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
+        return _protect_claude_code_keys_dir_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
-    home.mkdir(parents=True, exist_ok=True)
+    if args.home:
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    else:
+        _ensure_default_home_dir()
     plugin_dir = Path(args.plugin_dir).expanduser().resolve()
     failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
     if failed_plugin_checks:
@@ -2797,7 +3281,8 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         additional_policies = _resolve_protect_policies(args, profile, home)
     except _ProtectPolicyInputError as exc:
         return _protect_policy_input_failure_response(exc)
-    private_key, public_key = generate_keypair(keys_dir=args.keys_dir or (home / "keys"))
+    keys_dir_resolved = Path(args.keys_dir).expanduser().resolve() if args.keys_dir else (home / "keys")
+    private_key, public_key = generate_keypair(keys_dir=keys_dir_resolved)
     if profile and profile.allowed_tools:
         # A profile with an explicit allowlist is authoritative: if the author
         # leaves the blocklist empty, that means "no explicit tool denylist" and
@@ -3024,13 +3509,13 @@ def build_parser() -> argparse.ArgumentParser:
     start = subparsers.add_parser("start", help="start the VIBAP proxy HTTP service")
     start.add_argument("--host", default="127.0.0.1", help="bind address")
     start.add_argument("--port", type=int, default=8080, help="listen port")
-    start.add_argument("--mission", type=Path, help="optional mission JSON to issue and start immediately")
-    start.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
-    start.add_argument("--state-dir", type=Path, help="directory for persisted sessions")
-    start.add_argument("--log-path", type=Path, help="JSONL audit log path")
+    start.add_argument("--mission", type=str, help="optional mission JSON to issue and start immediately")
+    start.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    start.add_argument("--state-dir", type=str, help="directory for persisted sessions")
+    start.add_argument("--log-path", type=str, help="JSONL audit log path")
     start.add_argument("--api-token", help="Bearer token for clients; VIBAP_API_TOKEN still takes precedence")
-    start.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
-    start.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
+    start.add_argument("--tls-cert", type=str, help="TLS certificate PEM file")
+    start.add_argument("--tls-key", type=str, help="TLS private key PEM file")
     start.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
     auth_group = start.add_mutually_exclusive_group()
     auth_group.add_argument(
@@ -3058,19 +3543,19 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--delegation-allowed", action="store_true", help="allow one-step delegation")
     issue.add_argument("--max-delegation-depth", default=0, help="delegation depth budget")
     issue.add_argument("--ttl-s", help="override token TTL in seconds")
-    issue.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
+    issue.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     issue.set_defaults(func=cmd_issue)
 
     verify = subparsers.add_parser("verify", help="verify a mission passport JWT")
     verify.add_argument("--token", required=True, help="passport token to verify")
-    verify.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
+    verify.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     verify.set_defaults(func=cmd_verify)
 
     attest = subparsers.add_parser("attest", help="issue a behavioral attestation for a saved session")
     attest.add_argument("--session", required=True, help="session identifier / passport jti")
-    attest.add_argument("--keys-dir", type=Path, help="directory containing VIBAP signing keys")
-    attest.add_argument("--state-dir", type=Path, help="directory containing persisted sessions")
-    attest.add_argument("--log-path", type=Path, help="JSONL audit log path")
+    attest.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    attest.add_argument("--state-dir", type=str, help="directory containing persisted sessions")
+    attest.add_argument("--log-path", type=str, help="JSONL audit log path")
     attest.set_defaults(func=cmd_attest)
 
     cc_hook = subparsers.add_parser(
@@ -3220,7 +3705,7 @@ def build_parser() -> argparse.ArgumentParser:
     hub = subparsers.add_parser("hub", help="start the local Ardur Personal Hub")
     hub.add_argument("--host", default=DEFAULT_HUB_HOST, help="bind address")
     hub.add_argument("--port", type=int, default=DEFAULT_HUB_PORT, help="listen port")
-    hub.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    hub.add_argument("--home", type=str, help="Ardur Personal home directory")
     hub.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
     hub.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
     hub.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
@@ -3229,7 +3714,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup = subparsers.add_parser("setup", help="configure Ardur Personal on this Mac")
     setup.add_argument("--host", default=DEFAULT_HUB_HOST, help="Hub bind address")
     setup.add_argument("--port", default=DEFAULT_HUB_PORT, help="Hub port")
-    setup.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    setup.add_argument("--home", type=str, help="Ardur Personal home directory")
     setup.add_argument(
         "--rotate-token",
         action="store_true",
@@ -3246,11 +3731,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
     status.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     status.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    status.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    status.add_argument("--home", type=str, help="Ardur Personal home directory")
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
-    doctor.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    doctor.add_argument("--home", type=str, help="Ardur Personal home directory")
     doctor.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     doctor.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
     doctor.set_defaults(func=cmd_doctor)
@@ -3267,7 +3752,7 @@ def build_parser() -> argparse.ArgumentParser:
     kill_switch.set_defaults(func=cmd_kill_switch)
 
     uninstall = subparsers.add_parser("uninstall", help="remove Ardur Personal launch files")
-    uninstall.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    uninstall.add_argument("--home", type=str, help="Ardur Personal home directory")
     uninstall.add_argument(
         "--remove-data",
         action="store_true",
@@ -3348,7 +3833,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     desktop.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     desktop.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    desktop.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    desktop.add_argument("--home", type=str, help="Ardur Personal home directory")
     desktop.add_argument("--session-id", help="stable desktop session id")
     desktop.add_argument("--app", help="application name; autodetected on macOS when omitted")
     desktop.add_argument("--title", help="window title; autodetected on macOS when omitted")
@@ -3364,7 +3849,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     personal_native_host.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     personal_native_host.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    personal_native_host.add_argument("--home", type=Path, help="Ardur Personal home directory")
+    personal_native_host.add_argument("--home", type=str, help="Ardur Personal home directory")
     personal_native_host.add_argument(
         "--once-json",
         type=Path,
@@ -3414,7 +3899,7 @@ def build_parser() -> argparse.ArgumentParser:
         "claude-code",
         help="issue an active Mission Passport and print the Claude Code plugin command",
     )
-    protect_cc.add_argument("--scope", type=Path, help="folder Claude Code is allowed to work in")
+    protect_cc.add_argument("--scope", type=str, help="folder Claude Code is allowed to work in")
     protect_cc.add_argument("--profile", type=Path, help="Markdown Ardur profile, such as ARDUR.md")
     protect_cc.add_argument(
         "--mode",
@@ -3423,9 +3908,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="plain-English policy template",
     )
     protect_cc.add_argument("--json", action="store_true", help="print machine-readable setup details")
-    protect_cc.add_argument("--home", type=Path, help="Ardur home that receives active_mission.jwt")
+    # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
+    # values survive to the handler instead of being normalized to
+    # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
+    # stripped string before any directory creation or key generation.
+    protect_cc.add_argument("--home", type=str, help="Ardur home that receives active_mission.jwt")
     protect_cc.add_argument("--plugin-dir", type=Path, default=_default_claude_plugin_dir(), help="Claude Code plugin directory")
-    protect_cc.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    # ``--keys-dir`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
+    # only values survive to the handler instead of being normalized to
+    # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
+    # stripped string before any directory creation or key generation.
+    protect_cc.add_argument("--keys-dir", type=str, help="signing keys directory")
     protect_cc.add_argument("--agent-id", default="local-user:claude-code", help="Mission Passport subject")
     protect_cc.add_argument("--mission", help="override the default mission text for the selected mode")
     protect_cc.add_argument("--max-tool-calls", type=int, default=250, help="maximum governed tool calls")

@@ -393,6 +393,135 @@ def test_setup_existing_file_home_fails_closed_without_path_leak(tmp_path, capsy
         assert marker not in combined_output
 
 
+@pytest.mark.parametrize("home_value", ["", "   ", "\t\n"])
+def test_setup_empty_or_whitespace_home_fails_closed_before_artifact_creation(
+    tmp_path, monkeypatch, capsys, home_value
+):
+    from vibap import cli as cli_module
+
+    monkeypatch.setattr("vibap.personal_hub._write_launch_agent", lambda *a, **kw: None)
+    monkeypatch.setattr("vibap.personal_hub._ensure_hub_config", lambda *a, **kw: {"hub_url": "http://127.0.0.1:8765", "hub_token": "test-token"})
+
+    rc = cli_module.main(["setup", "--home", home_value])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "setup_home_invalid"
+    assert result["error"] == "setup_home_invalid"
+    assert result["error_code"] == "setup_home_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "ValueError",
+        "HubError",
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+    if home_value.strip():
+        assert home_value not in combined_output
+
+
+def test_setup_empty_home_creates_no_artifacts(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    # Prevent real plist/config writes so we can verify the guard fires first
+    plist_written = []
+    config_written = []
+
+    def fake_launch_agent(*args, **kwargs):
+        plist_written.append(True)
+        return None
+
+    def fake_config(*args, **kwargs):
+        config_written.append(True)
+        return {"hub_url": "http://127.0.0.1:8765", "hub_token": "test-token"}
+
+    monkeypatch.setattr("vibap.personal_hub._write_launch_agent", fake_launch_agent)
+    monkeypatch.setattr("vibap.personal_hub._ensure_hub_config", fake_config)
+
+    rc = cli_module.main(["setup", "--home", ""])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert result["condition"] == "setup_home_invalid"
+    assert not plist_written, "plist was written before validation"
+    assert not config_written, "config was written before validation"
+
+
+def test_setup_valid_new_home_still_succeeds(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    valid_home = tmp_path / "ardur-home"
+    monkeypatch.setattr("vibap.personal_hub._write_launch_agent", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "vibap.personal_hub._ensure_hub_config",
+        lambda *a, **kw: {"hub_url": "http://127.0.0.1:8765", "hub_token": "test-token"},
+    )
+
+    rc = cli_module.main(["setup", "--home", str(valid_home)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 0
+    assert result["ok"] is True
+    assert result["home"] == str(valid_home)
+    assert captured.err == ""
+
+
+def test_setup_existing_file_home_still_returns_path_not_directory(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    existing_file = tmp_path / "ardur-home-file"
+    existing_file.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main(["setup", "--home", str(existing_file)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert result["condition"] == "path_not_directory"
+    assert result["ok"] is False
+
+
+@pytest.mark.parametrize("command", ["hub", "doctor", "status", "uninstall"])
+def test_personal_commands_empty_home_fail_closed_without_artifacts(
+    tmp_path, monkeypatch, capsys, command
+):
+    from vibap import cli as cli_module
+
+    args = [command, "--home", ""]
+    if command == "hub":
+        args.extend(["--port", "0", "--no-tls"])
+    elif command in ("status", "doctor"):
+        args.extend(["--hub-url", "http://127.0.0.1:1"])
+
+    rc = cli_module.main(args)
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "setup_home_invalid"
+    assert result["next_steps"]
+    combined_output = captured.out + captured.err
+    for marker in ("Traceback", "ValueError", str(tmp_path), "/tmp/", "/Users/"):
+        assert marker not in combined_output
+
+
 def _assert_no_setup_artifacts(home, user_home):
     assert not (home / "config.json").exists()
     assert not (home / "state").exists()
@@ -1273,6 +1402,38 @@ def test_kill_switch_invalid_proxy_url_reports_placeholder_next_steps_without_ra
     assert "/tmp/ardur-proxy" not in encoded
     assert "notaport" not in encoded
     assert "Invalid IPv6 URL" not in encoded
+    assert "urlopen error" not in encoded
+
+
+def test_kill_switch_empty_proxy_url_returns_invalid(monkeypatch, capsys):
+    """An explicitly-passed empty --proxy-url must not silently fall back to the
+    default URL and reach the network layer; it must return proxy_url_invalid
+    with no urlopen call, matching the behavior of every other invalid URL.
+
+    Regression guard for the ``or`` fallback chain that treated '' as falsy.
+    """
+    from vibap import cli as cli_module
+
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("empty kill-switch proxy URL should fail before urlopen")
+
+    monkeypatch.setattr(urlrequest, "urlopen", fail_if_called)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="", api_token=None)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "proxy_url_invalid"
+    assert response["error_code"] == "proxy_url_invalid"
+    assert response["condition"] == "proxy_url_invalid"
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"check_proxy_url", "start_or_check_governance_proxy"} <= actions
+    encoded = json.dumps(response)
     assert "urlopen error" not in encoded
 
 
