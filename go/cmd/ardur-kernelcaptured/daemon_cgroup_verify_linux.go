@@ -7,32 +7,56 @@ package main
 // register_session binds a client-supplied cgroup_id (and root_pid) to a
 // session; apply_policy later writes BPF enforcement keyed by that cgroup_id.
 // Without a check, any authorized-UID peer could register a cgroup_id belonging
-// to another workload and then govern/tamper it. This closes that by requiring
-// root_pid to be a process the peer actually spawned.
+// to another workload and then govern/tamper it. This closes that with TWO
+// independent checks, both required:
 //
-// Why an ancestry check and NOT a literal "claimed cgroup_id == inode of
-// /proc/<peerPID>/cgroup" comparison: in the real `ardur run` flow the socket
-// peer (the launcher) does not enter the cgroup — it creates a cgroup and
-// adopts the *agent child* into it (run_bridge.py), so the peer's own cgroup
-// is not the registered one. Worse, cgroup namespaces make /proc/<pid>/cgroup
-// report a namespace-relative path (a governed agent commonly reads its own as
-// "0::/"), so the daemon cannot reliably resolve it back to the kernel cgroup
-// id the launcher derived via stat().st_ino across a namespace boundary — a
-// literal inode match there rejects the legitimate, end-to-end-verified flow.
+//  1. Ancestry — root_pid must be a process the peer actually spawned (PID
+//     ancestry within the daemon's own /proc view, namespace-robust).
+//  2. Ownership (issue #119) — root_pid's ACTUAL cgroup, as resolved by the
+//     daemon, must match the client-claimed cgroup_id.
 //
-// The ancestry check is namespace-robust (PID ancestry within the daemon's own
-// /proc view) and delivers the property that matters: a peer may only register
-// a session whose root_pid is a process it spawned. Since kernel enforcement
-// keys on each process's *actual* runtime cgroup and a peer can only name its
-// own descendants — which live in cgroups the peer itself controls — a peer
-// cannot bind a session to, and then govern, a cgroup it does not own.
+// #115 shipped only (1) and reasoned that (2) could not be done reliably: its
+// comment argued that in the real `ardur run` flow the socket peer (the
+// launcher) does not itself enter the cgroup — it creates one and adopts the
+// *agent child* into it (run_bridge.py) — and that cgroup namespaces make
+// /proc/<pid>/cgroup report a namespace-relative path the daemon cannot
+// resolve back to a real inode across a namespace boundary.
+//
+// That reasoning is correct about resolving the PEER's own cgroup, but #119
+// shows it was applied to the wrong process: this package never needs the
+// peer's cgroup. It needs root_pid's cgroup, resolved by the daemon itself —
+// and the daemon runs host-side, in the init cgroup namespace. /proc/<pid>/cgroup
+// read from a process outside a container's cgroup namespace (the daemon)
+// reports the path relative to the READER's namespace, i.e. the real,
+// non-namespace-relative host path — not root_pid's own view. resolveCgroupID
+// below does exactly that: read /proc/<root_pid>/cgroup as the daemon sees
+// it, resolve to the cgroup directory's inode (the same value
+// bpf_get_current_cgroup_id() returns, and what the Python run bridge computes
+// via os.stat().st_ino when it creates the session's cgroup), and require it
+// equal reg.CgroupID.
+//
+// Without check (2), ancestry alone let a non-root allowed peer register
+// {root_pid: <its own child>, cgroup_id: <any other live cgroup>} — ancestry
+// passes trivially (root_pid really is its child), but nothing had ever
+// verified that child was actually IN the claimed cgroup. The peer could then
+// apply_policy against a cgroup — and workload — it does not own. This was
+// demonstrated live against a build with only check (1); see
+// daemon_cgroup_verify_linux_test.go's TestVerifyRegisterSessionCgroup_Issue119Poc*
+// for the reproduction, now asserting rejection.
+//
+// A third, independent guard (checkCgroupCollision, daemon.go — platform-
+// neutral, no /proc dependency) rejects registering a cgroup_id already bound
+// to another live session, so even a race or a legitimate-looking claim can
+// never let two sessions govern the same cgroup concurrently.
 
 import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
@@ -52,31 +76,59 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	if peerPID == 0 || rootPID == 0 {
 		return nil
 	}
-	// The peer registering its own process is trivially owned.
-	if rootPID == peerPID {
-		return nil
-	}
 	// A root (uid 0) peer is already fully privileged on the host — it can move
-	// any process between cgroups directly, so this ancestry check adds nothing
-	// against it. The check exists to constrain a NON-root allowed peer (the
-	// sandboxed-workload threat) from binding a session to a process tree it did
-	// not spawn. Skipping root also lets tiers that register a placeholder
+	// any process between cgroups directly, so neither check below adds anything
+	// against it. Both checks exist to constrain a NON-root allowed peer (the
+	// sandboxed-workload threat) from binding a session to a cgroup/process tree
+	// it does not own. Skipping root also lets tiers that register a placeholder
 	// root_pid (the seccomp tier enforces per-shim'd-process, not by cgroup, and
-	// its smoke registers root_pid=1) work when the daemon and client are root.
-	// Per-session ownership on apply_policy still applies to every peer.
+	// its smoke registers root_pid=1, whose real cgroup is the hierarchy root —
+	// never a session's claimed leaf cgroup) work when the daemon and client are
+	// root. Per-session ownership on apply_policy still applies to every peer.
 	if handshake.Authorization.UID == 0 {
 		return nil
 	}
 	// Confirm the peer itself is visible in the daemon's /proc view. If it is
 	// not (an unusual cross-PID-namespace deployment where the daemon cannot
 	// see client PIDs at all), we cannot establish ancestry either way — skip
-	// rather than reject and break such a deployment, but say so loudly.
+	// rather than reject and break such a deployment, but say so loudly. Since
+	// resolving root_pid's cgroup below relies on the same /proc visibility, a
+	// daemon that can't see the peer generally can't see root_pid either, so
+	// both checks are skipped together here.
 	if _, err := os.Stat("/proc/" + strconv.FormatUint(uint64(peerPID), 10)); err != nil {
 		log.Warn("register_session cgroup ownership check skipped: peer pid not visible in /proc (cross-namespace daemon?)",
 			"peer_pid", peerPID, "root_pid", rootPID)
 		return nil
 	}
-	// Walk root_pid's parent chain; it must reach the registering peer.
+
+	// Check 1: ancestry. The peer registering its own process is trivially a
+	// (zero-hop) descendant; anything else must be found by walking parents.
+	if rootPID != peerPID {
+		if err := verifyCgroupAncestry(rootPID, peerPID); err != nil {
+			return err
+		}
+	}
+
+	// Check 2 (#119): ownership. root_pid's actual cgroup, resolved by the
+	// daemon, must match the claimed cgroup_id. Applies even to the
+	// rootPID==peerPID case above — a peer claiming its OWN pid as root_pid
+	// with a mismatched cgroup_id is the same vulnerability class, just
+	// without the extra step of spawning a child first.
+	if reg.CgroupID != 0 {
+		resolved, err := resolveCgroupID(rootPID)
+		if err != nil {
+			return fmt.Errorf("root_pid %d cgroup could not be resolved (%v); a peer may only register a cgroup_id its root_pid actually occupies", rootPID, err)
+		}
+		if resolved != reg.CgroupID {
+			return fmt.Errorf("root_pid %d is in cgroup %d, not the claimed cgroup_id %d; a peer may only register a cgroup_id its root_pid actually occupies", rootPID, resolved, reg.CgroupID)
+		}
+	}
+
+	return nil
+}
+
+// verifyCgroupAncestry walks rootPID's parent chain looking for peerPID.
+func verifyCgroupAncestry(rootPID, peerPID uint32) error {
 	cur := rootPID
 	for hops := 0; hops < maxCgroupAncestryHops; hops++ {
 		ppid, err := procParentPID(cur)
@@ -92,6 +144,51 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 		cur = ppid
 	}
 	return fmt.Errorf("root_pid %d is not a descendant of the registering peer pid %d; a peer may only register process trees it spawned", rootPID, peerPID)
+}
+
+// resolveCgroupID reads pid's cgroup v2 unified-hierarchy membership from
+// /proc/<pid>/cgroup as observed BY THE DAEMON — which runs host-side, in the
+// init cgroup namespace — and resolves it to the cgroup directory's inode:
+// the same value bpf_get_current_cgroup_id() returns for that cgroup, and
+// what the Python run bridge computes via os.stat().st_ino when it creates a
+// session's cgroup (python/vibap/kernel_correlation.py's create_run_cgroup).
+// See this file's header comment for why this is namespace-robust in the
+// direction that matters (resolving root_pid's cgroup from OUTSIDE any
+// container it might run in), unlike resolving the socket peer's own cgroup.
+func resolveCgroupID(pid uint32) (uint64, error) {
+	cgroupPath, err := resolveCgroupPath(pid)
+	if err != nil {
+		return 0, err
+	}
+	var st syscall.Stat_t
+	if err := syscall.Stat(cgroupPath, &st); err != nil {
+		return 0, fmt.Errorf("stat cgroup path %q (pid %d): %w", cgroupPath, pid, err)
+	}
+	if st.Ino == 0 {
+		return 0, fmt.Errorf("stat cgroup path %q returned inode 0", cgroupPath)
+	}
+	return st.Ino, nil
+}
+
+// resolveCgroupPath returns the absolute, daemon-side cgroupfs path for pid's
+// cgroup v2 unified-hierarchy membership (split out of resolveCgroupID so
+// tests can locate a real, writable cgroup subtree to create a child under —
+// see daemon_cgroup_verify_linux_test.go's cgroupV2SelfDir).
+func resolveCgroupPath(pid uint32) (string, error) {
+	path := "/proc/" + strconv.FormatUint(uint64(pid), 10) + "/cgroup"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 || parts[0] != "0" || parts[1] != "" {
+			continue // not the cgroup v2 unified-hierarchy entry (hierarchy-id 0, no controllers)
+		}
+		rel := strings.TrimPrefix(parts[2], "/")
+		return filepath.Join("/sys/fs/cgroup", rel), nil
+	}
+	return "", fmt.Errorf("no cgroup v2 unified-hierarchy entry found for pid %d in %q", pid, strings.TrimSpace(string(data)))
 }
 
 // procParentPID reads the PPID (field 4) from /proc/<pid>/stat. The comm field

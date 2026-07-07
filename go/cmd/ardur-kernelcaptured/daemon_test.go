@@ -155,6 +155,106 @@ func TestOnSessionRegisteredAndEnded(t *testing.T) {
 	}
 }
 
+// ── issue #119: cgroup collision guard ──────────────────────────────────────
+//
+// checkCgroupCollision is the second, platform-neutral half of #119's fix:
+// even a register_session that independently passes cgroupVerifier's
+// ownership check must not be allowed to bind a cgroup_id another live
+// session already holds.
+
+func TestCheckCgroupCollision_RejectsCgroupAlreadyBoundToAnotherSession(t *testing.T) {
+	d := newTestDaemon(t)
+	d.mu.Lock()
+	d.cgroupIndex[42] = "existing-session"
+	d.mu.Unlock()
+
+	err := d.checkCgroupCollision(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: "attacker-session",
+		RootPID:   1,
+		CgroupID:  42,
+	})
+	if err == nil {
+		t.Fatal("registering a cgroup_id already bound to a different session should be rejected")
+	}
+}
+
+func TestCheckCgroupCollision_AllowsSameSessionReRegistering(t *testing.T) {
+	d := newTestDaemon(t)
+	d.mu.Lock()
+	d.cgroupIndex[42] = "same-session"
+	d.mu.Unlock()
+
+	// A session re-registering against the cgroup_id it already owns is not a
+	// collision — it's a legitimate retry of its own registration.
+	err := d.checkCgroupCollision(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: "same-session",
+		RootPID:   1,
+		CgroupID:  42,
+	})
+	if err != nil {
+		t.Fatalf("a session re-registering its own cgroup_id should be allowed, got: %v", err)
+	}
+}
+
+func TestCheckCgroupCollision_AllowsUnclaimedCgroup(t *testing.T) {
+	d := newTestDaemon(t)
+	err := d.checkCgroupCollision(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: "fresh-session",
+		RootPID:   1,
+		CgroupID:  777,
+	})
+	if err != nil {
+		t.Fatalf("registering an unclaimed cgroup_id should be allowed, got: %v", err)
+	}
+}
+
+func TestCheckCgroupCollision_ZeroCgroupIsNoop(t *testing.T) {
+	d := newTestDaemon(t)
+	// cgroup_id=0 is rejected by protocol validation before this check ever
+	// matters in practice, but the guard itself must not panic or misbehave
+	// on it (e.g. by treating "0: unbound" as some kind of universal match).
+	if err := d.checkCgroupCollision(&kernelcapture.DaemonRegisterSessionRequest{SessionID: "s", RootPID: 1, CgroupID: 0}); err != nil {
+		t.Fatalf("cgroup_id=0 should be a no-op, got: %v", err)
+	}
+}
+
+func TestCheckCgroupCollision_NilRequestIsNoop(t *testing.T) {
+	d := newTestDaemon(t)
+	if err := d.checkCgroupCollision(nil); err != nil {
+		t.Fatalf("nil request should be a no-op, got: %v", err)
+	}
+}
+
+// TestHandleAuthorizedRequest_RejectsCgroupCollisionEvenWithNoOpVerifier
+// proves the collision guard is wired into the real request path
+// (handleAuthorizedRequest), not just unit-testable in isolation: even with
+// cgroupVerifier stubbed to always-allow (as newTestDaemon does, and as
+// production's verifyRegisterSessionCgroup would for a root peer or a
+// same-cgroup claim), a second session cannot register the same cgroup_id
+// an existing live session already holds.
+func TestHandleAuthorizedRequest_RejectsCgroupCollisionEvenWithNoOpVerifier(t *testing.T) {
+	d := newTestDaemon(t)
+	d.mu.Lock()
+	d.cgroupIndex[555] = "first-session"
+	d.mu.Unlock()
+
+	req := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    "second-session",
+			RootPID:      1,
+			CgroupID:     555,
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   60,
+		},
+	}
+	resp := d.handleAuthorizedRequest(context.Background(), req, kernelcapture.DaemonProtocolPeerHandshake{})
+	if resp.OK {
+		t.Fatal("register_session for a cgroup_id already bound to another session should not be OK")
+	}
+}
+
 // TestOnSessionEnded_ClearsSeccompState guards the E4 cleanup wiring:
 // onSessionEnded must clear the session's seccomp policy and cancel (and
 // forget) its seccomp listener supervisor, mirroring the existing
