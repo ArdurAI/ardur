@@ -903,6 +903,60 @@ def _start_mission_path_invalid_response() -> dict[str, object]:
     }
 
 
+def _start_api_token_invalid_response() -> dict[str, object]:
+    """Failure response for an empty/whitespace --api-token on start.
+
+    ``--api-token`` is stripped inside ``serve_proxy`` (mirroring the env-var
+    and Go TrimSpace paths), but an explicit whitespace-only argument is
+    truthy before stripping and falsy after, so it entered the argument
+    branch and resolved to an empty bearer token. Reject it here, before any
+    key material is generated, with the same structured shape the other
+    ``start`` validation helpers use. An unset ``--api-token`` (None) and an
+    empty string ``""`` (falsy, falls through to ``_generate_api_token``)
+    remain valid: only whitespace-only strings are rejected, matching the
+    silent-empty-token bug class closed for ``--proxy-url`` in 4d98a01.
+    """
+    return {
+        "ok": False,
+        "error": "start_api_token_invalid",
+        "error_code": "start_api_token_invalid",
+        "condition": "start_api_token_invalid",
+        "message": "ardur start --api-token must be a non-empty token after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only --api-token was provided on start. "
+            "Provide an explicit bearer token, or omit --api-token to have "
+            "ardur generate a random one."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_explicit_api_token",
+                "command": "ardur start --api-token <api-token>",
+                "detail": "Provide an explicit --api-token bearer token.",
+            },
+            {
+                "action": "omit_api_token_to_autogenerate",
+                "command": "ardur start",
+                "detail": (
+                    "Omit --api-token so ardur generates a random bearer token. "
+                    "VIBAP_API_TOKEN still takes precedence when set."
+                ),
+            },
+        ],
+    }
+
+
+def _start_api_token_invalid_failure(args: argparse.Namespace) -> dict[str, object] | None:
+    """Return the api-token-invalid response when --api-token is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to autogeneration), or a real token.
+    """
+    value = getattr(args, "api_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _start_api_token_invalid_response()
+    return None
+
+
 _PATH_ARG_SPECS = ("keys_dir", "state_dir", "log_path", "tls_cert", "tls_key")
 
 
@@ -1008,6 +1062,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     log_path_parent_failure = _log_path_parent_failure_exit_code(args.log_path)
     if log_path_parent_failure is not None:
         return log_path_parent_failure
+    api_token_failure = _start_api_token_invalid_failure(args)
+    if api_token_failure is not None:
+        _print_json(api_token_failure)
+        return 1
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:

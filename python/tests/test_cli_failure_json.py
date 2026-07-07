@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 
@@ -2297,3 +2298,81 @@ def test_start_mission_empty_or_whitespace_returns_mission_path_invalid(
     assert not (cwd / "passport_private.pem").exists()
     assert not (cwd / "passport_public.pem").exists()
     assert not (cwd / ".vibap").exists()
+
+
+# ---------------------------------------------------------------------------
+# Start --api-token whitespace rejection
+#
+# ``--api-token`` is stripped inside ``serve_proxy``. An explicit whitespace-
+# only argument is truthy before stripping but resolves to an empty bearer
+# token after, silently starting the server with auth-on and an empty token
+# (same silent-empty bug class closed for ``--proxy-url`` in 4d98a01). The
+# guard in ``cmd_start`` rejects whitespace-only tokens before key generation.
+# An empty string ``""`` is falsy and intentionally falls through to
+# autogeneration; only whitespace-only strings are rejected.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_start_api_token_whitespace_returns_api_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --api-token on start returns start_api_token_invalid before keys are created."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["start", "--api-token", token_value, "--port", "0", "--no-tls"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_api_token_invalid"
+    assert payload["error"] == "start_api_token_invalid"
+    assert payload["error_code"] == "start_api_token_invalid"
+    assert "api-token" in payload["message"].lower().replace("-", "-")
+    assert "whitespace" in payload["message"].lower()
+    assert payload["next_steps"]
+    rendered = json.dumps(payload)
+    for step in payload["next_steps"]:
+        # Placeholder-only tokens or the omit-the-flag step; no raw local paths.
+        command = step["command"]
+        is_omit_step = step["action"] == "omit_api_token_to_autogenerate"
+        assert is_omit_step or ("<" in command and ">" in command), step
+    # No traceback, no raw cwd path in output.
+    assert str(cwd) not in rendered
+    assert "Traceback" not in rendered
+    # No key/state/session artifacts created in cwd (guard fires pre-keygen).
+    assert _relative_tree_entries(cwd) == before
+    assert not (cwd / "passport_private.pem").exists()
+    assert not (cwd / "passport_public.pem").exists()
+    assert not (cwd / ".vibap").exists()
+
+
+def test_start_api_token_empty_string_is_not_rejected_like_whitespace():
+    """An empty-string --api-token \"\" is falsy and must NOT hit the whitespace guard.
+
+    It falls through to autogeneration (token_source=generated), which is the
+    documented, acceptable behavior for empty-but-not-whitespace. Only
+    whitespace-only truthy strings are rejected. This pins the boundary so a
+    future tightening (rejecting \"\" too) is a deliberate change, not a drift.
+
+    We test the guard helper directly because exercising the full ``cmd_start``
+    path with a valid token would actually start the HTTP server.
+    """
+    ns_unset = argparse.Namespace(api_token=None)
+    assert cli._start_api_token_invalid_failure(ns_unset) is None
+
+    ns_empty = argparse.Namespace(api_token="")
+    assert cli._start_api_token_invalid_failure(ns_empty) is None
+
+    ns_valid = argparse.Namespace(api_token="real-token-value")
+    assert cli._start_api_token_invalid_failure(ns_valid) is None
+
+    # Whitespace-only is the only rejected shape.
+    ns_ws = argparse.Namespace(api_token="   ")
+    failure = cli._start_api_token_invalid_failure(ns_ws)
+    assert failure is not None
+    assert failure["condition"] == "start_api_token_invalid"
