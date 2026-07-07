@@ -22,6 +22,18 @@ package main
 // links and kill-switch state each tick via kernelcapture.RunTamperAudit and
 // records the result through d.recordTamperAudit — see tamper_audit.go for
 // what this can and cannot detect.
+//
+// Restart survival (issue #124): loads via LoadAndAttachProcessGuardEBPFPinned,
+// which pins the three LSM links and every policy-state map under
+// /sys/fs/bpf/ardur/ so a daemon restart re-attaches to the still-enforcing
+// kernel state instead of dropping it — see that function's doc comment.
+//
+// Fail-open on mid-run death (issue #121): if this function returns while the
+// daemon is still running (main()'s ctx not yet cancelled) — whether from a
+// real error or a clean ringbuf close caused by something other than our own
+// shutdown watcher below — the caller in main() calls d.degradeGuardTier so
+// activeTier (and therefore every health response) stops claiming bpf_lsm the
+// moment nothing is actually attached anymore.
 
 import (
 	"context"
@@ -68,7 +80,7 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 		}
 	}
 
-	handles, err := kernelcapture.LoadAndAttachProcessGuardEBPF()
+	handles, err := kernelcapture.LoadAndAttachProcessGuardEBPFPinned(kernelcapture.DefaultPinnedGuardPaths())
 	if err != nil {
 		err = fmt.Errorf("load process_guard BPF-LSM: %w", err)
 		ready <- err
