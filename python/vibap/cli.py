@@ -3815,6 +3815,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="abort the run if kernel-level BPF policy enforcement cannot be installed "
         "(default: permissive — degrade to hook/proxy governance with a recorded note)",
     )
+    run.add_argument(
+        "--no-resource-scope",
+        action="store_true",
+        help="skip the default cwd-based file resource_scope (path_allow); use for a "
+        "mission that is genuinely network-only, since the seccomp fallback tier "
+        "(active when BPF-LSM is unavailable) can only ever enforce network policy — "
+        "a mission that also carries a file-scope dimension can never be fully "
+        "enforceable on that tier",
+    )
     run.add_argument("command", nargs=argparse.REMAINDER, help="command to run after --")
     run.set_defaults(func=cmd_run)
 

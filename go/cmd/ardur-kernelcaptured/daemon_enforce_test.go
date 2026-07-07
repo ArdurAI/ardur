@@ -413,3 +413,129 @@ func TestHandleAuthorizedRequest_SessionStatusIncludesEnforcementSummary(t *test
 		t.Errorf("enforcement summary = %+v, want 1 total denied event", statusResp.Enforcement)
 	}
 }
+
+// TestHandleAuthorizedRequest_SessionStatusReportsSeccompListenerAttached
+// guards issue #104's fix: a launcher must be able to confirm a seccomp
+// listener is actually supervising a session before trusting that
+// apply_policy's "applied" answer means anything is really enforced.
+func TestHandleAuthorizedRequest_SessionStatusReportsSeccompListenerAttached(t *testing.T) {
+	d := newTestDaemon(t)
+	handshake := kernelcapture.DaemonProtocolPeerHandshake{
+		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
+		Method:                kernelcapture.DaemonProtocolMethodRegisterSession,
+		SessionID:             "seccomp-status-session",
+		SocketPath:            "/run/ardur/kernelcapture/control.sock",
+		CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProcessStartTimeTicks: 1,
+		Authorization: kernelcapture.DaemonPeerAuthorization{
+			Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
+			Reason:                "test",
+			UID:                   501,
+			PID:                   4242,
+			ProcessStartTimeTicks: 1,
+			Matched:               "uid",
+		},
+	}
+	registerResp := d.handleAuthorizedRequest(context.Background(), kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    "seccomp-status-session",
+			RootPID:      100,
+			CgroupID:     55,
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   300,
+		},
+	}, handshake)
+	if !registerResp.OK {
+		t.Fatalf("register_session failed: %+v", registerResp)
+	}
+
+	statusReq := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodSessionStatus,
+		SessionStatus:   &kernelcapture.DaemonSessionStatusRequest{SessionID: "seccomp-status-session"},
+	}
+
+	before := d.handleAuthorizedRequest(context.Background(), statusReq, handshake)
+	if !before.OK {
+		t.Fatalf("session_status (before listener) failed: %+v", before)
+	}
+	if before.SeccompListenerAttached {
+		t.Error("SeccompListenerAttached = true before any listener registered, want false")
+	}
+
+	if !d.registerSeccompListener("seccomp-status-session", func() {}) {
+		t.Fatal("registerSeccompListener: expected first registration to succeed")
+	}
+
+	during := d.handleAuthorizedRequest(context.Background(), statusReq, handshake)
+	if !during.OK {
+		t.Fatalf("session_status (listener attached) failed: %+v", during)
+	}
+	if !during.SeccompListenerAttached {
+		t.Error("SeccompListenerAttached = false while a listener is registered, want true")
+	}
+
+	d.unregisterSeccompListener("seccomp-status-session")
+
+	after := d.handleAuthorizedRequest(context.Background(), statusReq, handshake)
+	if !after.OK {
+		t.Fatalf("session_status (after unregister) failed: %+v", after)
+	}
+	if after.SeccompListenerAttached {
+		t.Error("SeccompListenerAttached = true after unregisterSeccompListener, want false")
+	}
+}
+
+// TestHandleAuthorizedRequest_HealthNeverReportsSeccompListenerAttached
+// guards the field's scoping: listener attachment is per-session, so it must
+// never appear (default false) on the daemon-wide health response even when
+// some session somewhere does have a listener attached.
+func TestHandleAuthorizedRequest_HealthNeverReportsSeccompListenerAttached(t *testing.T) {
+	d := newTestDaemon(t)
+	if !d.registerSeccompListener("some-other-session", func() {}) {
+		t.Fatal("registerSeccompListener: expected first registration to succeed")
+	}
+
+	handshake := kernelcapture.DaemonProtocolPeerHandshake{
+		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
+		Method:                kernelcapture.DaemonProtocolMethodHealth,
+		SocketPath:            "/run/ardur/kernelcapture/control.sock",
+		CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProcessStartTimeTicks: 1,
+		Authorization: kernelcapture.DaemonPeerAuthorization{
+			Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
+			Reason:                "test",
+			UID:                   501,
+			PID:                   4242,
+			ProcessStartTimeTicks: 1,
+			Matched:               "uid",
+		},
+	}
+	resp := d.handleAuthorizedRequest(context.Background(), kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodHealth,
+		Health:          &kernelcapture.DaemonHealthRequest{},
+	}, handshake)
+	if !resp.OK {
+		t.Fatalf("health request failed: %+v", resp)
+	}
+	if resp.SeccompListenerAttached {
+		t.Error("health response set SeccompListenerAttached = true, want it left at its zero value (false)")
+	}
+}
+
+func TestSeccompListenerAttached_EmptySessionIDIsAlwaysFalse(t *testing.T) {
+	d := newTestDaemon(t)
+	if d.seccompListenerAttached("") {
+		t.Error("seccompListenerAttached(\"\") = true, want false")
+	}
+}
+
+func TestSeccompListenerAttached_UnknownSessionIsFalse(t *testing.T) {
+	d := newTestDaemon(t)
+	if d.seccompListenerAttached("no-such-session") {
+		t.Error("seccompListenerAttached for an unregistered session = true, want false")
+	}
+}

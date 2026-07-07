@@ -4,7 +4,11 @@
 #   Usage: run.sh <enforce|permissive>
 set -u
 MODE="${1:-enforce}"
-OUT="/out/${MODE}"; mkdir -p "$OUT"
+# OUT_BASE defaults to /out (the Docker demo image mounts a writable /out).
+# virtme-ng boots the host rootfs read-only, so the vng wrapper
+# (ci-vng-enforce.sh) points this at a writable tmpfs instead.
+OUT_BASE="${OUT_BASE:-/out}"
+OUT="${OUT_BASE}/${MODE}"; mkdir -p "$OUT"
 DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "================ ardur run BPF-LSM demo — mode=${MODE} ================"
