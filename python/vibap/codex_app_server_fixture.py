@@ -67,6 +67,15 @@ class FixtureProjectDirError(ValueError):
     """Raised when a fixture project path cannot safely receive context files."""
 
 
+class FixturePathError(ValueError):
+    """Raised when a fixture path argument is not a directory (existing file, dangling symlink, etc.)."""
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.condition = condition
+        self.detail = detail
+
+
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -236,8 +245,49 @@ def _write_private_text(path: Path, content: str) -> None:
 
 
 def _validate_fixture_project_dir(project: Path) -> None:
+    if project.is_symlink() and not project.exists():
+        raise FixtureProjectDirError("fixture project directory is a dangling symlink")
     if project.exists() and not project.is_dir():
         raise FixtureProjectDirError("fixture project directory must be a directory")
+
+
+def _validate_fixture_path_not_file(path: Path, *, label: str, condition: str) -> None:
+    """Fail closed when a fixture path argument is an existing non-directory.
+
+    Catches: regular files, dangling symlinks, broken symlinks, and any
+    existing filesystem entry that is not a directory.
+    """
+    if path.is_symlink() and not path.exists():
+        raise FixturePathError(
+            f"{label} is a dangling symlink",
+            condition=condition,
+        )
+    if path.exists() and not path.is_dir():
+        raise FixturePathError(
+            f"{label} is not a directory",
+            condition=condition,
+        )
+
+
+def _fixture_path_failure_response(*, condition: str, label: str, arg_name: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": f"Codex app-server fixture {label} is not a directory.",
+        "detail": (
+            f"The {arg_name} argument points at an existing non-directory. "
+            f"Use an existing directory or a new directory path that Ardur can create."
+        ),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": f"rerun_codex_fixture_with_{label.replace(' ', '_')}",
+                "command": f"ardur codex-app-server-fixture {arg_name} <{label}>",
+                "detail": f"Replace <{label}> with a directory path, not a regular file.",
+            }
+        ],
+    }
 
 
 def fixture_project_dir_failure_response() -> dict[str, Any]:
@@ -275,10 +325,19 @@ def build_local_fixture(
     user can wire into Codex app-server/host-event surfaces, but does not mutate
     a real Codex install unless the caller explicitly points ``home`` there.
     """
-    codex_home = Path(home or _default_codex_fixture_home()).expanduser().resolve(strict=False)
-    project = Path(project_dir or Path.cwd()).expanduser().resolve(strict=False)
-    ardur_chain = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser().resolve(strict=False)
-    _validate_fixture_project_dir(project)
+    codex_home_raw = Path(home or _default_codex_fixture_home()).expanduser()
+    project_raw = Path(project_dir or Path.cwd()).expanduser()
+    ardur_chain_raw = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser()
+    # Validate raw paths for dangling symlinks before resolve() follows them.
+    _validate_fixture_path_not_file(codex_home_raw, label="home", condition="codex_app_server_fixture_home_not_directory")
+    _validate_fixture_path_not_file(ardur_chain_raw, label="chain dir", condition="codex_app_server_fixture_chain_dir_not_directory")
+    _validate_fixture_project_dir(project_raw)
+    if keys_dir is not None:
+        keys_raw = Path(keys_dir).expanduser()
+        _validate_fixture_path_not_file(keys_raw, label="keys dir", condition="codex_app_server_fixture_keys_dir_not_directory")
+    codex_home = codex_home_raw.resolve(strict=False)
+    project = project_raw.resolve(strict=False)
+    ardur_chain = ardur_chain_raw.resolve(strict=False)
     # When chain_dir falls through to the DEFAULT_HOME-derived default,
     # materialise the home with 0o700 before creating directories inside it.
     if chain_dir is None:

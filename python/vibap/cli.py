@@ -64,18 +64,22 @@ from .claude_code_report import build_claude_code_report
 from .claude_code_hook import main as claude_code_hook_main
 from .gemini_cli_hook import (
     FixtureProjectDirError as GeminiFixtureProjectDirError,
+    FixturePathError as GeminiFixturePathError,
     build_local_fixture as build_gemini_local_fixture,
     build_shareable_context as build_gemini_shareable_context,
     build_shareable_report as build_gemini_shareable_report,
     fixture_project_dir_failure_response as gemini_fixture_project_dir_failure_response,
+    _fixture_path_failure_response as gemini_fixture_path_failure_response,
     main as gemini_cli_hook_main,
 )
 from .codex_app_server_fixture import (
     FixtureProjectDirError as CodexFixtureProjectDirError,
+    FixturePathError as CodexFixturePathError,
     build_local_fixture as build_codex_local_fixture,
     build_shareable_context as build_codex_shareable_context,
     build_shareable_report as build_codex_shareable_report,
     fixture_project_dir_failure_response as codex_fixture_project_dir_failure_response,
+    _fixture_path_failure_response as codex_fixture_path_failure_response,
     handle_host_event as handle_codex_host_event,
 )
 from .posture_index import build_posture_index, format_posture_report
@@ -1669,6 +1673,20 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
     except GeminiFixtureProjectDirError:
         _print_json(gemini_fixture_project_dir_failure_response())
         return 1
+    except GeminiFixturePathError as exc:
+        _print_json(gemini_fixture_path_failure_response(
+            condition=exc.condition,
+            label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
+            arg_name="--" + exc.condition.replace("gemini_cli_fixture_", "").replace("_not_directory", "").replace("_", "-"),
+        ))
+        return 1
+    except KeyDirectoryError:
+        _print_json(gemini_fixture_path_failure_response(
+            condition="gemini_cli_fixture_keys_dir_not_directory",
+            label="keys dir",
+            arg_name="--keys-dir",
+        ))
+        return 1
     _print_json(build_gemini_shareable_context(fixture))
     return 0
 
@@ -1770,6 +1788,20 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
         )
     except CodexFixtureProjectDirError:
         _print_json(codex_fixture_project_dir_failure_response())
+        return 1
+    except CodexFixturePathError as exc:
+        _print_json(codex_fixture_path_failure_response(
+            condition=exc.condition,
+            label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
+            arg_name="--" + exc.condition.replace("codex_app_server_fixture_", "").replace("_not_directory", "").replace("_", "-"),
+        ))
+        return 1
+    except KeyDirectoryError:
+        _print_json(codex_fixture_path_failure_response(
+            condition="codex_app_server_fixture_keys_dir_not_directory",
+            label="keys dir",
+            arg_name="--keys-dir",
+        ))
         return 1
     _print_json(build_codex_shareable_context(fixture))
     return 0
