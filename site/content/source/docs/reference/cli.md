@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "5cb13bd5bba48da957929c88feda8d1d0e8f0fd1742b436b15099752ac3c57a8"
+source_sha256: "365f1633619823128237c7d6d698bf0956c477c125fd6e1a4609919d85056016"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -446,7 +446,10 @@ ardur run [--home DIR]
 `--allowed-tools` and `--forbidden-tools` are repeatable and each value may be a
 comma-separated list. `--max-tool-calls` sets the governed tool-call budget
 (default `250` when governing), while `--max-duration-s` sets the wall-clock run
-budget. `--via auto` chooses the adapter automatically, `--via claude-code` uses
+budget. Invalid budget flags (negative `--max-duration-s`, negative
+`--max-tool-calls`) are rejected with structured JSON before key generation,
+consistent with `ardur issue`. `--via auto` chooses the adapter automatically,
+`--via claude-code` uses
 the Claude Code hook path, `--via env` exposes governance details to a
 cooperating command through environment variables, and `--via intercept` is only
 a scaffolded transparent-intercept path today; it fails closed rather than

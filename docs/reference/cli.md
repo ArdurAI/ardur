@@ -429,7 +429,10 @@ ardur run [--home DIR]
 `--allowed-tools` and `--forbidden-tools` are repeatable and each value may be a
 comma-separated list. `--max-tool-calls` sets the governed tool-call budget
 (default `250` when governing), while `--max-duration-s` sets the wall-clock run
-budget. `--via auto` chooses the adapter automatically, `--via claude-code` uses
+budget. Invalid budget flags (negative `--max-duration-s`, negative
+`--max-tool-calls`) are rejected with structured JSON before key generation,
+consistent with `ardur issue`. `--via auto` chooses the adapter automatically,
+`--via claude-code` uses
 the Claude Code hook path, `--via env` exposes governance details to a
 cooperating command through environment variables, and `--via intercept` is only
 a scaffolded transparent-intercept path today; it fails closed rather than
