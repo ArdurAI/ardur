@@ -896,6 +896,51 @@ def _print_run_governed_mission_invalid_next_steps() -> None:
             print(f"   {detail}", file=sys.stderr)
 
 
+def _run_governed_budget_failure(
+    condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
+) -> int:
+    """Emit a structured JSON failure response and return exit code 2.
+
+    Uses ``json.dump`` directly to avoid a circular import of ``cli._print_json``.
+    """
+    response: dict[str, object] = {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": next_steps,
+    }
+    json.dump(response, sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 2
+
+
+def _run_max_duration_invalid_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "action": "provide_positive_max_duration_s",
+            "command": "ardur run --mission <mission> --max-duration-s <positive-seconds> -- <command>",
+            "detail": (
+                "--max-duration-s must be a positive integer number of seconds."
+            ),
+        },
+    ]
+
+
+def _run_max_tool_calls_invalid_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "action": "provide_valid_max_tool_calls",
+            "command": "ardur run --mission <mission> --max-tool-calls <zero-or-positive-count> -- <command>",
+            "detail": (
+                "--max-tool-calls must be zero or a positive integer."
+            ),
+        },
+    ]
+
+
 def run_governed_cli(args: Any) -> int:
     """Argparse entry point used by ``cmd_run`` when governance flags are present."""
     command = list(getattr(args, "command", None) or [])
@@ -924,6 +969,45 @@ def run_governed_cli(args: Any) -> int:
     # --max-duration-s for symmetry.
     max_tool_calls_arg = getattr(args, "max_tool_calls", None)
     max_duration_s_arg = getattr(args, "max_duration_s", None)
+
+    # Validate budget arguments BEFORE calling run_governed so invalid values
+    # are rejected without creating key material or issuing a passport.
+    if max_duration_s_arg is not None:
+        try:
+            parsed = int(max_duration_s_arg)
+        except (TypeError, ValueError):
+            return _run_governed_budget_failure(
+                "run_max_duration_invalid",
+                "Run governance max-duration-s is invalid.",
+                "--max-duration-s must be a positive integer number of seconds.",
+                _run_max_duration_invalid_next_steps("run_max_duration_invalid"),
+            )
+        if parsed <= 0:
+            return _run_governed_budget_failure(
+                "run_max_duration_invalid",
+                "Run governance max-duration-s is invalid.",
+                "--max-duration-s must be a positive integer number of seconds.",
+                _run_max_duration_invalid_next_steps("run_max_duration_invalid"),
+            )
+
+    if max_tool_calls_arg is not None:
+        try:
+            parsed = int(max_tool_calls_arg)
+        except (TypeError, ValueError):
+            return _run_governed_budget_failure(
+                "run_max_tool_calls_invalid",
+                "Run governance max-tool-calls is invalid.",
+                "--max-tool-calls must be zero or a positive integer.",
+                _run_max_tool_calls_invalid_next_steps("run_max_tool_calls_invalid"),
+            )
+        if parsed < 0:
+            return _run_governed_budget_failure(
+                "run_max_tool_calls_invalid",
+                "Run governance max-tool-calls is invalid.",
+                "--max-tool-calls must be zero or a positive integer.",
+                _run_max_tool_calls_invalid_next_steps("run_max_tool_calls_invalid"),
+            )
+
     try:
         result = run_governed(
             command=command,
