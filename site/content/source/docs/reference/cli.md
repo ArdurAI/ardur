@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b3769a5f6ec4adcd96ceb4a81295dffe7e4ea372d7ff0ff6cc60c88bef329c2e"
+source_sha256: "b59d6714205c4c880f76e024460070be9eb9213507e7a37b7ef9712ca9485767"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -776,6 +776,21 @@ environment variables resolve to the current working directory and are rejected,
 because they silently create real signing keys in unintended locations.
 Omitting `--keys-dir` entirely uses the default keys directory under the Ardur
 home and is not rejected. An explicit `--keys-dir .` is still accepted.
+
+If `--profile` is supplied but is empty, whitespace-only, or a directory path,
+the command exits nonzero without loading a profile, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_profile_invalid"`, `condition: "protect_profile_invalid"`, and
+placeholder-only `next_steps` such as
+`ardur profile init --template safe-coding --path <profile-file>`,
+`ardur protect claude-code --profile <profile-file>`, and
+`ardur protect claude-code --scope <your-project>` (configure protection
+directly without a profile); human output prints the same recovery guidance.
+Empty strings and whitespace-only values previously normalized to the current
+working directory and caused a directory-read traceback; they are now rejected
+before any profile load or key generation. An explicit `--profile .` (or any
+directory) is also rejected. Omitting `--profile` entirely uses the selected
+mode's defaults and is not rejected.
 
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output

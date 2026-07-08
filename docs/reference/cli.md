@@ -760,6 +760,21 @@ because they silently create real signing keys in unintended locations.
 Omitting `--keys-dir` entirely uses the default keys directory under the Ardur
 home and is not rejected. An explicit `--keys-dir .` is still accepted.
 
+If `--profile` is supplied but is empty, whitespace-only, or a directory path,
+the command exits nonzero without loading a profile, generating keys, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_profile_invalid"`, `condition: "protect_profile_invalid"`, and
+placeholder-only `next_steps` such as
+`ardur profile init --template safe-coding --path <profile-file>`,
+`ardur protect claude-code --profile <profile-file>`, and
+`ardur protect claude-code --scope <your-project>` (configure protection
+directly without a profile); human output prints the same recovery guidance.
+Empty strings and whitespace-only values previously normalized to the current
+working directory and caused a directory-read traceback; they are now rejected
+before any profile load or key generation. An explicit `--profile .` (or any
+directory) is also rejected. Omitting `--profile` entirely uses the selected
+mode's defaults and is not rejected.
+
 If the selected Claude Code plugin directory is missing or incomplete, the
 command also exits nonzero without writing `active_mission.jwt`. JSON output
 includes `ok: false`, `error: "claude_code_plugin_incomplete"`,
