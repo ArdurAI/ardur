@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b636555efb222bc62fdf9c7f96580809c65ecd0e3e94451d11f41feec03a4857"
+source_sha256: "b3769a5f6ec4adcd96ceb4a81295dffe7e4ea372d7ff0ff6cc60c88bef329c2e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -514,10 +514,12 @@ text and is not rejected.
 
 If `--home` points to an existing non-directory (file, socket, symlink-to-file,
 etc.), `ardur run` exits `2` without generating keys, creating a Mission
-Passport, or launching the governed command. Stderr prints a message and
-placeholder-only `Next steps:` guidance such as
-`ardur run --home <ardur-home> --mission <mission> -- <command>` and
-`ardur run -- <command>`; the remediation text never echoes the raw `--home`
+Passport, or launching the governed command. Stderr prints a message, a usage
+line, and placeholder-only `Next steps:` guidance (condition
+`run_home_not_directory`) such as
+`ardur run --home <ardur-home> --mission <mission> -- <command>` (point
+`--home` at a directory) and `ardur run -- <command>` (omit `--home` so Ardur
+creates an ephemeral home); the remediation text never echoes the raw `--home`
 value or local paths. Omitting `--home` uses an ephemeral Ardur home that is
 created and cleaned up automatically.
 
