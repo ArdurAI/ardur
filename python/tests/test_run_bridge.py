@@ -1383,3 +1383,225 @@ def test_run_governed_cli_negative_max_duration_no_stderr_traceback(
     assert "Traceback" not in captured.err
     assert "ttl_s must be positive" not in captured.out
     assert "ttl_s must be positive" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# --home path pre-validation (existing non-directory rejection)
+# ---------------------------------------------------------------------------
+
+
+def test_run_governed_home_not_directory_next_steps_are_deterministic() -> None:
+    """The ``next_steps`` list for ``run_home_not_directory`` must be
+    deterministic and contain the expected ``condition`` field."""
+    steps = run_bridge.run_governed_home_not_directory_next_steps()
+    assert len(steps) == 2
+    for step in steps:
+        assert step["condition"] == "run_home_not_directory"
+        assert "command" in step
+        assert "detail" in step
+        assert "action" in step
+
+
+def test_run_governed_cli_existing_file_home_is_rejected_before_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--home <existing-file>`` must be rejected with exit 2, empty stdout,
+    deterministic stderr + Next steps, no traceback, no raw path leak, and
+    no artifacts created before rejection."""
+    existing_file = tmp_path / "existing-file"
+    existing_file.write_text("sentinel")
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        raise AssertionError("existing-file home must be rejected before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=str(existing_file),
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert str(existing_file) not in captured.err
+    assert "must point to a directory path" in captured.err
+    assert "Next steps:" in captured.err
+    # The existing file must be untouched.
+    assert existing_file.read_text() == "sentinel"
+    # No keys/ directory or other artifacts created beside the file.
+    assert not (tmp_path / "keys").exists()
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+
+
+def test_run_governed_cli_symlink_to_file_home_is_rejected_before_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--home <symlink-to-file>`` must also be rejected (resolve follows
+    the link, ``is_dir()`` is False)."""
+    real_file = tmp_path / "real-file"
+    real_file.write_text("sentinel")
+    symlink = tmp_path / "link-to-file"
+    symlink.symlink_to(real_file)
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        raise AssertionError("symlink-to-file home must be rejected before governed launch")
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=str(symlink),
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert "must point to a directory path" in captured.err
+    assert real_file.read_text() == "sentinel"
+
+
+@pytest.mark.parametrize(
+    "home_value",
+    [
+        "existing_dir",
+        "nonexistent",
+        "dangling_symlink",
+    ],
+)
+def test_run_governed_cli_valid_home_paths_pass_through_to_run_governed(
+    home_value: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing directories, nonexistent paths, and dangling symlinks must
+    pass through to ``run_governed`` without printing the rejection message."""
+    if home_value == "existing_dir":
+        home = tmp_path / "ardur-home"
+        home.mkdir()
+    elif home_value == "nonexistent":
+        home = tmp_path / "nonexistent-home"
+    elif home_value == "dangling_symlink":
+        home = tmp_path / "dangling-link"
+        home.symlink_to(tmp_path / "nonexistent-target")
+    else:
+        raise AssertionError(f"unexpected home_value: {home_value}")
+
+    # Stub run_governed to return a minimal result so format_summary succeeds.
+    from vibap.run_bridge import GovernanceRunResult
+
+    def stub_run_governed(**_kwargs: object) -> GovernanceRunResult:
+        return GovernanceRunResult(
+            exit_code=0,
+            session_id="stub-session",
+            mission_id="stub-mission",
+            agent_id="stub-agent",
+            adapter="stub-adapter",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=str(home),
+            passport_path=str(tmp_path / "passport.jwt"),
+            summary={"ok": True},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="stub-token",
+            attestation_digest="sha-256:stub",
+            receipts_path=str(tmp_path / "receipts.jsonl"),
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+        )
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", stub_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=str(home),
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    assert exit_code == 0
+
+
+def test_run_governed_cli_omitted_home_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When ``--home`` is omitted (``None``), the call must reach
+    ``run_governed`` without printing the rejection message."""
+    from vibap.run_bridge import GovernanceRunResult
+
+    def stub_run_governed(**_kwargs: object) -> GovernanceRunResult:
+        return GovernanceRunResult(
+            exit_code=0,
+            session_id="stub-session",
+            mission_id="stub-mission",
+            agent_id="stub-agent",
+            adapter="stub-adapter",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=str(Path(tempfile.mkdtemp())),
+            passport_path=str(Path(tempfile.mkdtemp()) / "passport.jwt"),
+            summary={"ok": True},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="stub-token",
+            attestation_digest="sha-256:stub",
+            receipts_path=str(Path(tempfile.mkdtemp()) / "receipts.jsonl"),
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+        )
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", stub_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=None,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    assert exit_code == 0

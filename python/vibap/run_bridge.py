@@ -1106,6 +1106,41 @@ def _print_run_governed_mission_invalid_next_steps() -> None:
             print(f"   {detail}", file=sys.stderr)
 
 
+def run_governed_home_not_directory_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    that is an existing non-directory (file, socket, symlink-to-file, etc.)."""
+    return [
+        {
+            "condition": "run_home_not_directory",
+            "action": "pass_a_directory_or_nonexistent_path",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "Pass a path that is either nonexistent (it will be created) or "
+                "an existing directory. The path you provided is an existing "
+                "non-directory (for example a regular file or socket)."
+            ),
+        },
+        {
+            "condition": "run_home_not_directory",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_not_directory_next_steps() -> None:
+    print("Next steps:", file=sys.stderr)
+    for index, step in enumerate(run_governed_home_not_directory_next_steps(), start=1):
+        print(f"{index}. {step['command']}", file=sys.stderr)
+        detail = step.get("detail", "")
+        if detail:
+            print(f"   {detail}", file=sys.stderr)
+
+
 def _run_governed_budget_failure(
     condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
 ) -> int:
@@ -1168,6 +1203,21 @@ def run_governed_cli(args: Any) -> int:
         print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
         _print_run_governed_mission_invalid_next_steps()
         return 2
+
+    # Validate --home before budget checks so an existing non-directory is
+    # rejected without creating key material or issuing a passport.
+    home_arg = getattr(args, "home", None)
+    if home_arg is not None:
+        try:
+            resolved_home = Path(home_arg).expanduser().resolve()
+        except (OSError, ValueError) as exc:
+            print(f"ardur run: {exc}", file=sys.stderr)
+            return 2
+        if resolved_home.exists() and not resolved_home.is_dir():
+            print("ardur run --home must point to a directory path.", file=sys.stderr)
+            print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+            _print_run_governed_home_not_directory_next_steps()
+            return 2
 
     allowed = _split_csv(getattr(args, "allowed_tools", None))
     forbidden = _split_csv(getattr(args, "forbidden_tools", None))
