@@ -837,6 +837,19 @@ and `GEMINI.md` under the selected local directories. It is a proof harness for
 visible Gemini CLI hook/tool-boundary events; it is not a live-provider or
 server-side enforcement claim.
 
+If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
+existing regular file (or `--project-dir` is a dangling symlink whose target
+does not exist), the command fails closed with exit code `1` and prints a JSON
+response with `ok: false`, matching `error` and `condition` fields, a concise
+`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
+of `gemini_cli_fixture_home_not_directory`,
+`gemini_cli_fixture_chain_dir_not_directory`,
+`gemini_cli_fixture_keys_dir_not_directory`, or
+`gemini_cli_fixture_project_dir_not_directory` depending on which argument
+failed. Validation runs before any fixture file is written, so a rejected input
+leaves no fixture artifacts behind. Valid directory inputs are created or reused
+as-is.
+
 ### `ardur gemini-cli-hook`
 
 Run the local-only Gemini CLI pre-tool-call hook adapter. The hook reads one
@@ -910,6 +923,19 @@ By default the fixture writes under isolated Ardur local state, not the caller's
 real `~/.codex`. It writes `config.json`, `ardur-host-event.schema.json`, and
 `CODEX.md` under the selected local directories. This is an adoption/proof
 harness for visible local Codex app-server or host-event-style fields only.
+
+If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
+existing regular file (or `--project-dir` is a dangling symlink whose target
+does not exist), the command fails closed with exit code `1` and prints a JSON
+response with `ok: false`, matching `error` and `condition` fields, a concise
+`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
+of `codex_app_server_fixture_home_not_directory`,
+`codex_app_server_fixture_chain_dir_not_directory`,
+`codex_app_server_fixture_keys_dir_not_directory`, or
+`codex_app_server_fixture_project_dir_not_directory` depending on which argument
+failed. Validation runs before any fixture file is written, so a rejected input
+leaves no fixture artifacts behind. Valid directory inputs are created or reused
+as-is.
 
 ### `ardur codex-app-server-event`
 
