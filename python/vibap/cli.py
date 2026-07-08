@@ -3177,6 +3177,47 @@ def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_profile_invalid_response() -> dict[str, object]:
+    """Structured response for empty/whitespace/directory ``--profile``.
+
+    Mirrors the ``protect_scope_invalid`` / ``protect_home_invalid`` shape
+    so all ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local paths
+    or tokens. Placed before any ``load_ardur_profile`` / ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid profile value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_profile_invalid",
+        "condition": "protect_profile_invalid",
+        "message": "ardur protect claude-code --profile must be a non-empty path to a Markdown file after trimming whitespace.",
+        "detail": (
+            "An empty, whitespace-only, or directory --profile was provided. "
+            "Pass an explicit path to an ARDUR.md profile file, or omit "
+            "--profile to use the selected mode's defaults."
+        ),
+        "next_steps": [
+            {
+                "action": "create_profile",
+                "command": "ardur profile init --template safe-coding --path <profile-file>",
+                "detail": "Create an editable profile before using --profile.",
+            },
+            {
+                "action": "use_profile",
+                "command": "ardur protect claude-code --profile <profile-file>",
+                "detail": "Rerun protection with the profile file after it exists.",
+            },
+            {
+                "action": "omit_profile",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Or configure protection directly for a project folder without a profile.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     return {
         "ok": False,
@@ -3206,9 +3247,24 @@ def _protect_claude_code_missing_profile_response() -> dict[str, object]:
 
 
 def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
+    # Reject empty/whitespace-only --profile before any key generation or
+    # profile loading. ``--profile`` is ``type=str`` so an empty or
+    # whitespace-only value survives here as-is (previously ``type=Path``
+    # normalized ``\"\"`` to ``PosixPath('.')`` which silently resolved to the
+    # CWD and caused ``load_ardur_profile`` to ``read_text()`` on a directory,
+    # producing an ``IsADirectoryError`` traceback). An explicit ``--profile .``
+    # (CWD) is also a directory and must be rejected. Omitting ``--profile``
+    # entirely keeps ``args.profile=None`` and is acceptable.
+    if isinstance(args.profile, str):
+        stripped = args.profile.strip()
+        if not stripped:
+            return _protect_claude_code_profile_invalid_response()
+        profile_path = Path(stripped).expanduser()
+        if profile_path.is_dir():
+            return _protect_claude_code_profile_invalid_response()
     try:
         profile = load_ardur_profile(args.profile) if args.profile else None
-    except FileNotFoundError:
+    except (FileNotFoundError, IsADirectoryError):
         return _protect_claude_code_missing_profile_response()
     mode_name = _normalize_protect_mode(args.mode or (profile.mode if profile and profile.mode else "safe-coding"))
     if mode_name not in CLAUDE_CODE_PROTECT_MODES:
@@ -3900,7 +3956,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="issue an active Mission Passport and print the Claude Code plugin command",
     )
     protect_cc.add_argument("--scope", type=str, help="folder Claude Code is allowed to work in")
-    protect_cc.add_argument("--profile", type=Path, help="Markdown Ardur profile, such as ARDUR.md")
+    # ``--profile`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
+    # values survive to the handler instead of being normalized to
+    # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
+    # stripped string before any key generation or profile loading.
+    protect_cc.add_argument("--profile", type=str, help="Markdown Ardur profile, such as ARDUR.md")
     protect_cc.add_argument(
         "--mode",
         choices=sorted(CLAUDE_CODE_PROTECT_MODES),
