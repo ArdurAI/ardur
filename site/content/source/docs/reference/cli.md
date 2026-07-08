@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b59d6714205c4c880f76e024460070be9eb9213507e7a37b7ef9712ca9485767"
+source_sha256: "e67767075194c8ada7f6c29bf06ac52c2504447db5b74c497993f2ef377cd4bc"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -716,15 +716,16 @@ command exits nonzero without configuring Claude Code. JSON output includes
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
 
-If `--scope` is supplied but is empty or whitespace-only, the command exits
-nonzero without configuring Claude Code, generating keys, or writing
-`active_mission.jwt`. JSON output includes `ok: false`,
-`error: "protect_scope_invalid"`, `condition: "protect_scope_invalid"`, and
-placeholder-only `next_steps` such as
-`ardur protect claude-code --scope <your-project>` and
+If `--scope` is supplied but is empty, whitespace-only, or points to an
+existing regular file, the command exits nonzero without configuring Claude
+Code, generating keys, or writing `active_mission.jwt`. JSON output includes
+`ok: false`, `error: "protect_scope_invalid"`,
+`condition: "protect_scope_invalid"`, and placeholder-only `next_steps` such
+as `ardur protect claude-code --scope <your-project>` and
 `ardur protect claude-code --scope .`; human output prints the same recovery
 guidance. An explicit `--scope .` is still accepted and protects the current
-working directory.
+working directory. A nonexistent path is also accepted (the directory will be
+created during protection).
 
 If `--agent-id` is supplied but is empty or whitespace-only, the command exits
 nonzero without configuring Claude Code, generating keys, or writing

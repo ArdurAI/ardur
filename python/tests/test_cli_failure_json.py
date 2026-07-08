@@ -1616,6 +1616,55 @@ def test_protect_claude_code_explicit_dot_scope_still_succeeds(tmp_path, capsys)
     assert payload["ok"] is True
 
 
+def test_protect_claude_code_scope_regular_file_returns_invalid(tmp_path, capsys):
+    """``--scope <existing-regular-file>`` must fail closed with structured JSON
+    and must NOT create signing keys or active_mission.jwt.
+
+    Regression: previously ``--scope`` used ``type=Path`` which silently
+    accepted an existing regular file as the project folder, creating real
+    signing keys for the wrong path.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    # Create a real regular file to use as the invalid scope.
+    scope_file = tmp_path / "not-a-directory.txt"
+    scope_file.write_text("this is a file, not a project folder")
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(scope_file),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_scope_invalid"
+    assert payload["error"] == "protect_scope_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # scope is rejected.
+    assert not home.exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
 @pytest.mark.parametrize(
     ("agent_id",),
     [
