@@ -1,0 +1,47 @@
+# No-Key MVP Demo
+
+Run this from a source checkout when you want to see the core governance loop
+without a provider account, API key, Docker, or manual bearer-token setup. It
+starts a temporary proxy on loopback, shows one `PERMIT` and one `DENY`, and
+verifies the resulting signed attestation with the temporary public key.
+
+This is a local demonstration, not a production launch mode. The driver binds
+only to `127.0.0.1`, disables TLS and bearer authentication only for its child
+process, and removes its temporary keys, session state, and audit log when it
+exits.
+
+## Run it
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e python/
+python scripts/run-no-key-mvp-demo.py
+```
+
+Expected output includes:
+
+```text
+PASS  read_file returned PERMIT
+PASS  delete_file returned DENY
+PASS  signed attestation verified with the temporary public key
+```
+
+**Measured timing:** on 2026-07-09, a new Python 3.13 virtual environment ran
+the source install plus this demo in **6 seconds**; the local proxy lifecycle
+itself completed in **1.0 second**. Network dependency downloads on another
+machine can add time, but the measured path is comfortably within the 10-minute
+first-run target.
+
+## Next no-key paths
+
+- Run [`scripts/run-rwt-phase1-fresh-user.py`](../../scripts/run-rwt-phase1-fresh-user.py)
+  for the broader redacted fresh-user evidence bundle.
+- Follow the [Claude Code MVP quickstart](claude-code-mvp-quickstart.md) for
+  the no-key hook evidence path, or its optional live-Claude section if the
+  local `claude` CLI is already authenticated.
+
+The demo proves local proxy decisions and a locally verified signature. It does
+not claim provider-side reasoning visibility, subprocess/kernel/network capture,
+or production deployment readiness. For the documented production-authenticated
+path, use the evaluator guide after its API examples are refreshed.

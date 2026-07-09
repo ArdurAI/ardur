@@ -121,23 +121,43 @@ The Go `pkg/aat` package implements 13 constraint types, token serialization, de
 
 [Python test suite →](python/tests/) · Aggregate report: `python/tests/comprehensive_test_report.json` · [Proof & evidence site →](site/)
 
-## Evaluator Quickstart
+## First-Run Paths
 
-One command to a working governance demo:
+Start with one of these source-checkout paths. All three avoid a provider API
+key; the local demo additionally avoids manual bearer-token and Docker setup.
+
+### Local governance loop
 
 ```bash
 git clone https://github.com/ArdurAI/ardur.git && cd ardur
-make demo
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e python/
+python scripts/run-no-key-mvp-demo.py
 ```
 
-Then run the automated verification harness:
+This temporary loopback-only demo reaches a `PERMIT`, a `DENY`, and a locally
+verified signed attestation. It disables TLS and bearer auth only for the child
+process; do not use it as a production launch command. See the
+[no-key MVP guide](docs/guides/no-key-mvp-demo.md) for the boundary and timing.
+
+### Fresh-user evidence bundle
 
 ```bash
-./scripts/verify-mvp.sh
+python3 scripts/run-rwt-phase1-fresh-user.py \
+  --expected-origin-dev "$(git rev-parse --short=12 origin/dev)" \
+  --output-dir /tmp/ardur-rwt-phase1
 ```
 
-Full walkthrough with architecture diagrams, session lifecycle, receipt chain
-explanation, and known gaps: [`docs/mvp-evaluator-guide.md`](docs/mvp-evaluator-guide.md).
+This runs the repeatable no-key install, profile, hook allow/deny, receipt-chain,
+and redaction checks. Read the [Claude Code MVP quickstart](docs/guides/claude-code-mvp-quickstart.md)
+for the expected bundle result and the optional live-Claude path.
+
+### Authenticated Docker evaluator
+
+`make demo` plus [`scripts/verify-mvp.sh`](scripts/verify-mvp.sh) is the
+authenticated Docker path. Configure `ARDUR_API_TOKEN` before starting it; the
+evaluator guide is being refreshed to match this authenticated API path.
 
 ## Fastest MVP Path: Claude Code
 
