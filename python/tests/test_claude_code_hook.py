@@ -13,6 +13,7 @@ import pytest
 
 from cryptography.hazmat.primitives.asymmetric import ec
 
+import vibap.claude_code_hook as claude_code_hook
 from vibap.claude_code_hook import (
     ChainState,
     append_receipt,
@@ -198,6 +199,9 @@ def test_empty_vibap_home_falls_back_to_default_home(tmp_path, monkeypatch):
     generate_keypair(keys_dir=tmp_path)
     monkeypatch.delenv("ARDUR_MISSION_PASSPORT", raising=False)
     monkeypatch.setenv("VIBAP_HOME", "")  # explicit empty string
+    # Other tests may materialize the process-level default under the repo
+    # CWD. Give this fallback assertion an empty default home of its own.
+    monkeypatch.setattr(claude_code_hook, "DEFAULT_HOME", tmp_path / "default-home")
 
     with pytest.raises(MissionLoadError) as exc_info:
         load_active_passport(keys_dir=tmp_path)
