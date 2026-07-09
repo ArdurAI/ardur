@@ -19,3 +19,4 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ardur-md-profile.md`](/__ardur_internal__/source/docs/reference/ardur-md-profile/)
 - [`cli.md`](/__ardur_internal__/source/docs/reference/cli/)
 - [`personal-hub-api.md`](/__ardur_internal__/source/docs/reference/personal-hub-api/)
+- [`proxy-oci-image.md`](/__ardur_internal__/source/docs/reference/proxy-oci-image/)
