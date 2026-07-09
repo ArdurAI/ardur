@@ -46,6 +46,7 @@ _ACTIVE_SOCKET_PROBE_INTERVAL_S = 0.01
 # Installed native fast path command for Claude Code PreToolUse hooks.
 _NATIVE_PRE_TOOL_USE_COMMAND_BASENAME = "claude-code-pre_tool_use"
 _NATIVE_PRE_TOOL_USE_COMMAND_MODE = 0o700
+_NATIVE_PRE_TOOL_USE_STAMP_MODE = 0o600
 
 
 def _native_pre_tool_use_client_c_source() -> str:
@@ -646,6 +647,171 @@ def _candidate_native_compilers() -> list[str]:
     return discovered
 
 
+def _copy_to_destination_staging_file(
+    source: Path,
+    destination: Path,
+    *,
+    mode: int,
+    purpose: str,
+) -> Path:
+    """Copy source into a private, durable staging file beside destination."""
+    fd = -1
+    staged: Path | None = None
+    try:
+        fd, raw_path = tempfile.mkstemp(
+            prefix=f".{destination.name}.{purpose}.",
+            suffix=".tmp",
+            dir=destination.parent,
+        )
+        staged = Path(raw_path)
+        with source.open("rb") as source_handle, os.fdopen(fd, "wb") as staged_handle:
+            fd = -1
+            shutil.copyfileobj(source_handle, staged_handle)
+            staged_handle.flush()
+            os.fchmod(staged_handle.fileno(), mode)
+            os.fsync(staged_handle.fileno())
+        return staged
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        if staged is not None:
+            try:
+                staged.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+
+
+def _stage_existing_destination(path: Path) -> tuple[bool, Path | None]:
+    """Snapshot an existing regular destination for transactional rollback."""
+    if path.is_symlink():
+        raise OSError(f"refusing to replace symlinked native hook artifact: {path}")
+    if not path.exists():
+        return False, None
+    if not path.is_file():
+        raise OSError(f"native hook artifact is not a regular file: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    backup = _copy_to_destination_staging_file(
+        path,
+        path,
+        mode=mode,
+        purpose="rollback",
+    )
+    return True, backup
+
+
+def _remove_staging_file(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _restore_destination(path: Path, *, existed: bool, backup: Path | None) -> None:
+    if backup is not None:
+        os.replace(backup, path)
+    elif not existed:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _fsync_directory_best_effort(path: Path) -> None:
+    """Persist directory entries where the host filesystem supports it."""
+    directory_fd = -1
+    try:
+        directory_fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        os.fsync(directory_fd)
+    except OSError:
+        # Windows and some network filesystems do not support directory fsync.
+        pass
+    finally:
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def _install_native_pre_tool_use_artifacts(
+    *,
+    built_command: Path,
+    built_stamp: Path,
+    target: Path,
+    target_stamp: Path,
+) -> None:
+    """Install the command and stamp atomically per file with pair rollback."""
+    staged_command: Path | None = None
+    staged_stamp: Path | None = None
+    command_backup: Path | None = None
+    stamp_backup: Path | None = None
+    command_existed = False
+    stamp_existed = False
+    command_replaced = False
+    stamp_replaced = False
+
+    try:
+        staged_command = _copy_to_destination_staging_file(
+            built_command,
+            target,
+            mode=_NATIVE_PRE_TOOL_USE_COMMAND_MODE,
+            purpose="install",
+        )
+        staged_stamp = _copy_to_destination_staging_file(
+            built_stamp,
+            target_stamp,
+            mode=_NATIVE_PRE_TOOL_USE_STAMP_MODE,
+            purpose="install",
+        )
+        command_existed, command_backup = _stage_existing_destination(target)
+        stamp_existed, stamp_backup = _stage_existing_destination(target_stamp)
+
+        os.replace(staged_command, target)
+        staged_command = None
+        command_replaced = True
+        os.replace(staged_stamp, target_stamp)
+        staged_stamp = None
+        stamp_replaced = True
+        _fsync_directory_best_effort(target.parent)
+    except Exception as exc:
+        rollback_errors: list[OSError] = []
+        if stamp_replaced:
+            try:
+                _restore_destination(
+                    target_stamp,
+                    existed=stamp_existed,
+                    backup=stamp_backup,
+                )
+                stamp_backup = None
+            except OSError as rollback_error:
+                rollback_errors.append(rollback_error)
+        if command_replaced:
+            try:
+                _restore_destination(
+                    target,
+                    existed=command_existed,
+                    backup=command_backup,
+                )
+                command_backup = None
+            except OSError as rollback_error:
+                rollback_errors.append(rollback_error)
+        _fsync_directory_best_effort(target.parent)
+        if rollback_errors and hasattr(exc, "add_note"):
+            exc.add_note(
+                "native hook rollback also failed: "
+                + "; ".join(str(error) for error in rollback_errors)
+            )
+        raise
+    finally:
+        for path in (
+            staged_command,
+            staged_stamp,
+            command_backup,
+            stamp_backup,
+        ):
+            _remove_staging_file(path)
+
+
 def install_native_pre_tool_use_command(
     *,
     home: Path | None = None,
@@ -706,9 +872,12 @@ def install_native_pre_tool_use_command(
                 + "\n",
                 encoding="utf-8",
             )
-            out.replace(target)
-            target.chmod(_NATIVE_PRE_TOOL_USE_COMMAND_MODE)
-            stamp.replace(target_stamp)
+            _install_native_pre_tool_use_artifacts(
+                built_command=out,
+                built_stamp=stamp,
+                target=target,
+                target_stamp=target_stamp,
+            )
             return target
 
     return None
