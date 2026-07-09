@@ -44,6 +44,7 @@ from .passport import (
     load_mission_file,
     verify_passport,
 )
+from .package_assets import claude_code_plugin_dir
 from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
@@ -2392,11 +2393,7 @@ def _claude_code_plugin_validation_detail(raw_detail: str, *, plugin: Path, home
 
 
 def _default_claude_plugin_dir() -> Path:
-    cwd_candidate = Path.cwd() / "plugins" / "claude-code"
-    if cwd_candidate.exists():
-        return cwd_candidate
-    source_candidate = Path(__file__).resolve().parents[2] / "plugins" / "claude-code"
-    return source_candidate
+    return claude_code_plugin_dir()
 
 
 def _normalize_protect_mode(value: str) -> str:

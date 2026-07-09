@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from . import kernel_correlation as kc
+from .package_assets import claude_code_plugin_dir
 
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
@@ -226,8 +227,8 @@ def select_adapter(command: list[str], via: str) -> AgentAdapter:
 
 
 def _claude_plugin_dir() -> Path | None:
-    candidate = Path(__file__).resolve().parents[2] / "plugins" / "claude-code"
-    return candidate if candidate.exists() else None
+    candidate = claude_code_plugin_dir()
+    return candidate if candidate.is_dir() else None
 
 
 # ── embedded governance server ─────────────────────────────────────────────────
