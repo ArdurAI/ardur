@@ -8,6 +8,7 @@
     ".github/workflows/hugo-site.yml": "repo/.github/workflows/hugo-site.yml",
     ".github/workflows/kernel-enforce.yml": "repo/.github/workflows/kernel-enforce.yml",
     ".github/workflows/link-check.yml": "repo/.github/workflows/link-check.yml",
+    ".github/workflows/python-package.yml": "repo/.github/workflows/python-package.yml",
     ".github/workflows/secret-scan.yml": "repo/.github/workflows/secret-scan.yml",
     ".github/workflows/tests.yml": "repo/.github/workflows/tests.yml",
     ".github/workflows/validate-formats.yml": "repo/.github/workflows/validate-formats.yml",

@@ -2,15 +2,29 @@
 
 The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and records receipts you can verify after the fact.
 
-A note on names: the eventual PyPI package is `ardur`, but the internal Python module is still `vibap`. That's a technical-lineage thing — VIBAP is the original research-era name for the protocol, not a product codename, and renaming the import path would have churned every test and example for no real benefit. Treat `vibap` as an implementation detail; everything user-facing speaks `ardur`.
+A note on names: the distribution and CLI are `ardur`, but the internal Python
+module is still `vibap`. That import name preserves protocol lineage without
+churning every integration. Treat `vibap` as an implementation detail;
+everything user-facing speaks `ardur`.
+
+## Install
+
+Public-index availability is tracked in the repository's root `STATUS.md`.
+After it is marked public, install a release on Python 3.10 or newer with:
+
+```bash
+python -m pip install ardur
+```
+
+From a source checkout, install the same package metadata with:
+
+```bash
+python -m pip install -e python/
+```
 
 ## Quickstart (no API keys required)
 
 ```bash
-# from the ardur repo root
-cd python
-pip install -e .
-
 # Issue a passport for a mission
 ardur issue \
   --agent-id alice \
@@ -29,7 +43,6 @@ That walks through key generation, mission compilation, ES256-signed passport is
 The regular-user path uses the same package dependencies and CLI:
 
 ```bash
-pip install -e .
 ardur profile init --template read-only --path ARDUR.md
 ardur protect claude-code --profile ARDUR.md
 ardur doctor-claude-code

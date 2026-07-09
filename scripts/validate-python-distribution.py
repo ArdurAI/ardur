@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""Validate Ardur's built Python distributions before publication."""
+
+from __future__ import annotations
+
+import argparse
+import configparser
+import email.policy
+import stat
+import tarfile
+import zipfile
+from email.parser import BytesParser
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 release runner
+    import tomli as tomllib
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PYTHON_ROOT = REPO_ROOT / "python"
+SOURCE_PLUGIN = REPO_ROOT / "plugins" / "claude-code"
+EXPECTED_URLS = {
+    "Homepage": "https://github.com/ArdurAI/ardur",
+    "Documentation": "https://github.com/ArdurAI/ardur/tree/main/docs",
+    "Repository": "https://github.com/ArdurAI/ardur",
+    "Issues": "https://github.com/ArdurAI/ardur/issues",
+    "Discussions": "https://github.com/ArdurAI/ardur/discussions",
+}
+EXPECTED_SUMMARY = "Runtime governance and signed evidence for AI agent tool calls"
+PLUGIN_ASSETS = (
+    PurePosixPath(".claude-plugin/plugin.json"),
+    PurePosixPath("hooks/hooks.json"),
+    PurePosixPath("hooks/post_tool_use"),
+    PurePosixPath("hooks/pre_tool_use"),
+    PurePosixPath("hooks/subagent_start"),
+    PurePosixPath("hooks/subagent_stop"),
+)
+
+
+class DistributionValidationError(ValueError):
+    """A release artifact violates the publication contract."""
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise DistributionValidationError(message)
+
+
+def one(paths: list[Path], description: str) -> Path:
+    require(len(paths) == 1, f"expected one {description}, found {len(paths)}")
+    return paths[0]
+
+
+def safe_archive_path(raw_name: str) -> PurePosixPath:
+    path = PurePosixPath(raw_name)
+    require(bool(raw_name), "archive contains an empty path")
+    require(not path.is_absolute(), f"archive path is absolute: {raw_name}")
+    require(".." not in path.parts, f"archive path traverses upward: {raw_name}")
+    require("\\" not in raw_name, f"archive path contains a backslash: {raw_name}")
+    return path
+
+
+def project() -> dict[str, object]:
+    with (PYTHON_ROOT / "pyproject.toml").open("rb") as handle:
+        return tomllib.load(handle)["project"]
+
+
+def plugin_files() -> dict[PurePosixPath, Path]:
+    files: dict[PurePosixPath, Path] = {}
+    for relative_path in PLUGIN_ASSETS:
+        path = SOURCE_PLUGIN / relative_path
+        require(not path.is_symlink(), f"canonical plugin asset is a symlink: {path}")
+        require(path.is_file(), f"canonical plugin asset is missing: {path}")
+        files[PurePosixPath("vibap/_plugins/claude-code") / relative_path] = path
+    return files
+
+
+def file_mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def read_required(handle: BinaryIO | None, description: str) -> bytes:
+    require(handle is not None, f"could not read {description}")
+    return handle.read()
+
+
+def validate_metadata(metadata_bytes: bytes, expected_version: str) -> None:
+    metadata = BytesParser(policy=email.policy.default).parsebytes(metadata_bytes)
+    require(metadata["Name"] == "ardur", "wheel Name must be ardur")
+    require(
+        metadata["Version"] == expected_version, "wheel version differs from source"
+    )
+    require(
+        metadata["Summary"] == EXPECTED_SUMMARY, "wheel summary differs from source"
+    )
+    require(metadata["Requires-Python"] == ">=3.10", "Requires-Python must be >=3.10")
+    require(metadata["License-Expression"] == "MIT", "license expression must be MIT")
+    require(
+        metadata["Description-Content-Type"] == "text/markdown",
+        "README must be Markdown",
+    )
+    urls: dict[str, str] = {}
+    for value in metadata.get_all("Project-URL", []):
+        label, separator, url = value.partition(", ")
+        require(bool(separator), f"invalid Project-URL metadata: {value}")
+        urls[label] = url
+    require(
+        urls == EXPECTED_URLS, "wheel project URLs differ from canonical ArdurAI URLs"
+    )
+
+
+def validate_wheel(wheel_path: Path, expected_version: str) -> None:
+    expected_name = f"ardur-{expected_version}-py3-none-any.whl"
+    require(
+        wheel_path.name == expected_name,
+        f"unexpected wheel filename: {wheel_path.name}",
+    )
+    with zipfile.ZipFile(wheel_path) as archive:
+        infos = archive.infolist()
+        names: dict[PurePosixPath, zipfile.ZipInfo] = {}
+        for info in infos:
+            path = safe_archive_path(info.filename)
+            require(path not in names, f"wheel contains a duplicate path: {path}")
+            archived_mode = info.external_attr >> 16
+            require(
+                not stat.S_ISLNK(archived_mode), f"wheel contains a symlink: {path}"
+            )
+            require(
+                not info.is_dir() or info.file_size == 0,
+                f"non-empty wheel directory: {path}",
+            )
+            names[path] = info
+        metadata_path = one(
+            [
+                Path(str(path))
+                for path in names
+                if str(path).endswith(".dist-info/METADATA")
+            ],
+            "wheel METADATA",
+        )
+        dist_info = PurePosixPath(metadata_path.as_posix()).parent
+        validate_metadata(archive.read(metadata_path.as_posix()), expected_version)
+        wheel_metadata = archive.read((dist_info / "WHEEL").as_posix()).decode("utf-8")
+        require(
+            "Tag: py3-none-any" in wheel_metadata, "wheel must be platform independent"
+        )
+        entry_points = configparser.ConfigParser(interpolation=None)
+        entry_points.read_string(
+            archive.read((dist_info / "entry_points.txt").as_posix()).decode("utf-8")
+        )
+        require(
+            dict(entry_points["console_scripts"])
+            == {"ardur": "vibap.cli:main", "ardur-proxy": "vibap.cli:main"},
+            "console entry points differ from the release contract",
+        )
+        license_path = dist_info / "licenses" / "LICENSE"
+        require(license_path in names, "wheel does not contain the MIT license file")
+        require(
+            archive.read(license_path.as_posix())
+            == (REPO_ROOT / "LICENSE").read_bytes(),
+            "wheel license differs from root LICENSE",
+        )
+        require(
+            PurePosixPath("vibap/_specs/mission_declaration_v01.schema.json") in names,
+            "wheel does not contain the embedded mission schema",
+        )
+        expected_plugin_files = plugin_files()
+        plugin_root = PurePosixPath("vibap/_plugins/claude-code")
+        actual_plugin_files = {
+            path
+            for path, info in names.items()
+            if path.is_relative_to(plugin_root) and not info.is_dir()
+        }
+        require(
+            actual_plugin_files == set(expected_plugin_files),
+            "wheel plugin asset set differs from the release manifest",
+        )
+        for packaged_path, source_path in expected_plugin_files.items():
+            require(
+                packaged_path in names,
+                f"wheel is missing plugin asset: {packaged_path}",
+            )
+            info = names[packaged_path]
+            require(
+                archive.read(packaged_path.as_posix()) == source_path.read_bytes(),
+                f"wheel plugin asset differs from source: {packaged_path}",
+            )
+            archived_mode = (info.external_attr >> 16) & 0o777
+            expected_mode = file_mode(source_path)
+            require(
+                archived_mode == expected_mode,
+                f"wheel plugin asset has unexpected mode: {packaged_path}",
+            )
+
+
+def validate_sdist(sdist_path: Path, expected_version: str) -> None:
+    expected_name = f"ardur-{expected_version}.tar.gz"
+    require(
+        sdist_path.name == expected_name,
+        f"unexpected sdist filename: {sdist_path.name}",
+    )
+    root = PurePosixPath(f"ardur-{expected_version}")
+    with tarfile.open(sdist_path, mode="r:gz") as archive:
+        members = archive.getmembers()
+        names: dict[PurePosixPath, tarfile.TarInfo] = {}
+        for member in members:
+            path = safe_archive_path(member.name)
+            require(path not in names, f"sdist contains a duplicate path: {path}")
+            require(
+                not member.issym() and not member.islnk(),
+                f"sdist contains a link: {path}",
+            )
+            require(not member.isdev(), f"sdist contains a device: {path}")
+            require(
+                path.parts and path.parts[0] == str(root),
+                f"sdist path has wrong root: {path}",
+            )
+            names[path] = member
+        for relative_path in ("pyproject.toml", "README.md", "LICENSE"):
+            path = root / relative_path
+            require(
+                path in names and names[path].isfile(),
+                f"sdist is missing {relative_path}",
+            )
+        require(
+            read_required(archive.extractfile(names[root / "LICENSE"]), "sdist LICENSE")
+            == (REPO_ROOT / "LICENSE").read_bytes(),
+            "sdist license differs from root LICENSE",
+        )
+        expected_plugin_files = plugin_files()
+        plugin_root = root / "vibap/_plugins/claude-code"
+        actual_plugin_files = {
+            path.relative_to(root)
+            for path, member in names.items()
+            if path.is_relative_to(plugin_root) and member.isfile()
+        }
+        require(
+            actual_plugin_files == set(expected_plugin_files),
+            "sdist plugin asset set differs from the release manifest",
+        )
+        for packaged_path, source_path in expected_plugin_files.items():
+            path = root / packaged_path
+            require(
+                path in names and names[path].isfile(),
+                f"sdist is missing plugin asset: {path}",
+            )
+            require(
+                read_required(archive.extractfile(names[path]), str(path))
+                == source_path.read_bytes(),
+                f"sdist plugin asset differs from source: {path}",
+            )
+            require(
+                stat.S_IMODE(names[path].mode) == file_mode(source_path),
+                f"sdist plugin mode differs from source: {path}",
+            )
+
+
+def validate(dist_dir: Path, expected_tag: str | None = None) -> tuple[Path, Path, str]:
+    config = project()
+    expected_version = str(config["version"])
+    require(config["name"] == "ardur", "source project name must be ardur")
+    require(
+        config["description"] == EXPECTED_SUMMARY,
+        "source summary differs from release contract",
+    )
+    require(config["requires-python"] == ">=3.10", "source Python floor must be >=3.10")
+    require(config["license"] == "MIT", "source license expression must be MIT")
+    require(
+        config["urls"] == EXPECTED_URLS,
+        "source project URLs differ from canonical URLs",
+    )
+    if expected_tag is not None:
+        require(
+            expected_tag == f"v{expected_version}",
+            f"tag {expected_tag!r} must equal v{expected_version}",
+        )
+    require(dist_dir.is_dir(), f"distribution directory does not exist: {dist_dir}")
+    wheel = one(sorted(dist_dir.glob("*.whl")), "wheel")
+    sdist = one(sorted(dist_dir.glob("*.tar.gz")), "source distribution")
+    require(wheel.is_file() and not wheel.is_symlink(), "wheel must be a regular file")
+    require(sdist.is_file() and not sdist.is_symlink(), "sdist must be a regular file")
+    dist_entries = set(dist_dir.iterdir())
+    require(
+        dist_entries == {wheel, sdist},
+        "distribution directory must contain only the validated wheel and sdist",
+    )
+    validate_wheel(wheel, expected_version)
+    validate_sdist(sdist, expected_version)
+    return wheel, sdist, expected_version
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dist-dir", type=Path, required=True)
+    parser.add_argument("--expected-tag")
+    args = parser.parse_args()
+    try:
+        wheel, sdist, version = validate(args.dist_dir.resolve(), args.expected_tag)
+    except (DistributionValidationError, KeyError, configparser.Error, OSError) as exc:
+        print(f"error: {exc}")
+        return 1
+    print(f"validated ardur {version}: {wheel.name}, {sdist.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

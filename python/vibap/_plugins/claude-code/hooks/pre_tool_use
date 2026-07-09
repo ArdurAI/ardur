@@ -1,0 +1,193 @@
+#!/bin/bash
+# Ardur PreToolUse hook - daemon-first path with Python fallback.
+set -eu
+
+daemon_toggle="${ARDUR_CC_HOOK_DAEMON:-1}"
+case "$daemon_toggle" in
+  0|false|FALSE|False|off|OFF|no|NO)
+    daemon_enabled=0
+    ;;
+  *)
+    daemon_enabled=1
+    ;;
+esac
+
+strict_native_toggle="${ARDUR_CC_HOOK_STRICT_NATIVE:-0}"
+case "$strict_native_toggle" in
+  1|true|TRUE|True|on|ON|yes|YES)
+    strict_native=1
+    ;;
+  *)
+    strict_native=0
+    ;;
+esac
+
+hook_input=""
+hook_input_ready=0
+
+read_hook_input() {
+  if [ "$hook_input_ready" -eq 1 ]; then
+    return
+  fi
+  hook_input=""
+  if ! IFS= read -r -d '' hook_input; then
+    :
+  fi
+  hook_input_ready=1
+}
+
+native_attempted=0
+daemon_socket_fast="${ARDUR_CC_HOOK_DAEMON_SOCKET:-}"
+native_pre_tool_use_command_fast="${ARDUR_CC_HOOK_NATIVE_PRE_TOOL_USE:-${ARDUR_CC_HOOK_NATIVE_CLIENT:-}}"
+if [ "$daemon_enabled" -eq 1 ] && [ -n "$daemon_socket_fast" ] && [ -n "$native_pre_tool_use_command_fast" ] && [ -S "$daemon_socket_fast" ] && [ -x "$native_pre_tool_use_command_fast" ]; then
+  native_attempted=1
+  if [ "$strict_native" -eq 1 ]; then
+    exec "$native_pre_tool_use_command_fast" "$daemon_socket_fast" "${ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS:-5}"
+  fi
+  read_hook_input
+  if "$native_pre_tool_use_command_fast" "$daemon_socket_fast" "${ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS:-5}" 2>/dev/null <<<"$hook_input"; then
+    exit 0
+  fi
+fi
+
+hook_home="${VIBAP_HOME:-}"
+if [ -z "$hook_home" ]; then
+  if [ -d "$PWD/.vibap" ]; then
+    hook_home="$PWD/.vibap"
+  else
+    hook_home="$HOME/.vibap"
+  fi
+fi
+
+hook_python_file="$hook_home/claude-code-hook-python"
+
+daemon_socket="$daemon_socket_fast"
+daemon_timeout_ms="${ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS:-5}"
+native_pre_tool_use_command="$native_pre_tool_use_command_fast"
+
+if [ -z "$daemon_socket" ]; then
+  daemon_socket="$hook_home/daemon/claude-code-hook-daemon.sock"
+fi
+if [ -z "$native_pre_tool_use_command" ]; then
+  native_pre_tool_use_command="$hook_home/claude-code-pre_tool_use"
+fi
+
+if [ "$daemon_enabled" -eq 1 ] && [ "$native_attempted" -eq 0 ] && [ -S "$daemon_socket" ] && [ -x "$native_pre_tool_use_command" ]; then
+  native_attempted=1
+  if [ "$strict_native" -eq 1 ]; then
+    exec "$native_pre_tool_use_command" "$daemon_socket" "$daemon_timeout_ms"
+  fi
+  read_hook_input
+  if "$native_pre_tool_use_command" "$daemon_socket" "$daemon_timeout_ms" 2>/dev/null <<<"$hook_input"; then
+    exit 0
+  fi
+fi
+
+if [ "$daemon_enabled" -eq 1 ] && [ "$native_attempted" -eq 0 ]; then
+  read_hook_input
+  daemon_python=""
+  if [ -n "${ARDUR_HOOK_PYTHON:-}" ] && [ -x "$ARDUR_HOOK_PYTHON" ]; then
+    daemon_python="$ARDUR_HOOK_PYTHON"
+  elif [ -r "$hook_python_file" ]; then
+    configured_python="$(sed -n '1p' "$hook_python_file")"
+    if [ -n "$configured_python" ] && [ -x "$configured_python" ]; then
+      daemon_python="$configured_python"
+    fi
+  elif command -v python3 >/dev/null 2>&1; then
+    daemon_python="python3"
+  fi
+
+  if [ -S "$daemon_socket" ] && [ -n "$daemon_python" ]; then
+    # Python daemon client fallback preserves compatibility when native build is
+    # unavailable. Keep this helper out of the top-level wrapper parse path to
+    # minimize healthy native-fast-path startup overhead.
+    daemon_response="$(
+      HOOK_INPUT="$hook_input" "$daemon_python" -c '
+import json
+import os
+import socket
+import sys
+
+from vibap.claude_code_daemon import extract_valid_pre_tool_use_output
+
+
+def _timeout_seconds() -> float:
+    raw = os.environ.get("ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS", "").strip()
+    if not raw:
+        return 0.005
+    try:
+        return max(0.001, float(raw) / 1000.0)
+    except ValueError:
+        return 0.005
+
+
+socket_path = sys.argv[1]
+raw_input = os.environ.get("HOOK_INPUT", "")
+if not raw_input:
+    raise SystemExit(1)
+
+request = raw_input if raw_input.endswith("\n") else raw_input + "\n"
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+    conn.settimeout(_timeout_seconds())
+    conn.connect(socket_path)
+    conn.sendall(request.encode("utf-8"))
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = conn.recv(8192)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > 1_000_000:
+            raise ValueError("daemon response exceeded max_bytes")
+        if b"\n" in chunk:
+            break
+
+raw_response = b"".join(chunks)
+line = raw_response.splitlines()[0] if raw_response else b""
+if not line:
+    raise SystemExit(1)
+
+response = json.loads(line.decode("utf-8"))
+if not isinstance(response, dict):
+    raise SystemExit(1)
+
+output = extract_valid_pre_tool_use_output(response)
+if output is None:
+    raise SystemExit(1)
+
+sys.stdout.write(json.dumps(output, separators=(",", ":")) + "\n")
+' "$daemon_socket" 2>/dev/null || true
+    )"
+    if [ -n "$daemon_response" ]; then
+      printf '%s\n' "$daemon_response"
+      exit 0
+    fi
+  fi
+fi
+
+run_local_pre_hook() {
+  # Fallback must stay local and never re-enter the daemon path.
+  printf '%s' "$hook_input" | env ARDUR_CC_HOOK_DAEMON=0 "$@"
+}
+
+read_hook_input
+
+if [ -n "${ARDUR_HOOK_PYTHON:-}" ]; then
+  run_local_pre_hook "$ARDUR_HOOK_PYTHON" -m vibap.claude_code_hook pre "$@"
+  exit $?
+fi
+if [ -r "$hook_python_file" ]; then
+  hook_python="$(sed -n '1p' "$hook_python_file")"
+  if [ -n "$hook_python" ] && [ -x "$hook_python" ]; then
+    run_local_pre_hook "$hook_python" -m vibap.claude_code_hook pre "$@"
+    exit $?
+  fi
+fi
+if command -v ardur >/dev/null 2>&1; then
+  run_local_pre_hook ardur claude-code-hook pre "$@"
+  exit $?
+fi
+run_local_pre_hook python3 -m vibap.claude_code_hook pre "$@"
