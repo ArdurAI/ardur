@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "e67767075194c8ada7f6c29bf06ac52c2504447db5b74c497993f2ef377cd4bc"
+source_sha256: "1027dc7727931d75e0a1ac025ec4272c60b5d0f5542327e03452352186b4dce8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -748,19 +748,22 @@ recovery guidance. An empty-string `--mission ""` is falsy and falls through to
 the selected mode's default mission; only whitespace-only strings that would
 leak into the JWT are rejected.
 
-If `--home` is supplied but is empty or whitespace-only, the command exits
-nonzero without configuring Claude Code, generating keys, or writing
-`active_mission.jwt`. JSON output includes `ok: false`,
-`error: "protect_home_invalid"`, `error_code: "protect_home_invalid"`,
-`condition: "protect_home_invalid"`, and placeholder-only `next_steps` such as
+If `--home` is supplied but is empty, whitespace-only, or points to an
+existing regular file, the command exits nonzero without configuring Claude
+Code, generating keys, or writing `active_mission.jwt`. JSON output includes
+`ok: false`, `error: "protect_home_invalid"`,
+`error_code: "protect_home_invalid"`, `condition: "protect_home_invalid"`, and
+placeholder-only `next_steps` such as
 `ardur protect claude-code --home <ardur-home> --scope <your-project>`,
 `ardur protect claude-code --scope <your-project>` (omit `--home` to use the
 default), and `ardur protect claude-code --home . --scope <your-project>` (use
 `.` explicitly for the current working directory); human output prints the same
 recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected.
-Omitting `--home` entirely uses the default Ardur home directory and is not
-rejected. An explicit `--home .` is still accepted.
+A regular file cannot serve as an Ardur home directory and is rejected before
+any key generation or directory creation. Omitting `--home` entirely uses the
+default Ardur home directory and is not rejected. An explicit `--home .` is
+still accepted.
 
 If `--keys-dir` is supplied but is empty or whitespace-only, the command exits
 nonzero without generating keys, configuring Claude Code, or writing

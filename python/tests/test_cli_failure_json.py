@@ -1859,6 +1859,55 @@ def test_protect_claude_code_explicit_dot_home_still_succeeds(tmp_path, capsys):
     assert payload["ok"] is True
 
 
+def test_protect_claude_code_home_regular_file_returns_invalid(tmp_path, capsys):
+    """``--home <existing-regular-file>`` must fail closed with structured JSON
+    and must NOT create signing keys or active_mission.jwt.
+
+    Regression: previously ``--home`` pointing to an existing regular file
+    tracebacked with ``FileExistsError`` at ``home.mkdir()`` instead of
+    returning structured JSON with ``next_steps``.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    # Create a real regular file to use as the invalid home.
+    home_file = tmp_path / "not-a-directory.txt"
+    home_file.write_text("this is a file, not a home directory")
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home_file),
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_home_invalid"
+    assert payload["error"] == "protect_home_invalid"
+    assert payload["error_code"] == "protect_home_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # home is rejected.
+    assert not home_file.is_dir()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
 def test_protect_claude_code_omitted_home_still_succeeds(tmp_path, capsys, monkeypatch):
     """Omitting ``--home`` entirely must keep working and use DEFAULT_HOME.
     The empty/whitespace guard only fires on an explicitly-provided invalid
