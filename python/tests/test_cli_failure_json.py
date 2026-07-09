@@ -1961,6 +1961,55 @@ def test_protect_claude_code_keys_dir_regular_file_returns_invalid(tmp_path, cap
         assert str(tmp_path) not in step.get("detail", "")
 
 
+def test_protect_claude_code_negative_max_tool_calls_returns_invalid(tmp_path, capsys):
+    """``--max-tool-calls -1`` must fail closed with structured JSON and must
+    NOT create signing keys or active_mission.jwt.
+
+    Regression: previously a negative ``--max-tool-calls`` silently produced a
+    Mission Passport with a negative ``max_tool_calls`` claim.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    rc, payload = _run_cli_and_read_json(
+        [
+            "protect",
+            "claude-code",
+            "--scope",
+            str(project),
+            "--mode",
+            "read-only",
+            "--json",
+            "--home",
+            str(home),
+            "--max-tool-calls",
+            "-1",
+        ],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_budget_max_tool_calls_invalid"
+    assert payload["error"] == "protect_budget_max_tool_calls_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No keys directory, signing keys, or active_mission.jwt may be created
+    # when the budget is rejected.
+    assert not (home / "keys").exists()
+    assert not (home / "active_mission.jwt").exists()
+    # next_steps must be placeholder-only: no absolute local paths, tokens, or
+    # tmp_path leakage in any command/detail field.
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
+
+
 def test_protect_claude_code_omitted_home_still_succeeds(tmp_path, capsys, monkeypatch):
     """Omitting ``--home`` entirely must keep working and use DEFAULT_HOME.
     The empty/whitespace guard only fires on an explicitly-provided invalid

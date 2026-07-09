@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f9a22ac9af7a827b2cc50ce6e1863b7a39bd4e2f24af9a2ffcba3b5a796194e4"
+source_sha256: "0acbc8231161c377244d719fdc7b5fabf1e65d47b2141a5b20620cec5985dd93"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -782,6 +782,19 @@ existing regular file cannot serve as a signing keys directory and is rejected
 before any key generation. Omitting `--keys-dir` entirely uses the default keys
 directory under the Ardur home and is not rejected. An explicit `--keys-dir .`
 is still accepted.
+
+If `--max-tool-calls` is supplied with a negative value, the command exits
+nonzero without generating keys, configuring Claude Code, or writing
+`active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_budget_max_tool_calls_invalid"`,
+`condition: "protect_budget_max_tool_calls_invalid"`, and placeholder-only
+`next_steps` such as
+`ardur protect claude-code --scope <your-project> --max-tool-calls <non-negative-integer>`
+and `ardur protect claude-code --scope <your-project>` (omit `--max-tool-calls`
+to use the default of 250); human output prints the same recovery guidance.
+A negative budget would silently produce a Mission Passport with a negative
+`max_tool_calls` claim, which is semantically invalid. Omitting
+`--max-tool-calls` entirely uses the default of 250 and is not rejected.
 
 If `--profile` is supplied but is empty, whitespace-only, or a directory path,
 the command exits nonzero without loading a profile, generating keys, or writing

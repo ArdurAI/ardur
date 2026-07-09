@@ -3249,6 +3249,41 @@ def _protect_claude_code_missing_profile_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_budget_invalid_response() -> dict[str, object]:
+    """Structured response for negative ``--max-tool-calls``.
+
+    Mirrors the ``protect_scope_invalid`` / ``protect_home_invalid`` shape
+    so all ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local paths
+    or tokens. Placed before any ``generate_keypair`` / ``issue_passport`` /
+    artifact write so no Ardur state is created for an invalid budget value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_budget_max_tool_calls_invalid",
+        "condition": "protect_budget_max_tool_calls_invalid",
+        "message": "ardur protect claude-code --max-tool-calls must be zero or a positive integer.",
+        "detail": (
+            "A negative --max-tool-calls value was provided. Pass zero or a "
+            "positive integer, or omit --max-tool-calls to use the default "
+            "of 250."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_valid_budget",
+                "command": "ardur protect claude-code --scope <your-project> --max-tool-calls <non-negative-integer>",
+                "detail": "Provide a non-negative integer for --max-tool-calls.",
+            },
+            {
+                "action": "omit_budget",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --max-tool-calls to use the default of 250.",
+            },
+        ],
+    }
+
+
 def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # Reject empty/whitespace-only --profile before any key generation or
     # profile loading. ``--profile`` is ``type=str`` so an empty or
@@ -3344,6 +3379,13 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         keys_dir_path = Path(args.keys_dir).expanduser()
         if keys_dir_path.exists() and keys_dir_path.is_file():
             return _protect_claude_code_keys_dir_invalid_response()
+    # Reject negative --max-tool-calls before any key generation or directory
+    # creation. ``--max-tool-calls`` is ``type=int`` with a default of 250,
+    # so only an explicitly-passed negative value reaches here. A negative
+    # budget would silently produce a Mission Passport with a negative
+    # max_tool_calls claim, which is semantically invalid.
+    if args.max_tool_calls < 0:
+        return _protect_claude_code_budget_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
