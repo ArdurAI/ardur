@@ -38,7 +38,21 @@ ardur --help
 Keep the virtualenv active for the rest of the walkthrough so Claude Code hooks
 can find the same installed `ardur` package.
 
-## 2. Run the no-key evidence harness
+## 2. Optional: see the local governance loop first
+
+For a provider-free `PERMIT`/`DENY`/signed-attestation demonstration before the
+broader hook evidence path, run:
+
+```bash
+python scripts/run-no-key-mvp-demo.py
+```
+
+The driver is loopback-only and temporary: it deliberately disables TLS and
+bearer auth for its child process, verifies the attestation signature locally,
+then removes its keys and state. See the
+[no-key MVP guide](no-key-mvp-demo.md) for the complete boundary.
+
+## 3. Run the no-key evidence harness
 
 This does not call a live LLM provider. It uses temporary HOME, project, Ardur
 home, and evidence directories, then writes a redacted shareable bundle.
@@ -72,7 +86,7 @@ bundle can support, read
 For a compact reviewer/demo handoff after the run, use
 [`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md).
 
-## 3. Run a live Claude Code session
+## 4. Run a live Claude Code session
 
 Only run this if `claude` is already installed and logged in. The demo creates a
 temporary project and a local `.vibap` home under that project.
@@ -107,7 +121,7 @@ chain links, and summarize compliant, violation, and unknown outcomes. If the
 model attempts `Bash`, `Edit`, or `Write`, the read-only profile should return a
 Claude Code deny decision and still preserve the signed violation receipt.
 
-## 4. Read the result correctly
+## 5. Read the result correctly
 
 Ardur evidence is strongest at the local tool boundary. Treat the report as a
 verified statement about what Claude Code exposed to local hooks and what Ardur
