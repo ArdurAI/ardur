@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur is the runtime governance and evidence layer for AI agents."
 source_path: "README.md"
-source_sha256: "14201d834bc4f7a4c2d5be9f82be4ce8ad38b737344c3df335576b78857ff2c5"
+source_sha256: "1525e6840104e87cda13766777f9b80fa6f6f09ce29102a2eb366b9d0e88a3a4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -174,7 +174,8 @@ for the expected bundle result and the optional live-Claude path.
 
 `make demo` plus [`scripts/verify-mvp.sh`](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/scripts/verify-mvp.sh) is the
 authenticated Docker path. Configure `ARDUR_API_TOKEN` before starting it; the
-evaluator guide is being refreshed to match this authenticated API path.
+[MVP evaluator guide](/__ardur_internal__/source/docs/mvp-evaluator-guide/) contains the tested,
+copy-paste authenticated lifecycle.
 
 ## Fastest MVP Path: Claude Code
 
