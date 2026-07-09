@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur is the runtime governance and evidence layer for AI agents."
 source_path: "README.md"
-source_sha256: "e2ed693416834784fae6d814c300ba1e70308f2b5d14b9ea3dcb1ce9e57b5e2b"
+source_sha256: "14201d834bc4f7a4c2d5be9f82be4ce8ad38b737344c3df335576b78857ff2c5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -138,23 +138,43 @@ The Go `pkg/aat` package implements 13 constraint types, token serialization, de
 
 [Python test suite →](https://github.com/ArdurAI/ardur/tree/__ARDUR_SOURCE_REF__/python/tests) · Aggregate report: `python/tests/comprehensive_test_report.json` · [Proof & evidence site →](/__ardur_internal__/source/site/readme/)
 
-## Evaluator Quickstart
+## First-Run Paths
 
-One command to a working governance demo:
+Start with one of these source-checkout paths. All three avoid a provider API
+key; the local demo additionally avoids manual bearer-token and Docker setup.
+
+### Local governance loop
 
 ```bash
 git clone https://github.com/ArdurAI/ardur.git && cd ardur
-make demo
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e python/
+python scripts/run-no-key-mvp-demo.py
 ```
 
-Then run the automated verification harness:
+This temporary loopback-only demo reaches a `PERMIT`, a `DENY`, and a locally
+verified signed attestation. It disables TLS and bearer auth only for the child
+process; do not use it as a production launch command. See the
+[no-key MVP guide](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/) for the boundary and timing.
+
+### Fresh-user evidence bundle
 
 ```bash
-./scripts/verify-mvp.sh
+python3 scripts/run-rwt-phase1-fresh-user.py \
+  --expected-origin-dev "$(git rev-parse --short=12 origin/dev)" \
+  --output-dir /tmp/ardur-rwt-phase1
 ```
 
-Full walkthrough with architecture diagrams, session lifecycle, receipt chain
-explanation, and known gaps: [`docs/mvp-evaluator-guide.md`](/__ardur_internal__/source/docs/mvp-evaluator-guide/).
+This runs the repeatable no-key install, profile, hook allow/deny, receipt-chain,
+and redaction checks. Read the [Claude Code MVP quickstart](/__ardur_internal__/source/docs/guides/claude-code-mvp-quickstart/)
+for the expected bundle result and the optional live-Claude path.
+
+### Authenticated Docker evaluator
+
+`make demo` plus [`scripts/verify-mvp.sh`](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/scripts/verify-mvp.sh) is the
+authenticated Docker path. Configure `ARDUR_API_TOKEN` before starting it; the
+evaluator guide is being refreshed to match this authenticated API path.
 
 ## Fastest MVP Path: Claude Code
 

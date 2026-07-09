@@ -2,7 +2,7 @@
 title: "Claude Code MVP Quickstart"
 description: "This is the shortest product-facing path through Ardur today from a source"
 source_path: "docs/guides/claude-code-mvp-quickstart.md"
-source_sha256: "c2990feb0a7718e55c02fee0bad84e0481ccc29604d8de5957ae5ffbb0820f27"
+source_sha256: "cea6ecdf699535d889a867e74593b3be4ede519d502feebf326f370a33faf343"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -55,7 +55,21 @@ ardur --help
 Keep the virtualenv active for the rest of the walkthrough so Claude Code hooks
 can find the same installed `ardur` package.
 
-## 2. Run the no-key evidence harness
+## 2. Optional: see the local governance loop first
+
+For a provider-free `PERMIT`/`DENY`/signed-attestation demonstration before the
+broader hook evidence path, run:
+
+```bash
+python scripts/run-no-key-mvp-demo.py
+```
+
+The driver is loopback-only and temporary: it deliberately disables TLS and
+bearer auth for its child process, verifies the attestation signature locally,
+then removes its keys and state. See the
+[no-key MVP guide](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/) for the complete boundary.
+
+## 3. Run the no-key evidence harness
 
 This does not call a live LLM provider. It uses temporary HOME, project, Ardur
 home, and evidence directories, then writes a redacted shareable bundle.
@@ -89,7 +103,7 @@ bundle can support, read
 For a compact reviewer/demo handoff after the run, use
 [`docs/guides/phase1-demo-packet.md`](/__ardur_internal__/source/docs/guides/phase1-demo-packet/).
 
-## 3. Run a live Claude Code session
+## 4. Run a live Claude Code session
 
 Only run this if `claude` is already installed and logged in. The demo creates a
 temporary project and a local `.vibap` home under that project.
@@ -124,7 +138,7 @@ chain links, and summarize compliant, violation, and unknown outcomes. If the
 model attempts `Bash`, `Edit`, or `Write`, the read-only profile should return a
 Claude Code deny decision and still preserve the signed violation receipt.
 
-## 4. Read the result correctly
+## 5. Read the result correctly
 
 Ardur evidence is strongest at the local tool boundary. Treat the report as a
 verified statement about what Claude Code exposed to local hooks and what Ardur

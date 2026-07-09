@@ -143,6 +143,7 @@
     "docs/engineering-standards.md": "source/docs/engineering-standards/",
     "docs/guides/ardur-personal-hub.md": "source/docs/guides/ardur-personal-hub/",
     "docs/guides/claude-code-mvp-quickstart.md": "source/docs/guides/claude-code-mvp-quickstart/",
+    "docs/guides/no-key-mvp-demo.md": "source/docs/guides/no-key-mvp-demo/",
     "docs/guides/phase1-demo-packet.md": "source/docs/guides/phase1-demo-packet/",
     "docs/guides/read-phase1-evidence-bundle.md": "source/docs/guides/read-phase1-evidence-bundle/",
     "docs/known-limitations.md": "source/docs/known-limitations/",
