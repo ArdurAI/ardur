@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "0acbc8231161c377244d719fdc7b5fabf1e65d47b2141a5b20620cec5985dd93"
+source_sha256: "620ee9ee695dde6b3beed9958dd3cd756c95c99269fe850f4b173eccfc5712c3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -795,6 +795,33 @@ to use the default of 250); human output prints the same recovery guidance.
 A negative budget would silently produce a Mission Passport with a negative
 `max_tool_calls` claim, which is semantically invalid. Omitting
 `--max-tool-calls` entirely uses the default of 250 and is not rejected.
+
+If `--max-duration-s` is supplied with a non-positive value (zero or negative),
+the command exits nonzero without generating keys, configuring Claude Code, or
+writing `active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_budget_max_duration_invalid"`,
+`condition: "protect_budget_max_duration_invalid"`, and placeholder-only
+`next_steps` such as
+`ardur protect claude-code --scope <your-project> --max-duration-s <positive-integer>`
+and `ardur protect claude-code --scope <your-project>` (omit `--max-duration-s`
+to use the default of 86400, 24 hours); human output prints the same recovery
+guidance. A non-positive budget would silently produce a Mission Passport with a
+non-positive `max_duration_s` claim, which is semantically invalid. Omitting
+`--max-duration-s` entirely uses the default of 86400 and is not rejected.
+
+If `--ttl-s` is supplied with a non-positive value (zero or negative), the
+command exits nonzero without generating keys, configuring Claude Code, or
+writing `active_mission.jwt`. JSON output includes `ok: false`,
+`error: "protect_budget_ttl_invalid"`,
+`condition: "protect_budget_ttl_invalid"`, and placeholder-only `next_steps`
+such as
+`ardur protect claude-code --scope <your-project> --ttl-s <positive-integer>`
+and `ardur protect claude-code --scope <your-project>` (omit `--ttl-s` to use
+the `--max-duration-s` value as the token TTL); human output prints the same
+recovery guidance. A non-positive TTL would traceback with
+`ValueError: ttl_s must be positive` from `issue_passport()` after keys are
+already generated. Omitting `--ttl-s` entirely uses the `--max-duration-s`
+value as the token TTL and is not rejected.
 
 If `--profile` is supplied but is empty, whitespace-only, or a directory path,
 the command exits nonzero without loading a profile, generating keys, or writing

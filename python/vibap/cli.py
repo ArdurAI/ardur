@@ -3284,6 +3284,78 @@ def _protect_claude_code_budget_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_max_duration_invalid_response() -> dict[str, object]:
+    """Structured response for non-positive ``--max-duration-s``.
+
+    Mirrors the ``protect_budget_max_tool_calls_invalid`` shape so all
+    ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local
+    paths or tokens. Placed before any ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid budget value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_budget_max_duration_invalid",
+        "condition": "protect_budget_max_duration_invalid",
+        "message": "ardur protect claude-code --max-duration-s must be a positive integer number of seconds.",
+        "detail": (
+            "A non-positive --max-duration-s value was provided. Pass a "
+            "positive integer, or omit --max-duration-s to use the default "
+            "of 86400 (24 hours)."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_valid_budget",
+                "command": "ardur protect claude-code --scope <your-project> --max-duration-s <positive-integer>",
+                "detail": "Provide a positive integer for --max-duration-s.",
+            },
+            {
+                "action": "omit_budget",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --max-duration-s to use the default of 86400 (24 hours).",
+            },
+        ],
+    }
+
+
+def _protect_claude_code_ttl_invalid_response() -> dict[str, object]:
+    """Structured response for non-positive ``--ttl-s``.
+
+    Mirrors the ``protect_budget_max_tool_calls_invalid`` shape so all
+    ``protect claude-code`` fail-closed branches share the same envelope.
+    ``next_steps`` use placeholder-only commands and details with no local
+    paths or tokens. Placed before any ``generate_keypair`` /
+    ``issue_passport`` / artifact write so no Ardur state is created for an
+    invalid TTL value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_budget_ttl_invalid",
+        "condition": "protect_budget_ttl_invalid",
+        "message": "ardur protect claude-code --ttl-s must be a positive integer number of seconds.",
+        "detail": (
+            "A non-positive --ttl-s value was provided. Pass a positive "
+            "integer, or omit --ttl-s to use the --max-duration-s value "
+            "as the token TTL."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_valid_ttl",
+                "command": "ardur protect claude-code --scope <your-project> --ttl-s <positive-integer>",
+                "detail": "Provide a positive integer for --ttl-s.",
+            },
+            {
+                "action": "omit_ttl",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --ttl-s to use the --max-duration-s value as the token TTL.",
+            },
+        ],
+    }
+
+
 def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # Reject empty/whitespace-only --profile before any key generation or
     # profile loading. ``--profile`` is ``type=str`` so an empty or
@@ -3386,6 +3458,20 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # max_tool_calls claim, which is semantically invalid.
     if args.max_tool_calls < 0:
         return _protect_claude_code_budget_invalid_response()
+    # Reject non-positive --max-duration-s before any key generation or
+    # directory creation. ``--max-duration-s`` is ``type=int`` with a default
+    # of 86400, so only an explicitly-passed non-positive value reaches here.
+    # A non-positive budget would silently produce a Mission Passport with a
+    # non-positive max_duration_s claim, which is semantically invalid.
+    if args.max_duration_s <= 0:
+        return _protect_claude_code_max_duration_invalid_response()
+    # Reject non-positive --ttl-s before any key generation or directory
+    # creation. ``--ttl-s`` is ``type=int`` with a default of None, so only
+    # an explicitly-passed non-positive value reaches here. A non-positive TTL
+    # would traceback with ``ValueError: ttl_s must be positive`` from
+    # ``issue_passport()`` after keys are already generated.
+    if args.ttl_s is not None and args.ttl_s <= 0:
+        return _protect_claude_code_ttl_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
