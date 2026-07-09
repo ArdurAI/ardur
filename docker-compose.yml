@@ -5,6 +5,22 @@
 services:
   # ── SPIRE (SPIFFE workload identity) ──────────────────────────────────────
 
+  # Named volumes are created root-owned, while the SPIRE server image runs as
+  # uid 1000. Prepare the server datastore and join-token volume once before
+  # starting any uid-1000 SPIRE process.
+  spire-volume-init:
+    image: alpine:3.22
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        chown -R 1000:1000 /run/spire/server-data /run/spire/shared
+        chmod 0750 /run/spire/server-data /run/spire/shared
+    volumes:
+      - spire-server-data:/run/spire/server-data
+      - spire-shared:/run/spire/shared
+
   spire-server:
     image: ghcr.io/spiffe/spire-server:1.14.4
     command:
@@ -12,12 +28,15 @@ services:
       - /run/spire/config/server.conf
     volumes:
       - spire-server-data:/run/spire/data
-      - spire-shared:/tmp/spire-shared
+      - spire-shared:/run/spire/sockets
       - ./deploy/local/spire/server.conf:/run/spire/config/server.conf:ro
+    depends_on:
+      spire-volume-init:
+        condition: service_completed_successfully
     ports:
-      - "8081:8081"
+      - "${ARDUR_SPIRE_SERVER_PORT:-8081}:8081"
     healthcheck:
-      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck", "-serverAddr", "localhost:8081"]
+      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck", "-socketPath", "/run/spire/sockets/server.sock"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -25,10 +44,13 @@ services:
     restart: unless-stopped
 
   spire-init:
-    image: ghcr.io/spiffe/spire-server:1.14.4
-    entrypoint: ["/bin/bash", "/tmp/setup.sh"]
+    build:
+      context: .
+      dockerfile: deploy/local/spire/Dockerfile.init
+    entrypoint: ["/bin/sh", "/tmp/setup.sh"]
     volumes:
       - spire-shared:/tmp/spire-shared
+      - spire-shared:/run/spire/sockets
       - ./deploy/local/spire/setup.sh:/tmp/setup.sh:ro
     depends_on:
       spire-server:
@@ -39,11 +61,13 @@ services:
     command:
       - -config
       - /run/spire/config/agent.conf
-      - -joinToken
+      - -joinTokenFile
       - /tmp/spire-shared/join_token
     volumes:
       - spire-agent-data:/run/spire/data
-      - spire-shared:/tmp/spire-shared
+      - spire-shared:/tmp/spire-shared:ro
+      - spire-shared:/run/spire/sockets
+      - spire-shared:/run/spire/bundle:ro
       - ./deploy/local/spire/agent.conf:/run/spire/config/agent.conf:ro
     depends_on:
       spire-init:
@@ -63,7 +87,7 @@ services:
       context: .
       dockerfile: Dockerfile.proxy
     ports:
-      - "8443:8443"
+      - "${ARDUR_PROXY_PORT:-8443}:8443"
     environment:
       - ARDUR_NO_TLS=${ARDUR_NO_TLS:-}
       - ARDUR_API_TOKEN=${ARDUR_API_TOKEN:-}
@@ -93,7 +117,7 @@ services:
       context: .
       dockerfile: Dockerfile.hub
     ports:
-      - "8765:8765"
+      - "${ARDUR_HUB_PORT:-8765}:8765"
     environment:
       - ARDUR_NO_TLS=${ARDUR_NO_TLS:-}
       - ARDUR_RATE_LIMIT_RPS=${ARDUR_RATE_LIMIT_RPS:-100}
