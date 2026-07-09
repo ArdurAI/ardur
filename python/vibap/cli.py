@@ -3404,16 +3404,16 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     if scope_path.exists() and scope_path.is_file():
         return _protect_claude_code_scope_invalid_response()
     # Reject empty/whitespace-only --agent-id and explicitly-provided
-    # whitespace-only --mission before any key generation, Mission Passport JWT
-    # issuance, or plugin/hook artifact creation. ``--agent-id`` has an argparse
-    # default (``local-user:claude-code``) so only an explicitly-passed
-    # empty/whitespace string reaches here. ``--mission`` defaults to ``None``;
-    # reject only explicitly-provided whitespace-only strings (truthy values
-    # that leak into the JWT). An empty string ``""`` is falsy and falls through
-    # to the ``args.mission or (...)`` mode/profile default, which is acceptable.
+    # empty/whitespace-only --mission before any key generation, Mission
+    # Passport JWT issuance, or plugin/hook artifact creation. ``--agent-id``
+    # has an argparse default (``local-user:claude-code``) so only an
+    # explicitly-passed empty/whitespace string reaches here. ``--mission``
+    # defaults to ``None``; reject any explicitly-provided empty or
+    # whitespace-only string so that ``--mission ""`` cannot silently create
+    # an active mission with keys.
     if isinstance(args.agent_id, str) and not args.agent_id.strip():
         return _protect_claude_code_identity_invalid_response("protect_agent_id_invalid")
-    if isinstance(args.mission, str) and args.mission and not args.mission.strip():
+    if isinstance(args.mission, str) and not args.mission.strip():
         return _protect_claude_code_identity_invalid_response("protect_mission_invalid")
     # Reject empty/whitespace-only --home before any directory creation or key
     # generation. ``--home`` is ``type=str`` so an empty or whitespace-only

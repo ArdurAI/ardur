@@ -1733,9 +1733,8 @@ def test_protect_claude_code_whitespace_mission_returns_invalid(tmp_path, capsys
     structured JSON and must NOT create signing keys, active_mission.jwt, or
     home artifacts.
 
-    Note: an empty-string ``--mission ""`` is falsy and falls through to the
-    mode default via ``args.mission or (...)``; that fallback is acceptable and
-    only whitespace-only strings (truthy but meaningless) leak into the JWT.
+    Note: an empty-string ``--mission ""`` is now also rejected (the guard was
+    tightened to catch both empty and whitespace-only strings).
     """
     project = tmp_path / "project"
     project.mkdir()
@@ -2262,11 +2261,11 @@ def test_protect_claude_code_omitted_keys_dir_still_succeeds(tmp_path, capsys, m
     assert payload["ok"] is True
 
 
-def test_protect_claude_code_empty_string_mission_falls_back_to_default(tmp_path, capsys):
-    """An empty-string ``--mission ""`` is falsy and must fall through to the
-    selected mode's default mission rather than be rejected. This preserves the
-    ``args.mission or (...)`` fallback documented in the fix boundary.
-    """
+def test_protect_claude_code_empty_string_mission_returns_invalid(tmp_path, capsys):
+    """An empty-string ``--mission ""`` must now be rejected with structured
+    JSON and must NOT create signing keys, active_mission.jwt, or home
+    artifacts. The guard was tightened to catch both empty and whitespace-only
+    strings."""
     project = tmp_path / "project"
     project.mkdir()
     home = tmp_path / "home"
@@ -2287,10 +2286,22 @@ def test_protect_claude_code_empty_string_mission_falls_back_to_default(tmp_path
         capsys,
     )
 
-    assert rc == 0
-    assert payload["ok"] is True
-    # The default read-only mode mission must be used (non-empty).
-    assert payload["claims"]["mission"]
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "protect_mission_invalid"
+    assert payload["error"] == "protect_mission_invalid"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No home directory, keys, or active_mission.jwt may be created when the
+    # mission is rejected.
+    assert not home.exists()
+    for step in payload["next_steps"]:
+        assert str(tmp_path) not in step.get("command", "")
+        assert str(tmp_path) not in step.get("detail", "")
 
 
 def test_protect_claude_code_omitted_agent_id_and_mission_still_succeeds(tmp_path, capsys):
