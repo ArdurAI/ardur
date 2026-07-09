@@ -748,9 +748,9 @@ any key generation or directory creation. Omitting `--home` entirely uses the
 default Ardur home directory and is not rejected. An explicit `--home .` is
 still accepted.
 
-If `--keys-dir` is supplied but is empty or whitespace-only, the command exits
-nonzero without generating keys, configuring Claude Code, or writing
-`active_mission.jwt`. JSON output includes `ok: false`,
+If `--keys-dir` is supplied but is empty, whitespace-only, or an existing
+regular file, the command exits nonzero without generating keys, configuring
+Claude Code, or writing `active_mission.jwt`. JSON output includes `ok: false`,
 `error: "protect_keys_dir_invalid"`, `error_code: "protect_keys_dir_invalid"`,
 `condition: "protect_keys_dir_invalid"`, and placeholder-only `next_steps` such
 as `ardur protect claude-code --keys-dir <keys-dir> --scope <your-project>`,
@@ -760,9 +760,11 @@ default keys directory under the Ardur home), and
 explicitly for the current working directory); human output prints the same
 recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected,
-because they silently create real signing keys in unintended locations.
-Omitting `--keys-dir` entirely uses the default keys directory under the Ardur
-home and is not rejected. An explicit `--keys-dir .` is still accepted.
+because they silently create real signing keys in unintended locations. An
+existing regular file cannot serve as a signing keys directory and is rejected
+before any key generation. Omitting `--keys-dir` entirely uses the default keys
+directory under the Ardur home and is not rejected. An explicit `--keys-dir .`
+is still accepted.
 
 If `--profile` is supplied but is empty, whitespace-only, or a directory path,
 the command exits nonzero without loading a profile, generating keys, or writing

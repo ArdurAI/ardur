@@ -3134,7 +3134,7 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
 
 
 def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
-    """Structured response for empty/whitespace-only ``--keys-dir``.
+    """Structured response for empty/whitespace-only or regular-file ``--keys-dir``.
 
     Mirrors the ``protect_home_invalid`` / ``protect_scope_invalid`` shape so all
     ``protect claude-code`` fail-closed branches share the same envelope.
@@ -3149,15 +3149,16 @@ def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
         "error": "protect_keys_dir_invalid",
         "error_code": "protect_keys_dir_invalid",
         "condition": "protect_keys_dir_invalid",
-        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace.",
+        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace and must not be an existing regular file.",
         "detail": (
-            "An empty or whitespace-only --keys-dir was provided. Pass an "
+            "An empty, whitespace-only, or regular-file --keys-dir was provided. Pass an "
             "explicit signing keys directory, or omit --keys-dir to use the "
             "default keys directory under the Ardur home. Empty strings, "
             "whitespace-only values, and unquoted empty environment variables "
             "resolve to the current working directory and are rejected, "
             "because they silently create real signing keys in unintended "
-            "locations."
+            "locations. An existing regular file cannot serve as a signing keys "
+            "directory and is rejected before any key generation."
         ),
         "next_steps": [
             {
@@ -3335,6 +3336,14 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # the handler falls back to ``<home>/keys``.
     if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
         return _protect_claude_code_keys_dir_invalid_response()
+    # Reject --keys-dir pointing to an existing regular file before any key
+    # generation.  A regular file cannot serve as a signing keys directory and
+    # would traceback with KeyDirectoryError at generate_keypair().  Nonexistent
+    # paths and directories pass through.
+    if args.keys_dir:
+        keys_dir_path = Path(args.keys_dir).expanduser()
+        if keys_dir_path.exists() and keys_dir_path.is_file():
+            return _protect_claude_code_keys_dir_invalid_response()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
