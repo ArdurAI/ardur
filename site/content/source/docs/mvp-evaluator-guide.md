@@ -1,8 +1,8 @@
 ---
 title: "Ardur MVP Evaluator Guide"
-description: "Quickstart guide for evaluating Ardur — the runtime governance and evidence"
+description: "Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:"
 source_path: "docs/mvp-evaluator-guide.md"
-source_sha256: "06dabc3705346ff27a6ac029f610e4ccbd4802ac65ed2ce785bdc265595a6ae1"
+source_sha256: "5d3e2ce1e861c87d1fe0cef4a01bcd775a93f3e9231e36a6c7db96c9e2d0c788"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -17,204 +17,247 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-Quickstart guide for evaluating Ardur — the runtime governance and evidence
-layer for AI agents.
+Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:
+a SPIRE-backed local proxy that applies mission policy before tool execution and
+returns signed session evidence.
 
-## 30-Second Sanity Check
+For the provider-free, no-bearer first-run path, use the
+[No-Key MVP Demo](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/) instead. The relaxed auth mode in
+that guide is deliberately loopback-only and temporary.
+
+## Start the authenticated demo
+
+From the repository root, configure a fresh local bearer token and start the
+stack in terminal 1:
 
 ```bash
-git clone https://github.com/ArdurAI/ardur.git && cd ardur
+export ARDUR_API_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 make demo
 ```
 
-Wait for both services to report healthy (`docker compose ps` shows healthy),
-then:
+Wait until `docker compose ps` reports the SPIRE server, SPIRE agent, proxy, and
+hub as healthy. Keep terminal 1 running. `make demo-down` stops the stack and
+removes its named volumes after the walkthrough.
+
+## Run the complete lifecycle
+
+Paste this entire block into terminal 2 from the same repository root. If
+`ARDUR_API_TOKEN` is not already exported there, the block reads the configured
+token from the running proxy container. It never prints the bearer value or
+places it directly in curl's argument list.
+
+<!-- evaluator-guide-live-block -->
+```bash
+(
+set -euo pipefail
+
+PROXY_URL="${ARDUR_PROXY_URL:-https://localhost:${ARDUR_PROXY_PORT:-8443}}"
+if [[ -z "${ARDUR_API_TOKEN:-}" ]]; then
+  ARDUR_API_TOKEN="$(docker compose exec -T proxy sh -c 'printf %s "$VIBAP_API_TOKEN"')"
+fi
+if [[ -z "$ARDUR_API_TOKEN" || "$ARDUR_API_TOKEN" == *$'\n'* || "$ARDUR_API_TOKEN" == *$'\r'* ]]; then
+  echo "No configured proxy token found. Start make demo with ARDUR_API_TOKEN set." >&2
+  exit 1
+fi
+
+umask 077
+AUTH_HEADER_FILE="$(mktemp "${TMPDIR:-/tmp}/ardur-evaluator-auth.XXXXXX")"
+REQUEST_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/ardur-evaluator-body.XXXXXX")"
+cleanup() {
+  rm -f "$AUTH_HEADER_FILE" "$REQUEST_BODY_FILE"
+}
+trap cleanup EXIT
+printf 'Authorization: Bearer %s\n' "$ARDUR_API_TOKEN" > "$AUTH_HEADER_FILE"
+
+curl_public() {
+  curl --insecure --silent --show-error --fail "$@"
+}
+
+curl_auth() {
+  curl --insecure --silent --show-error --fail --header "@$AUTH_HEADER_FILE" "$@"
+}
+
+post_json() {
+  local path="$1"
+  local payload="$2"
+  printf '%s' "$payload" > "$REQUEST_BODY_FILE"
+  curl_auth \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --data-binary "@$REQUEST_BODY_FILE" \
+    "$PROXY_URL$path"
+}
+
+json_string() {
+  python3 -c '
+import json
+import sys
+
+value = json.load(sys.stdin).get(sys.argv[1])
+assert isinstance(value, str) and value, value
+print(value, end="")
+' "$1"
+}
+
+json_value() {
+  python3 -c '
+import json
+import sys
+
+value = json.load(sys.stdin).get(sys.argv[1])
+assert value is not None, value
+print(value, end="")
+' "$1"
+}
+
+json_object_with_stdin() {
+  python3 -c '
+import json
+import sys
+
+print(json.dumps({sys.argv[1]: sys.stdin.read()}), end="")
+' "$1"
+}
+
+json_evaluate() {
+  python3 -c '
+import json
+import sys
+
+print(json.dumps({
+    "session_id": sys.stdin.read(),
+    "tool_name": sys.argv[1],
+    "arguments": {"path": "/tmp/ardur-evaluator.txt"},
+}), end="")
+' "$1"
+}
+
+HEALTH_RESPONSE="$(curl_public "$PROXY_URL/health")"
+test "$(printf '%s' "$HEALTH_RESPONSE" | json_value status)" = "ok"
+echo "health=ok"
+
+MISSION_PAYLOAD='{"mission":{"agent_id":"evaluator-guide","mission":"evaluate the governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"max_tool_calls":4}}'
+ISSUE_RESPONSE="$(post_json /issue "$MISSION_PAYLOAD")"
+PASSPORT="$(printf '%s' "$ISSUE_RESPONSE" | json_string token)"
+echo "issue=passport-created"
+
+START_PAYLOAD="$(printf '%s' "$PASSPORT" | json_object_with_stdin token)"
+START_RESPONSE="$(post_json /session/start "$START_PAYLOAD")"
+SESSION_ID="$(printf '%s' "$START_RESPONSE" | json_string session_id)"
+echo "session=started"
+
+PERMIT_PAYLOAD="$(printf '%s' "$SESSION_ID" | json_evaluate read_file)"
+PERMIT_RESPONSE="$(post_json /evaluate "$PERMIT_PAYLOAD")"
+PERMIT_DECISION="$(printf '%s' "$PERMIT_RESPONSE" | json_string decision)"
+test "$PERMIT_DECISION" = "PERMIT"
+echo "read_file=$PERMIT_DECISION"
+
+DENY_PAYLOAD="$(printf '%s' "$SESSION_ID" | json_evaluate delete_file)"
+DENY_RESPONSE="$(post_json /evaluate "$DENY_PAYLOAD")"
+DENY_DECISION="$(printf '%s' "$DENY_RESPONSE" | json_string decision)"
+test "$DENY_DECISION" = "DENY"
+echo "delete_file=$DENY_DECISION"
+
+SESSION_PAYLOAD="$(printf '%s' "$SESSION_ID" | json_object_with_stdin session_id)"
+ATTEST_RESPONSE="$(post_json /attest "$SESSION_PAYLOAD")"
+ATTESTATION_TOKEN="$(printf '%s' "$ATTEST_RESPONSE" | json_string token)"
+test -n "$ATTESTATION_TOKEN"
+echo "attest=signed-token-created"
+
+END_RESPONSE="$(post_json /session/end "$SESSION_PAYLOAD")"
+END_ATTESTATION="$(printf '%s' "$END_RESPONSE" | json_string attestation_token)"
+test -n "$END_ATTESTATION"
+echo "session=ended"
+
+METRICS_RESPONSE="$(curl_auth "$PROXY_URL/metrics")"
+[[ "$METRICS_RESPONSE" == *"ardur_"* ]]
+echo "metrics=prometheus-ok"
+)
+```
+
+Expected output:
+
+```text
+health=ok
+issue=passport-created
+session=started
+read_file=PERMIT
+delete_file=DENY
+attest=signed-token-created
+session=ended
+metrics=prometheus-ok
+```
+
+Every curl call uses `--fail`, so an authentication or schema error makes the
+block exit non-zero instead of turning an HTTP 4xx body into a misleading pass.
+The same lifecycle and payload shapes are also exercised by
+[`scripts/verify-mvp.sh`](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/scripts/verify-mvp.sh).
+
+## What the lifecycle proves
+
+- `/issue` signs a Mission Passport for a structured mission declaration.
+- `/session/start` binds a governed session to that passport.
+- `/evaluate` returns `PERMIT` for an allowed tool and `DENY` when a forbidden
+  rule overlaps the allowlist; deny wins.
+- `/attest` and `/session/end` return signed behavioral-attestation JWTs.
+- `/metrics` is authenticated and exposes Prometheus-formatted Ardur metrics.
+
+The walkthrough verifies that non-empty signed tokens are returned. For a local
+cryptographic signature-verification demonstration, run
+[`scripts/run-no-key-mvp-demo.py`](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/scripts/run-no-key-mvp-demo.py), which
+verifies the session-end token with its ephemeral public key before cleanup.
+
+## Architecture boundary
+
+The local Compose stack contains a SPIRE server, a SPIRE agent, the governance
+proxy, and the Personal Hub. The proxy governs calls presented at its HTTP/tool
+boundary; it does not claim visibility into provider-hidden reasoning or every
+subprocess, filesystem, kernel, or network side effect caused below that
+boundary.
+
+## Kill switch
+
+The emergency kill switch is an authenticated administrative control. It is not
+part of the copy-paste lifecycle above because it changes shared proxy state and
+would disrupt other evaluator sessions. The CLI uses `ARDUR_PROXY_URL` and
+`ARDUR_API_TOKEN` when the explicit flags are omitted:
 
 ```bash
-curl -k https://localhost:8443/health
-# → {"status": "ok", "version": "vibap.v0.1", "sessions": 0}
+export ARDUR_PROXY_URL="https://localhost:${ARDUR_PROXY_PORT:-8443}"
+export ARDUR_API_TOKEN="$(docker compose exec -T proxy sh -c 'printf %s "$VIBAP_API_TOKEN"')"
+ardur kill-switch
+ardur kill-switch --deactivate
 ```
 
-## What You're Looking At
+Health remains public while the switch is active. Authenticated governance
+operations fail closed until it is deactivated.
 
-```
-┌──────────┐     ┌──────────────────┐     ┌──────────┐
-│  Agent   │────▶│  Ardur Proxy     │────▶│  Tools   │
-│ (Claude, │     │  (port 8443)     │     │  (APIs,  │
-│  LangChn)│     │                  │     │   cmds)  │
-└──────────┘     │  ┌─────────────┐ │     └──────────┘
-                 │  │Policy Engine│ │
-                 │  │(Cedar/Nativ)│ │
-                 │  └─────────────┘ │
-                 │  ┌─────────────┐ │
-                 │  │Receipt Chain│ │
-                 │  └─────────────┘ │
-                 └────────┬─────────┘
-                          │
-                 ┌────────▼─────────┐
-                 │  Personal Hub    │
-                 │  (port 8765)     │
-                 └──────────────────┘
-```
+## Stop the demo
 
-The proxy sits between the agent and its tools, evaluates every tool call
-against declared policy, and emits hash-chained receipts proving what was
-allowed, denied, or unknown.
-
-## Walkthrough: Session Lifecycle
-
-### 1. Start the proxy with a mission
-
-In one terminal:
-```bash
-make demo
-```
-
-### 2. Issue a mission passport
+In a third terminal, or after stopping the attached `make demo` process, run:
 
 ```bash
-TOKEN=$(curl -sk https://localhost:8443/issue \
-  -H "Authorization: Bearer $(docker compose exec proxy printenv ARDUR_API_TOKEN)" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id":"demo-agent","mission":"evaluate the governance proxy","allowed_tools":["Read","Bash","WebSearch"],"max_tool_calls":10}')
-echo $TOKEN | python3 -c "import sys,json;print(json.loads(sys.stdin.read())['token'])" > /tmp/passport.jwt
+make demo-down
 ```
 
-Or use the CLI directly:
-```bash
-ardur issue --agent-id demo-agent \
-  --mission "evaluate the governance proxy" \
-  --allowed-tools Read Bash WebSearch \
-  --max-tool-calls 10 \
-  > /tmp/passport.json
-PASSPORT=$(python3 -c "import json;print(json.load(open('/tmp/passport.json'))['token'])")
-```
+This removes the Compose containers, network, and named volumes for the project.
 
-### 3. Start a session
+## Known gaps
 
-```bash
-curl -sk https://localhost:8443/session/start \
-  -H "Authorization: Bearer $(docker compose exec proxy printenv ARDUR_API_TOKEN)" \
-  -H "Content-Type: application/json" \
-  -d "{\"token\":\"$PASSPORT\"}"
-# → {"session_id":"...","agent_id":"demo-agent","status":"active"}
-```
-
-Capture the `session_id` from the response.
-
-### 4. Evaluate a tool call
-
-```bash
-curl -sk https://localhost:8443/evaluate \
-  -H "Authorization: Bearer $(docker compose exec proxy printenv ARDUR_API_TOKEN)" \
-  -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"SESSION_ID\",\"tool\":\"Read\",\"resource\":\"/tmp/test.txt\",\"action\":\"read\"}"
-# → {"decision":"allow",...} or {"decision":"deny","reason":"..."}
-```
-
-### 5. Evaluate a forbidden tool call
-
-```bash
-curl -sk https://localhost:8443/evaluate \
-  -H "Authorization: Bearer $(docker compose exec proxy printenv ARDUR_API_TOKEN)" \
-  -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"SESSION_ID\",\"tool\":\"WebFetch\",\"resource\":\"https://evil.com\",\"action\":\"fetch\"}"
-# → {"decision":"deny","reason":"tool not in allowed_tools"}
-```
-
-### 6. Attest the session
-
-```bash
-curl -sk https://localhost:8443/attest \
-  -H "Authorization: Bearer $(docker compose exec proxy printenv ARDUR_API_TOKEN)" \
-  -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"SESSION_ID\"}"
-# → {"attestation":"eyJh...","receipt_count":2,...}
-```
-
-### 7. End the session
-
-```bash
-curl -sk https://localhost:8443/session/end \
-  -H "Authorization: Bearer $(docker compose exec proxy printenv ARDUR_API_TOKEN)" \
-  -H "Content-Type: application/json" \
-  -d "{\"session_id\":\"SESSION_ID\"}"
-# → {"status":"closed","receipt_count":2}
-```
-
-## What's Being Proven
-
-Each receipt is cryptographically linked to its predecessor via a parent hash:
-
-```
-Receipt 1 (session_start)           Receipt 2 (evaluate)
-┌─────────────────────┐           ┌─────────────────────┐
-│ receipt_id: r1      │◀─────────│ parent_hash: sha(r1) │
-│ parent_hash: null   │          │ receipt_id: r2       │
-│ digest: sha(...)  │           │ verdict: allow       │
-└─────────────────────┘           └─────────────────────┘
-```
-
-This means:
-- You can verify the entire chain independently
-- No receipt can be inserted, removed, or reordered without detection
-- The verifier needs only the public key — no trust in the proxy
-
-## Kill Switch Demo
-
-```bash
-# Activate the kill switch
-ardur kill-switch --api-token "TOKEN"
-# → {"kill_switch":"activated"}
-
-# Try to evaluate — denied
-curl -sk https://localhost:8443/evaluate \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"SESSION_ID","tool":"Read","resource":"/tmp/x","action":"read"}'
-# → {"error":"kill_switch_active"}
-
-# Deactivate
-ardur kill-switch --deactivate --api-token "TOKEN"
-# → {"kill_switch":"deactivated"}
-```
-
-Health endpoint and metrics remain available even when the kill switch is
-active, so monitoring is not disrupted.
-
-## Observability
-
-```bash
-# Prometheus metrics (requires auth)
-curl -sk https://localhost:8443/metrics \
-  -H "Authorization: Bearer TOKEN"
-
-# Structured access logs on stderr
-docker compose logs proxy | head -5
-# → {"timestamp":"2026-...","remote_addr":"...","method":"GET","path":"/health",...}
-```
-
-## Known Gaps
-
-- **Capture boundary**: Ardur governs at the tool-call level. Side effects below
-  the tool boundary (subprocess trees, kernel events, network connections from
-  tool-spawned processes) are not captured. Roadmap: v0.5 (Linux eBPF), v1.0
-  (macOS Endpoint Security Framework). See `docs/coverage-map.md`.
-- **No SPIRE in docker-compose**: The local demo uses auto-generated TLS certs.
-  SPIFFE/SPIRE workload identity is available in the Python runtime and Helm
-  chart but requires a Kubernetes cluster.
-- **Go AAT package**: The Go AAT engine is fully implemented with constraint
-  checks, subsumption, issuance/derivation, PoP binding, and full §7 chain
-  verification (49 tests). See `go/README.md`.
-- **Python Token Status List**: Token Status List revocation checking is
+- **Capture boundary:** Ardur governs at the tool-call boundary. See
+  [`docs/coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for current coverage and roadmap
+  boundaries.
+- **Development TLS:** the local proxy uses a generated self-signed certificate,
+  so the walkthrough uses curl's loopback-only `--insecure` mode. Do not carry
+  that TLS policy to a remote deployment.
+- **Single-user demo:** the local stack is not a multi-tenant isolation model.
+- **Python Token Status List:** Token Status List revocation checking is
   implemented in the Go credential verifier but not yet in Python.
-- **Single-user**: No multi-tenancy isolation in the local demo. The Helm chart
-  provides namespace-level isolation.
 
-## Where to Look Next
+## Where to look next
 
+- [No-Key MVP Demo](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/)
+- [Claude Code MVP Quickstart](/__ardur_internal__/source/docs/guides/claude-code-mvp-quickstart/)
 - [Architecture Decision Records](/__ardur_internal__/source/docs/decisions/readme/)
 - [Security Model](/__ardur_internal__/source/docs/security-model/)
 - [Coverage Map](/__ardur_internal__/source/docs/coverage-map/)
-- [Public Import Plan](/__ardur_internal__/source/docs/public-import-plan/)
-- [Claude Code MVP Quickstart](/__ardur_internal__/source/docs/guides/claude-code-mvp-quickstart/)

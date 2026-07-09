@@ -157,7 +157,8 @@ for the expected bundle result and the optional live-Claude path.
 
 `make demo` plus [`scripts/verify-mvp.sh`](scripts/verify-mvp.sh) is the
 authenticated Docker path. Configure `ARDUR_API_TOKEN` before starting it; the
-evaluator guide is being refreshed to match this authenticated API path.
+[MVP evaluator guide](docs/mvp-evaluator-guide.md) contains the tested,
+copy-paste authenticated lifecycle.
 
 ## Fastest MVP Path: Claude Code
 
