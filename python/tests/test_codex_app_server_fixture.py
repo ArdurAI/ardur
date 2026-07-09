@@ -632,3 +632,364 @@ def test_codex_app_server_event_cli_uses_exit_code_two_for_blocking_unknown(tmp_
     assert len(receipt_files) == 1
     assert receipt_files[0].resolve(strict=False).is_relative_to(chain_dir.resolve(strict=False))
     assert receipt_files[0].parent != chain_dir
+
+
+def test_codex_canonical_event_types_are_mapped_to_receipt_schema(tmp_path, monkeypatch):
+    """Each of the 7 canonical event types maps to Ardur receipt schema fields."""
+    from vibap.codex_app_server_fixture import CANONICAL_EVENT_TYPES, handle_host_event
+
+    keys_dir = tmp_path / "keys"
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    project.mkdir()
+    (project / "README.md").write_text("hello\n", encoding="utf-8")
+    token, public_key = _issue_codex_passport(
+        keys_dir,
+        allowed_tools=["read_file"],
+        resource_scope=[str(project), f"{project}/*"],
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(home))
+    monkeypatch.setenv("ARDUR_CODEX_APP_SERVER_DIR", str(chain_dir))
+
+    expected_types = {
+        "command_execution",
+        "dynamic_tool_call",
+        "sub_agent_activity",
+        "collab_tool_call",
+        "collab_wait",
+        "review_mode",
+        "hook_prompt",
+    }
+    assert set(CANONICAL_EVENT_TYPES.keys()) == expected_types
+
+    for canonical_type in expected_types:
+        mapping = CANONICAL_EVENT_TYPES[canonical_type]
+        assert "action_class" in mapping
+        assert "resource_family" in mapping
+        assert "side_effect_class" in mapping
+
+    # Exercise each canonical event type through handle_host_event
+    for canonical_type in sorted(expected_types):
+        output = handle_host_event(
+            {
+                "event_type": "tool_decision",
+                "event_id": f"evt-canonical-{canonical_type}",
+                "session_id": "codex-canonical-session",
+                "cwd": str(project),
+                "tool_name": "read_file",
+                "tool_input": {"path": str(project / "README.md")},
+                "canonical_event_type": canonical_type,
+            },
+            keys_dir=keys_dir,
+        )
+        assert output["status"] == "allow", f"canonical event {canonical_type} should allow"
+
+    # Verify receipts carry canonical event type metadata
+    receipt_files = list(chain_dir.rglob("receipts.jsonl"))
+    assert len(receipt_files) == 1
+    receipt_jwts = [
+        line.strip()
+        for line in receipt_files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(receipt_jwts) == len(expected_types)
+    verify_chain(receipt_jwts, public_key, verify_expiry=False)
+
+    claims = [pyjwt.decode(token, options={"verify_signature": False}) for token in receipt_jwts]
+    seen_types = set()
+    for claim in claims:
+        codex_meta = claim["measurements"]["codex_app_server"]
+        ctype = codex_meta.get("canonical_event_type")
+        if ctype:
+            seen_types.add(ctype)
+    assert seen_types == expected_types
+
+
+def test_codex_unmapped_canonical_event_type_is_flagged(tmp_path, monkeypatch):
+    """An unrecognized canonical event type adds unmapped_codex_canonical_event_type to boundaries."""
+    from vibap.codex_app_server_fixture import handle_host_event
+
+    keys_dir = tmp_path / "keys"
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    project.mkdir()
+    (project / "README.md").write_text("hello\n", encoding="utf-8")
+    token, public_key = _issue_codex_passport(
+        keys_dir,
+        allowed_tools=["read_file"],
+        resource_scope=[str(project), f"{project}/*"],
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(home))
+    monkeypatch.setenv("ARDUR_CODEX_APP_SERVER_DIR", str(chain_dir))
+
+    output = handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-unmapped-canonical",
+            "session_id": "codex-unmapped-canonical-session",
+            "cwd": str(project),
+            "tool_name": "read_file",
+            "tool_input": {"path": str(project / "README.md")},
+            "canonical_event_type": "future_unknown_event_type",
+        },
+        keys_dir=keys_dir,
+    )
+    assert output["status"] == "allow"
+
+    receipt_files = list(chain_dir.rglob("receipts.jsonl"))
+    receipt_jwts = [
+        line.strip()
+        for line in receipt_files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    claims = [pyjwt.decode(token, options={"verify_signature": False}) for token in receipt_jwts]
+    codex_meta = claims[0]["measurements"]["codex_app_server"]
+    assert "unmapped_codex_canonical_event_type" in codex_meta["unknown_boundaries"]
+
+
+def test_codex_writes_approval_mode_is_recognized(tmp_path, monkeypatch):
+    """The writes approval_policy value is recognized and recorded in policy_input."""
+    from vibap.codex_app_server_fixture import handle_host_event
+
+    keys_dir = tmp_path / "keys"
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    project.mkdir()
+    (project / "README.md").write_text("hello\n", encoding="utf-8")
+    token, public_key = _issue_codex_passport(
+        keys_dir,
+        allowed_tools=["read_file"],
+        resource_scope=[str(project), f"{project}/*"],
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(home))
+    monkeypatch.setenv("ARDUR_CODEX_APP_SERVER_DIR", str(chain_dir))
+
+    output = handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-writes-mode",
+            "session_id": "codex-writes-session",
+            "cwd": str(project),
+            "tool_name": "read_file",
+            "tool_input": {"path": str(project / "README.md")},
+            "host_context": {
+                "config": {
+                    "approval_policy": "writes",
+                    "sandbox_mode": "workspace-write",
+                },
+            },
+        },
+        keys_dir=keys_dir,
+    )
+    assert output["status"] == "allow"
+
+    receipt_files = list(chain_dir.rglob("receipts.jsonl"))
+    receipt_jwts = [
+        line.strip()
+        for line in receipt_files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    claims = [pyjwt.decode(token, options={"verify_signature": False}) for token in receipt_jwts]
+    codex_meta = claims[0]["measurements"]["codex_app_server"]
+    assert codex_meta["policy_input"]["approval_policy"] == "writes"
+    assert "approval_policy_unrecognized" not in codex_meta["policy_input"]
+
+
+def test_codex_unrecognized_approval_policy_is_flagged(tmp_path, monkeypatch):
+    """An unrecognized approval_policy value is flagged in policy_input."""
+    from vibap.codex_app_server_fixture import handle_host_event
+
+    keys_dir = tmp_path / "keys"
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    project.mkdir()
+    (project / "README.md").write_text("hello\n", encoding="utf-8")
+    token, public_key = _issue_codex_passport(
+        keys_dir,
+        allowed_tools=["read_file"],
+        resource_scope=[str(project), f"{project}/*"],
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(home))
+    monkeypatch.setenv("ARDUR_CODEX_APP_SERVER_DIR", str(chain_dir))
+
+    output = handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-unknown-policy",
+            "session_id": "codex-unknown-policy-session",
+            "cwd": str(project),
+            "tool_name": "read_file",
+            "tool_input": {"path": str(project / "README.md")},
+            "host_context": {
+                "config": {
+                    "approval_policy": "future_unknown_mode",
+                    "sandbox_mode": "workspace-write",
+                },
+            },
+        },
+        keys_dir=keys_dir,
+    )
+    assert output["status"] == "allow"
+
+    receipt_files = list(chain_dir.rglob("receipts.jsonl"))
+    receipt_jwts = [
+        line.strip()
+        for line in receipt_files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    claims = [pyjwt.decode(token, options={"verify_signature": False}) for token in receipt_jwts]
+    codex_meta = claims[0]["measurements"]["codex_app_server"]
+    assert codex_meta["policy_input"]["approval_policy_unrecognized"] == "future_unknown_mode"
+
+
+def test_codex_extension_owned_tool_source_class_is_recorded(tmp_path, monkeypatch):
+    """Extension-owned turn items are recorded with tool_source_class=extension_owned."""
+    from vibap.codex_app_server_fixture import handle_host_event
+
+    keys_dir = tmp_path / "keys"
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    project.mkdir()
+    (project / "README.md").write_text("hello\n", encoding="utf-8")
+    token, public_key = _issue_codex_passport(
+        keys_dir,
+        allowed_tools=["read_file"],
+        resource_scope=[str(project), f"{project}/*"],
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(home))
+    monkeypatch.setenv("ARDUR_CODEX_APP_SERVER_DIR", str(chain_dir))
+
+    output = handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-extension-owned",
+            "session_id": "codex-extension-session",
+            "cwd": str(project),
+            "tool_name": "read_file",
+            "tool_input": {"path": str(project / "README.md")},
+            "tool_source_class": "extension_owned",
+        },
+        keys_dir=keys_dir,
+    )
+    assert output["status"] == "allow"
+
+    receipt_files = list(chain_dir.rglob("receipts.jsonl"))
+    receipt_jwts = [
+        line.strip()
+        for line in receipt_files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    claims = [pyjwt.decode(token, options={"verify_signature": False}) for token in receipt_jwts]
+    codex_meta = claims[0]["measurements"]["codex_app_server"]
+    assert codex_meta["tool_source_class"] == "extension_owned"
+    assert "unmapped_extension_tool" in codex_meta["unknown_boundaries"]
+
+
+def test_codex_claim_boundary_notes_canonical_events_are_host_emitted(tmp_path):
+    """The claim boundary documents that canonical events are host-emitted evidence."""
+    from vibap.codex_app_server_fixture import build_local_fixture, build_shareable_context
+
+    fixture = build_local_fixture(
+        home=tmp_path / "home",
+        project_dir=tmp_path / "project",
+        chain_dir=tmp_path / "chain",
+        keys_dir=tmp_path / "keys",
+    )
+
+    # Hook schema claim boundary
+    hook_schema_path = Path(fixture["hook_schema_path"])
+    hook_schema = json.loads(hook_schema_path.read_text(encoding="utf-8"))
+    assert "host-emitted evidence" in hook_schema["claimBoundary"]
+    assert "not Ardur-originated" in hook_schema["claimBoundary"]
+
+    # Shareable context claim boundary
+    shareable = build_shareable_context(fixture)
+    assert shareable["claim_boundary"]["canonical_events"] == "host-emitted evidence, not Ardur-originated"
+
+    # Hook schema includes canonical_event_type and tool_source_class properties
+    props = hook_schema["properties"]
+    assert "canonical_event_type" in props
+    assert props["canonical_event_type"]["type"] == "string"
+    assert "tool_source_class" in props
+    assert props["tool_source_class"]["enum"] == ["built_in", "extension_owned"]
+
+
+def test_codex_shareable_report_includes_new_unknown_boundaries(tmp_path, monkeypatch):
+    """The shareable report coverage_gaps includes the new v0.144.0 unknown boundaries."""
+    from vibap.codex_app_server_fixture import build_shareable_report, handle_host_event
+
+    keys_dir = tmp_path / "keys"
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    project.mkdir()
+    (project / "README.md").write_text("hello\n", encoding="utf-8")
+    token, _public_key = _issue_codex_passport(
+        keys_dir,
+        allowed_tools=["read_file", "codex_unmapped_tool"],
+        resource_scope=[str(project), f"{project}/*"],
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("VIBAP_HOME", str(home))
+    monkeypatch.setenv("ARDUR_CODEX_APP_SERVER_DIR", str(chain_dir))
+
+    # Event with unmapped canonical event type
+    handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-gap-1",
+            "session_id": "codex-gap-session",
+            "cwd": str(project),
+            "tool_name": "read_file",
+            "tool_input": {"path": str(project / "README.md")},
+            "canonical_event_type": "future_unknown_event_type",
+        },
+        keys_dir=keys_dir,
+    )
+    # Event with extension-owned tool
+    handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-gap-2",
+            "session_id": "codex-gap-session",
+            "cwd": str(project),
+            "tool_name": "read_file",
+            "tool_input": {"path": str(project / "README.md")},
+            "tool_source_class": "extension_owned",
+        },
+        keys_dir=keys_dir,
+    )
+    # Unmapped tool
+    handle_host_event(
+        {
+            "event_type": "tool_decision",
+            "event_id": "evt-gap-3",
+            "session_id": "codex-gap-session",
+            "cwd": str(project),
+            "tool_name": "codex_unmapped_tool",
+            "tool_input": {"opaque_target": str(project / "opaque")},
+        },
+        keys_dir=keys_dir,
+    )
+
+    report = build_shareable_report(
+        home=home,
+        chain_dir=chain_dir,
+        keys_dir=keys_dir,
+        verify_expiry=False,
+    )
+    assert "unmapped_codex_canonical_event_type" in report["coverage_gaps"]
+    assert "unmapped_extension_tool" in report["coverage_gaps"]
+    assert "mcp_auth_elicitation" in report["coverage_gaps"]
+    assert "app_server_hosted_auth" in report["coverage_gaps"]
+    assert "code_mode_hosted_by_default" in report["coverage_gaps"]

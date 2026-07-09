@@ -40,7 +40,57 @@ UNKNOWN_BOUNDARIES = (
     "provider_server_side_tool_calls",
     "codex_cloud_action_enforcement",
     "codex_app_server_schema_drift",
+    "unmapped_codex_canonical_event_type",
+    "unmapped_extension_tool",
+    "mcp_auth_elicitation",
+    "app_server_hosted_auth",
+    "code_mode_hosted_by_default",
 )
+
+# Canonical event types introduced in Codex rust-v0.144.0.
+# These are host-emitted evidence events, not Ardur-originated.
+# Each maps to Ardur's receipt schema: action_class, resource_family, side_effect_class.
+CANONICAL_EVENT_TYPES: dict[str, dict[str, str]] = {
+    "command_execution": {
+        "action_class": "execute",
+        "resource_family": "process",
+        "side_effect_class": "state_change",
+    },
+    "dynamic_tool_call": {
+        "action_class": "observe",
+        "resource_family": "general",
+        "side_effect_class": "none",
+    },
+    "sub_agent_activity": {
+        "action_class": "observe",
+        "resource_family": "agent_lifecycle",
+        "side_effect_class": "none",
+    },
+    "collab_tool_call": {
+        "action_class": "observe",
+        "resource_family": "collaboration",
+        "side_effect_class": "none",
+    },
+    "collab_wait": {
+        "action_class": "observe",
+        "resource_family": "collaboration",
+        "side_effect_class": "none",
+    },
+    "review_mode": {
+        "action_class": "observe",
+        "resource_family": "review",
+        "side_effect_class": "none",
+    },
+    "hook_prompt": {
+        "action_class": "observe",
+        "resource_family": "hook",
+        "side_effect_class": "none",
+    },
+}
+
+# Tool source classes for Codex turn items.
+# extension_owned: tools dispatched by Codex extensions rather than built-in tools.
+TOOL_SOURCE_CLASSES = frozenset({"built_in", "extension_owned"})
 SENSITIVE_KEY_RE = re.compile(
     r"(api[_-]?key|token|secret|password|credential|authorization|cookie|session[_-]?key)",
     re.IGNORECASE,
@@ -374,8 +424,26 @@ def build_local_fixture(
             "tool_name": {"type": "string"},
             "tool_input": {"type": "object"},
             "host_context": {"type": "object"},
+            "canonical_event_type": {
+                "type": "string",
+                "description": "Codex canonical event class (host-emitted evidence, not Ardur-originated)",
+                "examples": [
+                    "command_execution",
+                    "dynamic_tool_call",
+                    "sub_agent_activity",
+                    "collab_tool_call",
+                    "collab_wait",
+                    "review_mode",
+                    "hook_prompt",
+                ],
+            },
+            "tool_source_class": {
+                "type": "string",
+                "description": "Codex turn item source class",
+                "enum": ["built_in", "extension_owned"],
+            },
         },
-        "claimBoundary": "visible local host-event fixture fields only; not live Codex cloud enforcement",
+        "claimBoundary": "visible local host-event fixture fields only; canonical events are host-emitted evidence, not Ardur-originated; not live Codex cloud enforcement",
     }
     context_text = "\n".join(
         [
@@ -434,6 +502,7 @@ def build_shareable_context(fixture: Mapping[str, Any]) -> dict[str, Any]:
                 "universal CLI/eBPF/kernel capture",
                 "production enforcement",
             ],
+            "canonical_events": "host-emitted evidence, not Ardur-originated",
         },
         "unknown_boundaries": list(UNKNOWN_BOUNDARIES),
         "host_context": {
@@ -582,6 +651,12 @@ def _policy_input_summary(host_event: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(value, str) and value:
                 summary[key] = value
                 break
+    # Recognized approval_policy values (Codex rust-v0.144.0+).
+    # "writes" means declared read-only actions are allowed while writes prompt for approval.
+    _RECOGNIZED_APPROVAL_POLICIES = frozenset({"never", "always", "writes"})
+    approval = summary.get("approval_policy")
+    if isinstance(approval, str) and approval not in _RECOGNIZED_APPROVAL_POLICIES:
+        summary["approval_policy_unrecognized"] = approval
     return _redact_sensitive_values(summary)
 
 
@@ -594,6 +669,8 @@ def _codex_measurements(
     mapping_confidence: str,
     receipt_id: str | None = None,
     verdict: str | None = None,
+    canonical_event_type: str | None = None,
+    tool_source_class: str = "built_in",
 ) -> dict[str, Any]:
     host_context = host_event.get("host_context")
     if not isinstance(host_context, Mapping):
@@ -601,6 +678,10 @@ def _codex_measurements(
     unknown_boundaries: list[str] = list(UNKNOWN_BOUNDARIES)
     if mapping_confidence == "unknown":
         unknown_boundaries.append("unmapped_codex_host_event_schema")
+    if canonical_event_type and canonical_event_type not in CANONICAL_EVENT_TYPES:
+        unknown_boundaries.append("unmapped_codex_canonical_event_type")
+    if tool_source_class == "extension_owned":
+        unknown_boundaries.append("unmapped_extension_tool")
     return _without_empty_values(
         {
             "schema_version": "ardur.codex_app_server.measurements.v0.1",
@@ -617,9 +698,11 @@ def _codex_measurements(
             "mapping_confidence": mapping_confidence,
             "host_context": _host_context_summary(host_context),
             "unknown_boundaries": unknown_boundaries,
-            "claim_boundary": "visible Codex app-server/host-event fixture evidence only",
+            "claim_boundary": "visible Codex app-server/host-event fixture evidence only; canonical events are host-emitted evidence, not Ardur-originated",
             "verdict": verdict,
             "receipt_id": receipt_id,
+            "canonical_event_type": canonical_event_type,
+            "tool_source_class": tool_source_class,
         }
     )
 
@@ -798,6 +881,15 @@ def handle_host_event(host_event: dict[str, Any], *, keys_dir: Path | None = Non
     tool_args = _normalize_tool_args(host_event)
     arguments, mapping_confidence = _map_tool_call(tool_name, tool_args)
     trace_id = _trace_id_from_input(host_event, claims)
+
+    # Extract canonical event type and tool source class from host event.
+    # canonical_event_type: one of CANONICAL_EVENT_TYPES keys (host-emitted evidence).
+    # tool_source_class: "built_in" (default) or "extension_owned" (extension-dispatched tools).
+    canonical_event_type = str(host_event.get("canonical_event_type", "") or "").strip() or None
+    tool_source_class = str(host_event.get("tool_source_class", "") or "").strip() or "built_in"
+    if tool_source_class not in TOOL_SOURCE_CLASSES:
+        tool_source_class = "built_in"
+
     event = _build_policy_event(
         claims=claims,
         tool_name=tool_name,
@@ -810,6 +902,8 @@ def handle_host_event(host_event: dict[str, Any], *, keys_dir: Path | None = Non
         tool_name=tool_name,
         mapped_tool_name=tool_name,
         mapping_confidence=mapping_confidence,
+        canonical_event_type=canonical_event_type,
+        tool_source_class=tool_source_class,
     )
 
     if mapping_confidence == "unknown":
