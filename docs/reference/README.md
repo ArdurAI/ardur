@@ -13,10 +13,14 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
   `ardur hub`, auth model, request and response shapes, error codes
 - [`ARDUR.md` Profile Format](ardur-md-profile.md) — the plain-Markdown
   guardrail format that compiles into a Mission Passport
+- [Proxy OCI Image Contract](proxy-oci-image.md) — canonical image name,
+  immutable release gates, runtime hardening, state, TLS, auth, scan, and cost
+  boundaries without claiming current registry availability
 
 ## When To Update These Pages
 
 These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
-`python/vibap/ardur_profile.py`), update the matching page in the same change.
-They are deliberately mechanical so the diff is easy to review.
+`python/vibap/ardur_profile.py`, `Dockerfile.proxy`, or its release workflow),
+update the matching page in the same change. They are deliberately mechanical
+so the diff is easy to review.
