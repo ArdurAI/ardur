@@ -1,0 +1,4 @@
+FROM ghcr.io/spiffe/spire-server:1.14.4 AS spire-server
+
+FROM alpine:3.22
+COPY --from=spire-server /opt/spire/bin/spire-server /opt/spire/bin/spire-server
