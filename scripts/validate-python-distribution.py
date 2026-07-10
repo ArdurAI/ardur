@@ -39,6 +39,12 @@ PLUGIN_ASSETS = (
     PurePosixPath("hooks/subagent_stop"),
 )
 REQUIRED_RUNTIME_FILES = (PurePosixPath("vibap/launch_gate.py"),)
+VENDORED_RFC8785_FILES = (
+    PurePosixPath("vibap/_vendor/rfc8785/LICENSE"),
+    PurePosixPath("vibap/_vendor/rfc8785/UPSTREAM.md"),
+    PurePosixPath("vibap/_vendor/rfc8785/__init__.py"),
+    PurePosixPath("vibap/_vendor/rfc8785/_impl.py"),
+)
 
 
 class DistributionValidationError(ValueError):
@@ -99,6 +105,10 @@ def validate_metadata(metadata_bytes: bytes, expected_version: str) -> None:
     )
     require(metadata["Requires-Python"] == ">=3.10", "Requires-Python must be >=3.10")
     require(metadata["License-Expression"] == "MIT", "license expression must be MIT")
+    require(
+        "rfc8785<0.2,>=0.1.4" in metadata.get_all("Requires-Dist", []),
+        "wheel must declare the RFC 8785 runtime dependency",
+    )
     require(
         metadata["Description-Content-Type"] == "text/markdown",
         "README must be Markdown",
@@ -168,8 +178,22 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
             PurePosixPath("vibap/_specs/mission_declaration_v01.schema.json") in names,
             "wheel does not contain the embedded mission schema",
         )
+        require(
+            PurePosixPath("vibap/_specs/execution_receipt_v02.schema.json") in names,
+            "wheel does not contain the embedded Execution Receipt v0.2 schema",
+        )
         for runtime_file in REQUIRED_RUNTIME_FILES:
             require(runtime_file in names, f"wheel is missing runtime file: {runtime_file}")
+        for vendored_file in VENDORED_RFC8785_FILES:
+            require(
+                vendored_file in names,
+                f"wheel is missing vendored RFC 8785 file: {vendored_file}",
+            )
+            require(
+                archive.read(vendored_file.as_posix())
+                == (PYTHON_ROOT / vendored_file).read_bytes(),
+                f"wheel vendored RFC 8785 file differs from source: {vendored_file}",
+            )
         expected_plugin_files = plugin_files()
         plugin_root = PurePosixPath("vibap/_plugins/claude-code")
         actual_plugin_files = {
@@ -234,6 +258,17 @@ def validate_sdist(sdist_path: Path, expected_version: str) -> None:
                 path in names and names[path].isfile(),
                 f"sdist is missing runtime file: {runtime_file}",
             )
+        for vendored_file in VENDORED_RFC8785_FILES:
+            path = root / vendored_file
+            require(
+                path in names and names[path].isfile(),
+                f"sdist is missing vendored RFC 8785 file: {vendored_file}",
+            )
+            require(
+                read_required(archive.extractfile(names[path]), str(path))
+                == (PYTHON_ROOT / vendored_file).read_bytes(),
+                f"sdist vendored RFC 8785 file differs from source: {vendored_file}",
+            )
         require(
             read_required(archive.extractfile(names[root / "LICENSE"]), "sdist LICENSE")
             == (REPO_ROOT / "LICENSE").read_bytes(),
@@ -280,6 +315,10 @@ def validate(dist_dir: Path, expected_tag: str | None = None) -> tuple[Path, Pat
     require(
         config["urls"] == EXPECTED_URLS,
         "source project URLs differ from canonical URLs",
+    )
+    require(
+        "rfc8785>=0.1.4,<0.2" in config["dependencies"],
+        "source project must declare the RFC 8785 runtime dependency",
     )
     if expected_tag is not None:
         require(

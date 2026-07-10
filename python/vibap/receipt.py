@@ -11,7 +11,6 @@ signed schema.
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 import base64
 import re
@@ -23,6 +22,8 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from .canonical_json import RFC8785JSONEncoder, canonical_json_bytes, canonical_json_text
 
 from .passport import (
     ALGORITHM,
@@ -37,6 +38,9 @@ if TYPE_CHECKING:
 
 
 RECEIPT_JWT_TYPE = "application/ardur.er+jwt"
+RECEIPT_SCHEMA_VERSION = "ardur.execution_receipt.v0.2"
+RECEIPT_CANONICALIZATION = "jcs-rfc8785"
+RECEIPT_KIND_ACTION = "action"
 DEFAULT_RECEIPT_TTL_S = 300
 DEFAULT_EVIDENCE_LEVEL = "self_signed"
 DEFAULT_REPLAY_CACHE_MAX_ENTRIES = 4096
@@ -95,7 +99,13 @@ _OPTIONAL_CLAIMS = {
     "evidence_proof_ref",
     "measurements",
 }
-_ALLOWED_CLAIMS = set(_REQUIRED_CLAIMS) | _OPTIONAL_CLAIMS
+_V02_REQUIRED_CLAIMS = {
+    "schema_version",
+    "canonicalization",
+    "receipt_kind",
+}
+_LEGACY_ALLOWED_CLAIMS = set(_REQUIRED_CLAIMS) | _OPTIONAL_CLAIMS
+_ALLOWED_CLAIMS = _LEGACY_ALLOWED_CLAIMS | _V02_REQUIRED_CLAIMS
 _ACTION_CLASSES = {
     "search", "read", "write", "query", "delegate", "send", "summarize", "observe",
     # Claude Code hook adapter extensions — tool-execution semantics not covered
@@ -126,7 +136,7 @@ _TOKEN_FIELD_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 def _canonical_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return canonical_json_text(payload)
 
 
 def _stable_identifier(prefix: str, payload: dict[str, Any]) -> str:
@@ -272,7 +282,23 @@ def _validate_budget_delta(value: Any) -> None:
 
 
 def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:
-    extra = set(claims) - _ALLOWED_CLAIMS
+    schema_version = claims.get("schema_version")
+    if schema_version is None:
+        allowed_claims = _LEGACY_ALLOWED_CLAIMS
+    elif schema_version == RECEIPT_SCHEMA_VERSION:
+        allowed_claims = _ALLOWED_CLAIMS
+        missing_v02 = sorted(_V02_REQUIRED_CLAIMS - set(claims))
+        if missing_v02:
+            _schema_violation(f"{missing_v02[0]} is required for {RECEIPT_SCHEMA_VERSION}")
+        if claims.get("canonicalization") != RECEIPT_CANONICALIZATION:
+            _schema_violation(
+                f"canonicalization must be {RECEIPT_CANONICALIZATION!r}"
+            )
+        if claims.get("receipt_kind") != RECEIPT_KIND_ACTION:
+            _schema_violation(f"receipt_kind must be {RECEIPT_KIND_ACTION!r}")
+    else:
+        _schema_violation(f"unsupported schema_version {schema_version!r}")
+    extra = set(claims) - allowed_claims
     if extra:
         _schema_violation(f"unknown claims: {', '.join(sorted(extra))}")
     for key in (
@@ -440,6 +466,9 @@ def _run_nonce_from_event(event: PolicyEvent, trace_id: str) -> str:
 class ExecutionReceipt:
     """Signed per-hop receipt payload."""
 
+    schema_version: str
+    canonicalization: str
+    receipt_kind: str
     receipt_id: str
     grant_id: str
     parent_receipt_hash: str | None
@@ -479,6 +508,9 @@ class ExecutionReceipt:
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
+            "schema_version": self.schema_version,
+            "canonicalization": self.canonicalization,
+            "receipt_kind": self.receipt_kind,
             "receipt_id": self.receipt_id,
             "grant_id": self.grant_id,
             "parent_receipt_hash": self.parent_receipt_hash,
@@ -578,6 +610,9 @@ def build_receipt(
         )
 
     payload_without_ids = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "canonicalization": RECEIPT_CANONICALIZATION,
+        "receipt_kind": RECEIPT_KIND_ACTION,
         "grant_id": str(getattr(event, "passport_jti", "")),
         "parent_receipt_hash": parent_receipt_hash,
         "parent_receipt_id": parent_receipt_hash[:16] if parent_receipt_hash is not None else None,
@@ -607,6 +642,9 @@ def build_receipt(
     receipt_id = _stable_identifier("receipt", payload_without_ids)
 
     return ExecutionReceipt(
+        schema_version=RECEIPT_SCHEMA_VERSION,
+        canonicalization=RECEIPT_CANONICALIZATION,
+        receipt_kind=RECEIPT_KIND_ACTION,
         receipt_id=receipt_id,
         grant_id=payload_without_ids["grant_id"],
         parent_receipt_hash=parent_receipt_hash,
@@ -652,7 +690,22 @@ def sign_receipt(receipt: ExecutionReceipt, private_key: ec.EllipticCurvePrivate
         private_key,
         algorithm=ALGORITHM,
         headers={"typ": RECEIPT_JWT_TYPE},
+        json_encoder=RFC8785JSONEncoder,
     )
+
+
+def _validate_canonical_payload(jwt_str: str, claims: dict[str, Any]) -> None:
+    if claims.get("schema_version") != RECEIPT_SCHEMA_VERSION:
+        return
+    try:
+        encoded_payload = jwt_str.split(".")[1]
+        padding = "=" * (-len(encoded_payload) % 4)
+        payload_bytes = base64.urlsafe_b64decode(encoded_payload + padding)
+        expected = canonical_json_bytes(claims)
+    except (IndexError, ValueError, TypeError) as exc:
+        _schema_violation(f"canonical payload could not be evaluated: {exc}")
+    if payload_bytes != expected:
+        _schema_violation("JWS payload is not RFC 8785 canonical JSON")
 
 
 def verify_receipt(
@@ -708,6 +761,7 @@ def verify_receipt(
     missing = [claim for claim in _REQUIRED_CLAIMS if claim not in claims]
     if missing:
         raise jwt.MissingRequiredClaimError(missing[0])
+    _validate_canonical_payload(jwt_str, claims)
     _validate_receipt_claim_schema(claims)
     issuer = claims.get("iss")
     verifier_id = claims.get("verifier_id")

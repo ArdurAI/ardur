@@ -119,6 +119,7 @@ validate_schema_sync() {
   "$PYTHON_RUN" - <<'PY'
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -126,8 +127,12 @@ fail = 0
 for embedded in sorted(Path("python/vibap/_specs").glob("*.schema.json")):
     base = embedded.name.removesuffix(".schema.json")
     canonical_base = base.replace("_", "-")
-    if canonical_base.endswith("-v01"):
-        canonical_base = canonical_base[:-3] + "v0.1"
+    version_match = re.search(r"-v([0-9])([0-9])$", canonical_base)
+    if version_match:
+        canonical_base = (
+            canonical_base[: version_match.start()]
+            + f"-v{version_match.group(1)}.{version_match.group(2)}"
+        )
     canonical = Path("docs/specs") / f"{canonical_base}.schema.json"
     if not canonical.exists():
         print(f"missing canonical schema for {embedded}: {canonical}", file=sys.stderr)

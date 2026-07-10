@@ -6,6 +6,9 @@ Uses the same fixtures + token pattern as test_http.py.
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from vibap.passport import issue_passport
@@ -89,6 +92,12 @@ class TestIssueAttestationForSessionKernelEnforcement:
     ):
         token = issue_passport(example_mission, private_key, ttl_s=60)
         session = proxy.start_session(token)
+        decision, _reason = proxy.evaluate_tool_call(
+            session,
+            "read_file",
+            {"path": "README.md"},
+        )
+        assert decision == Decision.PERMIT
         enforcement = {
             "total_events": 3,
             "verdict_counts": {"denied": 2, "compliant": 1},
@@ -100,6 +109,15 @@ class TestIssueAttestationForSessionKernelEnforcement:
             "kill_switch_change_count": 2,
             "kill_switch_engaged_during_session": True,
             "kill_switch_evidence_gap": False,
+            "lost_samples": 7,
+            "lifecycle_capture": {
+                "coverage_status": "degraded",
+                "ringbuf_dropped": 7,
+                "producer_ringbuf_dropped": 5,
+                "malformed_records": 2,
+                "producer_counter_evidence_gap": False,
+                "daemon_queue_dropped": 0,
+            },
         }
 
         _jwt_token, claims = proxy.issue_attestation_for_session(
@@ -107,6 +125,18 @@ class TestIssueAttestationForSessionKernelEnforcement:
         )
 
         assert claims["kernel_enforcement"] == enforcement
+        receipts = [
+            json.loads(line)
+            for line in proxy.receipts_log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(receipts) == 1
+        token = receipts[0]["jwt"]
+        assert claims["receipt_chain_head"] == {
+            "hash_algorithm": "sha-256",
+            "receipt_id": receipts[0]["receipt_id"],
+            "receipt_jwt_sha256": hashlib.sha256(token.encode("ascii")).hexdigest(),
+        }
 
     def test_omits_kernel_enforcement_when_none_provided(
         self, proxy, example_mission, private_key

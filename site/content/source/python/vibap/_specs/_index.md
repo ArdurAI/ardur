@@ -15,4 +15,5 @@ This section lists hosted documentation and mirrored artifacts generated from `p
 
 ## Hosted Artifacts
 
+- [`execution_receipt_v02.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/execution_receipt_v02.schema.json)
 - [`mission_declaration_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/mission_declaration_v01.schema.json)

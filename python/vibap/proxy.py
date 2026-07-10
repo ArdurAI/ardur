@@ -2205,6 +2205,8 @@ class GovernanceProxy:
         ).hexdigest()
         entry = {
             "type": "execution_receipt",
+            "schema_version": receipt.schema_version,
+            "receipt_kind": receipt.receipt_kind,
             "session_id": session.jti,
             "receipt_id": receipt.receipt_id,
             "parent_receipt_hash": receipt.parent_receipt_hash,
@@ -3344,6 +3346,12 @@ class GovernanceProxy:
                     extra_claims: dict[str, Any] = {}
                     if int(lifecycle_claims["delegation_count"]) > 0:
                         extra_claims.update(lifecycle_claims)
+                    if target.last_receipt_id and target.last_receipt_full_hash:
+                        extra_claims["receipt_chain_head"] = {
+                            "hash_algorithm": "sha-256",
+                            "receipt_id": target.last_receipt_id,
+                            "receipt_jwt_sha256": target.last_receipt_full_hash,
+                        }
                     if kernel_enforcement is not None:
                         extra_claims["kernel_enforcement"] = kernel_enforcement
                     target.attestation_token = issue_attestation(

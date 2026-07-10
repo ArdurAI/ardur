@@ -8,6 +8,11 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 local runner
+    import tomli as tomllib
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "python" / "pyproject.toml"
@@ -24,6 +29,7 @@ EXPECTED_RUNTIME_PACKAGES = {
     "pycparser",
     "pyjwt",
     "referencing",
+    "rfc8785",
     "rpds-py",
 }
 
@@ -32,27 +38,55 @@ class ValidationError(ValueError):
     pass
 
 
-def project_version() -> str:
-    text = PYPROJECT.read_text(encoding="utf-8")
-    project_match = re.search(r"(?ms)^\[project\]\s*$(.*?)(?=^\[|\Z)", text)
-    if project_match is None:
+def normalize_package_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def project() -> dict[str, object]:
+    with PYPROJECT.open("rb") as handle:
+        config = tomllib.load(handle)
+    project_config = config.get("project")
+    if not isinstance(project_config, dict):
         raise ValidationError("python/pyproject.toml has no [project] table")
-    version_match = re.search(
-        r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$',
-        project_match.group(1),
-        flags=re.MULTILINE,
-    )
-    if version_match is None:
+    return project_config
+
+
+def project_version() -> str:
+    version = project().get("version")
+    if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
         raise ValidationError("project.version must be a stable X.Y.Z version")
-    return version_match.group(1)
+    return version
+
+
+def project_runtime_packages() -> set[str]:
+    dependencies = project().get("dependencies")
+    if not isinstance(dependencies, list):
+        raise ValidationError("python/pyproject.toml has no project dependencies")
+    packages: set[str] = set()
+    for requirement in dependencies:
+        if not isinstance(requirement, str):
+            raise ValidationError("project dependencies must be strings")
+        name_match = re.match(r"[A-Za-z0-9_.-]+", requirement)
+        if name_match is None:
+            raise ValidationError(f"invalid project dependency: {requirement!r}")
+        packages.add(normalize_package_name(name_match.group()))
+    if not packages:
+        raise ValidationError("python/pyproject.toml has no runtime packages")
+    return packages
 
 
 def validate_runtime_lock() -> None:
     lock = RUNTIME_LOCK.read_text(encoding="utf-8")
     packages = {
-        match.group(1).lower().replace("_", "-")
+        normalize_package_name(match.group(1))
         for match in re.finditer(r"^([A-Za-z0-9_-]+)==[^\s]+\s*\\$", lock, re.MULTILINE)
     }
+    missing_direct = project_runtime_packages() - packages
+    if missing_direct:
+        raise ValidationError(
+            "runtime lock omits direct project dependencies: "
+            + ", ".join(sorted(missing_direct))
+        )
     if packages != EXPECTED_RUNTIME_PACKAGES:
         raise ValidationError(
             "runtime lock package set drifted: "

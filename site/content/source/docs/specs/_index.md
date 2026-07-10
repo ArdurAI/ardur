@@ -20,6 +20,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`delegation-grant-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/)
 - [`execution-receipt-eat-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/)
 - [`execution-receipt-v0.1.md`](/__ardur_internal__/source/docs/specs/execution-receipt-v0.1/)
+- [`execution-receipt-v0.2.md`](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/)
 - [`idm-extension-v0.1.md`](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/)
 - [`mission-declaration-v0.1.md`](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/)
 - [`revocation-v0.1.md`](/__ardur_internal__/source/docs/specs/revocation-v0.1/)
@@ -28,8 +29,10 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 ## Hosted Artifacts
 
 - [`execution-receipt-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json)
+- [`execution-receipt-v0.2.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.2.schema.json)
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)
 
 ## Child Sections
 
+- [`fixtures/`](/__ardur_internal__/source/docs/specs/fixtures/)
 - [`source-semantic-vectors/`](/__ardur_internal__/source/docs/specs/source-semantic-vectors/)

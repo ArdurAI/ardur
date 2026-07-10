@@ -8,6 +8,7 @@ import jwt
 import pytest
 
 from vibap.attestation import (
+    ATTESTATION_SCHEMA_VERSION,
     compute_log_digest,
     issue_attestation,
     verify_attestation,
@@ -36,6 +37,7 @@ class TestAttestationRoundtrip:
         )
         claims = verify_attestation(token, public_key)
 
+        assert claims["schema_version"] == ATTESTATION_SCHEMA_VERSION
         assert claims["sub"] == "agent-test"
         assert claims["passport_jti"] == "parent-jti-123"
         assert claims["type"] == "behavioral_attestation"
@@ -118,8 +120,7 @@ class TestAttestationDigest:
         assert d1 != d2
 
     def test_digest_stable_across_key_order(self):
-        """Because canonicalization uses sort_keys=True, dict ordering must
-        not affect the digest."""
+        """RFC 8785 object ordering must not affect the digest."""
         a = [{"tool": "read", "decision": "PERMIT"}]
         b = [{"decision": "PERMIT", "tool": "read"}]
         assert compute_log_digest(a) == compute_log_digest(b)
