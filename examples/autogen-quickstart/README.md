@@ -22,7 +22,7 @@ autogen-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
 - `autogen-agentchat ^0.4.0` plus `autogen-core` (transitive)
 - `autogen-ext[ollama,openai,anthropic]` for the multi-provider matrix

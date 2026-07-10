@@ -2,7 +2,7 @@
 title: "AutoGen + Ardur quickstart"
 description: "An AutoGen agent (v0.4+ architecture, `autogen-agentchat`) making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a smal"
 source_path: "examples/autogen-quickstart/README.md"
-source_sha256: "6a121815b1c4e5b1b0bc2db34e4b8470203c834cdfbc64b784c3b7a06ea1d5f3"
+source_sha256: "878bd2c46b691ff48c95cae074736fe6d6a241eda0597b1dbd94bf2357940501"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -39,7 +39,7 @@ autogen-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
 - `autogen-agentchat ^0.4.0` plus `autogen-core` (transitive)
 - `autogen-ext[ollama,openai,anthropic]` for the multi-provider matrix

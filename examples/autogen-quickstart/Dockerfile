@@ -14,22 +14,14 @@
 # uses the official `spire-agent` CLI instead (production sidecar-fetch
 # pattern). Same real Workload API, different real client.
 
-# FIX-9 (2026-04-28): production builds MUST digest-pin both base images.
-# Resolve current digests with:
-#   skopeo inspect docker://ghcr.io/spiffe/spire-agent:1.14.2 \
-#     --format '{{.Digest}}'
-#   skopeo inspect docker://docker.io/library/python:3.13-slim \
-#     --format '{{.Digest}}'
-# Then update the FROM lines to use "@sha256:<digest>" form. The
-# published demo images keep tag-pinned references for contributor
-# reproducibility; CI/release builds must swap to digest pinning so a
-# malicious tag re-push at the upstream registry can't poison the
-# governance demo.
+# Keep tags for readable dependency updates while immutable multi-arch index
+# digests prevent a registry tag re-push from changing published demo builds.
 
 # Stage 1: pull the real spire-agent binary from the official image.
-FROM ghcr.io/spiffe/spire-agent:1.15.0 AS spire
+FROM ghcr.io/spiffe/spire-agent:1.15.2@sha256:1d042e4040466686e0ee46f74981ff2167c86adfadca19b3835946f4d6047536 AS spire
 
-FROM python:3.14-slim
+# biscuit-python 0.4.0 embeds PyO3 0.24.1, whose supported ceiling is 3.13.
+FROM python:3.13.14-slim-trixie@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
