@@ -286,7 +286,7 @@ def _build_embedded_server(
 
         def do_GET(self) -> None:  # noqa: N802
             if self.path.split("?", 1)[0] in {"/health", "/healthz"}:
-                self._send(200, {"status": "ok", "session_id": session_id})
+                self._send(200, {"status": "ok"})
                 return
             self._send(404, {"error": "not found"})
 
