@@ -28,6 +28,8 @@
     "deploy/k8s/spire/server/serviceaccount.yaml": "repo/deploy/k8s/spire/server/serviceaccount.yaml",
     "deploy/k8s/spire/server/statefulset.yaml": "repo/deploy/k8s/spire/server/statefulset.yaml",
     "docs/specs/execution-receipt-v0.1.schema.json": "repo/docs/specs/execution-receipt-v0.1.schema.json",
+    "docs/specs/execution-receipt-v0.2.schema.json": "repo/docs/specs/execution-receipt-v0.2.schema.json",
+    "docs/specs/fixtures/execution-receipt-v0.2-action.json": "repo/docs/specs/fixtures/execution-receipt-v0.2-action.json",
     "docs/specs/mission-declaration-v0.1.schema.json": "repo/docs/specs/mission-declaration-v0.1.schema.json",
     "docs/specs/source-semantic-vectors/host-adoption-governance-v0.1.jsonl": "repo/docs/specs/source-semantic-vectors/host-adoption-governance-v0.1.jsonl",
     "docs/specs/source-semantic-vectors/host-adoption-governance-v0.1.schema.json": "repo/docs/specs/source-semantic-vectors/host-adoption-governance-v0.1.schema.json",
@@ -45,6 +47,7 @@
     "media/casts/ARDUR-CAP-003-resource-scope.cast": "repo/media/casts/ARDUR-CAP-003-resource-scope.cast",
     "media/casts/ARDUR-CAP-014-active-revocation.cast": "repo/media/casts/ARDUR-CAP-014-active-revocation.cast",
     "media/selected-assets.json": "repo/media/selected-assets.json",
+    "python/vibap/_specs/execution_receipt_v02.schema.json": "repo/python/vibap/_specs/execution_receipt_v02.schema.json",
     "python/vibap/_specs/mission_declaration_v01.schema.json": "repo/python/vibap/_specs/mission_declaration_v01.schema.json"
   },
   "directories": {
@@ -72,6 +75,7 @@
     "docs/research": "source/docs/research/",
     "docs/roadmap": "source/docs/roadmap/",
     "docs/specs": "source/docs/specs/",
+    "docs/specs/fixtures": "source/docs/specs/fixtures/",
     "docs/specs/source-semantic-vectors": "source/docs/specs/source-semantic-vectors/",
     "examples": "source/examples/",
     "examples/_shared": "source/examples/_shared/",
@@ -98,6 +102,8 @@
     "python": "source/python/",
     "python/vibap": "source/python/vibap/",
     "python/vibap/_specs": "source/python/vibap/_specs/",
+    "python/vibap/_vendor": "source/python/vibap/_vendor/",
+    "python/vibap/_vendor/rfc8785": "source/python/vibap/_vendor/rfc8785/",
     "reports": "source/reports/",
     "site": "source/site/"
   },
@@ -167,6 +173,7 @@
     "docs/specs/delegation-grant-profile-v0.1.md": "source/docs/specs/delegation-grant-profile-v0.1/",
     "docs/specs/execution-receipt-eat-profile-v0.1.md": "source/docs/specs/execution-receipt-eat-profile-v0.1/",
     "docs/specs/execution-receipt-v0.1.md": "source/docs/specs/execution-receipt-v0.1/",
+    "docs/specs/execution-receipt-v0.2.md": "source/docs/specs/execution-receipt-v0.2/",
     "docs/specs/idm-extension-v0.1.md": "source/docs/specs/idm-extension-v0.1/",
     "docs/specs/mission-declaration-v0.1.md": "source/docs/specs/mission-declaration-v0.1/",
     "docs/specs/revocation-v0.1.md": "source/docs/specs/revocation-v0.1/",
@@ -187,6 +194,7 @@
     "packaging/macos/systemextension/README.md": "source/packaging/macos/systemextension/readme/",
     "plugins/claude-code/README.md": "source/plugins/claude-code/readme/",
     "python/README.md": "source/python/readme/",
+    "python/vibap/_vendor/rfc8785/UPSTREAM.md": "source/python/vibap/_vendor/rfc8785/upstream/",
     "reports/LINEAGE_BUDGET_DELEGATION_PLAN_REVIEW_2026-05-13.md": "source/reports/lineage_budget_delegation_plan_review_2026-05-13/",
     "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md": "source/reports/phase2_daemon_kernel_boundary_claim_ledger_2026-05-11/",
     "site/README.md": "source/site/readme/"

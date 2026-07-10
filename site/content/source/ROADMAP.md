@@ -2,7 +2,7 @@
 title: "Roadmap"
 description: "Already present:"
 source_path: "ROADMAP.md"
-source_sha256: "6cee9b0a7c4e50190cc9d1ebc32b7cc653dc6cd9dc56616aa8fb3b9bdaa021d6"
+source_sha256: "535359dd4c8abb0af128f371bc0b028d5e99196bf35fb6b14b4e57d2e2553cf4"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["roadmap"]
@@ -25,6 +25,7 @@ Already present:
 - research-informed positioning
 - current status and known gaps
 - public v0.1 specs (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation)
+- versioned RFC 8785 Execution Receipt v0.2 action payloads, legacy v0.1 verification, golden schema fixtures, and signed session-final receipt-chain/kernel-integrity binding
 - curated Python and Go runtime imports
 - the Ardur Personal Hub service plus its CLI surface
 - the Claude Code plugin and hook with signed receipts

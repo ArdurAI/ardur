@@ -16,3 +16,4 @@ This section lists hosted documentation and mirrored artifacts generated from `p
 ## Child Sections
 
 - [`_specs/`](/__ardur_internal__/source/python/vibap/_specs/)
+- [`_vendor/`](/__ardur_internal__/source/python/vibap/_vendor/)

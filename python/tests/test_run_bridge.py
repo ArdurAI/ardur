@@ -11,6 +11,7 @@ user's ``~/.claude/settings.json``.
 from __future__ import annotations
 
 from argparse import Namespace
+import hashlib
 import json
 import os
 import shutil
@@ -26,9 +27,9 @@ import pytest
 
 from vibap import kernel_correlation as kc
 from vibap import run_bridge
-from vibap.attestation import verify_attestation
+from vibap.attestation import ATTESTATION_SCHEMA_VERSION, verify_attestation
 from vibap.passport import load_public_key
-from vibap.receipt import verify_chain
+from vibap.receipt import RECEIPT_SCHEMA_VERSION, verify_chain
 from vibap.run_bridge import (
     DEFAULT_MAX_DURATION_S,
     DEFAULT_MAX_TOOL_CALLS,
@@ -268,6 +269,7 @@ def test_ardur_run_governs_launched_agent_zero_setup(
     assert len(entries) == 3
     verified = verify_chain(entries, public_key)
     assert len(verified) == 3
+    assert {entry["schema_version"] for entry in verified} == {RECEIPT_SCHEMA_VERSION}
     verdicts = [c.get("verdict") for c in verified]
     # Signed receipts record a compliant (PERMIT) and a violation (DENY) verdict.
     assert "compliant" in verdicts
@@ -277,9 +279,17 @@ def test_ardur_run_governs_launched_agent_zero_setup(
     assert result.attestation_token
     assert result.attestation_digest.startswith("sha-256:")
     att = verify_attestation(result.attestation_token, public_key)
+    assert att["schema_version"] == ATTESTATION_SCHEMA_VERSION
     assert att["passport_jti"] == result.session_id
     assert int(att["permits"]) == 2
     assert int(att["denials"]) == 1
+    assert att["receipt_chain_head"] == {
+        "hash_algorithm": "sha-256",
+        "receipt_id": entries[-1]["receipt_id"],
+        "receipt_jwt_sha256": hashlib.sha256(
+            entries[-1]["jwt"].encode("ascii")
+        ).hexdigest(),
+    }
     # No kernel daemon was reachable (hermetic test host), so the attestation
     # must not claim kernel-enforcement data it never actually observed.
     assert "kernel_enforcement" not in att

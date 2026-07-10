@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "fe446b0d62defab9d3473240a78b0aa54c76e16c74cfd1cb2f2c67bad8584d50"
+source_sha256: "2a122846b064ee1e3015aa84a5056f65dafd490f02cafc8ee458145f50026ed2"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -34,11 +34,14 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) | **migrated** | Public-import annotated |
 | [Mission Declaration (MD)](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/) | **migrated** | Public-import annotated; clean-break protocol rename applied (`application/ardur.md+jwt`, `https://ardur.dev/...`) |
 | [Execution Receipt (ER)](/__ardur_internal__/source/docs/specs/execution-receipt-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
+| [Execution Receipt v0.2 hardening](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/) | **implemented** | Versioned RFC 8785 payloads, legacy verification, receipt-chain-head binding, and kernel loss/kill-switch finalization contract |
 | [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
+| [Execution Receipt v0.2 schema](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.2.schema.json) | **implemented** | Runtime-aligned action enums and required version/canonicalization claims |
+| [Execution Receipt v0.2 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
 | [Host adoption/governance source-semantic vectors](/__ardur_internal__/source/docs/specs/source-semantic-vectors/readme/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
@@ -58,7 +61,7 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 1. [Mission Declaration (MD)](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/) — the signed scope envelope the agent starts with
 2. [Delegation Grant (DG) Profile](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/) — how child agents get strictly narrower authority
-3. [Execution Receipt (ER)](/__ardur_internal__/source/docs/specs/execution-receipt-v0.1/) — the signed per-tool-call decision record
+3. [Execution Receipt v0.2](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
 4. [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) — RFC 9711 binding for ER carriage
 5. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
 6. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)

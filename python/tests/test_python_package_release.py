@@ -49,6 +49,7 @@ def test_python_distribution_metadata_is_release_ready() -> None:
     assert project["requires-python"] == ">=3.10"
     assert project["license"] == "MIT"
     assert project["license-files"] == ["LICENSE"]
+    assert "rfc8785>=0.1.4,<0.2" in project["dependencies"]
     assert build_system["requires"] == ["setuptools==83.0.0", "wheel==0.47.0"]
     assert project["urls"] == {
         "Homepage": "https://github.com/ArdurAI/ardur",

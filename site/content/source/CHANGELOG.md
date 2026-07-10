@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4769be6d9072fbc2fbe728ffb57794c96b6e9a7e875ba6c7c38592e6a2480aff"
+source_sha256: "81c2404a27135ac0f37702a957b240fcaabbcf47955ed68dd7b52e1250d69f50"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,11 +22,15 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Require RFC 8785 canonical payload bytes for versioned Execution Receipt v0.2 JWTs while preserving explicit legacy v0.1 verification
+- Keep the upstream RFC 8785 package as a declared dependency with an attributed Apache-2.0 fallback for dependency-less source-checkout runners
+- Bind the final action-receipt JWT hash and kernel loss/kill-switch rollup in the signed behavioral attestation
 - Redact kernel-capture daemon, MCP gateway, OPA backend, content safety scanner
 - Strip hardcoded provider version pins from Gemini/Claude hooks
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Execution Receipt v0.2 schema, embedded package copy, and canonical golden fixture
 - Comprehensive E2E showcase test suite (28 tests, 7 layers)
 - Live adversarial scoreboard and continuous harness
 - Multi-backend policy evaluation (Native, Cedar, OPA)

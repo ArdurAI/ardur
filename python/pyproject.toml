@@ -29,6 +29,10 @@ classifiers = [
 dependencies = [
     "PyJWT>=2.12.0,<3",
     "cryptography>=41.0,<50",
+    # Receipt ids, digests, and v0.2 JWS payloads claim RFC 8785 JCS. A real
+    # implementation is required because sorted stdlib JSON does not implement
+    # ECMAScript number formatting or UTF-16 property ordering.
+    "rfc8785>=0.1.4,<0.2",
     # jsonschema moved out of [dev] on 2026-04-28: the Mission Declaration
     # loader now validates fetched MDs against the v0.1 spec at the network
     # boundary (FIX-3 from S2 hostile audit). Validation is a security
@@ -84,6 +88,7 @@ include = ["vibap*"]
 # docs/specs/ directory being on disk.
 [tool.setuptools.package-data]
 "vibap._specs" = ["*.json"]
+"vibap._vendor.rfc8785" = ["LICENSE", "UPSTREAM.md"]
 "vibap" = [
     "_plugins/claude-code/.claude-plugin/*.json",
     "_plugins/claude-code/hooks/*",

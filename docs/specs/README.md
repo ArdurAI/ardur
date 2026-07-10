@@ -17,11 +17,14 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Verifier Contract](./verifier-contract-v0.1.md) | **migrated** | Public-import annotated |
 | [Mission Declaration (MD)](./mission-declaration-v0.1.md) | **migrated** | Public-import annotated; clean-break protocol rename applied (`application/ardur.md+jwt`, `https://ardur.dev/...`) |
 | [Execution Receipt (ER)](./execution-receipt-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
+| [Execution Receipt v0.2 hardening](./execution-receipt-v0.2.md) | **implemented** | Versioned RFC 8785 payloads, legacy verification, receipt-chain-head binding, and kernel loss/kill-switch finalization contract |
 | [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](./idm-extension-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](./mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](./execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
+| [Execution Receipt v0.2 schema](./execution-receipt-v0.2.schema.json) | **implemented** | Runtime-aligned action enums and required version/canonicalization claims |
+| [Execution Receipt v0.2 golden fixture](./fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
 | [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
@@ -41,7 +44,7 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 1. [Mission Declaration (MD)](./mission-declaration-v0.1.md) — the signed scope envelope the agent starts with
 2. [Delegation Grant (DG) Profile](./delegation-grant-profile-v0.1.md) — how child agents get strictly narrower authority
-3. [Execution Receipt (ER)](./execution-receipt-v0.1.md) — the signed per-tool-call decision record
+3. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
 4. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
 5. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
 6. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
