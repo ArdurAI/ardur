@@ -2,7 +2,7 @@
 title: "Technical Reference"
 description: "Flat technical reference pages for the public Ardur surface. These describe"
 source_path: "docs/reference/README.md"
-source_sha256: "de1cf03b098ad6837385a2bd9e91d5460cc268dcb19870bdd48d702c90585202"
+source_sha256: "74f4336e0b6646d6304e2364b464d1a0f6e1ba0653b97e35796566a9ac417c5d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -33,11 +33,14 @@ walkthroughs see [`../guides/`](/__ardur_internal__/source/docs/guides/); for pr
 - [Proxy OCI Image Contract](/__ardur_internal__/source/docs/reference/proxy-oci-image/) — canonical image name,
   immutable release gates, runtime hardening, state, TLS, auth, scan, and cost
   boundaries without claiming current registry availability
+- [Kernel Capture Daemon Operations](/__ardur_internal__/source/docs/reference/kernel-capture-daemon/) —
+  control-plane-only mode, capture-loss semantics, and malformed-record
+  response
 
 ## When To Update These Pages
 
 These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
-`python/vibap/ardur_profile.py`, `Dockerfile.proxy`, or its release workflow),
-update the matching page in the same change. They are deliberately mechanical
-so the diff is easy to review.
+`python/vibap/ardur_profile.py`, `go/cmd/ardur-kernelcaptured`,
+`Dockerfile.proxy`, or its release workflow), update the matching page in the
+same change. They are deliberately mechanical so the diff is easy to review.

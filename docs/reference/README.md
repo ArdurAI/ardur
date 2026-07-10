@@ -16,11 +16,14 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
 - [Proxy OCI Image Contract](proxy-oci-image.md) — canonical image name,
   immutable release gates, runtime hardening, state, TLS, auth, scan, and cost
   boundaries without claiming current registry availability
+- [Kernel Capture Daemon Operations](kernel-capture-daemon.md) —
+  control-plane-only mode, capture-loss semantics, and malformed-record
+  response
 
 ## When To Update These Pages
 
 These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
-`python/vibap/ardur_profile.py`, `Dockerfile.proxy`, or its release workflow),
-update the matching page in the same change. They are deliberately mechanical
-so the diff is easy to review.
+`python/vibap/ardur_profile.py`, `go/cmd/ardur-kernelcaptured`,
+`Dockerfile.proxy`, or its release workflow), update the matching page in the
+same change. They are deliberately mechanical so the diff is easy to review.
