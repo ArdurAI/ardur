@@ -2231,8 +2231,21 @@ def _run_has_governance_intent(args: argparse.Namespace) -> bool:
     """
     return any(
         getattr(args, name, None) not in (None, False)
-        for name in ("mission", "allowed_tools", "forbidden_tools", "via", "govern", "enforce")
-    ) or getattr(args, "max_tool_calls", None) is not None
+        for name in (
+            "mission",
+            "allowed_tools",
+            "forbidden_tools",
+            "via",
+            "govern",
+            "enforce",
+            "no_kernel_correlation",
+            "resource_scope",
+            "no_resource_scope",
+        )
+    ) or any(
+        getattr(args, name, None) is not None
+        for name in ("max_tool_calls", "max_duration_s")
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -4006,7 +4019,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--max-duration-s",
         type=int,
-        default=86400,
+        default=None,
         help="wall-clock budget for the governed run in seconds",
     )
     run.add_argument(
@@ -4026,7 +4039,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="abort the run if kernel-level BPF policy enforcement cannot be installed "
         "(default: permissive — degrade to hook/proxy governance with a recorded note)",
     )
-    run.add_argument(
+    resource_scope_group = run.add_mutually_exclusive_group()
+    resource_scope_group.add_argument(
+        "--resource-scope",
+        action="append",
+        metavar="PATH",
+        help="narrow file access to a path root inside the governed cwd (repeatable; "
+        "relative paths resolve against cwd)",
+    )
+    resource_scope_group.add_argument(
         "--no-resource-scope",
         action="store_true",
         help="skip the default cwd-based file resource_scope (path_allow); use for a "

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "23f4e7f438053d1628c2a67e426d8196b6e8b74a874e4a1f0eaa79782e23277f"
+source_sha256: "89b36cf0a9eea41a39410935c14bcccd1964fc29cc090d973e384ed999731544"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -444,11 +444,11 @@ Legacy Hub streaming remains the default when no governance selector is supplied
 ardur run [--hub-url URL] [--hub-token TOKEN] [--home DIR] -- <command>
 ```
 
-The zero-setup governance bridge is selected when `--mission`,
-`--allowed-tools`, `--forbidden-tools`, `--max-tool-calls`, or `--via` is
-supplied. It issues a temporary Mission Passport, starts an embedded loopback
-governance proxy, launches the command, then prints a governance summary to
-stderr when the command exits:
+The zero-setup governance bridge is selected when any governance option is
+supplied, including the mission/tool flags, kernel flags, or resource-scope
+flags below. It issues a temporary Mission Passport, starts an embedded
+loopback governance proxy, launches the command, then prints a governance
+summary to stderr when the command exits:
 
 ```text
 ardur run [--home DIR]
@@ -459,6 +459,8 @@ ardur run [--home DIR]
           [--max-duration-s N]
           [--via auto|claude-code|env|intercept]
           [--no-kernel-correlation]
+          [--enforce]
+          [--resource-scope PATH ... | --no-resource-scope]
           -- <command>
 ```
 
@@ -474,7 +476,19 @@ cooperating command through environment variables, and `--via intercept` is only
 a scaffolded transparent-intercept path today; it fails closed rather than
 claiming universal CLI capture. `--no-kernel-correlation` disables the
 best-effort kernel/cgroup correlation attempt that may be available on suitable
-Linux hosts.
+Linux hosts. `--enforce` aborts instead of degrading when kernel policy cannot
+be installed.
+
+By default, a governed run scopes file access to the complete governed working
+directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or
+more roots inside the working directory. Relative roots resolve against the
+governed working directory; symlinks are resolved before the inside-directory
+check. Each canonical root produces exact and subtree proxy patterns and is
+also passed to BPF path lowering; the existing kernel-tier and bounded path
+depth limits still apply. Glob patterns and roots outside the working directory
+are rejected before keys or a passport are created. `--no-resource-scope` is
+mutually exclusive with `--resource-scope`; it removes file scope only for a
+mission that is genuinely network-only and relies on the seccomp fallback.
 
 Safe local example:
 

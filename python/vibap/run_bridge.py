@@ -749,6 +749,47 @@ def _apply_kernel_policy(
 # ── main entry ─────────────────────────────────────────────────────────────────
 
 
+def _resolve_run_resource_scope(
+    work_dir: Path,
+    *,
+    resource_scope: list[str] | None,
+    disabled: bool,
+) -> list[str]:
+    """Return exact + subtree patterns for validated roots inside ``work_dir``."""
+    if disabled and resource_scope is not None:
+        raise ValueError("resource_scope cannot be combined with no_resource_scope")
+    if disabled:
+        return []
+
+    raw_roots = [str(work_dir)] if resource_scope is None else resource_scope
+    if not raw_roots:
+        raise ValueError("resource_scope must contain at least one path root")
+
+    roots: list[Path] = []
+    for raw_root in raw_roots:
+        if not isinstance(raw_root, str) or not raw_root.strip():
+            raise ValueError("resource_scope entries must be non-empty path roots")
+        if any(char in raw_root for char in "*?[]"):
+            raise ValueError("resource_scope entries must be path roots, not glob patterns")
+        candidate = Path(raw_root).expanduser()
+        if not candidate.is_absolute():
+            candidate = work_dir / candidate
+        try:
+            root = candidate.resolve()
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"invalid resource_scope path root: {exc}") from exc
+        if root != work_dir and not root.is_relative_to(work_dir):
+            raise ValueError("resource_scope path roots must stay inside the governed cwd")
+        if root not in roots:
+            roots.append(root)
+
+    patterns: list[str] = []
+    for root in roots:
+        root_text = str(root)
+        patterns.extend((root_text, "/*" if root_text == "/" else f"{root_text}/*"))
+    return patterns
+
+
 def run_governed(
     *,
     command: list[str],
@@ -763,6 +804,7 @@ def run_governed(
     env: dict[str, str] | None = None,
     enable_kernel_correlation: bool = True,
     enforce: bool = False,
+    resource_scope: list[str] | None = None,
     no_resource_scope: bool = False,
     cwd: Path | None = None,
     stdout: Any | None = None,
@@ -776,6 +818,12 @@ def run_governed(
     :class:`KernelPolicyEnforcementError` when ``enforce=True`` and
     kernel-level BPF policy enforcement could not be installed — the launched
     agent is killed before the error propagates.
+
+    ``resource_scope`` narrows the default cwd-based file scope to one or more
+    path roots inside ``cwd``. Relative roots resolve against ``cwd``; each is
+    represented as exact + recursive patterns for proxy enforcement and as an
+    absolute path prefix for BPF lowering. It cannot be combined with
+    ``no_resource_scope``.
 
     ``no_resource_scope`` skips the default cwd-based file resource_scope
     (``path_allow``/``OP_FILE_READ``+``OP_FILE_WRITE``), which every mission
@@ -797,6 +845,11 @@ def run_governed(
         raise ValueError(f"unknown --via mode: {via!r} (choose from {', '.join(VALID_VIA_MODES)})")
 
     work_dir = Path(cwd).expanduser().resolve() if cwd else Path.cwd()
+    scope_patterns = _resolve_run_resource_scope(
+        work_dir,
+        resource_scope=resource_scope,
+        disabled=no_resource_scope,
+    )
 
     ephemeral = home is None
     if ephemeral:
@@ -815,7 +868,7 @@ def run_governed(
         mission=mission_text,
         allowed_tools=list(allowed_tools or []),
         forbidden_tools=list(forbidden_tools or []),
-        resource_scope=[] if no_resource_scope else [str(work_dir), f"{work_dir}/*"],
+        resource_scope=scope_patterns,
         cwd=str(work_dir),
         max_tool_calls=max_tool_calls,
         max_duration_s=max_duration_s,
@@ -1341,6 +1394,7 @@ def run_governed_cli(args: Any) -> int:
             via=getattr(args, "via", None) or "auto",
             enable_kernel_correlation=not getattr(args, "no_kernel_correlation", False),
             enforce=bool(getattr(args, "enforce", False)),
+            resource_scope=getattr(args, "resource_scope", None),
             no_resource_scope=bool(getattr(args, "no_resource_scope", False)),
         )
     except NotImplementedError as exc:
