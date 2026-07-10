@@ -32,7 +32,10 @@ from vibap.receiver_attestation import (
     self_attested_envelope,
     verify_receiver_envelope,
 )
-from vibap.receiver_attestation_fixture import run_receiver_attestation_fixture
+from vibap.receiver_attestation_fixture import (
+    ReceiverAttestationFixtureOutputError,
+    run_receiver_attestation_fixture,
+)
 
 
 NOW = 1_800_000_000
@@ -776,3 +779,117 @@ def test_reference_mcp_fixture_is_exposed_through_cli(
     assert (output / "receiver-attestation.json").is_file()
     assert (output / "receipt-public.pem").is_file()
     assert (output / "receiver-public.pem").is_file()
+
+
+# --- --output validation (existing-file / empty / whitespace) ---
+
+
+def test_fixture_output_existing_regular_file_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    existing_file = tmp_path / "existing-file.txt"
+    existing_file.write_text("not a directory", encoding="utf-8")
+
+    code = cli_main(
+        ["receiver-attestation-fixture", "--output", str(existing_file)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "receiver_attestation_fixture_output_not_directory"
+    assert report["condition"] == "receiver_attestation_fixture_output_not_directory"
+    assert "[Errno" not in captured.out
+    assert "[Errno" not in report.get("message", "")
+    assert str(existing_file) not in captured.out
+    assert str(existing_file) not in json.dumps(report)
+    assert report["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in report["next_steps"])
+
+
+def test_fixture_output_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    code = cli_main(["receiver-attestation-fixture", "--output", ""])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "receiver_attestation_fixture_output_empty"
+    assert report["condition"] == "receiver_attestation_fixture_output_empty"
+    assert report["next_steps"]
+    assert not any(tmp_path.iterdir()), "no fixtures written to CWD on empty --output"
+
+
+def test_fixture_output_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    code = cli_main(["receiver-attestation-fixture", "--output", "   "])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "receiver_attestation_fixture_output_empty"
+    assert report["condition"] == "receiver_attestation_fixture_output_empty"
+    assert report["next_steps"]
+    assert not any(p.name.strip() == "" for p in tmp_path.iterdir()), (
+        "no whitespace-named directory created on whitespace-only --output"
+    )
+    assert not any(tmp_path.iterdir()), "no fixtures written on whitespace-only --output"
+
+
+def test_fixture_output_validation_raises_specialized_error(tmp_path: Path) -> None:
+    existing_file = tmp_path / "blocking-file"
+    existing_file.write_text("x", encoding="utf-8")
+
+    with pytest.raises(ReceiverAttestationFixtureOutputError) as exc_info:
+        run_receiver_attestation_fixture(existing_file)
+
+    assert exc_info.value.condition == "receiver_attestation_fixture_output_not_directory"
+    assert str(existing_file) not in exc_info.value.detail
+
+    with pytest.raises(ReceiverAttestationFixtureOutputError) as empty_info:
+        run_receiver_attestation_fixture("")
+    assert empty_info.value.condition == "receiver_attestation_fixture_output_empty"
+
+
+def test_fixture_output_valid_new_dir_behavior_preserved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    new_dir = tmp_path / "fresh-output-dir"
+
+    code = cli_main(["receiver-attestation-fixture", "--output", str(new_dir)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 0
+    assert captured.err == ""
+    assert report["ok"] is True
+    assert (new_dir / "receiver-attestation.json").is_file()
+    assert (new_dir / "receipt-public.pem").is_file()
+
+
+def test_fixture_output_existing_empty_dir_behavior_preserved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    existing_dir = tmp_path / "existing-dir"
+    existing_dir.mkdir()
+
+    code = cli_main(["receiver-attestation-fixture", "--output", str(existing_dir)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 0
+    assert captured.err == ""
+    assert report["ok"] is True
+    assert (existing_dir / "receiver-attestation.json").is_file()

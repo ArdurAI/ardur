@@ -28,6 +28,21 @@ RECEIVER_ID = "spiffe://fixture.ardur.dev/tool/read-file"
 RECEIVER_KEY_ID = "fixture-read-file:v1"
 
 
+class ReceiverAttestationFixtureOutputError(ValueError):
+    """Raised when the ``--output`` argument fails pre-validation.
+
+    A ``ValueError`` subclass so it is still caught by the generic handler in
+    ``main()`` / ``cmd_receiver_attestation_fixture()``, but distinct enough for
+    the CLI to emit a structured, sanitized failure response instead of the raw
+    exception text.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
+
+
 def _atomic_write(path: Path, data: bytes) -> None:
     if path.is_symlink():
         raise ValueError(f"fixture artifact must not be a symlink: {path.name}")
@@ -86,9 +101,24 @@ def run_receiver_attestation_fixture(
 ) -> dict[str, Any]:
     """Create and verify one synthetic MCP ``tools/call`` evidence bundle."""
 
-    output_path = Path(output).expanduser()
+    output_raw = str(output)
+    output_str = output_raw.strip()
+    if not output_str:
+        raise ReceiverAttestationFixtureOutputError(
+            "fixture output path must not be empty or whitespace-only",
+            condition="receiver_attestation_fixture_output_empty",
+        )
+    output_path = Path(output_str).expanduser()
     if output_path.is_symlink():
-        raise ValueError("fixture output directory must not be a symlink")
+        raise ReceiverAttestationFixtureOutputError(
+            "fixture output directory must not be a symlink",
+            condition="receiver_attestation_fixture_output_symlink",
+        )
+    if output_path.exists() and not output_path.is_dir():
+        raise ReceiverAttestationFixtureOutputError(
+            "fixture output path must be a directory, not a regular file",
+            condition="receiver_attestation_fixture_output_not_directory",
+        )
     output_path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not output_path.is_dir():
         raise ValueError("fixture output path must be a directory")

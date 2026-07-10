@@ -2104,11 +2104,71 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _receiver_attestation_fixture_output_invalid_response(condition: str) -> dict:
+    """Structured failure for an invalid ``--output`` argument.
+
+    Mirrors the fixture-path failure convention used by the gemini-cli and
+    codex-app-server fixtures: a stable ``condition``/``error`` pair, a
+    human-readable ``message`` with no raw exception text or local paths, a
+    ``detail`` explaining how to choose a valid directory, and placeholder-only
+    ``next_steps``.
+    """
+
+    messages = {
+        "receiver_attestation_fixture_output_empty": (
+            "Receiver attestation fixture output path is empty."
+        ),
+        "receiver_attestation_fixture_output_symlink": (
+            "Receiver attestation fixture output path must not be a symlink."
+        ),
+        "receiver_attestation_fixture_output_not_directory": (
+            "Receiver attestation fixture output path is not a directory."
+        ),
+    }
+    details = {
+        "receiver_attestation_fixture_output_empty": (
+            "The --output argument is empty or whitespace-only. "
+            "Provide a directory path where Ardur can write the public fixture artifacts."
+        ),
+        "receiver_attestation_fixture_output_symlink": (
+            "The --output argument points at a symlink. "
+            "Provide a real directory path, not a symbolic link."
+        ),
+        "receiver_attestation_fixture_output_not_directory": (
+            "The --output argument points at an existing regular file. "
+            "Use an existing directory or a new directory path that Ardur can create."
+        ),
+    }
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": messages.get(condition, "Receiver attestation fixture output path is invalid."),
+        "detail": details.get(condition, "Provide a directory path for the --output argument."),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_receiver_attestation_fixture_with_output_directory",
+                "command": "ardur receiver-attestation-fixture --output <fixture-dir>",
+                "detail": "Replace <fixture-dir> with a directory path (new or existing, not a file or symlink).",
+            }
+        ],
+    }
+
+
 def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
-    from .receiver_attestation_fixture import run_receiver_attestation_fixture
+    from .receiver_attestation_fixture import (
+        ReceiverAttestationFixtureOutputError,
+        run_receiver_attestation_fixture,
+    )
 
     try:
         report = run_receiver_attestation_fixture(args.output)
+    except ReceiverAttestationFixtureOutputError as exc:
+        _print_json(
+            _receiver_attestation_fixture_output_invalid_response(exc.condition)
+        )
+        return 1
     except (OSError, TypeError, ValueError) as exc:
         _print_json(
             {
@@ -4386,7 +4446,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     receiver_fixture.add_argument(
         "--output",
-        type=Path,
+        type=str,
         required=True,
         help="directory for public fixture artifacts; no private keys are persisted",
     )
