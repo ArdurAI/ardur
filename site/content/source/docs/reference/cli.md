@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "620ee9ee695dde6b3beed9958dd3cd756c95c99269fe850f4b173eccfc5712c3"
+source_sha256: "23f4e7f438053d1628c2a67e426d8196b6e8b74a874e4a1f0eaa79782e23277f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -910,6 +910,13 @@ configure `ardur protect claude-code`, run the printed
 hints use placeholders such as `<your-project>`, `<ardur-home>`, and
 `<claude-code-plugin>`; they do not call Claude, contact a provider, or imply
 visibility into provider-hidden actions.
+
+If `--home` or `--keys-dir` points at an existing regular file, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields set to `keys_dir_not_directory`, a
+concise `message`, a `detail`, and placeholder-only `next_steps`. Validation
+runs before any receipt file is read, so a rejected input leaves no artifacts
+behind.
 
 ### `ardur gemini-cli-fixture`
 

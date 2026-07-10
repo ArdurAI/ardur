@@ -1623,12 +1623,16 @@ def cmd_claude_code_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_claude_code_report(args: argparse.Namespace) -> int:
-    report = build_claude_code_report(
-        home=args.home,
-        chain_dir=args.chain_dir,
-        keys_dir=args.keys_dir,
-        verify_expiry=args.verify_expiry,
-    )
+    try:
+        report = build_claude_code_report(
+            home=args.home,
+            chain_dir=args.chain_dir,
+            keys_dir=args.keys_dir,
+            verify_expiry=args.verify_expiry,
+        )
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
     if args.json:
         _print_json(report)
         return 0

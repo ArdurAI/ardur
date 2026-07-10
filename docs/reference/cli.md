@@ -894,6 +894,13 @@ hints use placeholders such as `<your-project>`, `<ardur-home>`, and
 `<claude-code-plugin>`; they do not call Claude, contact a provider, or imply
 visibility into provider-hidden actions.
 
+If `--home` or `--keys-dir` points at an existing regular file, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields set to `keys_dir_not_directory`, a
+concise `message`, a `detail`, and placeholder-only `next_steps`. Validation
+runs before any receipt file is read, so a rejected input leaves no artifacts
+behind.
+
 ### `ardur gemini-cli-fixture`
 
 Write a local-only Gemini CLI settings/context fixture and print a redacted

@@ -637,6 +637,63 @@ def test_core_passport_commands_fail_closed_for_existing_file_keys_dir(tmp_path,
 @pytest.mark.parametrize(
     "argv",
     [
+        ["claude-code-report", "--json"],
+        ["claude-code-report"],
+    ],
+)
+def test_claude_code_report_fail_closed_for_existing_file_keys_dir(tmp_path, capsys, argv):
+    keys_file = tmp_path / "keys-file"
+    keys_file.write_text("not a directory", encoding="utf-8")
+
+    rc, payload = _run_cli_and_read_json(
+        [*argv, "--keys-dir", str(keys_file)],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "keys_dir_not_directory"
+    assert payload["error"] == "keys_dir_not_directory"
+    assert payload["error_code"] == "keys_dir_not_directory"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert str(tmp_path) not in rendered
+    assert str(keys_file) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
+def test_claude_code_report_fail_closed_for_existing_file_home(tmp_path, capsys):
+    home_file = tmp_path / "home-file"
+    home_file.write_text("not a directory", encoding="utf-8")
+
+    rc, payload = _run_cli_and_read_json(
+        ["claude-code-report", "--json", "--home", str(home_file)],
+        capsys,
+    )
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "keys_dir_not_directory"
+    assert payload["error"] == "keys_dir_not_directory"
+    assert payload["error_code"] == "keys_dir_not_directory"
+    assert payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert str(tmp_path) not in rendered
+    assert str(home_file) not in rendered
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in payload["next_steps"]
+    )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
         ["start"],
         ["attest", "--session", "not-a-uuid"],
     ],
