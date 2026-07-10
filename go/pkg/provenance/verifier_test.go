@@ -115,6 +115,9 @@ func TestVerifyOptions_Defaults(t *testing.T) {
 	if opts.RequiredIdentity != "" {
 		t.Error("RequiredIdentity should default to empty")
 	}
+	if opts.RequiredIssuer != "" {
+		t.Error("RequiredIssuer should default to empty")
+	}
 }
 
 func TestImageProvenance_Fields(t *testing.T) {
@@ -180,6 +183,35 @@ func TestSigstoreVerifier_VerifyBundleRejectsClosedVerifierBeforeIO(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "verifier is closed") {
 		t.Fatalf("VerifyBundle() error = %q, want closed-verifier error", err.Error())
+	}
+}
+
+func TestSigstoreVerifier_VerifyBundleRequiresCompleteSignerConstraintsBeforeIO(t *testing.T) {
+	tests := []struct {
+		name string
+		opts VerifyOptions
+	}{
+		{name: "both missing"},
+		{name: "identity only", opts: VerifyOptions{RequiredIdentity: "deployer@example.com"}},
+		{name: "issuer only", opts: VerifyOptions{RequiredIssuer: "https://token.actions.githubusercontent.com"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &SigstoreVerifier{}
+			_, err := v.VerifyBundle(
+				context.Background(),
+				"/path/that/does/not/exist.sigstore.json",
+				strings.Repeat("a", 64),
+				tt.opts,
+			)
+			if err == nil {
+				t.Fatal("VerifyBundle() should reject incomplete signer constraints")
+			}
+			if !strings.Contains(err.Error(), "requires both RequiredIdentity and RequiredIssuer") {
+				t.Fatalf("VerifyBundle() error = %q, want complete-constraints error", err.Error())
+			}
+		})
 	}
 }
 
