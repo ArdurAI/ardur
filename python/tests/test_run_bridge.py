@@ -969,6 +969,72 @@ def test_run_governed_rejects_unknown_via(tmp_path: Path, monkeypatch: pytest.Mo
         run_governed(command=["true"], via="bogus", home=tmp_path / "h")
 
 
+def test_resolve_run_resource_scope_narrows_relative_roots(tmp_path: Path) -> None:
+    work_dir = tmp_path / "project"
+    source = work_dir / "src"
+    source.mkdir(parents=True)
+
+    patterns = run_bridge._resolve_run_resource_scope(
+        work_dir,
+        resource_scope=["src", str(source)],
+        disabled=False,
+    )
+
+    assert patterns == [str(source), f"{source}/*"]
+
+    from vibap.proxy import _check_resource_scope
+
+    assert _check_resource_scope({"file_path": str(source / "main.py")}, patterns, cwd=str(work_dir))[0] is True
+    assert _check_resource_scope({"file_path": str(work_dir / "README.md")}, patterns, cwd=str(work_dir))[0] is False
+
+    from vibap.bpf_lower import lower_to_bpf_policy_plan
+
+    plan = lower_to_bpf_policy_plan(resource_scope=patterns)
+    assert str(source) in plan.path_allow
+
+
+@pytest.mark.parametrize(
+    ("resource_scope", "disabled", "message"),
+    [
+        (["../outside"], False, "inside the governed cwd"),
+        (["src/*"], False, "not glob patterns"),
+        ([], False, "at least one path root"),
+        (["src"], True, "cannot be combined"),
+    ],
+)
+def test_resolve_run_resource_scope_rejects_unsafe_or_ambiguous_inputs(
+    tmp_path: Path,
+    resource_scope: list[str],
+    disabled: bool,
+    message: str,
+) -> None:
+    work_dir = tmp_path / "project"
+    work_dir.mkdir()
+    with pytest.raises(ValueError, match=message):
+        run_bridge._resolve_run_resource_scope(
+            work_dir,
+            resource_scope=resource_scope,
+            disabled=disabled,
+        )
+
+
+def test_run_governed_rejects_invalid_resource_scope_before_artifacts(tmp_path: Path) -> None:
+    work_dir = tmp_path / "project"
+    work_dir.mkdir()
+    home = tmp_path / "ardur-home"
+
+    with pytest.raises(ValueError, match="inside the governed cwd"):
+        run_governed(
+            command=["true"],
+            mission="Reject scope escape before setup.",
+            resource_scope=["../outside"],
+            cwd=work_dir,
+            home=home,
+        )
+
+    assert not home.exists()
+
+
 class _FakeSessionStatusDaemon:
     """A one-shot AF_UNIX server that replays a canned session_status response."""
 
@@ -1147,6 +1213,42 @@ def test_run_governed_cli_coerces_unset_numeric_budgets(
     assert captured["max_duration_s"] == (
         DEFAULT_MAX_DURATION_S if unset_field == "max_duration_s" else 123
     )
+
+
+def test_run_governed_cli_passes_explicit_resource_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Stop(Exception):
+        pass
+
+    def fake_run_governed(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise Stop
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fake_run_governed)
+
+    with pytest.raises(Stop):
+        run_governed_cli(
+            Namespace(
+                command=["--", "true"],
+                mission="scope override smoke",
+                allowed_tools=["Read"],
+                forbidden_tools=None,
+                max_tool_calls=7,
+                max_duration_s=123,
+                home=tmp_path / "h",
+                via="env",
+                no_kernel_correlation=True,
+                enforce=False,
+                resource_scope=["src", "tests"],
+                no_resource_scope=False,
+            )
+        )
+
+    assert captured["resource_scope"] == ["src", "tests"]
+    assert captured["no_resource_scope"] is False
 
 
 @pytest.mark.parametrize("command", ([], ["--"]))
@@ -1368,10 +1470,19 @@ def test_run_dispatch_legacy_vs_governance() -> None:
         ["run", "--mission", "x", "--", "echo"],
         ["run", "--allowed-tools", "Read", "--", "echo"],
         ["run", "--max-tool-calls", "5", "--", "echo"],
+        ["run", "--max-duration-s", "60", "--", "echo"],
         ["run", "--via", "env", "--", "echo"],
+        ["run", "--no-kernel-correlation", "--", "echo"],
+        ["run", "--resource-scope", "src", "--", "echo"],
+        ["run", "--no-resource-scope", "--", "echo"],
     ):
         args = parser.parse_args(argv)
         assert _run_has_governance_intent(args) is True, argv
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["run", "--resource-scope", "src", "--no-resource-scope", "--", "echo"]
+        )
 
 
 # ── run governance budget validation ────────────────────────────────────────────
