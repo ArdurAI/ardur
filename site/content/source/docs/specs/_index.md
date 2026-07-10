@@ -24,6 +24,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`idm-extension-v0.1.md`](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/)
 - [`mission-declaration-v0.1.md`](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/)
 - [`revocation-v0.1.md`](/__ardur_internal__/source/docs/specs/revocation-v0.1/)
+- [`transparency-anchor-v0.1.md`](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/)
 - [`verifier-contract-v0.1.md`](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/)
 
 ## Hosted Artifacts
@@ -31,6 +32,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`execution-receipt-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json)
 - [`execution-receipt-v0.2.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.2.schema.json)
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)
+- [`transparency-anchor-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/transparency-anchor-v0.1.schema.json)
 
 ## Child Sections
 

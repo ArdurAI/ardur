@@ -1,0 +1,34 @@
+{
+  "anchor_id": "anchor:8f0aba322075fb3a6fb23787b1dfb6a451c39e5b114679eb6c2160daa13c4c4b",
+  "anchored_at": 1800000005,
+  "backend": {
+    "kind": "c2sp-local-v1",
+    "log_id": "fixtures.ardur.ai/transparency-anchor-v0.1"
+  },
+  "evidence": {
+    "body": "eyJpbnRlZ3JhdGVkX3RpbWUiOjE4MDAwMDAwMDUsInNjaGVtYV92ZXJzaW9uIjoiYXJkdXIudHJhbnNwYXJlbmN5X2xvZ19lbnRyeS52MC4xIiwic3ViamVjdCI6eyJkaWdlc3QiOnsiYWxnb3JpdGhtIjoic2hhMjU2IiwidmFsdWUiOiI4ZjBhYmEzMjIwNzVmYjNhNmZiMjM3ODdiMWRmYjZhNDUxYzM5ZTViMTE0Njc5ZWI2YzIxNjBkYWExM2M0YzRiIn0sIm1lZGlhX3R5cGUiOiJhcHBsaWNhdGlvbi9hcmR1ci5lcitqd3QifX0=",
+    "integrated_time": 1800000005,
+    "log_id": "fixtures.ardur.ai/transparency-anchor-v0.1",
+    "log_index": 0,
+    "verification": {
+      "inclusion_proof": {
+        "checkpoint": "fixtures.ardur.ai/transparency-anchor-v0.1\n1\nY+EQ5zMMsh/9JWO4RQtziznZZWaJ0Wwqtg25ssWdhhU=\n\n\u2014 fixtures.ardur.ai/transparency-anchor-v0.1 iSfIiEDPm2X9DpUZc12zrVudjDt1fZHPzlzYak8HwWbhohwBGRwt3bSpKebogW5mzvzboLYGqPqt3TsNoLlmGpufngo=\n",
+        "hashes": [],
+        "log_index": 0,
+        "root_hash": "63e110e7330cb21ffd2563b8450b738b39d9656689d16c2ab60db9b2c59d8615",
+        "tree_size": 1
+      }
+    }
+  },
+  "queued_at": 1800000001,
+  "receipt_jwt": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImFwcGxpY2F0aW9uL2FyZHVyLmVyK2p3dCJ9.eyJhY3Rpb25fY2xhc3MiOiJyZWFkIiwiYWN0b3IiOiJzcGlmZmU6Ly9leGFtcGxlLnRlc3QvYWdlbnQiLCJhcmd1bWVudHNfaGFzaCI6IjdkNjQ0MTQ5N2QyYTAwMGI4MTQzNjAyYTc4MTdjOTBhYmU3ZGI4OGUxMzlmODljMDYyYTFjMzZjZmUwYWQ5ZDYiLCJidWRnZXRfcmVtYWluaW5nIjp7fSwiY2Fub25pY2FsaXphdGlvbiI6Impjcy1yZmM4Nzg1IiwiZXZpZGVuY2VfbGV2ZWwiOiJzZWxmX3NpZ25lZCIsImV4cCI6MTgwMDAwMDMwMCwiZ3JhbnRfaWQiOiJwYXNzcG9ydDp0cmFuc3BhcmVuY3ktZml4dHVyZSIsImlhdCI6MTgwMDAwMDAwMCwiaW52b2NhdGlvbl9kaWdlc3QiOnsiYWxnIjoic2hhLTI1NiIsImNhbm9uaWNhbGl6YXRpb24iOiJqY3MtcmZjODc4NSIsInNjb3BlIjoibm9ybWFsaXplZF9pbnB1dCIsInZhbHVlIjoiNFkwTDFZYTJUazdaSTNlX2VmdW1TRjNNYkJvcld4cEtERjVtY245MDVxVSJ9LCJpc3MiOiJzcGlmZmU6Ly9leGFtcGxlLnRlc3QvYXJkdXIiLCJqdGkiOiJyZWNlaXB0OjU5YmViMDc5ZTZhMzA4Mzg4MGFiOTUwZDAyNTQyNWZjIiwicGFyZW50X3JlY2VpcHRfaGFzaCI6bnVsbCwicGFyZW50X3JlY2VpcHRfaWQiOm51bGwsInBvbGljeV9kZWNpc2lvbnMiOlt7ImJhY2tlbmQiOiJuYXRpdmUiLCJkZWNpc2lvbiI6IkFsbG93IiwicmVhc29uIjoiZml4dHVyZSBwZXJtaXQifV0sInJlYXNvbiI6ImZpeHR1cmUgcGVybWl0IiwicmVjZWlwdF9pZCI6InJlY2VpcHQ6NTliZWIwNzllNmEzMDgzODgwYWI5NTBkMDI1NDI1ZmMiLCJyZWNlaXB0X2tpbmQiOiJhY3Rpb24iLCJyZXNvdXJjZV9mYW1pbHkiOiJmaWxlc3lzdGVtIiwicnVuX25vbmNlIjoiZml4dHVyZV9ub25jZV8wMTIzNDU2Nzg5Iiwic2NoZW1hX3ZlcnNpb24iOiJhcmR1ci5leGVjdXRpb25fcmVjZWlwdC52MC4yIiwic2lkZV9lZmZlY3RfY2xhc3MiOiJub25lIiwic3RlcF9pZCI6InN0ZXA6dHJhbnNwYXJlbmN5LWZpeHR1cmUiLCJ0YXJnZXQiOiJSRUFETUUubWQiLCJ0aW1lc3RhbXAiOiIyMDI3LTAxLTE1VDA4OjAwOjAwWiIsInRvb2wiOiJyZWFkX2ZpbGUiLCJ0cmFjZV9pZCI6InRyYWNlOnRyYW5zcGFyZW5jeS1maXh0dXJlIiwidmVyZGljdCI6ImNvbXBsaWFudCIsInZlcmlmaWVyX2lkIjoic3BpZmZlOi8vZXhhbXBsZS50ZXN0L2FyZHVyIn0.TkSQi9EMC3RCKR_wRhMwtQkGZFpafMIR7d9THFZd4nnFMflIO1hKwAst2LvuQZbSihyippMzFiD8rRmc60BIzw",
+  "schema_version": "ardur.transparency_anchor.v0.1",
+  "status": "anchored",
+  "subject": {
+    "digest": {
+      "algorithm": "sha256",
+      "value": "8f0aba322075fb3a6fb23787b1dfb6a451c39e5b114679eb6c2160daa13c4c4b"
+    },
+    "media_type": "application/ardur.er+jwt"
+  }
+}

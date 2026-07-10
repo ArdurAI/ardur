@@ -15,7 +15,8 @@ capture and Kubernetes control-plane components, mission examples, runnable
 framework adapters (LangChain, LangGraph, AutoGen), the Ardur Personal Hub
 service, the Claude Code plugin and hook, and the public Hugo evidence site.
 The current public proof is strongest at those configured tool boundaries. It
-does not establish universal agent capture, third-party witnessing,
+does not establish universal agent capture, third-party witnessing unless an
+optional transparency anchor verifies under an independently trusted log key,
 provider-hidden behavior, or cross-platform kernel enforcement. Re-runnable
 proof media, full packaging, and production deployment material are still
 being tightened before they are presented as release-ready.
@@ -152,7 +153,7 @@ This repo currently includes:
 - the product thesis and launch direction
 - a short research-informed positioning summary
 - current status and what is still being resolved
-- public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification
+- public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, and a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs
 - Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`)
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
@@ -189,7 +190,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, JWT AAT constraint engine (13 types) | AAT CWT integer-key mapping, OPA, and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |
-| **Receipts sink**    | local JSON / stdout-oriented receipt surfaces | OTel emitters and durable storage examples |
+| **Receipts sink**    | local JSON / stdout receipts; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs | OTel emitters, checkpoint witnessing/consistency monitoring, and broader durable storage examples |
 
 If you'd use an integration that isn't listed, file an [integration request](https://github.com/ArdurAI/ardur/issues/new?template=integration_request.yml) — it's the strongest signal we have for prioritisation.
 

@@ -490,6 +490,9 @@ def _emit_receipt(
     signed = sign_receipt(receipt_obj, private_key)
     chain_tokens.append(signed)
     chain_path.write_text("\n".join(chain_tokens) + "\n", encoding="utf-8")
+    from .transparency import queue_receipt_anchor_best_effort
+
+    queue_receipt_anchor_best_effort(signed, chain_path)
     return receipt_obj
 
 

@@ -45,6 +45,7 @@ PUBLIC_ARTIFACT_GLOBS = [
     ".github/workflows/*.yml",
     "docs/**/*.json",
     "docs/**/*.jsonl",
+    "docs/specs/fixtures/*.pem",
     "python/vibap/_specs/*.json",
     "go/spec/**/*.json",
     "examples/**/*.json",

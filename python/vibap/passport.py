@@ -467,6 +467,37 @@ def load_private_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePriv
     return serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
 
 
+def load_existing_private_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePrivateKey:
+    """Load ``passport_private.pem`` without creating directories or key material."""
+    target_dir = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    try:
+        if target_dir.exists() and not target_dir.is_dir():
+            raise KeyDirectoryError()
+    except OSError as exc:
+        raise KeyDirectoryError() from exc
+    private_path = target_dir / "passport_private.pem"
+    try:
+        if private_path.is_symlink():
+            raise ValueError("passport_private.pem must not be a symlink")
+        if os.name == "posix" and private_path.stat().st_mode & 0o077:
+            raise PermissionError("passport_private.pem must use mode 0600 or stricter")
+        private_bytes = private_path.read_bytes()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "passport_private.pem is missing from the Mission Passport key directory"
+        ) from exc
+    except PermissionError:
+        raise
+    except NotADirectoryError as exc:
+        raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise ValueError("passport_private.pem is not a readable EC private key") from exc
+    private_key = serialization.load_pem_private_key(private_bytes, password=None)
+    if not isinstance(private_key, ec.EllipticCurvePrivateKey):
+        raise ValueError("passport_private.pem must contain an EC private key")
+    return private_key
+
+
 def load_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePublicKey:
     target_dir = resolve_keys_dir(keys_dir)
     pub_path = target_dir / "passport_public.pem"

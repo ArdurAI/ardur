@@ -233,6 +233,9 @@ def _locked(state: ChainState):
 def _append_receipt_unlocked(state: ChainState, signed_jwt: str) -> None:
     with open(state.file, "a", encoding="utf-8") as f:
         f.write(signed_jwt.strip() + "\n")
+    from .transparency import queue_receipt_anchor_best_effort
+
+    queue_receipt_anchor_best_effort(signed_jwt, state.file)
 
 
 def _previous_receipt_hash_unlocked(state: ChainState) -> str | None:
