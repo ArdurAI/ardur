@@ -94,6 +94,16 @@ type daemon struct {
 	// daemon-lifetime monotonic identifier shared by all affected sessions.
 	lifecycleCaptureSummaries map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator
 	lifecycleCaptureLossEpoch uint64
+	// lifecycleDropMu protects daemon-lifetime producer-drop baselining. The
+	// source is installed by the Linux lifecycle consumer and sampled at event
+	// and session boundaries so final drops do not need a later valid event.
+	// Code that needs both locks must acquire lifecycleDropMu before d.mu.
+	lifecycleDropMu          sync.Mutex
+	lifecycleDropTotal       func() (uint64, bool)
+	lifecycleDropLast        uint64
+	lifecycleDropBaselineSet bool
+	lifecycleDropReadFailed  bool
+	lifecycleDropSourceGone  bool
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
@@ -169,6 +179,14 @@ type appliedAllowRecord struct {
 	paths    map[string]struct{}
 	nets     map[string]struct{}
 }
+
+type lifecycleCaptureLossKind uint8
+
+const (
+	lifecycleCaptureLossGeneric lifecycleCaptureLossKind = iota
+	lifecycleCaptureLossMalformed
+	lifecycleCaptureLossProducer
+)
 
 const (
 	daemonTierNone    = "none"
@@ -323,16 +341,20 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 	switch req.Method {
 	case kernelcapture.DaemonProtocolMethodRegisterSession:
 		if req.RegisterSession != nil {
+			d.sampleLifecycleProducerLoss()
 			d.onSessionRegistered(req.RegisterSession, resp.SessionID)
+			d.sampleLifecycleProducerLoss()
 		}
 	case kernelcapture.DaemonProtocolMethodEndSession:
 		if sessionID := req.EndSession; sessionID != nil {
+			d.sampleLifecycleProducerLoss()
 			if summary, ok := d.lifecycleCaptureSummaryForSession(sessionID.SessionID); ok {
 				resp.LifecycleCapture = &summary
 			}
 			d.onSessionEnded(sessionID.SessionID)
 		}
 	case kernelcapture.DaemonProtocolMethodSessionStatus:
+		d.sampleLifecycleProducerLoss()
 		if summary, ok := d.enforceSummaryForScope(resp.SessionID); ok {
 			resp.Enforcement = &summary
 		}
@@ -762,10 +784,10 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	if sessionID == "" || reg == nil {
 		return
 	}
+	producerCounterGap := d.lifecycleProducerCounterEvidenceGapActive()
 	d.tamperWriteMu.Lock()
 	defer d.tamperWriteMu.Unlock()
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if reg.CgroupID != 0 {
 		d.cgroupIndex[reg.CgroupID] = sessionID
@@ -786,7 +808,11 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	lastTamperSeq, _ := d.tamperChain.Head()
 	summary.InitializeTamperWindow(lastTamperSeq+1, d.expectedKillSwitchEngaged)
 	d.enforceSummaries[sessionID] = summary
-	d.lifecycleCaptureSummaries[sessionID] = kernelcapture.NewLifecycleCaptureSummaryAccumulator()
+	captureSummary := kernelcapture.NewLifecycleCaptureSummaryAccumulator()
+	if producerCounterGap {
+		captureSummary.RecordProducerCounterEvidenceGap()
+	}
+	d.lifecycleCaptureSummaries[sessionID] = captureSummary
 
 	d.log.Info("session registered",
 		"session_id", sessionID,
@@ -795,6 +821,16 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 		"event_classes", reg.EventClasses,
 		"ttl_s", reg.TTLSeconds,
 	)
+	d.mu.Unlock()
+
+	// Close the transition window between the first counter-state snapshot and
+	// publishing the new summary. A failure recorded before publication cannot
+	// update this session, while a failure after publication will update it
+	// under d.mu. This second snapshot covers the former case without reversing
+	// the lifecycleDropMu -> d.mu lock order used by producer sampling.
+	if !producerCounterGap && d.lifecycleProducerCounterEvidenceGapActive() {
+		captureSummary.RecordProducerCounterEvidenceGap()
+	}
 }
 
 // onSessionEnded removes the session from the routing index and clears BPF maps.
@@ -1031,10 +1067,14 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 
 // recordLifecycleCaptureLoss records one daemon-global process lifecycle loss
 // epoch against every session active at that instant. It deliberately does not
-// attach the loss to a later event: the malformed record has no trustworthy
-// cgroup or PID, so event-based attribution would be arbitrary. The summaries
-// remain available for every session_status response until the session ends.
+// attach host-global loss to a later event because session attribution would be
+// arbitrary. The summaries remain available for every session_status response
+// until the session ends.
 func (d *daemon) recordLifecycleCaptureLoss(loss kernelcapture.CaptureLoss) uint64 {
+	return d.recordLifecycleCaptureLossKind(loss, lifecycleCaptureLossGeneric)
+}
+
+func (d *daemon) recordLifecycleCaptureLossKind(loss kernelcapture.CaptureLoss, kind lifecycleCaptureLossKind) uint64 {
 	if loss.RingbufDropped == 0 && loss.DaemonQueueDropped == 0 {
 		return 0
 	}
@@ -1044,13 +1084,132 @@ func (d *daemon) recordLifecycleCaptureLoss(loss kernelcapture.CaptureLoss) uint
 	d.lifecycleCaptureLossEpoch++
 	epoch := d.lifecycleCaptureLossEpoch
 	for _, summary := range d.lifecycleCaptureSummaries {
-		summary.RecordLoss(loss, epoch)
+		switch kind {
+		case lifecycleCaptureLossMalformed:
+			summary.RecordMalformedRecord(epoch)
+		case lifecycleCaptureLossProducer:
+			summary.RecordProducerRingbufDropped(loss.RingbufDropped, epoch)
+		default:
+			summary.RecordLoss(loss, epoch)
+		}
 	}
 	return epoch
 }
 
 func (d *daemon) recordMalformedLifecycleRecord() uint64 {
-	return d.recordLifecycleCaptureLoss(kernelcapture.CaptureLoss{RingbufDropped: 1})
+	return d.recordLifecycleCaptureLossKind(kernelcapture.CaptureLoss{RingbufDropped: 1}, lifecycleCaptureLossMalformed)
+}
+
+// setLifecycleDropCounter installs a daemon-lifetime monotonic producer-drop
+// source and snapshots its current value. A nonzero inherited total is a prior
+// lifetime baseline and is not replayed into current sessions.
+func (d *daemon) setLifecycleDropCounter(source func() (uint64, bool)) {
+	d.lifecycleDropMu.Lock()
+	previousSourceInstalled := d.lifecycleDropTotal != nil
+	d.lifecycleDropTotal = source
+	d.lifecycleDropLast = 0
+	d.lifecycleDropBaselineSet = false
+	d.lifecycleDropReadFailed = false
+	if source != nil {
+		d.lifecycleDropSourceGone = false
+	}
+	var baseline uint64
+	var baselineSet bool
+	if source != nil {
+		baseline, baselineSet = source()
+		if baselineSet {
+			d.lifecycleDropLast = baseline
+			d.lifecycleDropBaselineSet = true
+		} else {
+			d.lifecycleDropReadFailed = true
+		}
+	}
+	removedLiveSource := source == nil && previousSourceInstalled
+	if removedLiveSource {
+		d.lifecycleDropSourceGone = true
+	}
+	if (source != nil && !baselineSet) || removedLiveSource {
+		d.recordLifecycleProducerCounterEvidenceGap()
+	}
+	d.lifecycleDropMu.Unlock()
+	if baselineSet && baseline > 0 {
+		d.log.Warn("lifecycle drop counter nonzero at consumer load (prior daemon lifetime; not replayed)",
+			"kernel_dropped_total", baseline)
+	}
+	if source != nil && !baselineSet {
+		d.log.Warn("lifecycle drop counter unavailable at consumer load; active sessions will carry an evidence gap")
+	}
+	if removedLiveSource {
+		d.log.Warn("lifecycle drop counter source removed; active sessions will carry an evidence gap")
+	}
+}
+
+func (d *daemon) lifecycleProducerCounterEvidenceGapActive() bool {
+	d.lifecycleDropMu.Lock()
+	defer d.lifecycleDropMu.Unlock()
+	return d.lifecycleDropReadFailed || d.lifecycleDropSourceGone
+}
+
+// sampleLifecycleProducerLoss records newly observed in-kernel reservation
+// failures against every currently active session. The first successful read is
+// always a baseline, including after an initially unavailable counter.
+func (d *daemon) sampleLifecycleProducerLoss() uint64 {
+	d.lifecycleDropMu.Lock()
+	if d.lifecycleDropTotal == nil {
+		d.lifecycleDropMu.Unlock()
+		return 0
+	}
+	total, ok := d.lifecycleDropTotal()
+	if !ok {
+		firstFailure := !d.lifecycleDropReadFailed
+		d.lifecycleDropReadFailed = true
+		d.recordLifecycleProducerCounterEvidenceGap()
+		d.lifecycleDropMu.Unlock()
+		if firstFailure {
+			d.log.Warn("lifecycle drop counter read failed; capture completeness is unknown")
+		}
+		return 0
+	}
+	recovered := d.lifecycleDropReadFailed
+	d.lifecycleDropReadFailed = false
+	if !d.lifecycleDropBaselineSet {
+		d.lifecycleDropLast = total
+		d.lifecycleDropBaselineSet = true
+		d.lifecycleDropMu.Unlock()
+		if recovered {
+			d.log.Info("lifecycle drop counter read recovered; current total established as a new baseline",
+				"kernel_dropped_total", total)
+		}
+		return 0
+	}
+	if total < d.lifecycleDropLast {
+		prior := d.lifecycleDropLast
+		d.lifecycleDropLast = total
+		d.recordLifecycleProducerCounterEvidenceGap()
+		d.lifecycleDropMu.Unlock()
+		d.log.Warn("lifecycle drop counter moved backwards; capture completeness is unknown",
+			"prior_kernel_dropped_total", prior, "kernel_dropped_total", total)
+		return 0
+	}
+	if total == d.lifecycleDropLast {
+		d.lifecycleDropMu.Unlock()
+		return 0
+	}
+	delta := total - d.lifecycleDropLast
+	d.lifecycleDropLast = total
+	epoch := d.recordLifecycleCaptureLossKind(kernelcapture.CaptureLoss{RingbufDropped: delta}, lifecycleCaptureLossProducer)
+	d.lifecycleDropMu.Unlock()
+	d.log.Warn("lifecycle ringbuf producer drops observed",
+		"drop_count", delta, "kernel_dropped_total", total, "loss_epoch", epoch)
+	return delta
+}
+
+func (d *daemon) recordLifecycleProducerCounterEvidenceGap() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, summary := range d.lifecycleCaptureSummaries {
+		summary.RecordProducerCounterEvidenceGap()
+	}
 }
 
 func (d *daemon) lifecycleCaptureSummaryForSession(sessionID string) (kernelcapture.LifecycleCaptureSummary, bool) {

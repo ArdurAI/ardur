@@ -159,14 +159,14 @@ func LoadAndAttachProcessGuardEBPF() (*ProcessGuardHandles, error) {
 // PinnedGuardPaths holds the bpffs paths used for pinning the process_guard
 // BPF-LSM links and its policy-state maps (issue #124).
 //
-// Unlike the process-exec tracepoint (PinnedEBPFPaths: 2 links + 1 ringbuf
-// map), the guard has three LSM links and eight maps. Only the six maps that
-// hold policy STATE plus the enforce_events ringbuf and its drop counter
-// (enforce_events_dropped, issue #122) are listed here — the three per-CPU
-// scratch maps (file_allow_scratch, net_lpm_scratch, path_lpm_scratch) are
-// working memory the BPF program repopulates on every invocation; they carry
-// no state worth preserving across a restart and are safe to recreate empty on
-// every load.
+// Unlike the process-exec tracepoint (PinnedEBPFPaths: 2 links + ringbuf +
+// producer-drop counter), the durable guard state has three LSM links and eight
+// maps: six policy maps plus the enforce_events ringbuf and its drop counter
+// (enforce_events_dropped, issue #122). The three additional per-CPU scratch
+// maps (file_allow_scratch, net_lpm_scratch, path_lpm_scratch) are working
+// memory the BPF program repopulates on every invocation; they carry no state
+// worth preserving across a restart and are safe to recreate empty on every
+// load.
 type PinnedGuardPaths struct {
 	BprmLinkPath       string
 	FileOpenLinkPath   string

@@ -24,6 +24,9 @@ func TestDefaultDaemonCustodyConfigBuildsLocalOnlyPlan(t *testing.T) {
 	if plan.RingbufMapPath != "/sys/fs/bpf/ardur/process_lifecycle_events" {
 		t.Fatalf("ringbuf map path = %q", plan.RingbufMapPath)
 	}
+	if plan.LifecycleDroppedMapPath != "/sys/fs/bpf/ardur/process_lifecycle_events_dropped" {
+		t.Fatalf("lifecycle dropped map path = %q", plan.LifecycleDroppedMapPath)
+	}
 	if plan.OwnerUID != 0 || plan.OwnerGID != 0 {
 		t.Fatalf("owner = %d:%d, want 0:0", plan.OwnerUID, plan.OwnerGID)
 	}
@@ -160,6 +163,9 @@ func TestDaemonCustodyConfigRejectsInvalidPathRelationships(t *testing.T) {
 		{name: "relative config", mut: func(cfg *DaemonCustodyConfig) { cfg.ConfigPath = "ardur/kernelcapture.toml" }},
 		{name: "map outside bpffs", mut: func(cfg *DaemonCustodyConfig) { cfg.RingbufMapPath = "/tmp/ardur/process_lifecycle_events" }},
 		{name: "map outside configured bpffs dir", mut: func(cfg *DaemonCustodyConfig) { cfg.RingbufMapPath = "/sys/fs/bpf/other/process_lifecycle_events" }},
+		{name: "drop counter outside configured bpffs dir", mut: func(cfg *DaemonCustodyConfig) {
+			cfg.LifecycleDroppedMapPath = "/sys/fs/bpf/other/process_lifecycle_events_dropped"
+		}},
 		{name: "socket outside run dir", mut: func(cfg *DaemonCustodyConfig) { cfg.SocketPath = "/tmp/kernelcapture.sock" }},
 		{name: "config outside etc", mut: func(cfg *DaemonCustodyConfig) { cfg.ConfigPath = "/tmp/kernelcapture.toml" }},
 		{name: "state outside var lib", mut: func(cfg *DaemonCustodyConfig) { cfg.StateDir = "/tmp/ardur/kernelcapture" }},
@@ -177,6 +183,22 @@ func TestDaemonCustodyConfigRejectsInvalidPathRelationships(t *testing.T) {
 				t.Fatalf("expected ErrDaemonCustodyConfig, got %v", err)
 			}
 		})
+	}
+}
+
+func TestDaemonCustodyConfigDerivesLifecycleDropCounterPath(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultDaemonCustodyConfig()
+	cfg.LifecycleDroppedMapPath = ""
+	cfg.RepositoryRoot = t.TempDir()
+	plan, err := BuildDaemonCustodyPlan(cfg)
+	if err != nil {
+		t.Fatalf("BuildDaemonCustodyPlan returned error: %v", err)
+	}
+	want := filepath.Join(cfg.BPFFSDir, "process_lifecycle_events_dropped")
+	if plan.LifecycleDroppedMapPath != want {
+		t.Fatalf("derived lifecycle dropped map path = %q, want %q", plan.LifecycleDroppedMapPath, want)
 	}
 }
 

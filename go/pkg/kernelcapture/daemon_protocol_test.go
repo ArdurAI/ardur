@@ -121,11 +121,14 @@ func TestDaemonProtocolResponseLifecycleCaptureRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	want := LifecycleCaptureSummary{
-		CoverageStatus:     LifecycleCaptureCoverageDegraded,
-		RingbufDropped:     2,
-		DaemonQueueDropped: 1,
-		LossEpochStart:     4,
-		LossEpochEnd:       6,
+		CoverageStatus:             LifecycleCaptureCoverageDegraded,
+		RingbufDropped:             2,
+		ProducerRingbufDropped:     1,
+		MalformedRecords:           1,
+		ProducerCounterEvidenceGap: true,
+		DaemonQueueDropped:         1,
+		LossEpochStart:             4,
+		LossEpochEnd:               6,
 	}
 	encoded, err := EncodeDaemonProtocolResponse(DaemonProtocolResponse{
 		ProtocolVersion:  DaemonProtocolVersion,
@@ -138,7 +141,7 @@ func TestDaemonProtocolResponseLifecycleCaptureRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeDaemonProtocolResponse returned error: %v", err)
 	}
-	if !bytes.Contains(encoded, []byte(`"lifecycle_capture":{"coverage_status":"degraded","ringbuf_dropped":2,"daemon_queue_dropped":1,"loss_epoch_start":4,"loss_epoch_end":6}`)) {
+	if !bytes.Contains(encoded, []byte(`"lifecycle_capture":{"coverage_status":"degraded","ringbuf_dropped":2,"producer_ringbuf_dropped":1,"malformed_records":1,"producer_counter_evidence_gap":true,"daemon_queue_dropped":1,"loss_epoch_start":4,"loss_epoch_end":6}`)) {
 		t.Fatalf("encoded lifecycle_capture = %s", encoded)
 	}
 

@@ -54,6 +54,16 @@ struct {
     __uint(max_entries, 1 << 12);
 } events SEC(".maps");
 
+// lifecycle_events_dropped counts process exec/exit records that could not be
+// reserved in the ringbuf. Ringbuf readers do not receive a lost-samples signal,
+// so userspace must read this monotonic counter to report producer-side gaps.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+} lifecycle_events_dropped SEC(".maps");
+
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 1);
@@ -87,6 +97,8 @@ static __always_inline int cgroup_allowed(__u64 cgroup_id) {
 
 static __always_inline int submit_process_event(__u8 event_type) {
     struct ardur_process_event *event;
+    __u32 zero = 0;
+    __u64 *dropped;
     __u64 pid_tgid;
     __u64 cgroup_id;
     struct task_struct *task;
@@ -101,6 +113,10 @@ static __always_inline int submit_process_event(__u8 event_type) {
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event) {
+        dropped = bpf_map_lookup_elem(&lifecycle_events_dropped, &zero);
+        if (dropped) {
+            __sync_fetch_and_add(dropped, 1);
+        }
         return 0;
     }
 

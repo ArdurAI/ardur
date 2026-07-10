@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "f3ef13e19867d08f9f10ebc9d6c2fb66e8f67f232d06befbb4e603bfd7d12952"
+source_sha256: "88bbd56551f0c8c7663bdf2d9e5da78dbecbfde5f52516233af5789c9004bc28"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -28,9 +28,10 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - `coverage_status`
   - `capture_loss`
 - Exposes a session-window `lifecycle_capture` summary on daemon
-  `session_status` / `end_session` responses. Daemon-global malformed-record
-  loss degrades every session active during the same monotonic loss epoch and
-  is never charged to whichever session produces the next valid event.
+  `session_status` / `end_session` responses. Both in-kernel ringbuf reserve
+  failures and malformed userspace records degrade every session active during
+  the same monotonic loss epoch and are never charged to whichever session
+  produces the next valid event. Source-specific counters remain distinct.
 - Enforces honesty behavior:
   - ambiguous attribution => `insufficient_evidence`
   - degraded/unknown coverage => `insufficient_evidence`
@@ -246,13 +247,14 @@ Rootless privileged containers can still fail if memlock cannot be raised or tra
 
 ## Privileged boundary
 
-This package now contains bounded Linux-only Slice 2 daemon installer, systemd service, and link-pinning surfaces, but they remain development proof points rather than production daemon readiness. The `ardur-sensor install` path runs kernel capability checks, calls `InstallDaemonCustody` to create root-owned config/state custody paths with fd-anchored TOCTOU protections, installs a systemd unit, and can run `systemctl daemon-reload` plus `systemctl enable --now` unless `--no-enable` is supplied. The systemd unit declares `Type=notify`, watchdog timing, restrictive runtime/state/log directories, and BPF-related capability bounds. `LoadAndAttachProcessExecEBPFPinned` can pin tracepoint links and the ringbuf map under daemon-owned bpffs paths for restart-survival semantics. The only live socket behavior in this package remains the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; the only daemon session state remains the in-memory `DaemonSessionRegistry` proof seam, which binds ownership to daemon-observed UID/GID/PID plus process-start ticks for status/end requests; the daemon session/cgroup handoff remains a no-mutation plan seam. These are not release packages, cross-platform installers, persistent production session managers, cgroup assignment mechanisms, live enforcement, file/network side-effect capture, or production lifecycle guarantees.
+This package now contains bounded Linux-only Slice 2 daemon installer, systemd service, and link-pinning surfaces, but they remain development proof points rather than production daemon readiness. The `ardur-sensor install` path runs kernel capability checks, calls `InstallDaemonCustody` to create root-owned config/state custody paths with fd-anchored TOCTOU protections, installs a systemd unit, and can run `systemctl daemon-reload` plus `systemctl enable --now` unless `--no-enable` is supplied. The systemd unit declares `Type=notify`, watchdog timing, restrictive runtime/state/log directories, and BPF-related capability bounds. `LoadAndAttachProcessExecEBPFPinned` pins tracepoint links, the ringbuf, and its monotonic producer-drop counter as one restart-surviving generation; stale partial generations are removed before fresh attach. The only live socket behavior in this package remains the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; the only daemon session state remains the in-memory `DaemonSessionRegistry` proof seam, which binds ownership to daemon-observed UID/GID/PID plus process-start ticks for status/end requests; the daemon session/cgroup handoff remains a no-mutation plan seam. These are not release packages, cross-platform installers, persistent production session managers, cgroup assignment mechanisms, live enforcement, file/network side-effect capture, or production lifecycle guarantees.
 `BuildDaemonCustodyPlan` records the local-only dry-run daemon custody boundary as validated data:
 
 - config path: `/etc/ardur/kernelcapture-daemon.toml`, `0600`, root-owned
 - state dir: `/var/lib/ardur/kernelcapture`, `0700`, root-owned
 - runtime dir/socket: `/run/ardur/kernelcapture/control.sock`, socket `0600` or `0660`, root-owned
-- bpffs dir/map: `/sys/fs/bpf/ardur/process_lifecycle_events`, root-owned
+- bpffs dir/maps: `/sys/fs/bpf/ardur/process_lifecycle_events` and
+  `/sys/fs/bpf/ardur/process_lifecycle_events_dropped`, root-owned
 
 It rejects repository-controlled privileged paths when repository-root validation context is supplied, and the dry-run plan itself rejects any request to install or start a daemon. The separate Slice 2 installer path is explicitly Linux/root-gated and documented above. `InspectDaemonCustodyPreflight` adds the read-only on-disk inspection layer: symlink-aware realpath checks, owner/mode/type observations, and structured remediation text. `AuthorizeObservedDaemonPeer` adds the fail-closed local-client authorization contract: peer identity must be observed by daemon-owned socket code, include non-zero process-start ticks, and match an explicit UID/GID allowlist; it is never supplied by JSON clients. `AuthorizeDaemonProtocolPeer` adds the no-mutation handshake contract: a decoded protocol request is not considered ready for handling until it is paired with daemon-observed peer credentials from an explicit OS source, carries the same process-start identity, and the observed socket path matches the dry-run custody plan. `ObserveLinuxUnixPeerCredentials` is the Linux SO_PEERCRED retrieval seam for an accepted Unix connection and reads the bounded `/proc/<pid>/stat` start-time field for PID-reuse hardening. `BuildDaemonAcceptLoopPlan` records accept-loop invariants as dry-run data: a valid custody plan, explicit peer allowlist, bounded request bytes, bounded read timeout, bounded concurrency, and not-yet-executed steps for preflight, bind, accept, peer observation, request decoding, authorization, and dispatch. `DaemonUnixSocketServer` implements the bounded local Unix-domain socket proof seam around those invariants for protocol/authorization testing, but it still does not install/start a daemon service, create custody directories, pin maps, create cgroups, manage persistent/production daemon session state, or perform live enforcement. `BuildDaemonSessionHandoffPlan` projects an active registry record into daemon-owned hashed state/runtime paths and a non-zero cgroup allowlist precondition sequence, but it remains reviewable plan data and does not write filesystem state, assign cgroups, mutate BPF maps, pin maps, or enable live enforcement.
 
