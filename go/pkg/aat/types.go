@@ -1,23 +1,12 @@
-// Package aat defines the skeleton types for the Attenuating Authorization
-// Tokens (AAT) profile adopted by VIBAP.
-//
-// SECURITY-RELEVANT NOTICE — DO NOT USE THIS PACKAGE AS A VERIFIER (FIX-10
-// from S2 hostile audit, 2026-04-28). The AAT chain verifier in this
-// package is a fail-closed stub: VerifyChain returns VerdictDeny on every
-// call, regardless of inputs. Production callers MUST NOT depend on this
-// package's VerifyChain to enforce AAT §7. Until the TODO list in
-// chain_verify.go is closed, AAT enforcement happens in the Python
-// reference proxy (python/vibap/aat_adapter.py), not here. Importing this
-// package gives you the data types and the fail-closed stub, nothing more.
+// Package aat implements the JWT path of the Attenuating Authorization Tokens
+// (AAT) profile adopted by Ardur. It includes issuance, attenuation,
+// proof-of-possession, constraint, and chain-verification logic.
 //
 // Spec reference:
 //   - draft-niyikiza-oauth-attenuating-agent-tokens-00
 //   - Section 3: Token Types and Structure
 //
-// This package intentionally lands only the type system, function signatures,
-// and verification/derivation scaffolding required by PLAN.md §B.5. The
-// verifier, derivation logic, and PoP handling are left as explicit follow-up
-// work.
+// The companion CWT integer claim-key mapping remains pending; see ClaimKeys.
 package aat
 
 import jose "github.com/go-jose/go-jose/v4"

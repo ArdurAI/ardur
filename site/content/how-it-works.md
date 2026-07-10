@@ -44,9 +44,10 @@ That's it. No JSON, no YAML, no custom language. Ardur compiles this into a
 signed Mission Passport — a JWT that cryptographically binds the agent to
 these rules.
 
-## 2. Ardur enforces the rules at runtime
+## 2. A configured integration checks the request
 
-Every time the agent tries to call a tool, Ardur checks:
+When an installed adapter or proxy sends a tool request through Ardur, it
+checks:
 
 - **Is this tool allowed?** If it's not in the allowed list, deny.
 - **Is it forbidden?** Some tools are never OK, regardless.
@@ -54,22 +55,27 @@ Every time the agent tries to call a tool, Ardur checks:
 - **Has the budget been exceeded?** Too many calls or too long running? Deny.
 - **Do the policy backends agree?** Cedar rules, forbid-rules, custom checks.
 
-All of this happens before the tool runs. The agent never touches resources
-it shouldn't.
+The decision happens before that integration dispatches the tool. A deny keeps
+the governed adapter from dispatching the request. Ardur does not claim to
+discover or stop calls that bypass the configured boundary.
 
-## 3. You get signed proof of everything
+## 3. You get signed evidence for observed decisions
 
-Every decision produces an Execution Receipt — a JWT signed with the issuer's
+Each observed decision produces an Execution Receipt — a JWT signed with the issuer's
 private key. Each receipt links to the previous one by SHA-256 hash. The chain
 is tamper-evident: change any receipt and every receipt after it fails
 verification.
 
 A session receipt chain gives you:
 
-- **A complete timeline** — what happened and when
-- **The verdict** — PERMIT or DENY for each tool call
+- **An observed timeline** — calls that reached the configured Ardur boundary
+- **The verdict** — PERMIT or DENY for each observed tool call
 - **The reason** — which rule triggered a denial
 - **Cryptographic integrity** — proof the chain hasn't been modified
+
+Offline verification proves the issuer signature and chain linkage. It does
+not turn a self-issued receipt into independent third-party attestation, and it
+does not prove the side effects that occurred below a permitted tool call.
 
 ## Where Ardur sits
 
@@ -78,7 +84,7 @@ A session receipt chain gives you:
 │  Your AI agent (Claude Code, LangChain,  │
 │  AutoGen, custom, ...)                   │
 └──────────────────┬──────────────────────┘
-                   │ every tool call
+                   │ configured tool-call path
                    ▼
 ┌─────────────────────────────────────────┐
 │            Ardur Governance Proxy         │
@@ -100,14 +106,15 @@ A session receipt chain gives you:
 └─────────────────────────────────────────┘
 ```
 
-The proxy is the enforcement point. No bypass, no direct access, no "oops I
-forgot to turn it on."
+The adapter or proxy is the enforcement point only for traffic routed through
+it. Direct or provider-hidden paths remain outside this proof boundary.
 
 ## What Ardur does NOT do
 
 Honesty matters. Ardur is not:
 
 - **A sandbox** — it governs at the tool-call boundary, not the kernel level (yet)
+- **A universal capture layer** — calls that bypass the adapter are not observed
 - **A model guard** — it doesn't inspect or filter what the model says, only what tools it calls
 - **A replacement for OS security** — use it with, not instead of, file permissions and access controls
 

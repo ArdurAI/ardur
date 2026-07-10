@@ -25,7 +25,7 @@ go test -race ./...
 
 | Path | What lives here |
 |---|---|
-| `pkg/aat` | AAT credential-attenuation engine — constraint checks, subsumption, JWT issuance/derivation, PoP binding, and full chain verification per AAT §3-7 |
+| `pkg/aat` | AAT JWT credential-attenuation engine — constraint checks, subsumption, JWT issuance/derivation, PoP binding, and chain verification per AAT sections 3-7 |
 | `pkg/api/v1alpha1` | CRD types for the Kubernetes operator (`AgentPassport`, etc.) |
 | `pkg/credential` | Mission credential issuance + verification (SD-JWT-VC types for the K8s operator) |
 | `pkg/issuer` | Mission Declaration issuer + signing-key management |
@@ -42,8 +42,8 @@ go test -race ./...
 
 ## AAT Package
 
-The `pkg/aat` package implements the full Attenuating Authorization Token
-specification:
+The `pkg/aat` package implements the JWT path of the Attenuating Authorization
+Token profile:
 
 - **Constraint engine** — 13 constraint types (Exact, Pattern, Range, OneOf,
   NotOneOf, Contains, Subset, Regex, Wildcard, All, Any, Not, CEL) with
@@ -59,9 +59,12 @@ specification:
   §7: structural validation → root verification (3a-3n) → link
   verification (4a-4s) → depth match → leaf constraint check → PoP
   verification → verdict.
-- **49 tests** covering constraint checks, subsumption cross-types,
-  issuance, derivation, PoP round-trips, and full chain verification
-  scenarios.
+- **Tests** covering constraint checks, subsumption cross-types, issuance,
+  derivation, PoP round-trips, and full chain verification scenarios.
+
+The companion CWT integer claim-key mapping is still pending. This package is
+therefore substantial and runnable, but it is not a claim of complete support
+for every AAT serialization profile.
 
 ```bash
 cd go && go test ./pkg/aat/... -v   # full AAT test suite

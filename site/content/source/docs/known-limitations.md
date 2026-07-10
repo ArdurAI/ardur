@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "24fdbe4177983e88108c940ab7a0ea8109f8a4fdcb5dd6a0038069052b7ce542"
+source_sha256: "be8acf73817e13ea683601d3ae32b76282c4c84c624fef3c060d445131f83c21"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -42,11 +42,19 @@ evidence, Ardur must classify the result as `insufficient_evidence` (resulting
 in an `unknown` verdict at the session/verifier level) rather than safe. See
 [`coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the receipt-level evidence taxonomy.
 
+Ardur's current first-run proof is a configured tool-boundary proof. It can
+verify the issuer signature and hash linkage on receipts for calls observed by
+the adapter or proxy. It does not prove that every host or provider action was
+observed, and it does not add an independent third-party witness to a
+self-issued receipt. Transparency anchoring and receiver co-signing are
+separate roadmap work.
+
 ## Product limits
 
 Ardur is not:
 
 - a sandbox by itself
+- a universal discovery layer for calls that bypass its configured adapter
 - a universal semantic-safety engine
 - a replacement for identity, workload isolation, or network controls
 

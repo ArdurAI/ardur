@@ -2,10 +2,12 @@
 
 ## Capture Boundary
 
-Today, Ardur captures every Claude Code tool-call invocation — file reads
-(`Read`), file writes (`Edit`/`Write`), shell command invocations (`Bash`),
-web access (`WebFetch`/`WebSearch`), and subagent dispatches (`Task`). Each
-invocation is signed (ES256) and chained (SHA-256).
+Today, an installed Ardur Claude Code hook records the tool-call events Claude
+Code delivers to that hook — file reads (`Read`), file writes (`Edit`/`Write`),
+shell command invocations (`Bash`), web access (`WebFetch`/`WebSearch`), and
+subagent dispatches (`Task`). Each observed invocation is signed (ES256) and
+chained (SHA-256). Ardur does not claim visibility into calls that bypass the
+hook or provider-hidden actions.
 
 What we do **not** yet capture:
 
@@ -33,7 +35,7 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 - curated Python runtime files and tests are present under `python/`, including the Ardur Personal Hub service (`personal_hub.py`), Claude Code hook (`claude_code_hook.py`), Claude telemetry/reporting (`claude_code_telemetry.py`, `claude_code_report.py`), Gemini CLI local-only hook fixture/reporting (`gemini_cli_hook.py`), Codex app-server local host-event fixture/reporting (`codex_app_server_fixture.py`), native-messaging host (`ardur_personal_native_host.py`), and `ARDUR.md` profile compiler (`ardur_profile.py`)
 - the `ardur` CLI ships subcommands for the protocol path (`issue`, `verify`, `attest`, `start`) and the Personal path (`hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `uninstall`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `profile init`, `protect claude-code`, `claude-code-hook`, `claude-code-report`, `gemini-cli-fixture`, `gemini-cli-hook`, `gemini-cli-report`, `codex-app-server-fixture`, `codex-app-server-event`, `codex-app-server-report`)
 - the Claude Code plugin is present under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks plus a smoke script
-- curated Go runtime, governance, and operator files are present under `go/` (the AAT package remains a fail-closed skeleton by design and is documented as such in `go/README.md`)
+- curated Go runtime, governance, and operator files are present under `go/`; the AAT package implements the JWT issuance, derivation, proof-of-possession, constraint, and chain-verification path, while CWT integer-key mapping remains incomplete
 - runnable framework examples are present under `examples/`: LangChain, LangGraph, and AutoGen quickstarts; the Ardur Personal browser extension; the Ardur Personal desktop-observe adapter; the Ardur Personal native-messaging host; the Claude Code plugin pointer; and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
 - dedicated Python (3.10 + 3.13) and Go CI workflows run on every push and PR (`.github/workflows/tests.yml`), including the offline examples-smoke regression in `python/tests/test_examples_smoke.py`, alongside CodeQL, link-check, secret-scan, format validation, and the Hugo site build
 - the Hugo public evidence-site source tree is present under `site/`, with start-here / build / evidence sections that link each public claim back to the source file backing it

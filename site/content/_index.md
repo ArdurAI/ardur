@@ -8,9 +8,13 @@ frameworks: ["framework-agnostic"]
 evidence_levels: ["code-and-doc"]
 ---
 
-Ardur is an open-source tool that keeps AI agents honest. You tell it what your
-agent is allowed to do, it blocks anything outside that boundary, and it gives
-you proof of every decision.
+Ardur is an open-source governance layer for configured AI-agent tool paths.
+Calls observed by an Ardur adapter or proxy are checked before that integration
+dispatches them, and each decision gets an issuer-signed, hash-linked receipt.
 
-Built for the open-source AI community. MIT licensed. Works with Claude Code,
-Ollama, LangChain, and any agent that calls tools over HTTP.
+The public source-checkout proof covers Claude Code and proxy-routed framework
+examples. It does not claim universal capture, third-party witnessing, or
+cross-platform kernel enforcement. MIT licensed.
+
+See the [configured tool-boundary claim]({{< relref "/claims/configured-tool-boundary/" >}})
+and [current limitations]({{< relref "/source/docs/known-limitations/" >}}).
