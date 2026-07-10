@@ -8,8 +8,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
@@ -61,6 +63,7 @@ func newTestDaemon(t *testing.T) *daemon {
 		cgroupIndex:               make(map[uint64]string),
 		treeScopes:                make(map[string]*kernelcapture.ProcessTreeScope),
 		correlators:               make(map[string]*kernelcapture.Correlator),
+		routeIndex:                make(map[string]*sessionRoute),
 		enforceChains:             make(map[string]*kernelcapture.EnforceReceiptChain),
 		enforceSummaries:          make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
 		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
@@ -434,6 +437,143 @@ func TestRouteEvent_NoMatch(t *testing.T) {
 	}
 	if corr != nil {
 		t.Error("routeEvent no-match: expected nil correlator")
+	}
+}
+
+func TestRouteEventFallbackIndexContainsOnlyZeroCgroupScopes(t *testing.T) {
+	d := newTestDaemon(t)
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: "registered-cgroup", RootPID: 100, CgroupID: 42,
+	}, "registered-cgroup")
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: "fallback-scope", RootPID: 200,
+	}, "fallback-scope")
+
+	d.mu.RLock()
+	fallbackCount := len(d.fallbackRoutes)
+	routeCount := len(d.routeIndex)
+	d.mu.RUnlock()
+	if fallbackCount != 1 || routeCount != 2 {
+		t.Fatalf("route indexes = fallback:%d all:%d, want fallback:1 all:2", fallbackCount, routeCount)
+	}
+
+	evt := kernelcapture.ProcessEvent{PID: 200, CgroupID: 999, Type: kernelcapture.ProcessEventExec}
+	if sid, correlator := d.routeEvent(&evt); sid != "fallback-scope" || correlator == nil {
+		t.Fatalf("zero-cgroup fallback = (%q, %v), want (fallback-scope, non-nil)", sid, correlator)
+	}
+}
+
+func TestSessionRouteRetirementWaitsForMatchedEvent(t *testing.T) {
+	d := newTestDaemon(t)
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: "retirement-session", RootPID: 100, CgroupID: 42,
+	}, "retirement-session")
+
+	evt := kernelcapture.ProcessEvent{PID: 100, CgroupID: 42, Type: kernelcapture.ProcessEventExec}
+	route := d.lockRouteEvent(&evt)
+	if route == nil {
+		t.Fatal("lockRouteEvent returned nil for registered session")
+	}
+	ended := make(chan struct{})
+	go func() {
+		d.onSessionEnded("retirement-session")
+		close(ended)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for d.mu.TryRLock() {
+		d.mu.RUnlock()
+		if time.Now().After(deadline) {
+			route.unlock()
+			t.Fatal("session retirement did not reach the route lease")
+		}
+		runtime.Gosched()
+	}
+	select {
+	case <-ended:
+		route.unlock()
+		t.Fatal("session retirement completed while a matched route lease was held")
+	default:
+	}
+	route.unlock()
+	select {
+	case <-ended:
+	case <-time.After(time.Second):
+		t.Fatal("session retirement did not complete after route lease release")
+	}
+
+	probe := kernelcapture.ProcessEvent{PID: 100, CgroupID: 42, Type: kernelcapture.ProcessEventExec}
+	if sid, correlator := d.routeEvent(&probe); sid != "" || correlator != nil {
+		t.Fatalf("retired route matched as (%q, %v)", sid, correlator)
+	}
+}
+
+func TestProcessKernelEventReleasesRouteWithNilCorrelator(t *testing.T) {
+	d := newTestDaemon(t)
+	scope := kernelcapture.NewProcessTreeScope(100, 42)
+	scope.SessionID = "nil-correlator-session"
+	route := newSessionRoute("nil-correlator-session", &scope, nil)
+	d.mu.Lock()
+	d.cgroupIndex[42] = route.sessionID
+	d.treeScopes[route.sessionID] = &scope
+	d.publishSessionRouteLocked(route)
+	d.mu.Unlock()
+
+	d.processKernelEvent(kernelcapture.ProcessEvent{PID: 100, CgroupID: 42, Type: kernelcapture.ProcessEventExec})
+	if !route.mu.TryLock() {
+		t.Fatal("nil-correlator event leaked its route lease")
+	}
+	route.mu.Unlock()
+}
+
+func TestRouteEventConcurrentRoutingAndRetirement(t *testing.T) {
+	d := newTestDaemon(t)
+	const sessionCount = 32
+	for index := 0; index < sessionCount; index++ {
+		sessionID := benchmarkRouteSessionID(index)
+		evt := benchmarkRouteEvent(index)
+		d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+			SessionID: sessionID, RootPID: evt.PID, CgroupID: evt.CgroupID,
+		}, sessionID)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for index := 0; index < sessionCount; index++ {
+		index := index
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 500 {
+				evt := benchmarkRouteEvent(index)
+				d.routeEvent(&evt)
+			}
+		}()
+		if index%2 == 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				d.onSessionEnded(benchmarkRouteSessionID(index))
+			}()
+		}
+	}
+	close(start)
+	wg.Wait()
+
+	for index := 0; index < sessionCount; index++ {
+		evt := benchmarkRouteEvent(index)
+		sid, correlator := d.routeEvent(&evt)
+		if index%2 == 0 {
+			if sid != "" || correlator != nil {
+				t.Fatalf("retired session %d still routed as %q", index, sid)
+			}
+			continue
+		}
+		if want := benchmarkRouteSessionID(index); sid != want || correlator == nil {
+			t.Fatalf("active session %d routed as (%q, %v), want (%q, non-nil)", index, sid, correlator, want)
+		}
 	}
 }
 
