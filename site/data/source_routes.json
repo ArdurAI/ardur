@@ -155,6 +155,7 @@
     "docs/reference/README.md": "source/docs/reference/readme/",
     "docs/reference/ardur-md-profile.md": "source/docs/reference/ardur-md-profile/",
     "docs/reference/cli.md": "source/docs/reference/cli/",
+    "docs/reference/kernel-capture-daemon.md": "source/docs/reference/kernel-capture-daemon/",
     "docs/reference/personal-hub-api.md": "source/docs/reference/personal-hub-api/",
     "docs/reference/proxy-oci-image.md": "source/docs/reference/proxy-oci-image/",
     "docs/research/epic-b-performance-fp-budget.md": "source/docs/research/epic-b-performance-fp-budget/",
