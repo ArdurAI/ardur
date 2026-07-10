@@ -164,8 +164,12 @@ copy-paste authenticated lifecycle.
 
 Start with the source-checkout walkthrough in
 [`docs/guides/claude-code-mvp-quickstart.md`](docs/guides/claude-code-mvp-quickstart.md).
-It gives two bounded paths:
+It gives three bounded paths:
 
+- a **60-second deliberate deny proof** using
+  `python3 scripts/run-claude-deny-demo.py`; it exercises the real local hook
+  adapter, verifies a signed violation receipt, checks an unchanged canary, and
+  removes all temporary state without contacting an LLM provider;
 - a **no-key confidence check** that runs the fresh-user evidence harness,
   simulated Claude Code hook allow/deny receipts, and redacted bundle checks
   without contacting an LLM provider; and

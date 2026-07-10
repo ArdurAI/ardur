@@ -2,7 +2,7 @@
 title: "Claude Code MVP Quickstart"
 description: "This is the shortest product-facing path through Ardur today from a source"
 source_path: "docs/guides/claude-code-mvp-quickstart.md"
-source_sha256: "cea6ecdf699535d889a867e74593b3be4ede519d502feebf326f370a33faf343"
+source_sha256: "6211155ab12051ee10e8fa48b75a4cfba5ce4fc85e5bdd354b8b1b1281181e9b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -68,6 +68,23 @@ The driver is loopback-only and temporary: it deliberately disables TLS and
 bearer auth for its child process, verifies the attestation signature locally,
 then removes its keys and state. See the
 [no-key MVP guide](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/) for the complete boundary.
+
+For the shortest Claude Code-specific proof, run the deliberate deny demo:
+
+```bash
+python3 scripts/run-claude-deny-demo.py
+```
+
+It creates a temporary read-only profile and Mission Passport, submits a
+provider-free `PreToolUse` Bash request whose command would delete a canary and
+write an exfiltration marker, and requires Ardur to return a human-readable
+Claude Code deny before the harness can dispatch anything. It then verifies the
+canary digest, absent marker, and signed/hash-linked violation receipt before
+removing all temporary material. The run is capped at 60 seconds.
+
+The unchanged canary and absent marker are post-deny file-state checks. They do
+not prove independent process, kernel, network, or provider observation. Use
+the later evidence-correlation work for those stronger claims.
 
 ## 3. Run the no-key evidence harness
 

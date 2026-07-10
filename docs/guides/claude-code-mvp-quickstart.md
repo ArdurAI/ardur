@@ -52,6 +52,23 @@ bearer auth for its child process, verifies the attestation signature locally,
 then removes its keys and state. See the
 [no-key MVP guide](no-key-mvp-demo.md) for the complete boundary.
 
+For the shortest Claude Code-specific proof, run the deliberate deny demo:
+
+```bash
+python3 scripts/run-claude-deny-demo.py
+```
+
+It creates a temporary read-only profile and Mission Passport, submits a
+provider-free `PreToolUse` Bash request whose command would delete a canary and
+write an exfiltration marker, and requires Ardur to return a human-readable
+Claude Code deny before the harness can dispatch anything. It then verifies the
+canary digest, absent marker, and signed/hash-linked violation receipt before
+removing all temporary material. The run is capped at 60 seconds.
+
+The unchanged canary and absent marker are post-deny file-state checks. They do
+not prove independent process, kernel, network, or provider observation. Use
+the later evidence-correlation work for those stronger claims.
+
 ## 3. Run the no-key evidence harness
 
 This does not call a live LLM provider. It uses temporary HOME, project, Ardur

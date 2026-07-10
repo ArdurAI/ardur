@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur is the runtime governance and evidence layer for AI agents."
 source_path: "README.md"
-source_sha256: "1525e6840104e87cda13766777f9b80fa6f6f09ce29102a2eb366b9d0e88a3a4"
+source_sha256: "7b5eab7f5b548a09c9fddb7cf1567e5ca313b7ae059852770e52120d0d5adfe5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -181,8 +181,12 @@ copy-paste authenticated lifecycle.
 
 Start with the source-checkout walkthrough in
 [`docs/guides/claude-code-mvp-quickstart.md`](/__ardur_internal__/source/docs/guides/claude-code-mvp-quickstart/).
-It gives two bounded paths:
+It gives three bounded paths:
 
+- a **60-second deliberate deny proof** using
+  `python3 scripts/run-claude-deny-demo.py`; it exercises the real local hook
+  adapter, verifies a signed violation receipt, checks an unchanged canary, and
+  removes all temporary state without contacting an LLM provider;
 - a **no-key confidence check** that runs the fresh-user evidence harness,
   simulated Claude Code hook allow/deny receipts, and redacted bundle checks
   without contacting an LLM provider; and
