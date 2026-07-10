@@ -24,6 +24,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) | **implemented** | Immutable receipt sidecars, asynchronous pending queue, Rekor v1 and separately keyed self-hosted proof profiles, offline verifier |
 | [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
 | [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
+| [Runtime Evidence Correlation Profile v0.1](./runtime-evidence-correlation-v0.1.md) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
 | [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](./idm-extension-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -36,6 +37,9 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [DRP implementation fixture bundle schema](./drp-conformance-bundle-v0.1.schema.json) | **implemented** | Closed portable scenario, trust, expectation, and external-status contract |
 | [DRP implementation fixture report schema](./drp-implementation-fixture-report-v0.1.schema.json) | **implemented** | Closed deterministic scenario result, verifier status, and bundle-digest contract |
 | [DRP portable implementation fixtures](./conformance/drp-v0.1/README.md) | **implementation self-test** | Seven signed deterministic scenarios and report; no private keys, network dependency, IETF claim, or independent pass |
+| [Runtime evidence event schema](./runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
+| [Runtime evidence correlation report schema](./runtime-evidence-correlation-report-v0.1.schema.json) | **implemented** | Closed deterministic redacted association report; source assurance remains separate from match confidence |
+| [Runtime evidence portable fixtures](./conformance/runtime-evidence-v0.1/README.md) | **implementation self-test** | Ephemeral-key signed journal plus normalized/Tetragon/Falco inputs and reports; no private keys, sensor deployment, network dependency, or source-authenticity claim |
 | [Transparency Anchor v0.1 schema](./transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
 | [Transparency Anchor v0.1 golden fixture](./fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
 | [Receiver Attestation v0.1 schema](./receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
@@ -69,10 +73,11 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 8. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
 9. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating signed receipts
 10. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
-11. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
-12. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-13. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
-14. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
+11. [Runtime Evidence Correlation Profile v0.1](./runtime-evidence-correlation-v0.1.md) — detached claim-vs-reality association over imported sensor evidence
+12. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
+13. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+14. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
+15. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 

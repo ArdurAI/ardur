@@ -29,6 +29,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`offline-verification-bundle-v0.1.md`](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/)
 - [`receiver-attestation-v0.1.md`](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/)
 - [`revocation-v0.1.md`](/__ardur_internal__/source/docs/specs/revocation-v0.1/)
+- [`runtime-evidence-correlation-v0.1.md`](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/)
 - [`transparency-anchor-v0.1.md`](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/)
 - [`verifier-contract-v0.1.md`](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/)
 
@@ -43,6 +44,8 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)
 - [`offline-verification-bundle-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/offline-verification-bundle-v0.1.schema.json)
 - [`receiver-attestation-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/receiver-attestation-v0.1.schema.json)
+- [`runtime-evidence-correlation-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/runtime-evidence-correlation-report-v0.1.schema.json)
+- [`runtime-evidence-event-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/runtime-evidence-event-v0.1.schema.json)
 - [`transparency-anchor-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/transparency-anchor-v0.1.schema.json)
 
 ## Child Sections

@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/runtime-evidence-correlation-report-v0.1.schema.json",
+  "title": "Ardur Runtime Evidence Correlation Report v0.1",
+  "description": "Deterministic redacted associations between verified receipts and imported runtime evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_verification",
+    "event_source",
+    "summary",
+    "associations",
+    "receipt_summaries",
+    "sensitive_output_redacted",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.runtime_evidence_correlation_report.v0.1"
+    },
+    "receipt_verification": {
+      "$ref": "#/$defs/receiptVerification"
+    },
+    "event_source": {
+      "$ref": "#/$defs/eventSource"
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "associations": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/association"
+      }
+    },
+    "receipt_summaries": {
+      "type": "array",
+      "maxItems": 2048,
+      "items": {
+        "$ref": "#/$defs/receiptSummary"
+      }
+    },
+    "sensitive_output_redacted": {
+      "const": true
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "reasonCode": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,96}$"
+    },
+    "receiptVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified",
+        "result",
+        "receipt_count",
+        "source_sha256"
+      ],
+      "properties": {
+        "verified": {
+          "const": true
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "verified_chain_only"
+          ]
+        },
+        "receipt_count": {
+          "$ref": "#/$defs/count"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "eventSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "sha256",
+        "assurance",
+        "coverage"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "normalized",
+            "tetragon",
+            "falco"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "assurance": {
+          "const": "imported_unverified"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "degraded",
+            "unknown",
+            "alert_only",
+            "mixed"
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_count",
+        "event_count",
+        "matched_event_count",
+        "ambiguous_event_count",
+        "weak_event_count",
+        "unmatched_event_count",
+        "corroborated_receipt_count",
+        "ambiguous_receipt_count",
+        "unobserved_receipt_count"
+      ],
+      "properties": {
+        "receipt_count": {
+          "$ref": "#/$defs/count"
+        },
+        "event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "matched_event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "ambiguous_event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "weak_event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "unmatched_event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "corroborated_receipt_count": {
+          "$ref": "#/$defs/count"
+        },
+        "ambiguous_receipt_count": {
+          "$ref": "#/$defs/count"
+        },
+        "unobserved_receipt_count": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "eventPointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line",
+        "sha256",
+        "event_type",
+        "source_kind",
+        "source_assurance",
+        "coverage",
+        "pid_present",
+        "ppid_present",
+        "stable_process_identity_present",
+        "redacted_fields"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "process_start",
+            "process_exit",
+            "file_write",
+            "file_delete",
+            "network_connect"
+          ]
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": [
+            "normalized",
+            "tetragon",
+            "falco"
+          ]
+        },
+        "source_assurance": {
+          "const": "imported_unverified"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "degraded",
+            "unknown",
+            "alert_only"
+          ]
+        },
+        "pid_present": {
+          "type": "boolean"
+        },
+        "ppid_present": {
+          "type": "boolean"
+        },
+        "stable_process_identity_present": {
+          "type": "boolean"
+        },
+        "redacted_fields": {
+          "type": "array",
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "actor",
+              "command",
+              "container_id",
+              "destination",
+              "event_id",
+              "exec_id",
+              "path",
+              "session_id",
+              "trace_id",
+              "workspace"
+            ]
+          }
+        }
+      }
+    },
+    "association": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "receipt_id",
+        "match_status",
+        "confidence",
+        "proof_status",
+        "reason_codes"
+      ],
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/eventPointer"
+        },
+        "receipt_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "match_status": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "ambiguous",
+            "weak",
+            "unmatched"
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "ambiguous",
+            "none"
+          ]
+        },
+        "proof_status": {
+          "type": "string",
+          "enum": [
+            "corroborating_unverified",
+            "non_proof",
+            "no_evidence"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/reasonCode"
+          }
+        }
+      }
+    },
+    "receiptSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_id",
+        "receipt_index",
+        "evidence_status",
+        "matched_event_count",
+        "ambiguous_event_count",
+        "event_types"
+      ],
+      "properties": {
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "receipt_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2047
+        },
+        "evidence_status": {
+          "type": "string",
+          "enum": [
+            "corroborated",
+            "ambiguous",
+            "unobserved"
+          ]
+        },
+        "matched_event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "ambiguous_event_count": {
+          "$ref": "#/$defs/count"
+        },
+        "event_types": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "process_start",
+              "process_exit",
+              "file_write",
+              "file_delete",
+              "network_connect"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

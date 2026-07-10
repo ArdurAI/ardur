@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "b056dd695b4c6236cb72c8476bdb4a1ee195c3329d35c576d3118e7c2ca7e94a"
+source_sha256: "79db1a1f8034bd281a155ddf246abdc12316e612250a3a9acefd1501703bed60"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -41,6 +41,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Transparency Anchor v0.1](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/) | **implemented** | Immutable receipt sidecars, asynchronous pending queue, Rekor v1 and separately keyed self-hosted proof profiles, offline verifier |
 | [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
 | [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
+| [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
 | [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -53,6 +54,9 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [DRP implementation fixture bundle schema](/__ardur_internal__/repo/docs/specs/drp-conformance-bundle-v0.1.schema.json) | **implemented** | Closed portable scenario, trust, expectation, and external-status contract |
 | [DRP implementation fixture report schema](/__ardur_internal__/repo/docs/specs/drp-implementation-fixture-report-v0.1.schema.json) | **implemented** | Closed deterministic scenario result, verifier status, and bundle-digest contract |
 | [DRP portable implementation fixtures](/__ardur_internal__/source/docs/specs/conformance/drp-v0.1/readme/) | **implementation self-test** | Seven signed deterministic scenarios and report; no private keys, network dependency, IETF claim, or independent pass |
+| [Runtime evidence event schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
+| [Runtime evidence correlation report schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-correlation-report-v0.1.schema.json) | **implemented** | Closed deterministic redacted association report; source assurance remains separate from match confidence |
+| [Runtime evidence portable fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/) | **implementation self-test** | Ephemeral-key signed journal plus normalized/Tetragon/Falco inputs and reports; no private keys, sensor deployment, network dependency, or source-authenticity claim |
 | [Transparency Anchor v0.1 schema](/__ardur_internal__/repo/docs/specs/transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
 | [Transparency Anchor v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
 | [Receiver Attestation v0.1 schema](/__ardur_internal__/repo/docs/specs/receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
@@ -86,10 +90,11 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 8. [Transparency Anchor v0.1](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
 9. [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) — separate called-service signatures without mutating signed receipts
 10. [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) — skeptical-auditor composition and receipt-explorer output
-11. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
-12. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-13. [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) — layered revocation across delegation, session, credential, and transparency-log layers
-14. [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) — Intent-Declaration-Manifest experimental profile
+11. [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/) — detached claim-vs-reality association over imported sensor evidence
+12. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
+13. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+14. [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) — layered revocation across delegation, session, credential, and transparency-log layers
+15. [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 

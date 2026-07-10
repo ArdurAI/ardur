@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "82736b60336276170e87e8c032cc49b2984b06c6214ad62a8c865fe7f5c6e2a8"
+source_sha256: "ae52b74c4cb29c049955bce6b320b26601f21361be5c2b8f112969ff8bfbf3da"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -39,6 +39,13 @@ provider-hidden behavior, or cross-platform kernel enforcement. Re-runnable
 proof media, full packaging, and production deployment material are still
 being tightened before they are presented as release-ready.
 
+Ardur can also verify a receipt journal and correlate it offline with
+operator-supplied normalized, Tetragon, or Falco JSONL evidence. That path
+produces a detached redacted report with explicit match confidence, source
+assurance, and coverage limits. It does not deploy or authenticate a sensor,
+and a high-confidence association to imported JSON is corroboration rather
+than independent proof.
+
 [Research](/__ardur_internal__/source/research/) · [Status](/__ardur_internal__/source/status/) · [Coverage Map](/__ardur_internal__/source/docs/coverage-map/) · [Roadmap](/__ardur_internal__/source/roadmap/) · [Media](/__ardur_internal__/source/media-notes/) · [Articles](/__ardur_internal__/source/docs/articles/readme/) · [Docs](/__ardur_internal__/source/docs/readme/) · [Reference](/__ardur_internal__/source/docs/reference/readme/) · [Phase 1 Demo Packet](/__ardur_internal__/source/docs/guides/phase1-demo-packet/) · [Read the Phase 1 Evidence Bundle](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) · [Evidence Site Source](/__ardur_internal__/source/site/readme/)
 
 ## Verification Snapshot
@@ -47,7 +54,7 @@ At the reviewed `dev` tree on 2026-07-09, the current gates were:
 
 | Gate | Verified result |
 |---|---|
-| Python local matrix (Python 3.13) | 1,439 passed, 32 skipped; CI separately enforces its coverage threshold |
+| Python local matrix (Python 3.13) | 1,572 passed, 32 skipped; CI separately enforces its coverage threshold |
 | Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, seccomp smoke, and full `ardur run --enforce` seccomp E2E passed |
@@ -137,7 +144,9 @@ the exact claims the artifacts do and do not support.
 > events delivered to its installed hooks. Side effects below the tool
 > boundary — subprocess trees,
 > kernel events, network connections initiated by tool-spawned processes —
-> are not yet captured; the roadmap closes that gap in v0.2 (filesystem
+> are not automatically captured by the hook. The offline runtime-evidence
+> correlator can inspect supplied sensor events, but does not create or
+> authenticate them; the roadmap closes native capture gaps in v0.2 (filesystem
 > snapshots), v0.5 (Linux eBPF), and v1.0 (macOS Endpoint Security
 > Framework). See [`docs/coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the
 > precise per-tool audit.
@@ -173,7 +182,7 @@ This repo currently includes:
 - current status and what is still being resolved
 - public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus a draft-10-pinned DRP mapping and executable profile with RFC 8785/P-256 emit, external-trust full-chain and critical-bound verification, and a portable seven-scenario implementation self-test bundle/report (not an IETF or independent interoperability claim), the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, a receiver-attestation profile with a two-key offline verifier and MCP shim fixture, and a full offline-verification bundle/profile with redacted CLI/JSON/static HTML explorer reports
 - Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
-- the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, receiver-envelope verification, and no-key DRP/receiver/offline-verification fixtures), plus the deterministic `ardur-drp-fixtures` runner
+- the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, receiver-envelope verification, detached normalized/Tetragon/Falco runtime-evidence correlation, and no-key DRP/receiver/offline-verification fixtures), plus the deterministic `ardur-drp-fixtures` runner
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
 - runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
 - dedicated Python (3.10 + 3.13) and Go CI under `.github/workflows/tests.yml`, including the offline examples-smoke regression in `python/tests/test_examples_smoke.py` and a required fresh-volume Compose demo lifecycle, plus CodeQL, link-check, secret-scan, format validation, and the Hugo build

@@ -46,6 +46,7 @@ REQUIRED_RUNTIME_FILES = (
     PurePosixPath("vibap/launch_gate.py"),
     PurePosixPath("vibap/offline_verification.py"),
     PurePosixPath("vibap/offline_verification_fixture.py"),
+    PurePosixPath("vibap/runtime_evidence.py"),
     PurePosixPath("vibap/transparency.py"),
 )
 VENDORED_RFC8785_FILES = (

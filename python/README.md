@@ -62,6 +62,23 @@ are explicit verifier inputs whose fingerprints must be checked out of band.
 See
 [`docs/specs/offline-verification-bundle-v0.1.md`](../docs/specs/offline-verification-bundle-v0.1.md).
 
+Correlate a verified receipt journal with an explicit local sensor format:
+
+```bash
+ardur evidence correlate \
+  ../docs/specs/conformance/runtime-evidence-v0.1/receipts.jsonl \
+  ../docs/specs/conformance/runtime-evidence-v0.1/tetragon.jsonl \
+  --source-format tetragon \
+  --receipt-public-key \
+    ../docs/specs/conformance/runtime-evidence-v0.1/receipt-public.pem
+```
+
+This is a no-network offline inspection path. Imported Tetragon/Falco or
+normalized JSON is `imported_unverified`; match confidence does not authenticate
+the sensor or prove complete coverage. Reports exclude raw commands, paths,
+destinations, source identifiers, credentials, and local paths. See the
+[`Runtime Evidence Correlation Profile`](../docs/specs/runtime-evidence-correlation-v0.1.md).
+
 Generate and self-verify the synthetic DRP draft-10 profile fixture:
 
 ```bash
@@ -126,11 +143,12 @@ python/
 │   ├── policy_backend.py        # PolicyBackend protocol
 │   ├── proxy.py                 # Governance proxy + session lifecycle
 │   ├── receipt.py               # Execution Receipt issuance + verify
+│   ├── runtime_evidence.py      # Offline normalized/Tetragon/Falco correlation
 │   └── ...
-└── tests/                  # Curated test set (~23 files)
+└── tests/                  # Curated runtime, adapter, security, and release tests
 ```
 
-A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.3` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
 
 ## Protocol identifier rename
 
