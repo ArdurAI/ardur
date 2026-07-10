@@ -7,7 +7,7 @@ package kernelcapture
 // SECCOMP_RET_USER_NOTIF filter scoped to connect(2), and the
 // receive/respond/id-valid ioctls a supervisor uses to service it.
 //
-// golang.org/x/sys/unix v0.46.0 (this module's pinned version) has no
+// golang.org/x/sys/unix v0.47.0 (this module's pinned version) has no
 // seccomp user-notify support at all — no SeccompNotif/SeccompNotifResp
 // structs, no SECCOMP_IOCTL_NOTIF_* constants, no seccomp(2) wrapper (only
 // the legacy prctl(PR_SET_SECCOMP) path, which doesn't support
