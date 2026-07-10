@@ -7,6 +7,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+MAKEFILE = REPO_ROOT / "Makefile"
+TESTS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
 
 
 def test_spire_volume_initializer_prepares_nonroot_writable_volumes() -> None:
@@ -105,3 +107,39 @@ def test_demo_host_ports_keep_defaults_and_allow_parallel_overrides() -> None:
     ]
     assert services["proxy"]["ports"] == ["${ARDUR_PROXY_PORT:-8443}:8443"]
     assert services["hub"]["ports"] == ["${ARDUR_HUB_PORT:-8765}:8765"]
+
+
+def test_make_demo_supports_ci_wait_without_changing_interactive_default() -> None:
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+
+    assert "DEMO_UP_ARGS ?=" in makefile
+    assert "docker compose up --build $(DEMO_UP_ARGS)" in makefile
+
+
+def test_demo_stack_is_a_required_ci_lifecycle_gate() -> None:
+    workflow = yaml.safe_load(TESTS_WORKFLOW.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+    demo = jobs["demo-smoke"]
+    steps = {step.get("name"): step for step in demo["steps"] if "name" in step}
+
+    assert demo["runs-on"] == "ubuntu-24.04"
+    assert demo["timeout-minutes"] == 15
+    assert demo["env"]["ARDUR_API_TOKEN"] == "ci-demo-token"
+    assert steps["Start the full demo stack and wait for health"]["run"] == (
+        'make demo DEMO_UP_ARGS="--detach --wait --wait-timeout 240"'
+    )
+    assert steps["Verify health, PERMIT, DENY, and signed attestation"]["run"] == (
+        "./scripts/verify-mvp.sh"
+    )
+    assert steps["Show demo status and logs on failure"]["if"] == "failure()"
+    assert "docker compose logs --no-color" in steps[
+        "Show demo status and logs on failure"
+    ]["run"]
+    assert steps["Remove demo containers and volumes"]["if"] == "always()"
+    assert steps["Remove demo containers and volumes"]["run"] == "make demo-down"
+
+    aggregate = jobs["tests"]
+    assert "demo-smoke" in aggregate["needs"]
+    gate = aggregate["steps"][0]
+    assert gate["env"]["DEMO_SMOKE"] == "${{ needs['demo-smoke'].result }}"
+    assert 'require_success demo-smoke "$DEMO_SMOKE"' in gate["run"]

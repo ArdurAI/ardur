@@ -29,7 +29,7 @@ At the reviewed `dev` tree on 2026-07-09:
 
 | Gate | Result |
 |---|---|
-| Python local run with CI coverage flags | 1,358 passed, 32 skipped, 85% coverage |
+| Python local run with CI coverage flags | 1,363 passed, 32 skipped, 85% coverage |
 | Python CI | Python 3.10 and 3.13, lint, and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Static/security | Python and Go CodeQL, secret scans, and format checks passed |

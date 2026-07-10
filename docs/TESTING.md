@@ -53,6 +53,12 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
   no-key examples smoke. That test covers checked-in mission fixtures and the
   examples claim ledger; it does **not** prove live-provider framework demos.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
+- **Demo stack smoke**: starts the exact `make demo` target from fresh Compose
+  volumes in detached/wait mode, then runs `scripts/verify-mvp.sh`. The job
+  requires healthy public endpoints, authenticated issue/start, one `PERMIT`,
+  one `DENY`, a signed attestation, session end, and authenticated metrics.
+  Failure logs are emitted before containers and volumes are removed. The
+  aggregate `tests` check requires this job to succeed.
 
 ### What's Not Enforced By CI Today
 
