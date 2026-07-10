@@ -45,13 +45,6 @@ from vibap.tls import generate_self_signed_cert
 CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
 API_KEY = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
 
-TEST_REPORT_PATH = Path(
-    os.environ.get(
-        "ARDUR_COMPREHENSIVE_REPORT",
-        str(Path(__file__).resolve().parent / "comprehensive_test_report.json"),
-    )
-)
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -299,6 +292,12 @@ class TestArdurComprehensive:
     def test_full_ardur_protocol_composition(
         self, module_keys, tls_material, biscuit_keypair, tmp_path
     ):
+        report_path = Path(
+            os.environ.get(
+                "ARDUR_COMPREHENSIVE_REPORT",
+                str(tmp_path / "comprehensive_test_report.json"),
+            )
+        )
         private_key, public_key, keys_dir = module_keys
         tls_key, tls_cert, tls_fingerprint = tls_material
         report = ScenarioReport()
@@ -414,8 +413,8 @@ class TestArdurComprehensive:
 
         finally:
             report_data = report.finalize(env_info)
-            TEST_REPORT_PATH.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
-            print(f"\nComprehensive report → {TEST_REPORT_PATH}")
+            report_path.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
+            print(f"\nComprehensive report → {report_path}")
 
         failed = [s for s in report_data["scenarios"] if not s["passed"]]
         assert not failed, (

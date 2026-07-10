@@ -80,10 +80,21 @@ jobs:
         timeout-minutes: 15
         env:
           PYTHONFAULTHANDLER: "1"
-        run: python -m pytest tests/ -q --tb=short --durations=20 --cov=vibap --cov-report=term --cov-report=xml
+          COVERAGE_FILE: ${{ runner.temp }}/ardur-coverage
+        run: python -m pytest tests/ -q --tb=short --durations=20 --cov=vibap --cov-report=term --cov-report=xml:${{ runner.temp }}/ardur-coverage-report.xml
+
+      - name: Require pytest to leave the checkout clean
+        run: |
+          worktree_status="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$worktree_status" ]; then
+            printf '%s\n' "$worktree_status"
+            exit 1
+          fi
 
       - name: Show coverage summary
         working-directory: python
+        env:
+          COVERAGE_FILE: ${{ runner.temp }}/ardur-coverage
         run: |
           python -m coverage report --fail-under=0
           echo "::notice:: Aspirational targets: vibap=80%%, cli=60%%, integrations=70%%"
@@ -93,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: python-coverage-${{ matrix.python-version }}
-          path: python/coverage.xml
+          path: ${{ runner.temp }}/ardur-coverage-report.xml
           if-no-files-found: warn
           retention-days: 14
 

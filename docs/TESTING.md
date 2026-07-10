@@ -52,6 +52,10 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
   tree, it includes `python/tests/test_examples_smoke.py` for the offline,
   no-key examples smoke. That test covers checked-in mission fixtures and the
   examples claim ledger; it does **not** prove live-provider framework demos.
+  The job then fails if pytest changed tracked files or left untracked files in
+  the checkout; runtime keys, tokens, hooks, and reports belong in pytest temp
+  directories unless a test explicitly directs output elsewhere. Coverage data
+  and the uploaded XML report are written to the GitHub runner temp directory.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
 - **Demo stack smoke**: starts the exact `make demo` target from fresh Compose
   volumes in detached/wait mode, then runs `scripts/verify-mvp.sh`. The job
