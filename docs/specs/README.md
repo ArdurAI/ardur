@@ -19,6 +19,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Execution Receipt (ER)](./execution-receipt-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
 | [Execution Receipt v0.2 hardening](./execution-receipt-v0.2.md) | **implemented** | Versioned RFC 8785 payloads, legacy verification, receipt-chain-head binding, and kernel loss/kill-switch finalization contract |
 | [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) | **implemented** | Immutable receipt sidecars, asynchronous pending queue, Rekor v1 and separately keyed self-hosted proof profiles, offline verifier |
+| [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
 | [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](./idm-extension-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -28,6 +29,8 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Execution Receipt v0.2 golden fixture](./fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
 | [Transparency Anchor v0.1 schema](./transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
 | [Transparency Anchor v0.1 golden fixture](./fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
+| [Receiver Attestation v0.1 schema](./receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
+| [Receiver Attestation v0.1 golden fixture](./fixtures/receiver-attestation-v0.1.json) | **implemented** | Separately signed action/receiver evidence with public trust keys and offline verification |
 | [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
@@ -50,10 +53,11 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 3. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
 4. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
 5. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
-6. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
-7. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-8. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
-9. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
+6. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating action receipts
+7. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
+8. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+9. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
+10. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 

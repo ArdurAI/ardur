@@ -971,6 +971,10 @@ _PATH_ARG_SPECS = (
     "tls_key",
     "anchor_bundle",
     "transparency_log_key",
+    "receiver_envelope",
+    "receiver_public_key",
+    "mcp_request",
+    "mcp_response",
     "receipt_log",
     "local_log",
     "log_private_key",
@@ -1457,6 +1461,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return 1
     if args.anchor_bundle is not None:
         return _cmd_verify_anchor(args)
+    if args.receiver_envelope is not None:
+        return _cmd_verify_receiver_attestation(args)
     keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
     if keys_dir_failure is not None:
         return keys_dir_failure
@@ -1547,6 +1553,110 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
             {
                 "valid": False,
                 "error": "anchor_verification_failed",
+                "message": str(exc),
+            }
+        )
+        return 1
+    _print_json(report)
+    return 0
+
+
+def _load_receiver_public_key(path: Path):  # type: ignore[no-untyped-def]
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    if path.is_symlink():
+        raise ValueError("receiver public key path must not be a symlink")
+    if not path.is_file():
+        raise FileNotFoundError("receiver public key was not found")
+    with path.open("rb") as handle:
+        data = handle.read(64 * 1024 + 1)
+    if not data or len(data) > 64 * 1024:
+        raise ValueError("receiver public key is empty or exceeds the size limit")
+    key = serialization.load_pem_public_key(data)
+    if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(
+        key.curve, ec.SECP256R1
+    ):
+        raise ValueError("receiver public key must be an ES256 P-256 key")
+    return key
+
+
+def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
+    from .receiver_attestation import (
+        ASSURANCE_RECEIVER_ATTESTED,
+        ReceiverAttestationError,
+        ReceiverAttestationVerificationError,
+        load_json_document,
+        load_receiver_envelope,
+        verify_receiver_envelope,
+    )
+
+    if args.max_attestation_delay_s < 0 or args.receiver_clock_skew_s < 0:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_window_invalid",
+                "message": (
+                    "--max-attestation-delay-s and --receiver-clock-skew-s "
+                    "must be zero or greater."
+                ),
+            }
+        )
+        return 1
+    if args.mcp_response is not None and args.mcp_request is None:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_request_required",
+                "message": "--mcp-response also requires --mcp-request.",
+            }
+        )
+        return 1
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    try:
+        receipt_public_key = load_existing_public_key(keys_dir=args.keys_dir)
+        envelope = load_receiver_envelope(args.receiver_envelope)
+        receiver_public_key = None
+        if envelope.get("assurance_tier") == ASSURANCE_RECEIVER_ATTESTED:
+            if args.receiver_public_key is None:
+                raise ReceiverAttestationVerificationError(
+                    "receiver public key is required for receiver-attested verification"
+                )
+            receiver_public_key = _load_receiver_public_key(args.receiver_public_key)
+        expected_request = (
+            load_json_document(args.mcp_request, label="MCP request")
+            if args.mcp_request is not None
+            else None
+        )
+        expected_response = (
+            load_json_document(args.mcp_response, label="MCP response")
+            if args.mcp_response is not None
+            else None
+        )
+        report = verify_receiver_envelope(
+            envelope,
+            receipt_public_key=receipt_public_key,
+            receiver_public_key=receiver_public_key,
+            expected_request=expected_request,
+            expected_response=expected_response,
+            max_attestation_delay_s=args.max_attestation_delay_s,
+            receiver_clock_skew_s=args.receiver_clock_skew_s,
+        )
+    except (
+        ReceiverAttestationError,
+        ReceiverAttestationVerificationError,
+        KeyDirectoryError,
+        FileNotFoundError,
+        PermissionError,
+        OSError,
+        ValueError,
+    ) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_verification_failed",
                 "message": str(exc),
             }
         )
@@ -1834,6 +1944,24 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     print(f"Per-child attribution: {report['coverage']['per_child_attribution']}")
     print(f"Attribution: {report['coverage']['attribution']}")
     _print_report_next_steps(report)
+    return 0
+
+
+def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
+    from .receiver_attestation_fixture import run_receiver_attestation_fixture
+
+    try:
+        report = run_receiver_attestation_fixture(args.output)
+    except (OSError, TypeError, ValueError) as exc:
+        _print_json(
+            {
+                "ok": False,
+                "error": "receiver_attestation_fixture_failed",
+                "message": str(exc),
+            }
+        )
+        return 1
+    _print_json(report)
     return 0
 
 
@@ -3956,13 +4084,21 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     issue.set_defaults(func=cmd_issue)
 
-    verify = subparsers.add_parser("verify", help="verify a mission passport or receipt anchor")
+    verify = subparsers.add_parser(
+        "verify",
+        help="verify a mission passport, receipt anchor, or receiver attestation",
+    )
     verify_input = verify.add_mutually_exclusive_group(required=True)
     verify_input.add_argument("--token", help="passport token to verify")
     verify_input.add_argument(
         "--anchor-bundle",
         type=Path,
         help="portable receipt transparency-anchor JSON bundle",
+    )
+    verify_input.add_argument(
+        "--receiver-envelope",
+        type=Path,
+        help="portable receiver-attestation receipt envelope",
     )
     verify.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     verify.add_argument(
@@ -3971,10 +4107,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="trusted transparency-log public key PEM for offline anchor verification",
     )
     verify.add_argument(
+        "--receiver-public-key",
+        type=Path,
+        help="trusted receiver ES256 public key PEM for offline co-signature verification",
+    )
+    verify.add_argument(
+        "--mcp-request",
+        type=Path,
+        help="optional exact MCP tools/call request JSON for digest comparison",
+    )
+    verify.add_argument(
+        "--mcp-response",
+        type=Path,
+        help="optional exact MCP tools/call response JSON for digest comparison",
+    )
+    verify.add_argument(
         "--max-registration-delay-s",
         type=int,
         default=86_400,
         help="maximum allowed delay between receipt iat and log integration",
+    )
+    verify.add_argument(
+        "--max-attestation-delay-s",
+        type=int,
+        default=300,
+        help="maximum allowed delay between receipt and receiver co-signature",
+    )
+    verify.add_argument(
+        "--receiver-clock-skew-s",
+        type=int,
+        default=60,
+        help="allowed receiver clock skew relative to the receipt",
     )
     verify.set_defaults(func=cmd_verify)
 
@@ -4009,6 +4172,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     anchor.set_defaults(func=cmd_anchor)
+
+    receiver_fixture = subparsers.add_parser(
+        "receiver-attestation-fixture",
+        help="generate a synthetic MCP receiver co-signature evidence bundle",
+    )
+    receiver_fixture.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="directory for public fixture artifacts; no private keys are persisted",
+    )
+    receiver_fixture.set_defaults(func=cmd_receiver_attestation_fixture)
 
     attest = subparsers.add_parser("attest", help="issue a behavioral attestation for a saved session")
     attest.add_argument("--session", required=True, help="session identifier / passport jti")

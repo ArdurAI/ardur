@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.dev/spec/receiver-attestation-v0.1.schema.json",
+  "title": "Ardur Receiver Attestation Envelope v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "assurance_tier",
+    "receipt_subject",
+    "receipt_jwt",
+    "receiver_attestation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.receiver_attestation.v0.1"
+    },
+    "assurance_tier": {
+      "type": "string",
+      "enum": [
+        "self-attested",
+        "receiver-attested"
+      ]
+    },
+    "receipt_subject": {
+      "$ref": "#/$defs/receiptSubject"
+    },
+    "receipt_jwt": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 2097152,
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+    },
+    "receiver_attestation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/receiverAttestation"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "assurance_tier": {
+            "const": "self-attested"
+          }
+        },
+        "required": [
+          "assurance_tier"
+        ]
+      },
+      "then": {
+        "properties": {
+          "receiver_attestation": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "receiver_attestation": {
+            "$ref": "#/$defs/receiverAttestation"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "receiptSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "media_type",
+        "digest"
+      ],
+      "properties": {
+        "media_type": {
+          "const": "application/ardur.er+jwt"
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algorithm",
+            "value"
+          ],
+          "properties": {
+            "algorithm": {
+              "const": "sha256"
+            },
+            "value": {
+              "$ref": "#/$defs/sha256Hex"
+            }
+          }
+        }
+      }
+    },
+    "receiverAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "receiver_id",
+        "key_id",
+        "statement_jws"
+      ],
+      "properties": {
+        "format": {
+          "const": "application/ardur.receiver-attestation+jwt"
+        },
+        "receiver_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^\\S+$"
+        },
+        "key_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^\\S+$"
+        },
+        "statement_jws": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 1048576,
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+        }
+      }
+    }
+  }
+}

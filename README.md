@@ -16,7 +16,8 @@ framework adapters (LangChain, LangGraph, AutoGen), the Ardur Personal Hub
 service, the Claude Code plugin and hook, and the public Hugo evidence site.
 The current public proof is strongest at those configured tool boundaries. It
 does not establish universal agent capture, third-party witnessing unless an
-optional transparency anchor verifies under an independently trusted log key,
+optional transparency anchor verifies under an independently trusted log key
+or an optional receiver envelope verifies under a separately trusted tool key,
 provider-hidden behavior, or cross-platform kernel enforcement. Re-runnable
 proof media, full packaging, and production deployment material are still
 being tightened before they are presented as release-ready.
@@ -29,7 +30,7 @@ At the reviewed `dev` tree on 2026-07-09, the current gates were:
 
 | Gate | Verified result |
 |---|---|
-| Python local matrix with the CI coverage flags (Python 3.13) | 1,363 passed, 32 skipped, 85% coverage |
+| Python local matrix (Python 3.13) | 1,439 passed, 32 skipped; CI separately enforces its coverage threshold |
 | Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, seccomp smoke, and full `ardur run --enforce` seccomp E2E passed |
@@ -153,9 +154,9 @@ This repo currently includes:
 - the product thesis and launch direction
 - a short research-informed positioning summary
 - current status and what is still being resolved
-- public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, and a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs
+- public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, and a receiver-attestation profile with a two-key offline verifier and MCP shim fixture
 - Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
-- the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`)
+- the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, receiver-envelope verification, and the no-key receiver-attestation fixture)
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
 - runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
 - dedicated Python (3.10 + 3.13) and Go CI under `.github/workflows/tests.yml`, including the offline examples-smoke regression in `python/tests/test_examples_smoke.py` and a required fresh-volume Compose demo lifecycle, plus CodeQL, link-check, secret-scan, format validation, and the Hugo build
@@ -190,7 +191,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, JWT AAT constraint engine (13 types) | AAT CWT integer-key mapping, OPA, and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |
-| **Receipts sink**    | local JSON / stdout receipts; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs | OTel emitters, checkpoint witnessing/consistency monitoring, and broader durable storage examples |
+| **Receipts sink**    | local JSON / stdout receipts; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | OTel emitters, checkpoint witnessing/consistency monitoring, broader durable storage examples, and integrated multi-artifact chain verification |
 
 If you'd use an integration that isn't listed, file an [integration request](https://github.com/ArdurAI/ardur/issues/new?template=integration_request.yml) — it's the strongest signal we have for prioritisation.
 

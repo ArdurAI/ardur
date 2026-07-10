@@ -16,6 +16,9 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 ## Hosted Artifacts
 
 - [`execution-receipt-v0.2-action.json`](/__ardur_internal__/repo/docs/specs/fixtures/execution-receipt-v0.2-action.json)
+- [`receiver-attestation-v0.1-receipt-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1-receipt-public.pem)
+- [`receiver-attestation-v0.1-receiver-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1-receiver-public.pem)
+- [`receiver-attestation-v0.1.json`](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1.json)
 - [`transparency-anchor-v0.1-local.json`](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-local.json)
 - [`transparency-anchor-v0.1-log-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-log-public.pem)
 - [`transparency-anchor-v0.1-receipt-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-receipt-public.pem)

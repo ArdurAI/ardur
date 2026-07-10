@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "be8acf73817e13ea683601d3ae32b76282c4c84c624fef3c060d445131f83c21"
+source_sha256: "d3ba677f777ed87febc93cc311f0afbf02288f07308e5420da25612bae2ce950"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -45,9 +45,12 @@ in an `unknown` verdict at the session/verifier level) rather than safe. See
 Ardur's current first-run proof is a configured tool-boundary proof. It can
 verify the issuer signature and hash linkage on receipts for calls observed by
 the adapter or proxy. It does not prove that every host or provider action was
-observed, and it does not add an independent third-party witness to a
-self-issued receipt. Transparency anchoring and receiver co-signing are
-separate roadmap work.
+observed. Optional transparency anchors can add independently keyed inclusion
+evidence, and the Receiver Attestation v0.1 MCP shim can add a separately keyed
+called-service signature for an exact receipt and request/response digests.
+Both remain opt-in configured-path evidence: neither proves action-set
+completeness, detects a fully suppressed call, proves receiver correctness, or
+turns an uninstrumented provider path into an observed one.
 
 ## Product limits
 
