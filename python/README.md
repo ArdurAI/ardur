@@ -62,6 +62,23 @@ are explicit verifier inputs whose fingerprints must be checked out of band.
 See
 [`docs/specs/offline-verification-bundle-v0.1.md`](../docs/specs/offline-verification-bundle-v0.1.md).
 
+Generate and self-verify the synthetic DRP draft-10 profile fixture:
+
+```bash
+ardur drp-profile-fixture --output ./drp-fixture
+```
+
+The output directory may be empty or contain only a prior copy of the six
+declared fixture artifacts; unexpected entries are rejected before writing.
+
+The fixture emits a real root/child/grandchild P-256 chain and persists only
+public trust keys, receipts, a finite tool universe, explicitly preverified
+context facts, and a verification report. Its concrete action includes the
+resource, arguments, side-effect class, and cwd enforced by the profile. It is
+implementation evidence, not raw RFC 3161 proof, independent interoperability,
+IETF conformance, or current revocation evidence. See
+[`docs/specs/ardur-drp-profile-v0.1.md`](../docs/specs/ardur-drp-profile-v0.1.md).
+
 ## Ardur Personal Hub
 
 The regular-user path uses the same package dependencies and CLI:

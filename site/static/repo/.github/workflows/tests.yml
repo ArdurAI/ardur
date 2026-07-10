@@ -28,6 +28,9 @@ jobs:
       - name: Run ruff check on new hardening tests
         run: |
           python -m ruff check \
+            python/vibap/drp.py \
+            python/vibap/drp_fixture.py \
+            python/tests/test_drp.py \
             python/tests/test_proxy.py \
             python/tests/test_examples_governance_integration.py
 

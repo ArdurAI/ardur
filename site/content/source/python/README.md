@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "3aa1639dee4459719abd4f227852dda197ba2b482a88ff2e3bc483cd400b1fc0"
+source_sha256: "34d74485c74db1546a09de7fa952d0844b588ff3bfd6d45b5a72b1f71ef72a51"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -78,6 +78,23 @@ The evidence bundle never supplies its own trusted keys. The three public PEMs
 are explicit verifier inputs whose fingerprints must be checked out of band.
 See
 [`docs/specs/offline-verification-bundle-v0.1.md`](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/).
+
+Generate and self-verify the synthetic DRP draft-10 profile fixture:
+
+```bash
+ardur drp-profile-fixture --output ./drp-fixture
+```
+
+The output directory may be empty or contain only a prior copy of the six
+declared fixture artifacts; unexpected entries are rejected before writing.
+
+The fixture emits a real root/child/grandchild P-256 chain and persists only
+public trust keys, receipts, a finite tool universe, explicitly preverified
+context facts, and a verification report. Its concrete action includes the
+resource, arguments, side-effect class, and cwd enforced by the profile. It is
+implementation evidence, not raw RFC 3161 proof, independent interoperability,
+IETF conformance, or current revocation evidence. See
+[`docs/specs/ardur-drp-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/).
 
 ## Ardur Personal Hub
 

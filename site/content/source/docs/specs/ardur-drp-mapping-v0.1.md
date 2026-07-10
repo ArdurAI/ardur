@@ -2,7 +2,7 @@
 title: "Ardur DRP Mapping Profile v0.1"
 description: "This document maps the current Ardur delegation and action-receipt surfaces to"
 source_path: "docs/specs/ardur-drp-mapping-v0.1.md"
-source_sha256: "e80166b067804505066b36ddb335441b1061a57940faee86035bbbd61e620604"
+source_sha256: "64cae722c0d066bb3d239d553be9365dbf6d6bb861c09da502e89022076e36b5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -247,10 +247,8 @@ not a golden fixture:
       },
       "delegationLogAnchor": {
         "backend": "rfc3161-log",
-        "receiptId": "rec_<64-lowercase-hex>",
-        "includedBeforeUse": true,
-        "timestamp": "2026-07-10T12:00:01Z",
-        "proofRef": "https://example.test/delegation-log/entries/123"
+        "required": true,
+        "subject": "receipt-id"
       },
       "receiptChainAnchor": {
         "state": "present",
@@ -266,6 +264,14 @@ not a golden fixture:
 Root receipts omit `parentReceiptId` and `orchestratorSignature`.
 Sub-receipts require both.
 
+`delegationLogAnchor` is a signed evidence policy, not the proof output. The
+receipt must be identified and signed before log submission, so actual
+inclusion/TSA evidence is necessarily external and binds the final
+`receiptId`. Embedding that final ID or proof output in `pre_id_body` would
+create a circular hash requirement. Issue #179's verifier requires
+independently verified external evidence matching the signed backend and
+`receipt-id` subject.
+
 The profile requires all fields listed in
 `profile_shape.ardur_required_fields` in the ledger. If the source token does
 not carry policy version, capability reference, revocation reference, or
@@ -274,6 +280,12 @@ authenticated issuer configuration. A run that has not produced an action
 receipt uses `receiptChainAnchor.state = "unstarted"` and null head values; it
 MUST NOT fabricate a chain head. The emitter MUST fail closed if any other
 required value is unavailable.
+
+When `receiptChainAnchor.state = "present"`, a verifier returning PERMIT MUST
+receive independently verified action-chain facts from outside the
+Authorization Object and match the signed trace ID, head receipt ID, and head
+receipt-JWT digest. The signed anchor is a commitment, not proof of its own
+existence. Missing or mismatched facts are insufficient evidence.
 
 ## 5. Deterministic ID and Signing Procedure
 
@@ -326,10 +338,12 @@ cryptographic comparison.
 
 Draft-10 requires the Delegation Receipt to be anchored before agent action and
 uses an RFC 3161-backed log timestamp as authoritative time. The Authorization
-Object does not carry the complete proof, so the Ardur profile records an
-authenticated proof reference in
-`metadata.x-ardur.delegationLogAnchor` and requires the verifier to receive the
-actual inclusion/TSA evidence alongside the receipt.
+Object cannot carry proof output that is created only after signing and log
+submission. The Ardur profile therefore signs the required backend and
+`receipt-id` proof subject in
+`metadata.x-ardur.delegationLogAnchor`. The verifier receives the actual
+inclusion/TSA evidence alongside the receipt, validates it against external
+log/TSA trust, and requires it to bind the final `receiptId`.
 
 Ardur Transparency Anchor v0.1 currently anchors action receipts and supports
 multiple backends. It satisfies this delegation-log requirement only when the
@@ -450,6 +464,10 @@ Receiver attestations remain separate receiver-side evidence. Offline
 verification bundles remain packaging. None is copied into the Authorization
 Object or silently represented as a DRP field.
 
+A signed `receiptChainAnchor.state = "present"` similarly requires external
+verification of the referenced action-chain head. The Authorization Object
+cannot self-authenticate that referenced chain.
+
 ## 11. Known Draft-10 Gaps Fixed or Exposed by This Profile
 
 1. The Datatracker status is individual draft with no formal IETF standing.
@@ -477,6 +495,9 @@ Object or silently represented as a DRP field.
     open-ended tool universe. This profile requires a trusted finite manifest.
 12. Existing action-receipt transparency evidence is not automatically the
     pre-action Delegation Receipt log/TSA evidence required by draft-10.
+13. Embedding the final receipt ID or post-signing log proof in the pre-ID body
+    creates a circular construction. The signed body carries the evidence
+    policy; external evidence binds the resulting ID.
 
 ## 12. B2 Implementation Contract
 
@@ -488,7 +509,8 @@ Issue #179 is complete only when it:
 4. verifies every ancestor and attenuation dimension;
 5. rejects unexportable equal-action AAT children explicitly;
 6. distinguishes scope denial from insufficient evidence;
-7. verifies the finite tool universe plus pre-action delegation-log/TSA proof;
+7. verifies the finite tool universe plus pre-action delegation-log/TSA proof
+   through an explicitly trusted evidence-verification boundary;
 8. enforces revocation/offline policy;
 9. exposes no claim of interoperability until independent fixtures pass; and
 10. keeps the existing AAT token and Execution Receipt signatures intact rather

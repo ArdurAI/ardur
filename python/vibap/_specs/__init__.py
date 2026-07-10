@@ -26,34 +26,53 @@ def mission_declaration_v01_schema() -> dict:
     Cached after first load. Returns a plain dict suitable for
     :func:`jsonschema.validate`.
     """
-    raw = files(__package__).joinpath(
-        "mission_declaration_v01.schema.json"
-    ).read_text(encoding="utf-8")
+    raw = (
+        files(__package__)
+        .joinpath("mission_declaration_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
     return json.loads(raw)
 
 
 @lru_cache(maxsize=1)
 def transparency_anchor_v01_schema() -> dict:
     """Return the parsed Transparency Anchor v0.1 JSON Schema."""
-    raw = files(__package__).joinpath(
-        "transparency_anchor_v01.schema.json"
-    ).read_text(encoding="utf-8")
+    raw = (
+        files(__package__)
+        .joinpath("transparency_anchor_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
     return json.loads(raw)
 
 
 @lru_cache(maxsize=1)
 def receiver_attestation_v01_schema() -> dict:
     """Return the parsed Receiver Attestation v0.1 JSON Schema."""
-    raw = files(__package__).joinpath(
-        "receiver_attestation_v01.schema.json"
-    ).read_text(encoding="utf-8")
+    raw = (
+        files(__package__)
+        .joinpath("receiver_attestation_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
     return json.loads(raw)
 
 
 @lru_cache(maxsize=1)
 def offline_verification_bundle_v01_schema() -> dict:
     """Return the parsed Offline Verification Bundle v0.1 JSON Schema."""
-    raw = files(__package__).joinpath(
-        "offline_verification_bundle_v01.schema.json"
-    ).read_text(encoding="utf-8")
+    raw = (
+        files(__package__)
+        .joinpath("offline_verification_bundle_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def ardur_drp_profile_v01_schema() -> dict:
+    """Return the parsed Ardur DRP Profile v0.1 JSON Schema."""
+    raw = (
+        files(__package__)
+        .joinpath("ardur_drp_profile_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
     return json.loads(raw)

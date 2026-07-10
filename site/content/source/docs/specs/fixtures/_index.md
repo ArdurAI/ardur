@@ -15,6 +15,12 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 ## Hosted Artifacts
 
+- [`ardur-drp-profile-v0.1-chain.json`](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-chain.json)
+- [`ardur-drp-profile-v0.1-child-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-child-public.pem)
+- [`ardur-drp-profile-v0.1-context.json`](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-context.json)
+- [`ardur-drp-profile-v0.1-grandchild-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-grandchild-public.pem)
+- [`ardur-drp-profile-v0.1-report.json`](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-report.json)
+- [`ardur-drp-profile-v0.1-root-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-root-public.pem)
 - [`execution-receipt-v0.2-action.json`](/__ardur_internal__/repo/docs/specs/fixtures/execution-receipt-v0.2-action.json)
 - [`offline-verification-v0.1-log-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1-log-public.pem)
 - [`offline-verification-v0.1-receipt-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1-receipt-public.pem)

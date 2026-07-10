@@ -2182,6 +2182,24 @@ def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_drp_profile_fixture(args: argparse.Namespace) -> int:
+    from .drp_fixture import run_drp_profile_fixture
+
+    try:
+        report = run_drp_profile_fixture(args.output)
+    except (OSError, TypeError, ValueError) as exc:
+        _print_json(
+            {
+                "ok": False,
+                "error": "drp_profile_fixture_failed",
+                "message": str(exc),
+            }
+        )
+        return 1
+    _print_json(report)
+    return 0
+
+
 def cmd_offline_verification_fixture(args: argparse.Namespace) -> int:
     from .offline_verification_fixture import run_offline_verification_fixture
 
@@ -4451,6 +4469,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory for public fixture artifacts; no private keys are persisted",
     )
     receiver_fixture.set_defaults(func=cmd_receiver_attestation_fixture)
+
+    drp_fixture = subparsers.add_parser(
+        "drp-profile-fixture",
+        help="generate a synthetic DRP draft-10 profile implementation fixture",
+    )
+    drp_fixture.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="directory for public fixture artifacts; no private keys are persisted",
+    )
+    drp_fixture.set_defaults(func=cmd_drp_profile_fixture)
 
     offline_fixture = subparsers.add_parser(
         "offline-verification-fixture",

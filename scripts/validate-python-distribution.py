@@ -40,6 +40,8 @@ PLUGIN_ASSETS = (
     PurePosixPath("hooks/subagent_stop"),
 )
 REQUIRED_RUNTIME_FILES = (
+    PurePosixPath("vibap/drp.py"),
+    PurePosixPath("vibap/drp_fixture.py"),
     PurePosixPath("vibap/launch_gate.py"),
     PurePosixPath("vibap/offline_verification.py"),
     PurePosixPath("vibap/offline_verification_fixture.py"),
@@ -88,6 +90,17 @@ def plugin_files() -> dict[PurePosixPath, Path]:
         require(not path.is_symlink(), f"canonical plugin asset is a symlink: {path}")
         require(path.is_file(), f"canonical plugin asset is missing: {path}")
         files[PurePosixPath("vibap/_plugins/claude-code") / relative_path] = path
+    return files
+
+
+def embedded_schema_files() -> dict[PurePosixPath, Path]:
+    source_root = PYTHON_ROOT / "vibap" / "_specs"
+    files: dict[PurePosixPath, Path] = {}
+    for path in sorted(source_root.glob("*.schema.json")):
+        require(not path.is_symlink(), f"embedded schema is a symlink: {path}")
+        require(path.is_file(), f"embedded schema is not a regular file: {path}")
+        files[PurePosixPath("vibap/_specs") / path.name] = path
+    require(bool(files), "no embedded schemas found in the Python source tree")
     return files
 
 
@@ -193,28 +206,28 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
             == (REPO_ROOT / "LICENSE").read_bytes(),
             "wheel license differs from root LICENSE",
         )
+        expected_schemas = embedded_schema_files()
+        schema_root = PurePosixPath("vibap/_specs")
+        actual_schemas = {
+            path
+            for path, info in names.items()
+            if path.parent == schema_root
+            and path.name.endswith(".schema.json")
+            and not info.is_dir()
+        }
         require(
-            PurePosixPath("vibap/_specs/mission_declaration_v01.schema.json") in names,
-            "wheel does not contain the embedded mission schema",
+            actual_schemas == set(expected_schemas),
+            "wheel embedded schema set differs from the source tree",
         )
-        require(
-            PurePosixPath("vibap/_specs/execution_receipt_v02.schema.json") in names,
-            "wheel does not contain the embedded Execution Receipt v0.2 schema",
-        )
-        require(
-            PurePosixPath("vibap/_specs/transparency_anchor_v01.schema.json") in names,
-            "wheel does not contain the embedded Transparency Anchor v0.1 schema",
-        )
-        require(
-            PurePosixPath("vibap/_specs/receiver_attestation_v01.schema.json") in names,
-            "wheel does not contain the embedded Receiver Attestation v0.1 schema",
-        )
-        require(
-            PurePosixPath("vibap/_specs/offline_verification_bundle_v01.schema.json") in names,
-            "wheel does not contain the embedded Offline Verification Bundle v0.1 schema",
-        )
+        for packaged_path, source_path in expected_schemas.items():
+            require(
+                archive.read(packaged_path.as_posix()) == source_path.read_bytes(),
+                f"wheel embedded schema differs from source: {packaged_path}",
+            )
         for runtime_file in REQUIRED_RUNTIME_FILES:
-            require(runtime_file in names, f"wheel is missing runtime file: {runtime_file}")
+            require(
+                runtime_file in names, f"wheel is missing runtime file: {runtime_file}"
+            )
         for vendored_file in VENDORED_RFC8785_FILES:
             require(
                 vendored_file in names,
@@ -288,6 +301,26 @@ def validate_sdist(sdist_path: Path, expected_version: str) -> None:
             require(
                 path in names and names[path].isfile(),
                 f"sdist is missing runtime file: {runtime_file}",
+            )
+        expected_schemas = embedded_schema_files()
+        schema_root = root / "vibap/_specs"
+        actual_schemas = {
+            path.relative_to(root)
+            for path, member in names.items()
+            if path.parent == schema_root
+            and path.name.endswith(".schema.json")
+            and member.isfile()
+        }
+        require(
+            actual_schemas == set(expected_schemas),
+            "sdist embedded schema set differs from the source tree",
+        )
+        for packaged_path, source_path in expected_schemas.items():
+            path = root / packaged_path
+            require(
+                read_required(archive.extractfile(names[path]), str(path))
+                == source_path.read_bytes(),
+                f"sdist embedded schema differs from source: {path}",
             )
         for vendored_file in VENDORED_RFC8785_FILES:
             path = root / vendored_file
