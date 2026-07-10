@@ -71,6 +71,9 @@ func (v *SigstoreVerifier) VerifyBundle(_ context.Context, bundlePath string, ar
 	if v.closed {
 		return nil, fmt.Errorf("verifier is closed")
 	}
+	if err := validateSignerConstraints(opts); err != nil {
+		return nil, err
+	}
 
 	b, err := bundle.LoadJSONFromPath(bundlePath)
 	if err != nil {
@@ -90,10 +93,6 @@ func (v *SigstoreVerifier) VerifyBundle(_ context.Context, bundlePath string, ar
 	digestBytes, err := hex.DecodeString(cleanDigest)
 	if err != nil {
 		return nil, fmt.Errorf("invalid artifact digest hex: %w", err)
-	}
-
-	if opts.RequiredIdentity == "" && opts.RequiredIssuer == "" {
-		return nil, fmt.Errorf("provenance verification requires RequiredIdentity or RequiredIssuer; refusing to verify without signer constraints")
 	}
 
 	identity, err := verify.NewShortCertificateIdentity(
@@ -158,6 +157,13 @@ func (v *SigstoreVerifier) VerifyBundle(_ context.Context, bundlePath string, ar
 	}
 
 	return provenance, nil
+}
+
+func validateSignerConstraints(opts VerifyOptions) error {
+	if opts.RequiredIdentity == "" || opts.RequiredIssuer == "" {
+		return fmt.Errorf("provenance verification requires both RequiredIdentity and RequiredIssuer; refusing to verify with incomplete signer constraints")
+	}
+	return nil
 }
 
 func (v *SigstoreVerifier) buildVerifierOptions(opts VerifyOptions) []verify.VerifierOption {
