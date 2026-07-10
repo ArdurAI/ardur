@@ -126,6 +126,12 @@ type DaemonProtocolResponse struct {
 	// directories are root-0700, so this is the only channel a non-root client
 	// has to learn what kernel-level enforcement happened.
 	Enforcement *EnforceEventSummary `json:"enforcement,omitempty"`
+	// LifecycleCapture reports daemon-global process exec/exit capture loss that
+	// occurred while this session was active. It is populated on successful
+	// session_status and end_session responses. Loss is summarized independently
+	// for every concurrently active session because a malformed host-level record
+	// cannot be attributed to whichever session produces the next valid event.
+	LifecycleCapture *LifecycleCaptureSummary `json:"lifecycle_capture,omitempty"`
 	// EnforcementTier carries which kernel enforcement tier is currently
 	// active — EnforcementTierBPFLSM, EnforcementTierSeccomp, or
 	// EnforcementTierNone — on successful health responses. The daemon

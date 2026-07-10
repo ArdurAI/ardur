@@ -55,22 +55,23 @@ func newTestDaemon(t *testing.T) *daemon {
 	t.Helper()
 	tmpDir := t.TempDir()
 	return &daemon{
-		log:                  testLogger(t),
-		registry:             kernelcapture.NewDaemonSessionRegistry(),
-		evidenceDir:          filepath.Join(tmpDir, "evidence"),
-		cgroupIndex:          make(map[uint64]string),
-		treeScopes:           make(map[string]*kernelcapture.ProcessTreeScope),
-		correlators:          make(map[string]*kernelcapture.Correlator),
-		enforceChains:        make(map[string]*kernelcapture.EnforceReceiptChain),
-		enforceSummaries:     make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
-		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
-		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
-		fs:                   osEvidenceFS{},
-		tamperChain:          kernelcapture.NewTamperReceiptChain(),
-		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
-		seccompListeners:     make(map[string]context.CancelFunc),
-		activeTier:           daemonTierNone,
-		appliedAllow:         make(map[string]*appliedAllowRecord),
+		log:                       testLogger(t),
+		registry:                  kernelcapture.NewDaemonSessionRegistry(),
+		evidenceDir:               filepath.Join(tmpDir, "evidence"),
+		cgroupIndex:               make(map[uint64]string),
+		treeScopes:                make(map[string]*kernelcapture.ProcessTreeScope),
+		correlators:               make(map[string]*kernelcapture.Correlator),
+		enforceChains:             make(map[string]*kernelcapture.EnforceReceiptChain),
+		enforceSummaries:          make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
+		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
+		enforceOrphanSummary:      kernelcapture.NewEnforceEventSummaryAccumulator(),
+		lifecycleCaptureSummaries: make(map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator),
+		fs:                        osEvidenceFS{},
+		tamperChain:               kernelcapture.NewTamperReceiptChain(),
+		seccompPolicy:             kernelcapture.NewSeccompPolicyStore(),
+		seccompListeners:          make(map[string]context.CancelFunc),
+		activeTier:                daemonTierNone,
+		appliedAllow:              make(map[string]*appliedAllowRecord),
 		// No-op cgroup verifier: daemon-flow tests register synthetic PIDs that
 		// aren't real /proc descendants. The real check is covered directly by
 		// daemon_cgroup_verify_linux_test.go.
@@ -436,6 +437,136 @@ func TestRouteEvent_NoMatch(t *testing.T) {
 	}
 }
 
+func TestLifecycleCaptureLossIsSessionWindowedAndNotEventAttributed(t *testing.T) {
+	d := newTestDaemon(t)
+	stub := newStubFS()
+	d.fs = evidenceFS(stub)
+
+	register := func(sessionID string, rootPID uint32, cgroupID uint64) {
+		d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+			SessionID: sessionID, RootPID: rootPID, CgroupID: cgroupID,
+		}, sessionID)
+	}
+	register("session-a", 100, 10)
+	register("session-b", 200, 20)
+
+	if epoch := d.recordMalformedLifecycleRecord(); epoch != 1 {
+		t.Fatalf("first loss epoch = %d, want 1", epoch)
+	}
+	// A valid event outside every registered scope must not erase the gap.
+	d.processKernelEvent(kernelcapture.ProcessEvent{PID: 999, CgroupID: 99, Type: kernelcapture.ProcessEventExec})
+
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		summary, ok := d.lifecycleCaptureSummaryForSession(sessionID)
+		if !ok {
+			t.Fatalf("missing lifecycle capture summary for %s", sessionID)
+		}
+		if summary.CoverageStatus != kernelcapture.LifecycleCaptureCoverageDegraded || summary.RingbufDropped != 1 {
+			t.Fatalf("%s summary after uncorrelated event = %+v", sessionID, summary)
+		}
+		if summary.LossEpochStart != 1 || summary.LossEpochEnd != 1 {
+			t.Fatalf("%s loss epoch = %d..%d, want 1..1", sessionID, summary.LossEpochStart, summary.LossEpochEnd)
+		}
+	}
+
+	// A later correlated event is written without being arbitrarily charged the
+	// host-global gap; the session-level summary remains degraded instead.
+	d.processKernelEvent(kernelcapture.ProcessEvent{PID: 100, CgroupID: 10, Type: kernelcapture.ProcessEventExec})
+	stub.mu.Lock()
+	data := append([]byte(nil), stub.appends[filepath.Join(d.evidenceDir, "session-a", "kernel_receipts.jsonl")]...)
+	stub.mu.Unlock()
+	if len(data) == 0 {
+		t.Fatal("correlated event did not write a kernel receipt")
+	}
+	var entry KernelReceiptEntry
+	if err := json.Unmarshal(data[:len(data)-1], &entry); err != nil {
+		t.Fatalf("decode kernel receipt: %v", err)
+	}
+	if entry.Receipt.CaptureLoss != (kernelcapture.CaptureLoss{}) {
+		t.Fatalf("correlated receipt was arbitrarily charged global loss: %+v", entry.Receipt.CaptureLoss)
+	}
+
+	// A session registered after epoch 1 starts complete, then joins all other
+	// active sessions in epoch 2.
+	register("session-c", 300, 30)
+	if got, _ := d.lifecycleCaptureSummaryForSession("session-c"); got.CoverageStatus != kernelcapture.LifecycleCaptureCoverageComplete || got.RingbufDropped != 0 {
+		t.Fatalf("new session inherited an old capture gap: %+v", got)
+	}
+	d.recordLifecycleCaptureLoss(kernelcapture.CaptureLoss{RingbufDropped: 1})
+
+	for _, tc := range []struct {
+		sessionID string
+		drops     uint64
+		start     uint64
+	}{{"session-a", 2, 1}, {"session-b", 2, 1}, {"session-c", 1, 2}} {
+		got, _ := d.lifecycleCaptureSummaryForSession(tc.sessionID)
+		if got.RingbufDropped != tc.drops || got.LossEpochStart != tc.start || got.LossEpochEnd != 2 {
+			t.Fatalf("%s final summary = %+v", tc.sessionID, got)
+		}
+	}
+}
+
+func TestLifecycleCaptureSummaryIsExposedUntilSessionEnd(t *testing.T) {
+	d := newTestDaemon(t)
+	const startTicks uint64 = 987654
+	handshake := kernelcapture.DaemonProtocolPeerHandshake{
+		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
+		CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProcessStartTimeTicks: startTicks,
+		Authorization: kernelcapture.DaemonPeerAuthorization{
+			Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
+			UID:                   uint32(os.Getuid()),
+			PID:                   uint32(os.Getpid()),
+			ProcessStartTimeTicks: startTicks,
+		},
+	}
+
+	register := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    "capture-status-session",
+			RootPID:      123,
+			CgroupID:     456,
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   60,
+		},
+	}
+	handshake.Method = register.Method
+	if resp := d.handleAuthorizedRequest(context.Background(), register, handshake); !resp.OK {
+		t.Fatalf("register_session failed: %+v", resp)
+	}
+	d.recordMalformedLifecycleRecord()
+
+	status := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodSessionStatus,
+		SessionStatus:   &kernelcapture.DaemonSessionStatusRequest{SessionID: "capture-status-session"},
+	}
+	handshake.Method = status.Method
+	statusResp := d.handleAuthorizedRequest(context.Background(), status, handshake)
+	if !statusResp.OK || statusResp.LifecycleCapture == nil {
+		t.Fatalf("session_status lifecycle capture = %+v", statusResp)
+	}
+	if got := statusResp.LifecycleCapture; got.CoverageStatus != kernelcapture.LifecycleCaptureCoverageDegraded || got.RingbufDropped != 1 {
+		t.Fatalf("session_status lifecycle capture = %+v", got)
+	}
+
+	end := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodEndSession,
+		EndSession:      &kernelcapture.DaemonEndSessionRequest{SessionID: "capture-status-session"},
+	}
+	handshake.Method = end.Method
+	endResp := d.handleAuthorizedRequest(context.Background(), end, handshake)
+	if !endResp.OK || endResp.LifecycleCapture == nil || endResp.LifecycleCapture.RingbufDropped != 1 {
+		t.Fatalf("end_session lifecycle capture = %+v", endResp)
+	}
+	if _, ok := d.lifecycleCaptureSummaryForSession("capture-status-session"); ok {
+		t.Fatal("ended session retained lifecycle capture state")
+	}
+}
+
 // TestRouteEvent_SlowPathPIDTreeMatch exercises the slow-path PID-tree scan.
 // The session is registered with CgroupID=0 (no cgroup guard) so it does not
 // appear in cgroupIndex. The event carries CgroupID=99 which misses the fast
@@ -670,6 +801,7 @@ func TestPruneExpiredSessions(t *testing.T) {
 	d.treeScopes["phantom-session"] = &scope
 	d.cgroupIndex[88] = "phantom-session"
 	d.correlators["phantom-session"] = kernelcapture.NewCorrelator(kernelcapture.CorrelatorOptions{})
+	d.lifecycleCaptureSummaries["phantom-session"] = kernelcapture.NewLifecycleCaptureSummaryAccumulator()
 	d.mu.Unlock()
 
 	// pruneExpiredSessions should remove the phantom session because the
@@ -679,6 +811,7 @@ func TestPruneExpiredSessions(t *testing.T) {
 	d.mu.RLock()
 	_, stillInCgroup := d.cgroupIndex[88]
 	_, stillInTree := d.treeScopes["phantom-session"]
+	_, stillInCapture := d.lifecycleCaptureSummaries["phantom-session"]
 	d.mu.RUnlock()
 
 	if stillInCgroup {
@@ -686,6 +819,9 @@ func TestPruneExpiredSessions(t *testing.T) {
 	}
 	if stillInTree {
 		t.Error("phantom session tree scope not pruned")
+	}
+	if stillInCapture {
+		t.Error("phantom session lifecycle capture summary not pruned")
 	}
 }
 

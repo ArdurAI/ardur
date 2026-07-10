@@ -303,8 +303,8 @@ class KernelCaptureClient:
 
     def session_status(self, *, session_id: str) -> dict[str, Any]:
         """Fetch the daemon's status snapshot for a session, including its
-        kernel-enforcement rollup (``"enforcement"``) when the daemon has
-        processed enforce_events for it.
+        kernel-enforcement rollup (``"enforcement"``) and process-lifecycle
+        capture health (``"lifecycle_capture"``).
 
         Evidence-log directories are root-0700, so this socket round-trip is
         the only way a non-root caller can learn what kernel enforcement
