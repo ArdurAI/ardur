@@ -27,7 +27,7 @@ _INT_MIN = -(2**53) + 1
 # which is licensed under the Apache License, version 2.0.
 # See: <https://github.com/cyberphone/json-canonicalization/blob/ba74d44ecf5/python3/src/org/webpki/json/Canonicalize.py>
 # See: <https://github.com/cyberphone/json-canonicalization/blob/ba74d44ecf5/python3/src/org/webpki/json/LICENSE>
-_ESCAPE = re.compile(r'[\x00-\x1f\\"\b\f\n\r\t]')
+_ESCAPE = re.compile(r'[\x00-\x1f\\\"\x08\x0c\n\r\t]')
 _ESCAPE_DCT = {
     "\\": "\\\\",
     '"': '\\"',

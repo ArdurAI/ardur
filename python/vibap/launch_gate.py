@@ -35,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             os.close(ready_fd)
         except OSError:
+            # The fd may already be closed by the OS or inherited by the
+            # target process; nothing actionable for the gate.
             pass
 
     if release != RELEASE_BYTE:
@@ -46,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(f"ardur launch gate: exec {command[0]!r} failed: {exc}", file=sys.stderr)
         return 126
+    # os.execvpe replaces the process image on success, so this line is
+    # unreachable in normal operation.  It exists to make the control-flow
+    # explicit for static analysis (no implicit ``return None``).
+    return 127  # pragma: no cover
 
 
 if __name__ == "__main__":
