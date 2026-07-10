@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "0d71e21b99a353aa4046ce87b08966cd90cf1ffd3cd7c1a6e91f2cad5f324942"
+source_sha256: "1a910d98caa9a14e71156ad308068110e76d4f93a063d293b11e0967563c9d6c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -37,6 +37,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Execution Receipt v0.2 hardening](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/) | **implemented** | Versioned RFC 8785 payloads, legacy verification, receipt-chain-head binding, and kernel loss/kill-switch finalization contract |
 | [Transparency Anchor v0.1](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/) | **implemented** | Immutable receipt sidecars, asynchronous pending queue, Rekor v1 and separately keyed self-hosted proof profiles, offline verifier |
 | [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
+| [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
 | [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -48,6 +49,8 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Transparency Anchor v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
 | [Receiver Attestation v0.1 schema](/__ardur_internal__/repo/docs/specs/receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
 | [Receiver Attestation v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1.json) | **implemented** | Separately signed action/receiver evidence with public trust keys and offline verification |
+| [Offline Verification Bundle v0.1 schema](/__ardur_internal__/repo/docs/specs/offline-verification-bundle-v0.1.schema.json) | **implemented** | Strict full-evidence journal shape with no embedded trust-root fields |
+| [Offline Verification Bundle v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1.json) | **implemented** | Three-receipt PERMIT/DENY/PERMIT chain, separate public trust roots, and redacted JSON/HTML explorer reports |
 | [Host adoption/governance source-semantic vectors](/__ardur_internal__/source/docs/specs/source-semantic-vectors/readme/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
@@ -71,10 +74,11 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 4. [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) — RFC 9711 binding for ER carriage
 5. [Transparency Anchor v0.1](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
 6. [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) — separate called-service signatures without mutating action receipts
-7. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
-8. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-9. [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) — layered revocation across delegation, session, credential, and transparency-log layers
-10. [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) — Intent-Declaration-Manifest experimental profile
+7. [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) — skeptical-auditor composition and receipt-explorer output
+8. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
+9. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+10. [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) — layered revocation across delegation, session, credential, and transparency-log layers
+11. [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 

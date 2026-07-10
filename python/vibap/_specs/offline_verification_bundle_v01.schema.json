@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/offline-verification-bundle-v0.1.schema.json",
+  "title": "Ardur Offline Verification Bundle v0.1",
+  "description": "Ordered Ardur Execution Receipt journal with exact transparency and receiver evidence sidecars. Trust roots are supplied separately by the verifier.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile", "journal"],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.offline_verification_bundle.v0.1"
+    },
+    "profile": {
+      "const": "full-evidence"
+    },
+    "journal": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2048,
+      "items": {
+        "$ref": "#/$defs/journalEntry"
+      }
+    }
+  },
+  "$defs": {
+    "compactJws": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+      "maxLength": 2097152
+    },
+    "journalEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_jwt",
+        "transparency_anchor",
+        "receiver_attestation"
+      ],
+      "properties": {
+        "receipt_jwt": {
+          "$ref": "#/$defs/compactJws"
+        },
+        "transparency_anchor": {
+          "type": "object"
+        },
+        "receiver_attestation": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

@@ -35,6 +35,16 @@ Both remain opt-in configured-path evidence: neither proves action-set
 completeness, detects a fully suppressed call, proves receiver correctness, or
 turns an uninstrumented provider path into an observed one.
 
+The Offline Verification Bundle v0.1 verifies the evidence it is given; it
+cannot prove that a presenter supplied every action, an unsuppressed chain
+prefix/tail, or an honest receiver. Trust roots are external inputs and their
+SPKI fingerprints must be checked against an independent inventory or channel.
+Raw JSONL verification is an explicit lower-assurance `--chain-only` mode.
+Offline verification reports `revocation_checked: false`, so a receipt revoked
+after bundle assembly may still verify cryptographically. Static JSON/HTML
+reports are derived views, not new signed evidence; retain the source bundle,
+trust-root fingerprints, and verifier command for reproduction.
+
 ## Product limits
 
 Ardur is not:

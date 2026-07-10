@@ -970,11 +970,14 @@ _PATH_ARG_SPECS = (
     "tls_cert",
     "tls_key",
     "anchor_bundle",
+    "journal",
+    "receipt_public_key",
     "transparency_log_key",
     "receiver_envelope",
     "receiver_public_key",
     "mcp_request",
     "mcp_response",
+    "html_report",
     "receipt_log",
     "local_log",
     "log_private_key",
@@ -1459,6 +1462,46 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if path_failure is not None:
         _print_json(path_failure)
         return 1
+    selected_inputs = sum(
+        value is not None
+        for value in (
+            args.journal,
+            args.token,
+            args.anchor_bundle,
+            args.receiver_envelope,
+        )
+    )
+    if selected_inputs != 1:
+        _print_json(
+            {
+                "valid": False,
+                "error": "verify_input_invalid",
+                "message": (
+                    "Choose exactly one verification input: a positional journal, "
+                    "--token, --anchor-bundle, or --receiver-envelope."
+                ),
+            }
+        )
+        return 1
+    if args.journal is not None:
+        return _cmd_verify_offline(args)
+    if any(
+        (
+            args.receipt_public_key is not None,
+            args.chain_only,
+            args.verify_expiry,
+            args.html_report is not None,
+            args.unsafe_show_sensitive,
+        )
+    ):
+        _print_json(
+            {
+                "valid": False,
+                "error": "verify_option_invalid",
+                "message": "Offline journal options require a positional journal input.",
+            }
+        )
+        return 1
     if args.anchor_bundle is not None:
         return _cmd_verify_anchor(args)
     if args.receiver_envelope is not None:
@@ -1493,9 +1536,15 @@ def _load_transparency_public_key(path: Path):  # type: ignore[no-untyped-def]
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 
+    if path.is_symlink():
+        raise ValueError("transparency log public key path must not be a symlink")
     if not path.is_file():
-        raise FileNotFoundError(f"transparency log public key not found: {path}")
-    key = serialization.load_pem_public_key(path.read_bytes())
+        raise FileNotFoundError("transparency log public key was not found")
+    with path.open("rb") as handle:
+        data = handle.read(64 * 1024 + 1)
+    if not data or len(data) > 64 * 1024:
+        raise ValueError("transparency log public key is empty or exceeds the size limit")
+    key = serialization.load_pem_public_key(data)
     if not isinstance(key, (ec.EllipticCurvePublicKey, ed25519.Ed25519PublicKey)):
         raise ValueError("transparency log public key must be ECDSA or Ed25519")
     return key
@@ -1562,23 +1611,131 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
 
 
 def _load_receiver_public_key(path: Path):  # type: ignore[no-untyped-def]
+    return _load_p256_public_key(path, label="receiver public key")
+
+
+def _load_p256_public_key(path: Path, *, label: str):  # type: ignore[no-untyped-def]
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec
 
     if path.is_symlink():
-        raise ValueError("receiver public key path must not be a symlink")
+        raise ValueError(f"{label} path must not be a symlink")
     if not path.is_file():
-        raise FileNotFoundError("receiver public key was not found")
+        raise FileNotFoundError(f"{label} was not found")
     with path.open("rb") as handle:
         data = handle.read(64 * 1024 + 1)
     if not data or len(data) > 64 * 1024:
-        raise ValueError("receiver public key is empty or exceeds the size limit")
+        raise ValueError(f"{label} is empty or exceeds the size limit")
     key = serialization.load_pem_public_key(data)
     if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(
         key.curve, ec.SECP256R1
     ):
-        raise ValueError("receiver public key must be an ES256 P-256 key")
+        raise ValueError(f"{label} must be an ES256 P-256 key")
     return key
+
+
+def _cmd_verify_offline(args: argparse.Namespace) -> int:
+    from .offline_verification import (
+        OfflineVerificationError,
+        render_cli_report,
+        verify_offline_path,
+        write_html_report,
+    )
+
+    if args.receipt_public_key is not None and args.keys_dir is not None:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receipt_key_source_conflict",
+                "message": "Use either --receipt-public-key or --keys-dir, not both.",
+            }
+        )
+        return 1
+    if args.mcp_request is not None or args.mcp_response is not None:
+        _print_json(
+            {
+                "valid": False,
+                "error": "offline_mcp_input_invalid",
+                "message": "Full bundles carry receiver sidecars; MCP request/response files apply only to --receiver-envelope.",
+            }
+        )
+        return 1
+    if args.receipt_public_key is None and args.keys_dir is None:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receipt_public_key_required",
+                "message": "Offline verification requires --receipt-public-key or --keys-dir.",
+            }
+        )
+        return 1
+    if (
+        args.max_registration_delay_s < 0
+        or args.max_attestation_delay_s < 0
+        or args.receiver_clock_skew_s < 0
+    ):
+        _print_json(
+            {
+                "valid": False,
+                "error": "offline_verification_window_invalid",
+                "message": "Offline verification time windows must be zero or greater.",
+            }
+        )
+        return 1
+    try:
+        receipt_public_key = (
+            _load_p256_public_key(args.receipt_public_key, label="receipt public key")
+            if args.receipt_public_key is not None
+            else load_existing_public_key(keys_dir=args.keys_dir)
+        )
+        log_public_key = (
+            _load_transparency_public_key(args.transparency_log_key)
+            if args.transparency_log_key is not None
+            else None
+        )
+        receiver_public_key = (
+            _load_receiver_public_key(args.receiver_public_key)
+            if args.receiver_public_key is not None
+            else None
+        )
+        report = verify_offline_path(
+            args.journal,
+            receipt_public_key=receipt_public_key,
+            log_public_key=log_public_key,
+            receiver_public_key=receiver_public_key,
+            chain_only=args.chain_only,
+            verify_expiry=args.verify_expiry,
+            max_registration_delay_s=args.max_registration_delay_s,
+            max_attestation_delay_s=args.max_attestation_delay_s,
+            receiver_clock_skew_s=args.receiver_clock_skew_s,
+            redact=not args.unsafe_show_sensitive,
+        )
+        if args.html_report is not None:
+            write_html_report(args.html_report, report)
+    except (
+        OfflineVerificationError,
+        KeyDirectoryError,
+        FileNotFoundError,
+        PermissionError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        response: dict[str, object] = {
+            "valid": False,
+            "error": getattr(exc, "code", "offline_verification_failed"),
+            "message": str(exc),
+        }
+        index = getattr(exc, "index", None)
+        if index is not None:
+            response["receipt_index"] = index
+        _print_json(response)
+        return 1
+    if args.json:
+        _print_json(report)
+    else:
+        sys.stdout.write(render_cli_report(report))
+    return 0
 
 
 def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
@@ -1957,6 +2114,24 @@ def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
             {
                 "ok": False,
                 "error": "receiver_attestation_fixture_failed",
+                "message": str(exc),
+            }
+        )
+        return 1
+    _print_json(report)
+    return 0
+
+
+def cmd_offline_verification_fixture(args: argparse.Namespace) -> int:
+    from .offline_verification_fixture import run_offline_verification_fixture
+
+    try:
+        report = run_offline_verification_fixture(args.output)
+    except (OSError, TypeError, ValueError) as exc:
+        _print_json(
+            {
+                "ok": False,
+                "error": "offline_verification_fixture_failed",
                 "message": str(exc),
             }
         )
@@ -4086,9 +4261,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = subparsers.add_parser(
         "verify",
-        help="verify a mission passport, receipt anchor, or receiver attestation",
+        help="verify an offline receipt journal, mission passport, receipt anchor, or receiver attestation",
     )
-    verify_input = verify.add_mutually_exclusive_group(required=True)
+    verify.add_argument(
+        "journal",
+        nargs="?",
+        type=Path,
+        help="offline full-evidence bundle, or receipt JSONL with --chain-only",
+    )
+    verify_input = verify.add_mutually_exclusive_group(required=False)
     verify_input.add_argument("--token", help="passport token to verify")
     verify_input.add_argument(
         "--anchor-bundle",
@@ -4101,6 +4282,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="portable receiver-attestation receipt envelope",
     )
     verify.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    verify.add_argument(
+        "--receipt-public-key",
+        type=Path,
+        help="trusted receipt-issuer ES256 public key PEM for offline journal verification",
+    )
     verify.add_argument(
         "--transparency-log-key",
         type=Path,
@@ -4138,6 +4324,27 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=60,
         help="allowed receiver clock skew relative to the receipt",
+    )
+    verify.add_argument(
+        "--chain-only",
+        action="store_true",
+        help="explicitly verify receipt signatures and chain only, without external sidecars",
+    )
+    verify.add_argument(
+        "--verify-expiry",
+        action="store_true",
+        help="also enforce short receipt expiry windows during archival verification",
+    )
+    verify.add_argument("--json", action="store_true", help="print a machine-readable explorer report")
+    verify.add_argument(
+        "--html-report",
+        type=Path,
+        help="write a private static HTML explorer report",
+    )
+    verify.add_argument(
+        "--unsafe-show-sensitive",
+        action="store_true",
+        help="disable default report redaction for explicit local inspection",
     )
     verify.set_defaults(func=cmd_verify)
 
@@ -4184,6 +4391,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory for public fixture artifacts; no private keys are persisted",
     )
     receiver_fixture.set_defaults(func=cmd_receiver_attestation_fixture)
+
+    offline_fixture = subparsers.add_parser(
+        "offline-verification-fixture",
+        help="generate a synthetic full-evidence offline verification bundle",
+    )
+    offline_fixture.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="directory for public fixture artifacts; no private keys are persisted",
+    )
+    offline_fixture.set_defaults(func=cmd_offline_verification_fixture)
 
     attest = subparsers.add_parser("attest", help="issue a behavioral attestation for a saved session")
     attest.add_argument("--session", required=True, help="session identifier / passport jti")

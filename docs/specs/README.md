@@ -20,6 +20,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Execution Receipt v0.2 hardening](./execution-receipt-v0.2.md) | **implemented** | Versioned RFC 8785 payloads, legacy verification, receipt-chain-head binding, and kernel loss/kill-switch finalization contract |
 | [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) | **implemented** | Immutable receipt sidecars, asynchronous pending queue, Rekor v1 and separately keyed self-hosted proof profiles, offline verifier |
 | [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
+| [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
 | [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](./idm-extension-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -31,6 +32,8 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Transparency Anchor v0.1 golden fixture](./fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
 | [Receiver Attestation v0.1 schema](./receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
 | [Receiver Attestation v0.1 golden fixture](./fixtures/receiver-attestation-v0.1.json) | **implemented** | Separately signed action/receiver evidence with public trust keys and offline verification |
+| [Offline Verification Bundle v0.1 schema](./offline-verification-bundle-v0.1.schema.json) | **implemented** | Strict full-evidence journal shape with no embedded trust-root fields |
+| [Offline Verification Bundle v0.1 golden fixture](./fixtures/offline-verification-v0.1.json) | **implemented** | Three-receipt PERMIT/DENY/PERMIT chain, separate public trust roots, and redacted JSON/HTML explorer reports |
 | [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
@@ -54,10 +57,11 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 4. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
 5. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
 6. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating action receipts
-7. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
-8. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-9. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
-10. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
+7. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
+8. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
+9. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+10. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
+11. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 

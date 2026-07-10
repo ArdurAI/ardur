@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "d3ba677f777ed87febc93cc311f0afbf02288f07308e5420da25612bae2ce950"
+source_sha256: "9375903ddd66bda54c12ebcbe0de0c6a50a0a35e058fa636e5106aa6786247fc"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -51,6 +51,16 @@ called-service signature for an exact receipt and request/response digests.
 Both remain opt-in configured-path evidence: neither proves action-set
 completeness, detects a fully suppressed call, proves receiver correctness, or
 turns an uninstrumented provider path into an observed one.
+
+The Offline Verification Bundle v0.1 verifies the evidence it is given; it
+cannot prove that a presenter supplied every action, an unsuppressed chain
+prefix/tail, or an honest receiver. Trust roots are external inputs and their
+SPKI fingerprints must be checked against an independent inventory or channel.
+Raw JSONL verification is an explicit lower-assurance `--chain-only` mode.
+Offline verification reports `revocation_checked: false`, so a receipt revoked
+after bundle assembly may still verify cryptographically. Static JSON/HTML
+reports are derived views, not new signed evidence; retain the source bundle,
+trust-root fingerprints, and verifier command for reproduction.
 
 ## Product limits
 

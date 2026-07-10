@@ -2,7 +2,7 @@
 title: "Roadmap"
 description: "Already present:"
 source_path: "ROADMAP.md"
-source_sha256: "fc0aff3856b26bb23ca70b45eebc9222ac98989c5c92516bf59fe329243f89e8"
+source_sha256: "d8af13dd75f77de947fad89d3902dd9b3f1265503dbf9145c929ce1432950928"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["roadmap"]
@@ -28,6 +28,7 @@ Already present:
 - versioned RFC 8785 Execution Receipt v0.2 action payloads, legacy v0.1 verification, golden schema fixtures, and signed session-final receipt-chain/kernel-integrity binding
 - optional receipt transparency anchors with Rekor v1 and separately keyed self-hosted proof profiles
 - optional receiver-attested receipt envelopes with a separately keyed MCP shim, public golden fixture, and offline two-signature verification
+- a packaged offline verifier that composes receipt chains, transparency proofs, and conditional receiver evidence into redacted CLI/JSON/static HTML reports without a running service
 - curated Python and Go runtime imports
 - the Ardur Personal Hub service plus its CLI surface
 - the Claude Code plugin and hook with signed receipts
@@ -50,7 +51,7 @@ Next hardening work:
 
 - live-provider OpenAI Agents SDK and Google ADK wrapper evidence beyond the current no-key fixtures
 - Codex hooks and Claude Desktop MCP packaging
-- public verifier and proof entry points with stable artifact paths so the archival walkthrough casts can be re-recorded against the public runtime
+- re-recorded proof media using the packaged offline verifier and stable public fixture paths
 - conformance test vectors imported under `docs/specs/conformance/` to retire the "private layout" notes in the v0.1 specs
 
 ## Proof Story

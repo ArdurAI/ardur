@@ -1,0 +1,215 @@
+# Offline Verification Bundle v0.1
+
+Status: implemented public profile for independently runnable Ardur receipt
+verification.
+
+## 1. Scope
+
+This profile composes an ordered Ardur Execution Receipt journal with the
+portable evidence defined by:
+
+- [Execution Receipt v0.2](./execution-receipt-v0.2.md);
+- [Transparency Anchor v0.1](./transparency-anchor-v0.1.md); and
+- [Receiver Attestation v0.1](./receiver-attestation-v0.1.md).
+
+The result is a single evidence JSON file that can be checked without a running
+Ardur service and without network access. Receipt-issuer, transparency-log, and
+receiver public keys are separate verifier inputs. A bundle MUST NOT establish
+trust in a key merely by carrying that key alongside the evidence.
+
+The companion JSON Schema is
+[`offline-verification-bundle-v0.1.schema.json`](./offline-verification-bundle-v0.1.schema.json).
+
+## 2. Artifact Shape
+
+The top-level object is:
+
+```json
+{
+  "schema_version": "ardur.offline_verification_bundle.v0.1",
+  "profile": "full-evidence",
+  "journal": [
+    {
+      "receipt_jwt": "<compact JWS>",
+      "transparency_anchor": { "...": "Transparency Anchor v0.1" },
+      "receiver_attestation": { "...": "Receiver Attestation v0.1" }
+    }
+  ]
+}
+```
+
+`journal` is the signed chain order. A verifier MUST NOT sort entries by
+timestamp, receipt id, or evidence metadata before checking parent linkage.
+
+Each `transparency_anchor.receipt_jwt` and
+`receiver_attestation.receipt_jwt` MUST equal the journal entry's compact JWS
+byte for byte. Matching decoded claims is insufficient because the sidecars
+commit to the exact signed artifact.
+
+The bundle contains no trusted-key field. Unknown top-level or journal-entry
+members fail schema validation.
+
+## 3. Verification Profiles
+
+### 3.1 Full evidence
+
+The default `full-evidence` profile requires:
+
+1. a valid ES256 signature and supported receipt schema for every journal
+   entry;
+2. one root receipt followed by exact SHA-256 parent links;
+3. unique receipt ids and JTIs in one trace/run-nonce lineage;
+4. monotonic signed issuance and observation times;
+5. a valid Transparency Anchor v0.1 inclusion proof for every receipt;
+6. a valid `receiver-attested` envelope for every `compliant` receipt; and
+7. a valid explicit `self-attested` envelope for every `violation` or
+   `insufficient_evidence` receipt.
+
+The conditional receiver rule is intentional. A compliant action reached the
+receiver and can be co-signed. A denied action MUST be blocked before dispatch,
+so requiring a receiver signature would contradict successful enforcement.
+The self-attested envelope records that lower tier explicitly instead of
+pretending the receiver participated.
+
+### 3.2 Chain only
+
+Legacy receipt JSONL can be checked only with explicit `--chain-only`. This
+profile verifies receipt signatures and parent linkage but does not claim
+transparency inclusion or receiver participation. Its result is
+`verified_chain_only`, not `verified`.
+
+The explicit option prevents an attacker from deleting external sidecars and
+silently obtaining the same assurance label from a weaker input.
+
+## 4. Offline Algorithm
+
+An implementation conforming to this profile MUST:
+
+1. read a bounded regular UTF-8 file and reject symlinks;
+2. reject duplicate JSON object keys before schema validation;
+3. cap full input size, compact-JWS size, and journal cardinality;
+4. validate the outer bundle and every nested sidecar under its versioned
+   schema;
+5. verify all receipt signatures before trusting timeline fields;
+6. check root shape, parent hash, parent id, uniqueness, lineage, and time
+   ordering;
+7. verify each transparency proof and signed checkpoint using the separately
+   supplied log key;
+8. verify each receiver state and signature using the separately supplied
+   receiver key where required;
+9. fail the complete operation on the first invalid or missing required item;
+   and
+10. report `verification_mode: offline` and `revocation_checked: false`.
+
+Archival verification does not reject a receipt merely because its short
+runtime `exp` window elapsed. `--verify-expiry` opts into that additional
+runtime-time check. Signatures, schemas, parent linkage, registration delay,
+receiver delay, and signed chronology remain enforced in either mode.
+
+No verification step in this profile performs a network request. This is an
+implementation property, not a claim that the host process is sandboxed from
+all networking by the operating system.
+
+## 5. Trust Roots
+
+The verifier accepts these independent public inputs:
+
+| Role | Accepted key |
+|---|---|
+| Receipt issuer | ES256 / P-256 public key |
+| Transparency log | Ed25519 or ECDSA key accepted by the anchor profile |
+| Receiver | ES256 / P-256 public key distinct from the receipt issuer |
+
+Reports include SHA-256 fingerprints of each SubjectPublicKeyInfo value. The
+operator or auditor must compare those fingerprints with an independently
+trusted inventory, certificate, policy, or communication channel. A valid
+signature under an attacker-selected key proves internal consistency, not the
+claimed signer identity.
+
+## 6. Explorer Report
+
+The verifier emits a chronological timeline with:
+
+- `PERMIT`, `DENY`, or `ERROR` derived from the signed tri-state verdict;
+- actor, grant, tool, action class, target, resource family, and side-effect
+  class;
+- signed policy-engine decisions and reasons;
+- budget deltas, remaining budgets, and selected numeric cost measurements;
+- receipt/chain, transparency, and receiver evidence status plus exact
+  anchor, log, and receiver-attestation references; and
+- a final verifier result and explicit limitations.
+
+Authority narrowing is reported only when signed budget evidence proves a
+decrease or a consuming/reserving delta, with no contradictory budget increase.
+A rejected action alone does not narrow future authority. A changed grant id is
+visible, but the report does not infer parent-scope containment without the
+signed grant artifacts.
+
+## 7. Redaction and Static HTML
+
+Human, JSON, and HTML projections redact credential-shaped strings by default.
+`--unsafe-show-sensitive` is an explicit local opt-in to the unredacted
+projection. It does not weaken cryptographic checks.
+
+Static HTML reports:
+
+- contain no JavaScript;
+- HTML-escape every evidence-derived value at the final rendering sink;
+- carry a restrictive Content Security Policy;
+- neutralize control and bidirectional formatting characters in displayed
+  values; and
+- are written atomically with mode `0600`.
+
+The HTML and JSON reports are derived views. The original bundle, trust-root
+fingerprints, and verifier command remain the authoritative reproducibility
+inputs.
+
+## 8. CLI and Package
+
+Full verification:
+
+```text
+ardur verify evidence.json \
+  --receipt-public-key receipt-public.pem \
+  --transparency-log-key log-public.pem \
+  --receiver-public-key receiver-public.pem \
+  --html-report report.html
+```
+
+Explicit legacy downgrade:
+
+```text
+ardur verify receipts.jsonl \
+  --receipt-public-key receipt-public.pem \
+  --chain-only
+```
+
+`ardur-verify` is a dedicated console alias for `ardur verify`. Both ship in
+the wheel and source distribution. Neither requires a running proxy, Hub,
+database, or Ardur service.
+
+The synthetic fixture command writes no private keys:
+
+```text
+ardur offline-verification-fixture --output ./offline-fixture
+```
+
+## 9. Failure Boundary
+
+Stable failure categories include malformed/oversized input, duplicate JSON
+keys, unsupported schema, invalid receipt chain, missing or substituted
+sidecars, invalid inclusion proof, invalid receiver signature, missing trust
+root, timestamp regression, and unsafe output path.
+
+Verification of a presented chain does not prove that the presenter supplied
+every action, an unsuppressed chain tail, or an honest receiver. One valid
+signed checkpoint does not prove log consistency across views. Offline mode
+cannot discover revocation published after the evidence was assembled.
+
+## 10. Primary References
+
+- [Sigstore bundle protobuf v0.3](https://github.com/sigstore/protobuf-specs/blob/main/protos/sigstore_bundle.proto)
+- [Sigstore verification documentation](https://docs.sigstore.dev/cosign/verifying/verify/)
+- [Delegation Receipt Protocol draft-10, offline verification](https://datatracker.ietf.org/doc/draft-nelson-agent-delegation-receipts/10/)
+- [OWASP Cross Site Scripting Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+- [RFC 8785: JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html)
