@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "1a910d98caa9a14e71156ad308068110e76d4f93a063d293b11e0967563c9d6c"
+source_sha256: "d804a6585a5b5f898d31926f18d3f3d7369a8549cc2dbb97daa65cda424edda6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -31,6 +31,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 |------|--------|-------|
 | [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) | **migrated** | Public-import annotated |
 | [Delegation Grant (DG) Profile of AAT](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/) | **migrated** | Public-import annotated |
+| [Ardur DRP Mapping Profile v0.1](/__ardur_internal__/source/docs/specs/ardur-drp-mapping-v0.1/) | **mapping published** | Draft-10-pinned field ledger and B2 target shape; not an IETF conformance or interoperability claim |
 | [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) | **migrated** | Public-import annotated |
 | [Mission Declaration (MD)](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/) | **migrated** | Public-import annotated; clean-break protocol rename applied (`application/ardur.md+jwt`, `https://ardur.dev/...`) |
 | [Execution Receipt (ER)](/__ardur_internal__/source/docs/specs/execution-receipt-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
@@ -70,19 +71,21 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 1. [Mission Declaration (MD)](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/) — the signed scope envelope the agent starts with
 2. [Delegation Grant (DG) Profile](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/) — how child agents get strictly narrower authority
-3. [Execution Receipt v0.2](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
-4. [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) — RFC 9711 binding for ER carriage
-5. [Transparency Anchor v0.1](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
-6. [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) — separate called-service signatures without mutating action receipts
-7. [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) — skeptical-auditor composition and receipt-explorer output
-8. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
-9. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-10. [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) — layered revocation across delegation, session, credential, and transparency-log layers
-11. [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) — Intent-Declaration-Manifest experimental profile
+3. [Ardur DRP Mapping Profile v0.1](/__ardur_internal__/source/docs/specs/ardur-drp-mapping-v0.1/) — field-by-field draft-10 mapping and the target shape for DRP emit/verify
+4. [Execution Receipt v0.2](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
+5. [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) — RFC 9711 binding for ER carriage
+6. [Transparency Anchor v0.1](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
+7. [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) — separate called-service signatures without mutating action receipts
+8. [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) — skeptical-auditor composition and receipt-explorer output
+9. [Verifier Contract](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — what a conforming verifier must do
+10. [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+11. [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) — layered revocation across delegation, session, credential, and transparency-log layers
+12. [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 
-- **AAT (Attenuating Authorization Tokens)** — IETF OAuth WG draft; MCEP's Delegation Grant is an AAT profile.
+- **AAT (Attenuating Authorization Tokens)** — individual Internet-Draft with no formal IETF standing; MCEP's current Delegation Grant profile is pinned to draft-00 while draft-01 migration is tracked in [#233](https://github.com/ArdurAI/ardur/issues/233).
+- **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur publishes a draft-10 mapping profile while emit/verify and interoperability evidence remain follow-up work.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
 - **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.
 - **Biscuit** — first-party-attenuation credential format; the DG profile's narrowing semantics rely on Biscuit's append-only block model (see [ADR-017](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/)).
