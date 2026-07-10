@@ -17,6 +17,7 @@ import socket
 import sys
 import tempfile
 import threading
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -204,6 +205,30 @@ def _live_kernel_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sockdir: P
     socket_path = sockdir / "daemon.sock"
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
     return socket_path
+
+
+def test_embedded_server_health_does_not_disclose_session_id() -> None:
+    server = run_bridge._build_embedded_server(
+        proxy=object(),
+        session_id="sensitive-session-id",
+        api_token="api-token",
+        private_key=object(),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+
+    try:
+        for path in ("/health", "/healthz"):
+            with urllib.request.urlopen(  # noqa: S310 - loopback test server
+                f"http://{host}:{port}{path}", timeout=2
+            ) as response:
+                assert response.status == 200
+                assert json.load(response) == {"status": "ok"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_ardur_run_governs_launched_agent_zero_setup(
