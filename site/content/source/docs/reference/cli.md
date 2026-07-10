@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "41442be742319cbc75c7c8559e82e3bfffa28c0486b59eba2b237b4afa892d78"
+source_sha256: "ec5f0c3eba03001f8ff0bae5b89e3e1d5434209663b74b1fff9136a99d8f484f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -350,6 +350,26 @@ RFC 8785/P-256 profile emitter and full-chain verifier; it is not raw RFC 3161
 proof, independent implementation interoperability, IETF conformance, or
 current revocation evidence. See the
 [Ardur DRP Profile v0.1 specification](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/).
+
+### `ardur-drp-fixtures`
+
+Run the exact portable DRP draft-10 implementation fixture bundle and write a
+deterministic machine-readable report:
+
+```text
+ardur-drp-fixtures --bundle FILE [--output FILE]
+```
+
+The runner reads only the local bundle. It performs no network requests and
+needs no private keys or API credentials. Exit code `0` means every actual
+decision, reason code, and receipt ID matched; `1` means a scenario mismatch;
+and `2` means malformed input, invalid trust context, or an unsafe output path.
+
+Both input and output are schema-closed. DENY rows label a surfaced receipt ID
+as `untrusted-input` (or `absent`) rather than treating it as verified
+evidence. The report is an Ardur implementation self-test, not IETF conformance
+or independent interoperability. See the
+[implementation and interoperability note](/__ardur_internal__/source/docs/specs/ardur-drp-implementation-interop-v0.1/).
 
 ### `ardur offline-verification-fixture`
 

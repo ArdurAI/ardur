@@ -2,7 +2,7 @@
 title: "Ardur DRP Profile v0.1"
 description: "This document defines the runtime profile implemented by"
 source_path: "docs/specs/ardur-drp-profile-v0.1.md"
-source_sha256: "a9f9412ad01765872f6d3e3fa4f63b8ede785c1bd5dedd454569c7c841c32f42"
+source_sha256: "2dfc85be75ede0271d2bee846eca957521c43a3318a2a32024628c8f0aeab038"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -33,8 +33,10 @@ standing. Ardur v0.1 therefore claims:
 - a documented comparison with one exact reference-SDK snapshot.
 
 It does not claim an IETF standard, IETF conformance, independent
-interoperability, or a complete RFC 3161 verifier. Issue #180 owns independent
-fixture evidence and any future public conformance statement.
+interoperability, or a complete RFC 3161 verifier. The
+[implementation and interoperability note](/__ardur_internal__/source/docs/specs/ardur-drp-implementation-interop-v0.1/)
+publishes portable Ardur self-test fixtures and records independent
+interoperability as `not-demonstrated`.
 
 ## 2. Lifecycle and the external log proof
 

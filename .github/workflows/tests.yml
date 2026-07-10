@@ -29,10 +29,13 @@ jobs:
         run: |
           python -m ruff check \
             python/vibap/drp.py \
+            python/vibap/drp_conformance.py \
             python/vibap/drp_fixture.py \
+            python/tests/test_drp_conformance.py \
             python/tests/test_drp.py \
             python/tests/test_proxy.py \
-            python/tests/test_examples_governance_integration.py
+            python/tests/test_examples_governance_integration.py \
+            scripts/generate-drp-implementation-fixtures.py
 
   go-lint:
     name: Go lint
@@ -78,6 +81,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
+      - name: Run public DRP implementation fixtures
+        working-directory: python
+        run: |
+          python -m vibap.drp_conformance \
+            --bundle ../docs/specs/conformance/drp-v0.1/bundle.json \
+            --output "${{ runner.temp }}/ardur-drp-fixture-report.json"
+
       - name: Run pytest with coverage
         working-directory: python
         timeout-minutes: 15
@@ -109,6 +119,15 @@ jobs:
           name: python-coverage-${{ matrix.python-version }}
           path: ${{ runner.temp }}/ardur-coverage-report.xml
           if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload DRP implementation fixture report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: drp-implementation-fixtures-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/ardur-drp-fixture-report.json
+          if-no-files-found: error
           retention-days: 14
 
   go:

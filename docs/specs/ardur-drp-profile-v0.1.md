@@ -16,8 +16,10 @@ standing. Ardur v0.1 therefore claims:
 - a documented comparison with one exact reference-SDK snapshot.
 
 It does not claim an IETF standard, IETF conformance, independent
-interoperability, or a complete RFC 3161 verifier. Issue #180 owns independent
-fixture evidence and any future public conformance statement.
+interoperability, or a complete RFC 3161 verifier. The
+[implementation and interoperability note](./ardur-drp-implementation-interop-v0.1.md)
+publishes portable Ardur self-test fixtures and records independent
+interoperability as `not-demonstrated`.
 
 ## 2. Lifecycle and the external log proof
 

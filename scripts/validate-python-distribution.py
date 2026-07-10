@@ -41,6 +41,7 @@ PLUGIN_ASSETS = (
 )
 REQUIRED_RUNTIME_FILES = (
     PurePosixPath("vibap/drp.py"),
+    PurePosixPath("vibap/drp_conformance.py"),
     PurePosixPath("vibap/drp_fixture.py"),
     PurePosixPath("vibap/launch_gate.py"),
     PurePosixPath("vibap/offline_verification.py"),
@@ -194,6 +195,7 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
             dict(entry_points["console_scripts"])
             == {
                 "ardur": "vibap.cli:main",
+                "ardur-drp-fixtures": "vibap.drp_conformance:main",
                 "ardur-proxy": "vibap.cli:main",
                 "ardur-verify": "vibap.offline_verification:main",
             },

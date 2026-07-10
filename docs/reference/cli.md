@@ -334,6 +334,26 @@ proof, independent implementation interoperability, IETF conformance, or
 current revocation evidence. See the
 [Ardur DRP Profile v0.1 specification](../specs/ardur-drp-profile-v0.1.md).
 
+### `ardur-drp-fixtures`
+
+Run the exact portable DRP draft-10 implementation fixture bundle and write a
+deterministic machine-readable report:
+
+```text
+ardur-drp-fixtures --bundle FILE [--output FILE]
+```
+
+The runner reads only the local bundle. It performs no network requests and
+needs no private keys or API credentials. Exit code `0` means every actual
+decision, reason code, and receipt ID matched; `1` means a scenario mismatch;
+and `2` means malformed input, invalid trust context, or an unsafe output path.
+
+Both input and output are schema-closed. DENY rows label a surfaced receipt ID
+as `untrusted-input` (or `absent`) rather than treating it as verified
+evidence. The report is an Ardur implementation self-test, not IETF conformance
+or independent interoperability. See the
+[implementation and interoperability note](../specs/ardur-drp-implementation-interop-v0.1.md).
+
 ### `ardur offline-verification-fixture`
 
 Generate a synthetic full-evidence receipt chain and immediately verify it:

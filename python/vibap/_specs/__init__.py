@@ -76,3 +76,25 @@ def ardur_drp_profile_v01_schema() -> dict:
         .read_text(encoding="utf-8")
     )
     return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def drp_conformance_bundle_v01_schema() -> dict:
+    """Return the parsed DRP implementation fixture bundle v0.1 schema."""
+    raw = (
+        files(__package__)
+        .joinpath("drp_conformance_bundle_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def drp_implementation_fixture_report_v01_schema() -> dict:
+    """Return the parsed DRP implementation fixture report v0.1 schema."""
+    raw = (
+        files(__package__)
+        .joinpath("drp_implementation_fixture_report_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)

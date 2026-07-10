@@ -15,7 +15,8 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Conformance Profiles](./conformance-profiles-v0.1.md) | **migrated** | Public-import annotated |
 | [Delegation Grant (DG) Profile of AAT](./delegation-grant-profile-v0.1.md) | **migrated** | Public-import annotated |
 | [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) | **mapping published** | Draft-10-pinned field ledger and B2 target shape; not an IETF conformance or interoperability claim |
-| [Ardur DRP Profile v0.1](./ardur-drp-profile-v0.1.md) | **implemented** | RFC 8785/P-256 emit, external-trust verifier, full transitive attenuation, and bounded DENY reasons; independent conformance remains #180 |
+| [Ardur DRP Profile v0.1](./ardur-drp-profile-v0.1.md) | **implemented** | RFC 8785/P-256 emit, external-trust verifier, full transitive attenuation, and bounded DENY reasons |
+| [DRP implementation and interoperability note v0.1](./ardur-drp-implementation-interop-v0.1.md) | **implementation evidence published** | Draft-10 support ledger, portable signed scenarios, deterministic CI report, and explicit `not-demonstrated` independent status |
 | [Verifier Contract](./verifier-contract-v0.1.md) | **migrated** | Public-import annotated |
 | [Mission Declaration (MD)](./mission-declaration-v0.1.md) | **migrated** | Public-import annotated; clean-break protocol rename applied (`application/ardur.md+jwt`, `https://ardur.dev/...`) |
 | [Execution Receipt (ER)](./execution-receipt-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
@@ -32,6 +33,9 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Execution Receipt v0.2 golden fixture](./fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
 | [Ardur DRP Profile v0.1 schema](./ardur-drp-profile-v0.1.schema.json) | **implemented** | Closed-world Authorization Object and critical extension contract |
 | [Ardur DRP Profile v0.1 fixture](./fixtures/ardur-drp-profile-v0.1-chain.json) | **implementation fixture** | Organic root/child/grandchild signatures, external public trust/context, and self-verification report; not independent conformance |
+| [DRP implementation fixture bundle schema](./drp-conformance-bundle-v0.1.schema.json) | **implemented** | Closed portable scenario, trust, expectation, and external-status contract |
+| [DRP implementation fixture report schema](./drp-implementation-fixture-report-v0.1.schema.json) | **implemented** | Closed deterministic scenario result, verifier status, and bundle-digest contract |
+| [DRP portable implementation fixtures](./conformance/drp-v0.1/README.md) | **implementation self-test** | Seven signed deterministic scenarios and report; no private keys, network dependency, IETF claim, or independent pass |
 | [Transparency Anchor v0.1 schema](./transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
 | [Transparency Anchor v0.1 golden fixture](./fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
 | [Receiver Attestation v0.1 schema](./receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
@@ -59,20 +63,21 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 2. [Delegation Grant (DG) Profile](./delegation-grant-profile-v0.1.md) — how child agents get strictly narrower authority
 3. [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) — field-by-field draft-10 mapping and proof boundaries
 4. [Ardur DRP Profile v0.1](./ardur-drp-profile-v0.1.md) — executable emit/verify, trust context, and reference-SDK comparison
-5. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
-6. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
-7. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
-8. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating signed receipts
-9. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
-10. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
-11. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-12. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
-13. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
+5. [DRP implementation and interoperability note v0.1](./ardur-drp-implementation-interop-v0.1.md) — exact support matrix, portable fixture evidence, and independent-status boundary
+6. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
+7. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
+8. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
+9. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating signed receipts
+10. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
+11. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
+12. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+13. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
+14. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 
 - **AAT (Attenuating Authorization Tokens)** — individual Internet-Draft with no formal IETF standing; MCEP's current Delegation Grant profile is pinned to draft-00 while draft-01 migration is tracked in [#233](https://github.com/ArdurAI/ardur/issues/233).
-- **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur implements its draft-10-pinned profile while raw RFC 3161 proof integration, independent interoperability, and public conformance evidence remain follow-up work.
+- **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur implements its draft-10-pinned profile and publishes portable implementation self-test fixtures, while raw RFC 3161 proof integration and independent interoperability remain not demonstrated.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
 - **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.
 - **Biscuit** — first-party-attenuation credential format; the DG profile's narrowing semantics rely on Biscuit's append-only block model (see [ADR-017](../decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md)).
