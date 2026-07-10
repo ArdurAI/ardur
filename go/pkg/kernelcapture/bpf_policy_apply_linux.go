@@ -88,8 +88,9 @@ func PolicyMapsFromHandles(h *ProcessGuardHandles) PolicyMaps {
 // LoadAndAttachProcessGuardEBPF loads the process_guard BPF object, attaches
 // the three LSM hooks, and opens the enforce_events ringbuf reader.
 //
-// Requires CAP_BPF (or CAP_SYS_ADMIN on older kernels), CONFIG_BPF_LSM=y,
-// and "bpf" listed in /sys/kernel/security/lsm (or the lsm= kernel cmdline).
+// Requires BPF syscall authority via effective CAP_BPF/CAP_SYS_ADMIN (the
+// supported Ardur installer path) or an explicitly delegated BPF token,
+// plus CONFIG_BPF_LSM=y and "bpf" listed in /sys/kernel/security/lsm.
 func LoadAndAttachProcessGuardEBPF() (*ProcessGuardHandles, error) {
 	h := &ProcessGuardHandles{}
 

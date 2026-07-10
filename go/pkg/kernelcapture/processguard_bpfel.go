@@ -65,6 +65,26 @@ type processGuardArdurPathLpmKey struct {
 	Path      [248]int8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	processGuardMapCgroupFileAllow      = "cgroup_file_allow"
+	processGuardMapCgroupManaged        = "cgroup_managed"
+	processGuardMapCgroupNetAllow       = "cgroup_net_allow"
+	processGuardMapCgroupOpPolicy       = "cgroup_op_policy"
+	processGuardMapCgroupPathAllow      = "cgroup_path_allow"
+	processGuardMapEnforceEvents        = "enforce_events"
+	processGuardMapEnforceEventsDropped = "enforce_events_dropped"
+	processGuardMapFileAllowScratch     = "file_allow_scratch"
+	processGuardMapKillSwitch           = "kill_switch"
+	processGuardMapNetLpmScratch        = "net_lpm_scratch"
+	processGuardMapPathLpmScratch       = "path_lpm_scratch"
+	processGuardProgGuardBprmCheck      = "guard_bprm_check"
+	processGuardProgGuardFileOpen       = "guard_file_open"
+	processGuardProgGuardSocketConnect  = "guard_socket_connect"
+)
+
 // loadProcessGuard returns the embedded CollectionSpec for processGuard.
 func loadProcessGuard() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_ProcessGuardBytes)
@@ -85,7 +105,7 @@ func loadProcessGuard() (*ebpf.CollectionSpec, error) {
 //	*processGuardMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadProcessGuardObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadProcessGuardObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadProcessGuard()
 	if err != nil {
 		return err
