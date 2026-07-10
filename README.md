@@ -29,6 +29,16 @@ assurance, and coverage limits. It does not deploy or authenticate a sensor,
 and a high-confidence association to imported JSON is corroboration rather
 than independent proof.
 
+For `ardur run` on Linux, when the launch bridge successfully registers the
+governed cgroup with `ardur-kernelcaptured`, each proxy receipt is reported to
+the daemon before the evaluated action is released. The signed session
+attestation then carries an `observability_gap` summary over the daemon's
+captured process exec/exit sample: captured, correlated, and uncorrelated
+effects plus the observed-effect gap ratio. An empty sample is `not_measured`;
+ringbuf loss or producer-counter uncertainty makes it `degraded`. This is not a
+universal file/network/host-effect percentage, and receipt source assurance is
+the authenticated session owner rather than daemon-side JWT verification.
+
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)
 produces schema-validated JSON and Markdown reports that keep governance-only
@@ -45,7 +55,7 @@ At the reviewed `dev` tree on 2026-07-09, the current gates were:
 
 | Gate | Verified result |
 |---|---|
-| Python local matrix (Python 3.13) | 1,595 passed, 32 skipped; CI separately enforces its coverage threshold |
+| Python local matrix (Python 3.13) | 1,600 passed, 32 skipped; CI separately enforces its coverage threshold |
 | Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, seccomp smoke, and full `ardur run --enforce` seccomp E2E passed |
@@ -132,15 +142,16 @@ handoff: tested commit, `bundle.redacted.json`, optional live-Claude report, and
 the exact claims the artifacts do and do not support.
 
 > **Capture boundary today (v0.1):** Ardur signs the Claude Code tool-call
-> events delivered to its installed hooks. Side effects below the tool
-> boundary — subprocess trees,
-> kernel events, network connections initiated by tool-spawned processes —
-> are not automatically captured by the hook. The offline runtime-evidence
-> correlator can inspect supplied sensor events, but does not create or
-> authenticate them; the roadmap closes native capture gaps in v0.2 (filesystem
-> snapshots), v0.5 (Linux eBPF), and v1.0 (macOS Endpoint Security
-> Framework). See [`docs/coverage-map.md`](docs/coverage-map.md) for the
-> precise per-tool audit.
+> events delivered to its installed hooks. Hook-only runs do not automatically
+> capture subprocess trees, kernel events, or network connections below that
+> boundary. A successfully daemon-linked Linux `ardur run` additionally
+> captures cgroup-scoped process exec/exit events and measures their
+> receipt-correlation gap, but still does not claim universal file, network, or
+> provider-hidden effect coverage. The offline runtime-evidence correlator can
+> inspect supplied sensor events, but does not create or authenticate them.
+> macOS Endpoint Security and broader native effect coverage remain roadmap
+> work. See [`docs/coverage-map.md`](docs/coverage-map.md) for the precise
+> per-tool audit.
 
 ## Why Ardur
 

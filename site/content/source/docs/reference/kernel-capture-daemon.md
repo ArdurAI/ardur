@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "76bbe5644f403c861d3df877f263133ed965bda5a6f77a19569d3562a02263c3"
+source_sha256: "22bc55554e92f61c4da02dc9d5f63f9a66191d7ade34ff52e1ac8be23264baf1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -128,6 +128,35 @@ reservation. Neither is the expected symptom of a BPF verifier rejection:
 verifier or attach failures occur during startup and are reported by the loader
 before records can be emitted.
 
+## Process-lifecycle observability gap
+
+The `ardur run` proxy registers each signed receipt identifier with the daemon
+after writing the receipt and before returning the evaluation response that
+releases the action. `register_receipt` accepts only a bounded opaque identifier
+from the Unix-socket peer that owns the active session. PID, cgroup, peer
+identity, and observation time come from daemon-owned state. Registrations are
+deduplicated and capped at 4,096 per session.
+
+Successful `session_status` and `end_session` responses include
+`observability_gap` with:
+
+- registered, corroborated, and unobserved receipt counts;
+- captured, correlated, and uncorrelated process lifecycle effect counts;
+- `observed_effect_gap_ratio = uncorrelated_effects / captured_effects` for a
+  non-empty captured sample;
+- `effect_scope = process_lifecycle` and explicit `process_exec` /
+  `process_exit` event classes; and
+- `receipt_source_assurance = authenticated_session_owner`.
+
+An empty captured sample is `not_measured` and omits the ratio. A non-empty,
+loss-free sample is `measured`. Any lifecycle capture loss or producer-counter
+evidence gap makes it `degraded`; the ratio still describes only the events
+that reached the daemon and must not be promoted to a complete-session rate.
+The metric does not claim daemon-side receipt signature verification, universal
+host capture, or file/network/provider-hidden effect coverage. The run bridge
+folds it into the signed attestation at
+`kernel_enforcement.observability_gap`.
+
 ## Operator response
 
 1. Confirm that the daemon binary and eBPF objects came from the same reviewed
@@ -139,10 +168,13 @@ before records can be emitted.
    `lifecycle_capture` summary whose
    `coverage_status` is `degraded` as an evidence gap; do not use affected
    sessions to claim complete kernel observation for that interval.
-4. Restart with a matched daemon and eBPF artifact set. If warnings continue,
+4. Interpret `observability_gap.observed_effect_gap_ratio` only within its
+   `process_lifecycle` event classes. Investigate uncorrelated effects, but do
+   not treat a zero observed-sample ratio as proof of universal coverage.
+5. Restart with a matched daemon and eBPF artifact set. If warnings continue,
    preserve the daemon logs, kernel version, artifact digests, and the first
    affected receipt for diagnosis.
-5. Use `--no-ringbuf` only to isolate the socket control plane. Record that
+6. Use `--no-ringbuf` only to isolate the socket control plane. Record that
    capture and enforcement were intentionally unavailable during the test.
 
 The summary is evidence-integrity metadata for a session's active time window,

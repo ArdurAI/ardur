@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 import jwt
 from cryptography.hazmat.primitives import serialization
@@ -3081,6 +3081,8 @@ class GovernanceProxy:
         session: GovernanceSession | str,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
+        receipt_callback: Callable[[str], None] | None = None,
     ) -> tuple[Decision, str]:
         arguments_snapshot = copy.deepcopy(arguments)
         receipt_entry: dict[str, Any] | None = None
@@ -3295,6 +3297,8 @@ class GovernanceProxy:
         )
         if receipt_entry is not None:
             self._log_receipt(receipt_entry)
+            if receipt_callback is not None:
+                receipt_callback(str(receipt_entry["receipt_id"]))
         return decision, reason
 
     def record_tool_result(

@@ -37,6 +37,6 @@ RUN pip install --no-cache-dir -e /opt/ardur/python \
 COPY --from=build /out/ardur-kernelcaptured /usr/local/bin/ardur-kernelcaptured
 COPY --from=build /out/ardur-exec-shim      /usr/local/bin/ardur-exec-shim
 COPY --from=build /out/enforce-verify        /usr/local/bin/enforce-verify
-COPY docs/demo/enforce-e2e/agent.py docs/demo/enforce-e2e/agent_seccomp.py docs/demo/enforce-e2e/run.sh docs/demo/enforce-e2e/run-seccomp.sh /opt/ardur/demo/
+COPY docs/demo/enforce-e2e/agent.py docs/demo/enforce-e2e/agent_seccomp.py docs/demo/enforce-e2e/verify-observability-gap.py docs/demo/enforce-e2e/run.sh docs/demo/enforce-e2e/run-seccomp.sh /opt/ardur/demo/
 RUN chmod +x /opt/ardur/demo/run.sh /opt/ardur/demo/run-seccomp.sh && mkdir -p /run/ardur /var/lib/ardur
 WORKDIR /opt/ardur/demo

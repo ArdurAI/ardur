@@ -205,8 +205,10 @@ local path.
   controls. Operators should still protect private sensor files.
 - There is no network or cloud cost in this command. Storage and CPU cost are
   local and bounded by the limits above.
-- Sensor authenticity, attested coverage, the observability-gap metric in #39,
-  and the measured Linux overhead experiment in #166 remain separate work.
+- Sensor authenticity and attested coverage remain outside this imported-file
+  profile. The native Linux `ardur run` observability-gap metric in #39 and the
+  measured Linux overhead experiment in #166 are separate evidence surfaces;
+  neither is inferred from an imported report.
 
 ## Primary references
 

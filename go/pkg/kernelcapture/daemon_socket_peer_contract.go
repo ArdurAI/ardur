@@ -240,6 +240,10 @@ func daemonProtocolRequestSessionID(req DaemonProtocolRequest) string {
 		if req.RegisterSession != nil {
 			return req.RegisterSession.SessionID
 		}
+	case DaemonProtocolMethodRegisterReceipt:
+		if req.RegisterReceipt != nil {
+			return req.RegisterReceipt.SessionID
+		}
 	case DaemonProtocolMethodEndSession:
 		if req.EndSession != nil {
 			return req.EndSession.SessionID

@@ -389,3 +389,43 @@ func TestValidateCgroupFilterSequenceRequiresAllowlistBeforeEnable(t *testing.T)
 		}
 	}
 }
+
+func TestDaemonRegisterReceiptProtocolRoundTripAndValidation(t *testing.T) {
+	t.Parallel()
+	req := DaemonProtocolRequest{
+		ProtocolVersion: DaemonProtocolVersion,
+		Method:          DaemonProtocolMethodRegisterReceipt,
+		RegisterReceipt: &DaemonRegisterReceiptRequest{
+			SessionID: "session-1",
+			ReceiptID: "receipt:0123456789abcdef",
+		},
+	}
+	encoded, err := EncodeDaemonProtocolRequest(req)
+	if err != nil {
+		t.Fatalf("EncodeDaemonProtocolRequest: %v", err)
+	}
+	decoded, err := DecodeDaemonProtocolRequest(encoded)
+	if err != nil {
+		t.Fatalf("DecodeDaemonProtocolRequest: %v", err)
+	}
+	if decoded.RegisterReceipt == nil || decoded.RegisterReceipt.ReceiptID != req.RegisterReceipt.ReceiptID {
+		t.Fatalf("decoded register_receipt = %#v", decoded.RegisterReceipt)
+	}
+
+	for name, receiptID := range map[string]string{
+		"empty":      "",
+		"whitespace": " receipt:a",
+		"control":    "receipt:a\n",
+		"unicode":    "receipt:\u00e9",
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := req
+			payload := *req.RegisterReceipt
+			payload.ReceiptID = receiptID
+			bad.RegisterReceipt = &payload
+			if err := ValidateDaemonProtocolRequest(bad); err == nil {
+				t.Fatalf("receipt_id %q passed validation", receiptID)
+			}
+		})
+	}
+}

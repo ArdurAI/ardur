@@ -72,19 +72,21 @@ type KernelReceiptEntry struct {
 // lockIfMatches leaves mu locked so the caller can hold a route lease through
 // correlation and evidence append; callers must invoke unlock afterward.
 type sessionRoute struct {
-	mu         sync.Mutex
-	sessionID  string
-	scope      *kernelcapture.ProcessTreeScope
-	correlator *kernelcapture.Correlator
-	active     bool
+	mu               sync.Mutex
+	sessionID        string
+	scope            *kernelcapture.ProcessTreeScope
+	correlator       *kernelcapture.Correlator
+	observabilityGap *kernelcapture.ObservabilityGapAccumulator
+	active           bool
 }
 
-func newSessionRoute(sessionID string, scope *kernelcapture.ProcessTreeScope, correlator *kernelcapture.Correlator) *sessionRoute {
+func newSessionRoute(sessionID string, scope *kernelcapture.ProcessTreeScope, correlator *kernelcapture.Correlator, gap *kernelcapture.ObservabilityGapAccumulator) *sessionRoute {
 	return &sessionRoute{
-		sessionID:  sessionID,
-		scope:      scope,
-		correlator: correlator,
-		active:     true,
+		sessionID:        sessionID,
+		scope:            scope,
+		correlator:       correlator,
+		observabilityGap: gap,
+		active:           true,
 	}
 }
 
@@ -138,6 +140,7 @@ type daemon struct {
 	// every session that was active when each gap occurred. lossEpoch is a
 	// daemon-lifetime monotonic identifier shared by all affected sessions.
 	lifecycleCaptureSummaries map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator
+	observabilityGaps         map[string]*kernelcapture.ObservabilityGapAccumulator
 	lifecycleCaptureLossEpoch uint64
 	// lifecycleDropMu protects daemon-lifetime producer-drop baselining. The
 	// source is installed by the Linux lifecycle consumer and sampled at event
@@ -284,6 +287,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary:      kernelcapture.NewEnforceEventSummaryAccumulator(),
 		lifecycleCaptureSummaries: make(map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator),
+		observabilityGaps:         make(map[string]*kernelcapture.ObservabilityGapAccumulator),
 		lifecycleFilter:           newLifecycleFilterManager(),
 		fs:                        osEvidenceFS{},
 		tamperChain:               kernelcapture.NewTamperReceiptChain(),
@@ -349,6 +353,8 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 	switch req.Method {
 	case kernelcapture.DaemonProtocolMethodApplyPolicy:
 		return d.handleApplyPolicy(req, handshake)
+	case kernelcapture.DaemonProtocolMethodRegisterReceipt:
+		return d.handleRegisterReceipt(req, handshake)
 	case kernelcapture.DaemonProtocolMethodSetKillSwitch:
 		return d.handleSetKillSwitch(req, handshake)
 	}
@@ -419,6 +425,9 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 			if summary, ok := d.lifecycleCaptureSummaryForSession(sessionID.SessionID); ok {
 				resp.LifecycleCapture = &summary
 			}
+			if summary, ok := d.observabilityGapSummaryForSession(sessionID.SessionID); ok {
+				resp.ObservabilityGap = &summary
+			}
 			d.onSessionEnded(sessionID.SessionID)
 		}
 	case kernelcapture.DaemonProtocolMethodSessionStatus:
@@ -429,6 +438,9 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		if summary, ok := d.lifecycleCaptureSummaryForSession(resp.SessionID); ok {
 			resp.LifecycleCapture = &summary
 		}
+		if summary, ok := d.observabilityGapSummaryForSession(resp.SessionID); ok {
+			resp.ObservabilityGap = &summary
+		}
 		resp.SeccompListenerAttached = d.seccompListenerAttached(resp.SessionID)
 	case kernelcapture.DaemonProtocolMethodHealth:
 		// Advertise which enforcement tier is live so a launcher can decide
@@ -437,6 +449,60 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		resp.EnforcementTier = d.enforcementTier()
 	}
 	return resp
+}
+
+func (d *daemon) handleRegisterReceipt(req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
+	response := kernelcapture.DaemonProtocolResponse{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterReceipt,
+	}
+	if err := kernelcapture.ValidateDaemonProtocolRequest(req); err != nil {
+		response.Error = fmt.Sprintf("invalid register_receipt request: %v", err)
+		return response
+	}
+	registration := req.RegisterReceipt
+	response.SessionID = registration.SessionID
+	record, err := d.registry.ActiveSessionForPeer(registration.SessionID, handshake)
+	if err != nil {
+		response.Error = err.Error()
+		return response
+	}
+
+	d.mu.RLock()
+	route := d.routeIndex[record.SessionID]
+	gap := d.observabilityGaps[record.SessionID]
+	d.mu.RUnlock()
+	if route == nil || route.correlator == nil || gap == nil {
+		response.Error = "active session receipt-correlation state is unavailable"
+		return response
+	}
+
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	if !route.active {
+		response.Error = "session route is no longer active"
+		return response
+	}
+	added, err := gap.RegisterReceipt(registration.ReceiptID)
+	if err != nil {
+		response.Error = err.Error()
+		return response
+	}
+	if added {
+		route.correlator.RegisterReceipt(kernelcapture.ToolReceipt{
+			ReceiptID:      registration.ReceiptID,
+			SessionID:      record.SessionID,
+			PID:            record.RootPID,
+			PIDNamespaceID: uint64(record.PIDNamespaceID),
+			CgroupID:       record.CgroupID,
+			ObservedAt:     time.Now().UTC(),
+		})
+		response.Status = "registered"
+	} else {
+		response.Status = "already_registered"
+	}
+	response.OK = true
+	return response
 }
 
 // enforcementTier reports which kernel-enforcement backend is currently live —
@@ -872,7 +938,9 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 		RestartGrace:     3 * time.Second,
 	})
 	d.correlators[sessionID] = correlator
-	d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator))
+	gap := kernelcapture.NewObservabilityGapAccumulator()
+	d.observabilityGaps[sessionID] = gap
+	d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator, gap))
 	d.enforceChains[sessionID] = kernelcapture.NewEnforceReceiptChain()
 	summary := kernelcapture.NewEnforceEventSummaryAccumulator()
 	lastTamperSeq, _ := d.tamperChain.Head()
@@ -941,6 +1009,7 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	delete(d.enforceChains, sessionID)
 	delete(d.enforceSummaries, sessionID)
 	delete(d.lifecycleCaptureSummaries, sessionID)
+	delete(d.observabilityGaps, sessionID)
 	// Grab (and forget) the seccomp listener's cancel func here, under the
 	// same lock as the map deletes above; call it below, outside the lock,
 	// since the supervisor goroutine it stops may itself try to touch
@@ -1183,6 +1252,9 @@ func (d *daemon) appendAndPersistTamperEntryLocked(entry kernelcapture.TamperRec
 // processKernelEvent is called by the platform-specific event loop for each
 // event that arrives from the eBPF ringbuf.
 func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
+	if evt.ObservedAt.IsZero() {
+		evt.ObservedAt = time.Now().UTC()
+	}
 	route := d.lockRouteEvent(&evt)
 	if route == nil {
 		return
@@ -1194,6 +1266,9 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 	sid, correlator := route.sessionID, route.correlator
 
 	receipt := correlator.Correlate(evt, kernelcapture.EventContext{})
+	if route.observabilityGap != nil {
+		route.observabilityGap.RecordEffect(receipt)
+	}
 
 	d.log.Debug("kernel event",
 		"session_id", sid,
@@ -1364,6 +1439,17 @@ func (d *daemon) lifecycleCaptureSummaryForSession(sessionID string) (kernelcapt
 	return summary.Snapshot(), true
 }
 
+func (d *daemon) observabilityGapSummaryForSession(sessionID string) (kernelcapture.ObservabilityGapSummary, bool) {
+	d.mu.RLock()
+	gap, gapOK := d.observabilityGaps[sessionID]
+	capture, captureOK := d.lifecycleCaptureSummaries[sessionID]
+	d.mu.RUnlock()
+	if !gapOK || gap == nil || !captureOK || capture == nil {
+		return kernelcapture.ObservabilityGapSummary{}, false
+	}
+	return gap.Snapshot(capture.Snapshot()), true
+}
+
 // pruneExpiredSessions removes sessions that the registry has expired so the
 // cgroup index does not leak indefinitely.
 func (d *daemon) pruneExpiredSessions() {
@@ -1394,6 +1480,7 @@ func (d *daemon) pruneExpiredSessions() {
 			delete(d.enforceChains, sid)
 			delete(d.enforceSummaries, sid)
 			delete(d.lifecycleCaptureSummaries, sid)
+			delete(d.observabilityGaps, sid)
 			if cancel, ok := d.seccompListeners[sid]; ok {
 				expiredSeccompCancels = append(expiredSeccompCancels, cancel)
 				delete(d.seccompListeners, sid)

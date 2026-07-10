@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "88bbd56551f0c8c7663bdf2d9e5da78dbecbfde5f52516233af5789c9004bc28"
+source_sha256: "69d457500fe0cd1108311a53a02c6607ca8e0654f2d19ded16f0caad0a972b06"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -32,6 +32,11 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   failures and malformed userspace records degrade every session active during
   the same monotonic loss epoch and are never charged to whichever session
   produces the next valid event. Source-specific counters remain distinct.
+- Accepts bounded, deduplicated `register_receipt` requests only from the peer
+  that owns the active session, then emits a session-window
+  `observability_gap` summary for captured process exec/exit effects. Empty
+  samples are `not_measured`; capture loss produces `degraded`; ratios never
+  claim universal file, network, provider-hidden, or host-effect coverage.
 - Enforces honesty behavior:
   - ambiguous attribution => `insufficient_evidence`
   - degraded/unknown coverage => `insufficient_evidence`

@@ -232,6 +232,44 @@ def _claude_plugin_dir() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+class _KernelReceiptRegistrar:
+    """Best-effort receipt bridge from the embedded proxy to the daemon."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._session_id: str | None = None
+        self._failures = 0
+        self._last_error: str | None = None
+
+    def activate(self, session_id: str) -> None:
+        with self._lock:
+            self._session_id = session_id
+
+    def register(self, receipt_id: str) -> None:
+        if not receipt_id:
+            return
+        with self._lock:
+            if self._session_id is None:
+                return
+            try:
+                kc.KernelCaptureClient(kc.daemon_socket_path()).register_receipt(
+                    session_id=self._session_id,
+                    receipt_id=receipt_id,
+                )
+            except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError) as exc:
+                self._failures += 1
+                self._last_error = type(exc).__name__
+
+    def failure_note(self) -> str | None:
+        with self._lock:
+            if self._failures == 0:
+                return None
+            return (
+                f"kernel receipt registration degraded: {self._failures} request(s) failed"
+                f" ({self._last_error or 'unknown error'})"
+            )
+
+
 # ── embedded governance server ─────────────────────────────────────────────────
 
 
@@ -241,6 +279,7 @@ def _build_embedded_server(
     api_token: str,
     private_key: Any,
     host: str = "127.0.0.1",
+    receipt_registrar: _KernelReceiptRegistrar | None = None,
 ) -> ThreadingHTTPServer:
     """A minimal loopback HTTP server delegating to the real GovernanceProxy.
 
@@ -310,7 +349,12 @@ def _build_embedded_server(
                     tool_name = payload.get("tool_name")
                     if not tool_name:
                         raise ValueError("missing field: tool_name")
-                    decision, reason = proxy.evaluate_tool_call(sid, str(tool_name), dict(arguments))
+                    decision, reason = proxy.evaluate_tool_call(
+                        sid,
+                        str(tool_name),
+                        dict(arguments),
+                        receipt_callback=receipt_registrar.register if receipt_registrar is not None else None,
+                    )
                     response: dict[str, Any] = {"decision": decision.value, "session_id": sid}
                     if decision != Decision.PERMIT:
                         response["reason"] = reason
@@ -486,11 +530,18 @@ def _kernel_enforcement_claim(
         return None
     enforcement = response.get("enforcement")
     lifecycle_capture = response.get("lifecycle_capture")
-    if not isinstance(enforcement, dict) and not isinstance(lifecycle_capture, dict):
+    observability_gap = response.get("observability_gap")
+    if (
+        not isinstance(enforcement, dict)
+        and not isinstance(lifecycle_capture, dict)
+        and not isinstance(observability_gap, dict)
+    ):
         return None
     claim = dict(enforcement) if isinstance(enforcement, dict) else {}
     if isinstance(lifecycle_capture, dict):
         claim["lifecycle_capture"] = lifecycle_capture
+    if isinstance(observability_gap, dict):
+        claim["observability_gap"] = observability_gap
     return claim
 
 
@@ -895,7 +946,14 @@ def run_governed(
     trace_id = session_id
 
     api_token = _generate_api_token()
-    server = _build_embedded_server(proxy, session_id, api_token, proxy.receipt_private_key)
+    receipt_registrar = _KernelReceiptRegistrar()
+    server = _build_embedded_server(
+        proxy,
+        session_id,
+        api_token,
+        proxy.receipt_private_key,
+        receipt_registrar=receipt_registrar,
+    )
     port = server.server_address[1]
     proxy_url = f"http://127.0.0.1:{port}"
     server_thread = threading.Thread(target=server.serve_forever, name="ardur-run-proxy", daemon=True)
@@ -998,6 +1056,8 @@ def run_governed(
             enabled=enable_kernel_correlation,
         )
         daemon_registered = correlation.available
+        if daemon_registered:
+            receipt_registrar.activate(session_id)
 
         # 5a. Signal ardur-exec-shim (if this run wrapped the agent with it)
         # that register_session has landed — see _wrap_command_with_seccomp_shim's
@@ -1054,6 +1114,8 @@ def run_governed(
         # Kernel enforcement must be fetched before the kernel daemon's
         # end_session call below, which retires the session's summary.
         kernel_enforcement = _kernel_enforcement_claim(session_id, correlation)
+        if registration_note := receipt_registrar.failure_note():
+            notes.append(registration_note)
         summary = proxy.end_session(session_id)
         attestation_token, _claims = proxy.issue_attestation_for_session(
             session_id, proxy.receipt_private_key, kernel_enforcement=kernel_enforcement

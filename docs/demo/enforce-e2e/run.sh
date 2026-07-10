@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
-# In-container orchestration for the `ardur run --enforce` BPF-LSM e2e demo.
+# In-container orchestration for the `ardur run` BPF-LSM e2e demo.
 # Runs inside the privileged demo image (see docs/demo/enforce-e2e.md).
 #   Usage: run.sh <enforce|permissive>
-set -u
+set -euo pipefail
 MODE="${1:-enforce}"
 # OUT_BASE defaults to /out (the Docker demo image mounts a writable /out).
 # virtme-ng boots the host rootfs read-only, so the vng wrapper
-# (ci-vng-enforce.sh) points this at a writable tmpfs instead.
+# (ci-vng-observability-gap.sh) points this at a writable tmpfs instead.
 OUT_BASE="${OUT_BASE:-/out}"
 OUT="${OUT_BASE}/${MODE}"; mkdir -p "$OUT"
+RUN_HOME="${OUT_BASE}/home-${MODE}"
 DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
+DPID=""
+
+cleanup() {
+  if [ -n "$DPID" ]; then
+    kill "$DPID" 2>/dev/null || true
+    wait "$DPID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
 echo "================ ardur run BPF-LSM demo — mode=${MODE} ================"
 
@@ -37,7 +47,7 @@ grep -q "process_guard loaded" "$OUT/daemon.log" \
 #    --max-tool-calls is passed explicitly to support dev before fix #111.
 ENF=""; [ "$MODE" = "enforce" ] && ENF="--enforce"
 ardur run \
-  --home "/out/home-${MODE}" \
+  --home "$RUN_HOME" \
   --mission "Kernel demo: executing external programs is forbidden." \
   --forbidden-tools Bash \
   --max-tool-calls 50 \
@@ -45,13 +55,15 @@ ardur run \
   $ENF \
   -- python3 "$DEMO_DIR/agent.py" 2>&1 | tee "$OUT/ardur-run.log" | grep -E "AGENT:|kernel policy|kernel link|attestation|agent exit"
 
+python3 "$DEMO_DIR/verify-observability-gap.py" "$RUN_HOME"
+
 # 3. offline evidence verification: hash-chain integrity + attestation linkage
-EVID=$(find /var/lib/ardur/kernelcapture/evidence -name enforce_events.jsonl 2>/dev/null | head -1)
+EVID=$(find /var/lib/ardur/kernelcapture/evidence -name enforce_events.jsonl -print -quit 2>/dev/null)
 if [ -n "$EVID" ]; then
   cp "$EVID" "$OUT/enforce_events.jsonl"
   # Pull kernel_enforcement.chain_digest from the session attestation (the JWT
   # whose claims carry scope_compliance — distinct from the mission passport).
-  DIGEST=$(python3 - "/out/home-${MODE}" <<'PY'
+  DIGEST=$(python3 - "$RUN_HOME" <<'PY'
 import base64, glob, json, os, sys
 home = sys.argv[1]
 for p in glob.glob(f"{home}/**/*", recursive=True):
@@ -74,5 +86,7 @@ PY
   echo "enforce-verify exit: $?"
 fi
 
-kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
+kill "$DPID" 2>/dev/null || true
+wait "$DPID" 2>/dev/null || true
+DPID=""
 echo "== demo (${MODE}) done =="

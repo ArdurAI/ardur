@@ -1,7 +1,19 @@
-# `ardur run --enforce` — kernel enforcement end-to-end demo
+# `ardur run` — BPF-LSM enforcement and observability demo
 
-This demo drives the **whole Epic A enforcement stack together** on a real
-BPF-LSM kernel and proves the cycle end to end — not just per component:
+This demo exercises the BPF-LSM enforcement and process-observability stack on
+a real kernel. The current verified proof is deliberately split:
+
+- `ardur-guard-smoke` proves that an installed BPF-LSM deny policy returns
+  `EPERM` and emits enforcement evidence.
+- `run.sh permissive` proves the real `ardur run` bridge, signed receipt
+  registration, process exec/exit capture, correlation, and attestation metric.
+- Full `ardur run --enforce` launch bootstrap is not currently a verified
+  end-to-end proof: the initial governed agent exec can be denied by its own
+  policy. That defect is tracked in [#241](https://github.com/ArdurAI/ardur/issues/241).
+
+Do not combine the first two results into a claim that the current full
+enforce-mode launch succeeds. They prove distinct boundaries without weakening
+the kernel policy or reopening the target-policy race.
 
 | Stage | Component | PR |
 | --- | --- | --- |
@@ -9,16 +21,20 @@ BPF-LSM kernel and proves the cycle end to end — not just per component:
 | **enforce** | `process_guard.bpf.c` LSM hooks return `-EPERM` | #92 / #101 |
 | **apply** | `ardur run` lowers the mission and pushes it to the kernel maps (`apply_policy`) | #96 |
 | **attest** | hash-chained receipts + `kernel_enforcement` folded into the session attestation | #100 |
+| **measure** | receipt-to-process-lifecycle observability gap in the signed attestation | #39 |
 
-What it demonstrates, concretely:
+What the two verified paths demonstrate, concretely:
 
 1. **(a) detect + attest** — the daemon registers the run's cgroup and issues a signed attestation.
 2. **(b) apply reaches the kernel** — the lowered `BpfPolicyPlan` is written to the BPF maps (`kernel policy installed`).
-3. **(c) the forbidden syscall actually fails `EPERM`** — a benign agent's `execve` is refused by the kernel.
-4. **(d) tamper-evident evidence** — the `enforce_events.jsonl` hash chain records the denial, the attestation commits to the chain head, and both **verify offline** with no kernel, daemon, or root.
+3. **(c) a forbidden syscall actually fails `EPERM`** — the direct guard smoke proves the kernel refusal.
+4. **(d) tamper-evident session evidence** — the permissive run's `enforce_events.jsonl` hash chain is committed into its attestation and verifies offline with no kernel, daemon, or root. The separate guard smoke verifies the denied raw event.
+5. **(e) measured process-lifecycle gap** — the agent obtains a signed governance receipt before its attempted effect, and the attestation reports a non-empty daemon-captured sample with at least one correlated effect.
 
-A **permissive control run** (same mission, no `--enforce`) shows the same op
-*logged but allowed* — isolating the kernel as the thing that enforces.
+A **permissive metric run** (same mission, no `--enforce`) shows the operation
+logged but allowed while exercising receipt-to-lifecycle correlation. It is
+not a control paired with a successful full enforce-mode launch until #241 is
+resolved.
 
 ---
 
@@ -62,7 +78,11 @@ and installs the `ardur` CLI.
 
 ---
 
-## Run — enforce
+## Run — enforce (known bootstrap failure)
+
+This command is retained as a fail-fast reproducer for #241. On the current
+tree it is expected to stop when the launch gate cannot exec the initial agent;
+it must not be treated as a passing end-to-end demonstration.
 
 ```console
 $ mkdir -p /tmp/ardur-demo-out
@@ -72,55 +92,21 @@ $ docker run --rm --privileged --pid=host \
     bash /opt/ardur/demo/run.sh enforce
 ```
 
-Expected output (session ids and hashes vary per run):
+Current fail-fast output (session ids and hashes vary per run):
 
 ```text
 ================ ardur run BPF-LSM demo — mode=enforce ================
 lsm=capability,bpf,landlock  btf=yes  cgroup=cgroup2fs
 daemon: BPF-LSM guard loaded ✓
-AGENT: pid=2923 cgroup=0::/
-AGENT: sleeping 4.0s for apply_policy to land...
-AGENT: exec(/bin/echo) BLOCKED — errno=1 (EPERM)          # <-- (c) kernel refused the exec
-AGENT: RESULT=DENIED_EPERM
-  attestation   sha-256:c7406a51...                        # <-- (a) signed attestation
+  attestation   sha-256:58951f5a...
   kernel link   cgroup registered with eBPF daemon; detect→session link active
-  kernel policy kernel BPF policy installed                # <-- (b) apply_policy reached the kernel
-  agent exit    0
------- offline verification (no kernel, no daemon, no root) ------
-attestation kernel_enforcement.chain_digest = caca42ff...
-entries         = 2
-denied verdicts = 2
-chain intact    = true                                     # <-- (d) hash chain verifies
-chain head hash = caca42ff...
-attestation digest match = true                            # <-- (d) attestation commits to the log
-enforce-verify exit: 0
-== demo (enforce) done ==
+  kernel policy kernel BPF policy installed
+  agent exit    126
 ```
 
-The kernel evidence log (`/tmp/ardur-demo-out/enforce/enforce_events.jsonl`),
-one hash-chained record per line:
-
-```jsonc
-// seq 1 — the interpreter's own /proc/self/stat read, denied under STRICT
-{"seq":1,"prev_hash":"","hash":"7429a1ff…","event":{"PID":2923,"Op":2,"ActionTaken":1,"EnforceMode":1,"Comm":"python3","Path":"/proc/2923/stat"},"verdict":"denied",…}
-// seq 2 — the denied open of the /bin/echo binary during execve (the exec attempt)
-{"seq":2,"prev_hash":"7429a1ff…","hash":"caca42ff…","event":{"PID":2924,"Op":2,"ActionTaken":1,"EnforceMode":1,"Comm":"python3","Path":"/usr/bin/echo"},"verdict":"denied",…}
-```
-
-The attestation carries the rollup (Op codes: `1`=EXEC, `2`=FILE_READ,
-`4`=NET_CONNECT; Action `1`=DENY; Mode `1`=ENFORCE):
-
-```json
-"kernel_enforcement": {
-  "total_events": 2, "verdict_counts": {"denied": 2},
-  "tier_coverage": {"bpf_lsm:enforce": 2}, "last_seq": 2,
-  "chain_digest": "caca42ff…",
-  "tamper_chain_start_seq": 1,
-  "kill_switch_change_count": 0,
-  "kill_switch_engaged_during_session": false,
-  "kill_switch_evidence_gap": false
-}
-```
+The script exits 126 at this point and does not print `done`; that nonzero exit
+is the expected #241 reproducer. The initial agent never starts, so this mode
+does not produce a governed call or a #39 receipt-to-effect measurement.
 
 If the global kernel kill switch changes while a session is active, the daemon
 first appends an attributed transition to `_tamper/tamper_audit.jsonl`. The
@@ -135,9 +121,10 @@ receipt cannot be persisted, even when the daemon successfully rolls the kernel
 map back. A caller receives `OK:false` for that operation rather than success
 without evidence.
 
-## Run — permissive (control)
+## Run — permissive (current observability proof)
 
-Same mission, **no** `--enforce`:
+Same mission, **no** `--enforce`. This is the mode used by KVM CI to verify the
+#39 metric against a real BPF process-lifecycle stream:
 
 ```console
 $ docker run --rm --privileged --pid=host \
@@ -147,18 +134,30 @@ $ docker run --rm --privileged --pid=host \
 ```
 
 ```text
+AGENT: governance decision=DENY before exec
 AGENT: exec(/bin/echo) SUCCEEDED — not blocked            # <-- same op, now allowed
 AGENT: RESULT=ALLOWED
-...
-entries         = 14
-denied verdicts = 0                                        # events logged as "blocked", not denied
+observability gap status = measured
+observability gap captured effects = 4
+observability gap correlated effects = 2
+observability gap ratio = 0.5
+entries         = 104
+denied verdicts = 0
 chain intact    = true
+attestation digest match = true
 ```
 
 `/bin/echo` runs to completion (hence 14 logged file-reads as it loads
 `libc`/`ld.so`/locale), every event `verdict=blocked` (logged, not enforced).
-The **only** difference between the runs is `--enforce`, so the kernel is
-demonstrably the thing that turned the log into a block.
+The permissive run does not prove denial. The separate `ardur-guard-smoke`
+test proves BPF-LSM denial directly; combining those results is intentionally
+deferred until #241 provides a kernel-verifiable bootstrap boundary.
+
+Counts vary with the kernel and process startup sequence. The verifier requires
+a non-empty captured sample and at least one correlated effect, but the ratio
+describes only captured `process_exec` / `process_exit` events. It is not a
+file, network, provider-hidden, or universal host-effect coverage claim. A
+capture-loss window reports `degraded` instead of `measured`.
 
 ---
 
@@ -175,8 +174,9 @@ opens the binary first — that fires the `lsm.s/file_open` hook with
 `OP_FILE_READ` on `/usr/bin/echo`, which STRICT denies with `-EPERM`. So the
 `execve` is refused *at the binary-open step*, before `bprm_check_security` is
 even reached; the explicit `OP_EXEC` deny is the belt-and-suspenders second
-line. Net guarantee: **a governed agent under `--enforce` cannot execute
-external programs** — proven by the `EPERM`.
+line. The direct guard smoke proves that this installed policy denies external
+exec with `EPERM`; the current full `ardur run --enforce` path fails earlier at
+its own bootstrap exec, as documented above.
 
 In **permissive** mode there is no STRICT flag and `OP_EXEC`'s mode is
 PERMISSIVE, so the binary open passes and `bprm_check_security` fires with
@@ -209,11 +209,10 @@ producer's own `enforce_receipt_chain_test.go`.
 
 ## Notes & caveats
 
-- **`correlation = ambiguous/ambiguous`** in the log is expected: the kernel's
-  action (DENY) is authoritative on its own; correlation only *grades* how
-  confidently an event maps to a specific tool-call receipt, and the burst of
-  events at exec time leaves that grading ambiguous. Attribution to the session
-  (via cgroup id) is exact.
+- Enforcement receipts can still report **`correlation = ambiguous/ambiguous`**
+  when a burst cannot be tied to one tool-call receipt. The #39 verifier instead
+  requires at least one process-lifecycle event correlated to the registered
+  governance receipt; cgroup attribution to the session remains exact.
 - **`--max-tool-calls 50`** is passed explicitly in `run.sh`. Plain `ardur run`
   without it crashes on current `dev` (`int(None)` `TypeError`); fixed in #111.
 - **Colima / stock cloud kernels won't work** — they don't boot with `bpf` in
