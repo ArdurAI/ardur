@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from . import kernel_correlation as kc
+from .launch_gate import RELEASE_BYTE as LAUNCH_GATE_RELEASE_BYTE
 from .package_assets import claude_code_plugin_dir
 
 # Environment-variable contract the bridge exports to the launched agent. The
@@ -582,6 +583,31 @@ def _wrap_command_with_seccomp_shim(
     ]
 
 
+def _wrap_command_with_launch_gate(command: list[str], *, ready_fd: int) -> list[str]:
+    """Block the target exec until cgroup adoption and registration finish.
+
+    The gate process is the child returned by ``Popen``. It retains that PID
+    when it eventually execs ``command``, so the cgroup and daemon registration
+    continue to identify the governed root process after release.
+    """
+    return [
+        sys.executable,
+        "-I",
+        str(Path(__file__).with_name("launch_gate.py")),
+        "--ready-fd",
+        str(ready_fd),
+        "--",
+        *command,
+    ]
+
+
+def _release_launch_gate(ready_fd: int) -> None:
+    try:
+        os.write(ready_fd, LAUNCH_GATE_RELEASE_BYTE)
+    finally:
+        os.close(ready_fd)
+
+
 # Module-level so tests can monkeypatch a short timeout rather than either
 # waiting out the real budget or threading an override through
 # run_governed's public signature for a purely internal verification detail.
@@ -826,6 +852,8 @@ def run_governed(
     # exception is raised before kernel correlation is attempted below.
     correlation = kc.CorrelationResult(available=False, reason="run did not reach kernel correlation")
     seccomp_ready_file: Path | None = None
+    launch_gate_read_fd: int | None = None
+    launch_gate_write_fd: int | None = None
     try:
         _wait_for_health(proxy_url, api_token)
 
@@ -870,14 +898,31 @@ def run_governed(
         if enable_kernel_correlation:
             cgroup_handle = kc.create_run_cgroup(session_id)
 
+        # A child PID does not exist until Popen returns, but an ordinary target
+        # can exec before that PID is adopted into the cgroup and registered
+        # with the daemon. Launch a tiny inherited-FD gate as the child whenever
+        # a cgroup exists; exec preserves its PID after the parent releases it.
+        popen_extra: dict[str, Any] = {}
+        if cgroup_handle is not None:
+            launch_gate_read_fd, launch_gate_write_fd = os.pipe()
+            run_command = _wrap_command_with_launch_gate(run_command, ready_fd=launch_gate_read_fd)
+            popen_extra["pass_fds"] = (launch_gate_read_fd,)
+
         # 5. Launch the agent.
-        proc = subprocess.Popen(
-            run_command,
-            env=run_env,
-            cwd=str(work_dir),
-            stdout=stdout,
-            stderr=stderr,
-        )
+        try:
+            proc = subprocess.Popen(
+                run_command,
+                env=run_env,
+                cwd=str(work_dir),
+                stdout=stdout,
+                stderr=stderr,
+                **popen_extra,
+            )
+        finally:
+            if launch_gate_read_fd is not None:
+                with suppress(OSError):
+                    os.close(launch_gate_read_fd)
+                launch_gate_read_fd = None
 
         if cgroup_handle is not None:
             try:
@@ -906,6 +951,13 @@ def run_governed(
             with suppress(OSError):
                 seccomp_ready_file.touch()
 
+        # The seccomp shim must run before _apply_kernel_policy can verify its
+        # listener handoff. Other tiers stay gated through policy application,
+        # eliminating both the registration race and a target-vs-policy race.
+        if seccomp_plan.wrapped and launch_gate_write_fd is not None:
+            _release_launch_gate(launch_gate_write_fd)
+            launch_gate_write_fd = None
+
         # 5b. Push the mission's lowered BPF policy to the daemon now that the
         # cgroup is registered. Under --enforce a failure here kills the agent
         # and aborts the run; under permissive it degrades to a recorded note.
@@ -924,6 +976,10 @@ def run_governed(
             raise
         if not kernel_policy["applied"]:
             notes.append(kernel_policy["reason"])
+
+        if launch_gate_write_fd is not None:
+            _release_launch_gate(launch_gate_write_fd)
+            launch_gate_write_fd = None
 
         # 6. Wait for the agent to exit (bounded by the mission duration budget).
         try:
@@ -957,6 +1013,10 @@ def run_governed(
         if seccomp_ready_file is not None:
             with suppress(OSError):
                 seccomp_ready_file.unlink()
+        for fd in (launch_gate_read_fd, launch_gate_write_fd):
+            if fd is not None:
+                with suppress(OSError):
+                    os.close(fd)
         server.shutdown()
         server.server_close()
 
