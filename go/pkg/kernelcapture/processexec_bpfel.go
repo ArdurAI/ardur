@@ -19,6 +19,7 @@ const (
 	processExecMapAllowedCgroups          = "allowed_cgroups"
 	processExecMapEvents                  = "events"
 	processExecMapFilterControl           = "filter_control"
+	processExecMapLifecycleEventsDropped  = "lifecycle_events_dropped"
 	processExecProgHandleSchedProcessExec = "handle_sched_process_exec"
 	processExecProgHandleSchedProcessExit = "handle_sched_process_exit"
 )
@@ -73,9 +74,10 @@ type processExecProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type processExecMapSpecs struct {
-	AllowedCgroups *ebpf.MapSpec `ebpf:"allowed_cgroups"`
-	Events         *ebpf.MapSpec `ebpf:"events"`
-	FilterControl  *ebpf.MapSpec `ebpf:"filter_control"`
+	AllowedCgroups         *ebpf.MapSpec `ebpf:"allowed_cgroups"`
+	Events                 *ebpf.MapSpec `ebpf:"events"`
+	FilterControl          *ebpf.MapSpec `ebpf:"filter_control"`
+	LifecycleEventsDropped *ebpf.MapSpec `ebpf:"lifecycle_events_dropped"`
 }
 
 // processExecVariableSpecs contains global variables before they are loaded into the kernel.
@@ -104,9 +106,10 @@ func (o *processExecObjects) Close() error {
 //
 // It can be passed to loadProcessExecObjects or ebpf.CollectionSpec.LoadAndAssign.
 type processExecMaps struct {
-	AllowedCgroups *ebpf.Map `ebpf:"allowed_cgroups"`
-	Events         *ebpf.Map `ebpf:"events"`
-	FilterControl  *ebpf.Map `ebpf:"filter_control"`
+	AllowedCgroups         *ebpf.Map `ebpf:"allowed_cgroups"`
+	Events                 *ebpf.Map `ebpf:"events"`
+	FilterControl          *ebpf.Map `ebpf:"filter_control"`
+	LifecycleEventsDropped *ebpf.Map `ebpf:"lifecycle_events_dropped"`
 }
 
 func (m *processExecMaps) Close() error {
@@ -114,6 +117,7 @@ func (m *processExecMaps) Close() error {
 		m.AllowedCgroups,
 		m.Events,
 		m.FilterControl,
+		m.LifecycleEventsDropped,
 	)
 }
 

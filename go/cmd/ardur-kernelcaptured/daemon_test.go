@@ -506,8 +506,113 @@ func TestLifecycleCaptureLossIsSessionWindowedAndNotEventAttributed(t *testing.T
 	}
 }
 
+type lifecycleDropSample struct {
+	total uint64
+	ok    bool
+}
+
+func scriptedLifecycleDropTotal(samples ...lifecycleDropSample) func() (uint64, bool) {
+	i := 0
+	return func() (uint64, bool) {
+		sample := samples[i]
+		if i < len(samples)-1 {
+			i++
+		}
+		return sample.total, sample.ok
+	}
+}
+
+func TestLifecycleProducerDropCounterBaselinesAndRebaselines(t *testing.T) {
+	d := newTestDaemon(t)
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{SessionID: sessionID}, sessionID)
+	}
+	d.setLifecycleDropCounter(scriptedLifecycleDropTotal(
+		lifecycleDropSample{total: 5, ok: true},
+		lifecycleDropSample{total: 5, ok: true},
+		lifecycleDropSample{total: 8, ok: true},
+		lifecycleDropSample{total: 4, ok: true},
+		lifecycleDropSample{total: 9, ok: true},
+	))
+	if got := d.sampleLifecycleProducerLoss(); got != 0 {
+		t.Fatalf("unchanged inherited baseline delta = %d, want 0", got)
+	}
+	if got := d.sampleLifecycleProducerLoss(); got != 3 {
+		t.Fatalf("first producer delta = %d, want 3", got)
+	}
+	if got := d.sampleLifecycleProducerLoss(); got != 0 {
+		t.Fatalf("backwards counter delta = %d, want 0", got)
+	}
+	if got := d.sampleLifecycleProducerLoss(); got != 5 {
+		t.Fatalf("post-reset producer delta = %d, want 5", got)
+	}
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		summary, _ := d.lifecycleCaptureSummaryForSession(sessionID)
+		if summary.RingbufDropped != 8 || summary.LossEpochStart != 1 || summary.LossEpochEnd != 2 {
+			t.Fatalf("%s producer summary = %+v", sessionID, summary)
+		}
+		if summary.ProducerRingbufDropped != 8 || summary.MalformedRecords != 0 {
+			t.Fatalf("%s producer source counters = %+v", sessionID, summary)
+		}
+		if !summary.ProducerCounterEvidenceGap {
+			t.Fatalf("%s backwards counter did not leave evidence gap: %+v", sessionID, summary)
+		}
+	}
+}
+
+func TestLifecycleProducerDropCounterWaitsForFirstAvailableBaseline(t *testing.T) {
+	d := newTestDaemon(t)
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{SessionID: "session-a"}, "session-a")
+	d.setLifecycleDropCounter(scriptedLifecycleDropTotal(
+		lifecycleDropSample{ok: false},
+		lifecycleDropSample{total: 7, ok: true},
+		lifecycleDropSample{total: 9, ok: true},
+	))
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{SessionID: "session-b"}, "session-b")
+	if got := d.sampleLifecycleProducerLoss(); got != 0 {
+		t.Fatalf("first available total was replayed as delta %d", got)
+	}
+	if got := d.sampleLifecycleProducerLoss(); got != 2 {
+		t.Fatalf("delta after delayed baseline = %d, want 2", got)
+	}
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		summary, _ := d.lifecycleCaptureSummaryForSession(sessionID)
+		if summary.RingbufDropped != 2 {
+			t.Fatalf("%s producer summary = %+v", sessionID, summary)
+		}
+		if summary.ProducerRingbufDropped != 2 || summary.MalformedRecords != 0 {
+			t.Fatalf("%s producer source counters = %+v", sessionID, summary)
+		}
+		if !summary.ProducerCounterEvidenceGap {
+			t.Fatalf("%s initial counter unavailability did not leave evidence gap: %+v", sessionID, summary)
+		}
+	}
+}
+
+func TestLifecycleProducerDropCounterRemovalMarksActiveSessions(t *testing.T) {
+	d := newTestDaemon(t)
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{SessionID: "session-a"}, "session-a")
+	d.setLifecycleDropCounter(scriptedLifecycleDropTotal(lifecycleDropSample{total: 4, ok: true}))
+	d.setLifecycleDropCounter(nil)
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{SessionID: "session-b"}, "session-b")
+
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		summary, _ := d.lifecycleCaptureSummaryForSession(sessionID)
+		if !summary.ProducerCounterEvidenceGap || summary.CoverageStatus != kernelcapture.LifecycleCaptureCoverageDegraded {
+			t.Fatalf("%s removed producer counter did not leave evidence gap: %+v", sessionID, summary)
+		}
+	}
+}
+
 func TestLifecycleCaptureSummaryIsExposedUntilSessionEnd(t *testing.T) {
 	d := newTestDaemon(t)
+	d.setLifecycleDropCounter(scriptedLifecycleDropTotal(
+		lifecycleDropSample{total: 0, ok: true},
+		lifecycleDropSample{total: 0, ok: true},
+		lifecycleDropSample{total: 0, ok: true},
+		lifecycleDropSample{total: 2, ok: true},
+		lifecycleDropSample{total: 3, ok: true},
+	))
 	const startTicks uint64 = 987654
 	handshake := kernelcapture.DaemonProtocolPeerHandshake{
 		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
@@ -548,8 +653,11 @@ func TestLifecycleCaptureSummaryIsExposedUntilSessionEnd(t *testing.T) {
 	if !statusResp.OK || statusResp.LifecycleCapture == nil {
 		t.Fatalf("session_status lifecycle capture = %+v", statusResp)
 	}
-	if got := statusResp.LifecycleCapture; got.CoverageStatus != kernelcapture.LifecycleCaptureCoverageDegraded || got.RingbufDropped != 1 {
+	if got := statusResp.LifecycleCapture; got.CoverageStatus != kernelcapture.LifecycleCaptureCoverageDegraded || got.RingbufDropped != 3 {
 		t.Fatalf("session_status lifecycle capture = %+v", got)
+	}
+	if got := statusResp.LifecycleCapture; got.ProducerRingbufDropped != 2 || got.MalformedRecords != 1 {
+		t.Fatalf("session_status lifecycle source counters = %+v", got)
 	}
 
 	end := kernelcapture.DaemonProtocolRequest{
@@ -559,7 +667,7 @@ func TestLifecycleCaptureSummaryIsExposedUntilSessionEnd(t *testing.T) {
 	}
 	handshake.Method = end.Method
 	endResp := d.handleAuthorizedRequest(context.Background(), end, handshake)
-	if !endResp.OK || endResp.LifecycleCapture == nil || endResp.LifecycleCapture.RingbufDropped != 1 {
+	if !endResp.OK || endResp.LifecycleCapture == nil || endResp.LifecycleCapture.RingbufDropped != 4 {
 		t.Fatalf("end_session lifecycle capture = %+v", endResp)
 	}
 	if _, ok := d.lifecycleCaptureSummaryForSession("capture-status-session"); ok {

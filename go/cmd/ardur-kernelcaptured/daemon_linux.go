@@ -89,6 +89,11 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 		return fmt.Errorf("load and attach eBPF: %w", err)
 	}
 	defer handles.Close()
+	if pinErr := handles.PinningError(); pinErr != nil {
+		log.Warn("process lifecycle pinning unavailable; restart survival disabled", "error", pinErr)
+	}
+	d.setLifecycleDropCounter(handles.LifecycleDroppedTotal)
+	defer d.setLifecycleDropCounter(nil)
 
 	log.Info("eBPF tracepoints attached",
 		"exec", "sched/sched_process_exec",
@@ -123,9 +128,11 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 			return fmt.Errorf("ringbuf read: %w", err)
 		}
 		if !ok {
+			d.sampleLifecycleProducerLoss()
 			continue
 		}
 
+		d.sampleLifecycleProducerLoss()
 		d.processKernelEvent(evt)
 	}
 }

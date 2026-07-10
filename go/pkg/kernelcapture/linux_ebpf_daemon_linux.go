@@ -3,6 +3,7 @@
 package kernelcapture
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,12 +25,46 @@ type ProcessExecEBPFHandles struct {
 	// load the map is owned by objs instead. Close must release it either
 	// way.
 	eventsMap *ebpf.Map
-	reader    *ringbuf.Reader
+	// droppedEventsMap is set only when reusing the pinned lifecycle drop
+	// counter. On a fresh load the same map is owned by objs.
+	droppedEventsMap *ebpf.Map
+	pinningErr       error
+	reader           *ringbuf.Reader
 }
 
 // Reader returns the ringbuf.Reader for consuming process lifecycle events.
 func (h *ProcessExecEBPFHandles) Reader() *ringbuf.Reader {
 	return h.reader
+}
+
+// LifecycleDroppedTotal returns the monotonic process lifecycle ringbuf
+// reservation-failure total. A false result means the map is unavailable.
+func (h *ProcessExecEBPFHandles) LifecycleDroppedTotal() (uint64, bool) {
+	if h == nil {
+		return 0, false
+	}
+	dropped := h.droppedEventsMap
+	if dropped == nil {
+		dropped = h.objs.LifecycleEventsDropped
+	}
+	if dropped == nil {
+		return 0, false
+	}
+	var zero uint32
+	var total uint64
+	if err := dropped.Lookup(&zero, &total); err != nil {
+		return 0, false
+	}
+	return total, true
+}
+
+// PinningError reports a non-fatal fresh-pin failure. The loaded consumer is
+// still usable for this daemon lifetime, but restart survival is unavailable.
+func (h *ProcessExecEBPFHandles) PinningError() error {
+	if h == nil {
+		return nil
+	}
+	return h.pinningErr
 }
 
 // Close releases all eBPF resources in reverse order.
@@ -42,6 +77,9 @@ func (h *ProcessExecEBPFHandles) Close() {
 	}
 	if h.eventsMap != nil {
 		_ = h.eventsMap.Close()
+	}
+	if h.droppedEventsMap != nil {
+		_ = h.droppedEventsMap.Close()
 	}
 	if h.exitTP != nil {
 		_ = h.exitTP.Close()
@@ -116,16 +154,20 @@ type PinnedEBPFPaths struct {
 	// map. A restart reuses this exact map so the reader stays bound to
 	// whatever the pinned (still-attached) programs are writing into.
 	EventsMapPath string
+	// DroppedEventsMapPath is the bpffs pin path for the monotonic lifecycle
+	// ringbuf reservation-failure counter.
+	DroppedEventsMapPath string
 }
 
 // DefaultPinnedEBPFPaths returns the standard bpffs pin paths under the
-// ardur-owned bpffs namespace (/sys/fs/bpf/ardur/). EventsMapPath matches the
-// ringbuf map path recorded by BuildDaemonCustodyPlan.
+// ardur-owned bpffs namespace (/sys/fs/bpf/ardur/). The ringbuf and lifecycle
+// drop-counter paths match the map paths recorded by BuildDaemonCustodyPlan.
 func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 	return PinnedEBPFPaths{
-		ExecLinkPath:  "/sys/fs/bpf/ardur/exec_tp_link",
-		ExitLinkPath:  "/sys/fs/bpf/ardur/exit_tp_link",
-		EventsMapPath: "/sys/fs/bpf/ardur/process_lifecycle_events",
+		ExecLinkPath:         "/sys/fs/bpf/ardur/exec_tp_link",
+		ExitLinkPath:         "/sys/fs/bpf/ardur/exit_tp_link",
+		EventsMapPath:        "/sys/fs/bpf/ardur/process_lifecycle_events",
+		DroppedEventsMapPath: "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
 	}
 }
 
@@ -133,48 +175,54 @@ func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 // adds BPF link- and map-pinning for restart survival.
 //
 // On first start (no pinned state at paths): loads and attaches the eBPF
-// program as usual, then pins both tracepoint links and the ringbuf map to
-// bpffs. The pins keep the links — and thus the attached programs — alive in
-// the kernel even after the daemon exits, and keep the ringbuf map reachable
-// so no events are lost during the restart gap.
+// program as usual, then pins both tracepoint links, the ringbuf map, and the
+// monotonic producer-drop counter to bpffs. The pins keep the links — and thus
+// the attached programs — alive in the kernel even after the daemon exits, and
+// keep both maps reachable across daemon lifetimes.
 //
-// On restart (pinned links AND the pinned ringbuf map all exist at paths):
+// On restart (both pinned links and both pinned maps all exist at paths):
 // loads the pinned links back without re-attaching, which avoids a brief
 // window where the tracepoints are detached, and loads the pinned map to open
 // a new reader bound to the exact map the still-attached programs write into.
 // The eBPF program has been continuously running in the kernel since the
 // prior daemon start.
 //
-// If any of the three pins is missing (e.g. a prior pin attempt partially
-// failed), the pinned state is treated as unusable and the function falls
-// back to a fresh load/attach/pin, matching first-start behavior.
+// If any pin is missing, the generation is unusable. All surviving pins are
+// removed before a fresh load/attach/pin so old and new tracepoint programs
+// cannot remain attached concurrently and duplicate lifecycle evidence.
 //
-// If pinning fails (e.g., bpffs not mounted, insufficient permissions), the
-// function returns the handles without pins and logs the failure. The daemon
-// still works; it just loses the restart-survival property.
+// If fresh pinning fails (e.g., bpffs not mounted), the function removes any
+// partial new set and returns usable handles with PinningError populated. The
+// daemon still works for this lifetime but logs that restart survival is off.
 //
 // Caller must call Close on the returned handles when done. Close does NOT
 // remove the bpffs pins; they are intentionally left for the next daemon
 // start. To remove pins call os.Remove on the PinnedEBPFPaths.
 func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPFHandles, error) {
-	// ── Try to reuse pinned links + map from a previous daemon run ────────
-	if execLink, exitLink, eventsMap, ok := tryLoadPinnedState(paths); ok {
+	paths = normalizePinnedEBPFPaths(paths)
+	// ── Try to reuse one complete pinned generation ───────────────────────
+	if execLink, exitLink, eventsMap, droppedEventsMap, ok := tryLoadPinnedState(paths); ok {
 		// The links are alive — the eBPF programs are still attached in the
 		// kernel and writing into eventsMap. Open a reader bound to that
 		// same map so restart doesn't lose the events the programs emit.
 		reader, err := ringbuf.NewReader(eventsMap)
 		if err != nil {
+			_ = droppedEventsMap.Close()
 			_ = eventsMap.Close()
 			_ = exitLink.Close()
 			_ = execLink.Close()
 			return nil, fmt.Errorf("open ringbuf reader (pinned restart): %w", err)
 		}
 		return &ProcessExecEBPFHandles{
-			execTP:    execLink,
-			exitTP:    exitLink,
-			eventsMap: eventsMap,
-			reader:    reader,
+			execTP:           execLink,
+			exitTP:           exitLink,
+			eventsMap:        eventsMap,
+			droppedEventsMap: droppedEventsMap,
+			reader:           reader,
 		}, nil
+	}
+	if err := removePinnedProcessExecState(paths); err != nil {
+		return nil, fmt.Errorf("remove stale or partial process-exec pin set before fresh attach: %w", err)
 	}
 
 	// ── Fresh load and attach ──────────────────────────────────────────────
@@ -183,44 +231,84 @@ func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPF
 		return nil, err
 	}
 
-	// Ensure the bpffs directories for all three pin paths exist, then pin
-	// the exec link, exit link, and ringbuf map; each Pin is non-fatal on
-	// failure. A partial pin (e.g. links pinned but the map pin fails) makes
-	// tryLoadPinnedState fail on the next restart, which falls back to this
-	// fresh-load path again rather than reusing a stale link.
-	if mkErr := os.MkdirAll(filepath.Dir(paths.ExecLinkPath), 0o700); mkErr == nil {
-		_ = h.execTP.Pin(paths.ExecLinkPath)
-	}
-	if mkErr := os.MkdirAll(filepath.Dir(paths.ExitLinkPath), 0o700); mkErr == nil {
-		_ = h.exitTP.Pin(paths.ExitLinkPath)
-	}
-	if mkErr := os.MkdirAll(filepath.Dir(paths.EventsMapPath), 0o700); mkErr == nil {
-		_ = h.objs.Events.Pin(paths.EventsMapPath)
+	if pinErr := pinProcessExecState(h, paths); pinErr != nil {
+		h.pinningErr = pinErr
 	}
 
 	return h, nil
 }
 
-// tryLoadPinnedState attempts to load both tracepoint links and the ringbuf
-// map from bpffs. Returns ok=true only if all three succeed; otherwise it
-// closes any partially-opened handles and returns ok=false so the caller
-// falls back to a fresh load rather than binding a reader to a map the
-// attached programs are not writing into.
-func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, eventsMap *ebpf.Map, ok bool) {
+// tryLoadPinnedState attempts to load both tracepoint links, the ringbuf, and
+// its producer-drop counter from bpffs. Returns ok=true only if the complete
+// generation loads; otherwise it closes partially-opened handles and returns
+// ok=false so the caller can remove the stale set before a fresh attach.
+func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, eventsMap, droppedEventsMap *ebpf.Map, ok bool) {
 	execLink, err := link.LoadPinnedLink(paths.ExecLinkPath, nil)
 	if err != nil {
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
 	exitLink, err = link.LoadPinnedLink(paths.ExitLinkPath, nil)
 	if err != nil {
 		_ = execLink.Close()
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
 	eventsMap, err = ebpf.LoadPinnedMap(paths.EventsMapPath, nil)
 	if err != nil {
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, false
+		return nil, nil, nil, nil, false
 	}
-	return execLink, exitLink, eventsMap, true
+	droppedEventsMap, err = ebpf.LoadPinnedMap(paths.DroppedEventsMapPath, nil)
+	if err != nil {
+		_ = eventsMap.Close()
+		_ = exitLink.Close()
+		_ = execLink.Close()
+		return nil, nil, nil, nil, false
+	}
+	return execLink, exitLink, eventsMap, droppedEventsMap, true
+}
+
+func normalizePinnedEBPFPaths(paths PinnedEBPFPaths) PinnedEBPFPaths {
+	if paths.DroppedEventsMapPath == "" && paths.EventsMapPath != "" {
+		paths.DroppedEventsMapPath = filepath.Join(filepath.Dir(paths.EventsMapPath), "process_lifecycle_events_dropped")
+	}
+	return paths
+}
+
+func pinProcessExecState(h *ProcessExecEBPFHandles, paths PinnedEBPFPaths) error {
+	for _, path := range pinnedProcessExecPaths(paths) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return fmt.Errorf("create pin parent for %q: %w", path, err)
+		}
+	}
+	pins := []struct {
+		path string
+		pin  func(string) error
+	}{
+		{paths.ExecLinkPath, h.execTP.Pin},
+		{paths.ExitLinkPath, h.exitTP.Pin},
+		{paths.EventsMapPath, h.objs.Events.Pin},
+		{paths.DroppedEventsMapPath, h.objs.LifecycleEventsDropped.Pin},
+	}
+	for _, item := range pins {
+		if err := item.pin(item.path); err != nil {
+			cleanupErr := removePinnedProcessExecState(paths)
+			return errors.Join(fmt.Errorf("pin process-exec object at %q: %w", item.path, err), cleanupErr)
+		}
+	}
+	return nil
+}
+
+func removePinnedProcessExecState(paths PinnedEBPFPaths) error {
+	var errs []error
+	for _, path := range pinnedProcessExecPaths(paths) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Errorf("remove pin %q: %w", path, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func pinnedProcessExecPaths(paths PinnedEBPFPaths) []string {
+	return []string{paths.ExecLinkPath, paths.ExitLinkPath, paths.EventsMapPath, paths.DroppedEventsMapPath}
 }

@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "dbd5d5546e499bba786cb6c126932fa7cf6843773dcd29014b35b5fd4d6df3de"
+source_sha256: "043924a78aa885c9045e3f9b28d94841e87a38454291b5b6c67180d9c0843da5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -45,36 +45,51 @@ consumer. A healthy socket in this mode proves control-plane liveness only; it
 does not prove that a governed process is observed or constrained below the
 tool-call boundary.
 
-## Malformed lifecycle records
+## Lifecycle capture loss
 
-The process lifecycle consumer decodes a fixed binary record emitted by the
+Lifecycle capture has two observable loss sources. If the eBPF producer cannot
+reserve ringbuf space, it increments a pinned monotonic counter. The daemon
+baselines inherited totals at startup and samples new deltas after delivered
+events and before session registration, status, or end:
+
+```text
+lifecycle ringbuf producer drops observed drop_count=<n> kernel_dropped_total=<n> loss_epoch=<n>
+```
+
+Separately, the userspace consumer decodes a fixed binary record emitted by the
 matching eBPF program. A record that is too short for that ABI, or otherwise
-cannot be decoded, produces a structured warning:
+cannot be decoded, produces:
 
 ```text
 malformed ringbuf record loss_epoch=<n>
 ```
 
-The daemon drops that record and continues reading. `loss_epoch` is a monotonic
-daemon-lifetime identifier for a host-wide lifecycle capture gap. Because the
-malformed record has no trustworthy PID or cgroup, the daemon does not charge
-the gap to whichever session happens to produce the next valid event. Instead,
-every session active when the gap occurs records the same increment in its
-`lifecycle_capture` session-window summary. An uncorrelated valid event cannot
-clear the summary, and a session registered after the gap does not inherit it.
+The daemon drops a malformed record and continues reading. For either source,
+`loss_epoch` is a monotonic daemon-lifetime identifier for a host-wide lifecycle
+capture gap. Missing or malformed records have no trustworthy session owner, so
+every session active when the gap is observed records the same increment. An
+uncorrelated valid event cannot clear the summary, and a session registered
+after the prior counter delta was sampled does not inherit it.
 
 Successful `session_status` and `end_session` responses expose the summary with
-`coverage_status`, `ringbuf_dropped`, `daemon_queue_dropped`, and the first and
-last affected loss epochs. The run bridge fetches this summary before ending a
-normal governed session and folds it into the signed attestation as
+`coverage_status`, total `ringbuf_dropped`, source-specific
+`producer_ringbuf_dropped` / `malformed_records`, sticky
+`producer_counter_evidence_gap`, `daemon_queue_dropped`, and the
+first and last affected loss epochs. The evidence-gap flag becomes true if the
+counter cannot be read, moves backwards, or a previously installed live source
+disappears. Sessions registered while that unavailable state persists inherit
+the flag. In that case the missing count is unknown, even if the numeric
+counters are zero. The run bridge fetches this summary before ending a normal
+governed session and folds it into the signed attestation as
 `kernel_enforcement.lifecycle_capture`. The daemon retains the summary for the
 session lifetime and returns it on every status request; individual lifecycle
 receipts do not misrepresent the host-global gap as event-local capture loss.
 
-A malformed record points to a producer/consumer ABI mismatch, truncated
-sample, or corruption in the lifecycle event path. It is not the expected
-symptom of a BPF verifier rejection: verifier or attach failures occur during
-startup and are reported by the loader before records can be emitted.
+A producer drop points to ringbuf pressure. A malformed record instead points
+to a producer/consumer ABI mismatch, truncated sample, or corruption after
+reservation. Neither is the expected symptom of a BPF verifier rejection:
+verifier or attach failures occur during startup and are reported by the loader
+before records can be emitted.
 
 ## Operator response
 
@@ -82,7 +97,8 @@ startup and are reported by the loader before records can be emitted.
    build or release digest.
 2. Inspect startup logs for load, verifier, attach, or pinned-state reuse
    failures before the first malformed-record warning.
-3. Treat every malformed-record warning or `lifecycle_capture` summary whose
+3. Treat every producer-drop or malformed-record warning, or any
+   `lifecycle_capture` summary whose
    `coverage_status` is `degraded` as an evidence gap; do not use affected
    sessions to claim complete kernel observation for that interval.
 4. Restart with a matched daemon and eBPF artifact set. If warnings continue,

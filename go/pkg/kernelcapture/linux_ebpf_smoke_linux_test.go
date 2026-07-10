@@ -319,9 +319,10 @@ func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
 	dir := filepath.Join("/sys/fs/bpf", fmt.Sprintf("ardur-test-restart-%d", os.Getpid()))
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	paths := PinnedEBPFPaths{
-		ExecLinkPath:  filepath.Join(dir, "exec_tp_link"),
-		ExitLinkPath:  filepath.Join(dir, "exit_tp_link"),
-		EventsMapPath: filepath.Join(dir, "process_lifecycle_events"),
+		ExecLinkPath:         filepath.Join(dir, "exec_tp_link"),
+		ExitLinkPath:         filepath.Join(dir, "exit_tp_link"),
+		EventsMapPath:        filepath.Join(dir, "process_lifecycle_events"),
+		DroppedEventsMapPath: filepath.Join(dir, "process_lifecycle_events_dropped"),
 	}
 
 	// ── First "boot": fresh load, attach, and pin. ──────────────────────
@@ -329,7 +330,7 @@ func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first LoadAndAttachProcessExecEBPFPinned: %v", err)
 	}
-	for _, p := range []string{paths.ExecLinkPath, paths.ExitLinkPath, paths.EventsMapPath} {
+	for _, p := range pinnedProcessExecPaths(paths) {
 		// A plain open(2) on a pinned bpf_link returns EIO (links require
 		// the BPF_OBJ_GET syscall path, unlike pinned maps/regular files),
 		// so check pin existence with Lstat rather than fileReadable.
