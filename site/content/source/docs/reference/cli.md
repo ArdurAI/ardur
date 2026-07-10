@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "ec5f0c3eba03001f8ff0bae5b89e3e1d5434209663b74b1fff9136a99d8f484f"
+source_sha256: "469a462c8cfa1ef6d1bac3d367bab290097f5f676c6a911b0eb822a7b4d112dc"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,7 +22,7 @@ The `ardur` console entry point ships with the Python package. After
 
 The CLI splits into two groups:
 
-- **Protocol path** — `start`, `issue`, `verify`, `anchor`, `attest`. Used by builders
+- **Protocol path** — `start`, `issue`, `verify`, `evidence correlate`, `anchor`, `attest`. Used by builders
   who want to issue Mission Passports and run a governance proxy directly.
 - **Personal path** — `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`,
   `uninstall`, `run`, `desktop-observe`, `personal-native-host`,
@@ -288,6 +288,44 @@ values of `path_arg_invalid`, a message, a detail, and placeholder-only
 `ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
 traceback, does not echo raw local paths or secrets, and leaves no artifacts.
 An explicit `--keys-dir .` is still accepted.
+
+### `ardur evidence correlate`
+
+Verify a signed receipt journal, import one explicit runtime-sensor JSONL
+format, and emit a detached redacted correlation report:
+
+```text
+ardur evidence correlate RECEIPTS.jsonl EVENTS.jsonl
+                        --source-format normalized|tetragon|falco
+                        (--receipt-public-key FILE | --keys-dir DIR)
+                        [--correlation-window-s SECONDS]
+                        [--verify-expiry]
+                        [--format json|text]
+                        [--output FILE]
+```
+
+Receipt verification happens before event parsing. A bad receipt signature or
+hash chain therefore fails before an invalid sensor file is considered. The
+command performs no network requests and never rewrites the receipt journal.
+
+The report keeps three dimensions separate:
+
+- source assurance is `imported_unverified` because v0.1 does not verify a
+  sensor signature or host attestation;
+- coverage is the source declaration, with Tetragon defaulting to `unknown`
+  and Falco forced to `alert_only`; and
+- match confidence describes association strength only. High confidence is
+  still `corroborating_unverified`, not independently proven causation.
+
+Weak PID-only inheritance, out-of-window hints, and score ties remain
+`non_proof`. Raw commands, paths, destinations, workspaces, credentials,
+event/exec/container identifiers, trace/session hints, actors, and local paths
+are absent from JSON and text reports. `--output` uses atomic owner-only mode
+`0600` and prints a safe digest/count completion object instead of the local
+path.
+
+See the [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/)
+and [public no-network fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/).
 
 ### `ardur anchor`
 

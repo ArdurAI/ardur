@@ -502,6 +502,7 @@ def verify_offline_input(
     max_attestation_delay_s: int = 300,
     receiver_clock_skew_s: int = 60,
     redact: bool = True,
+    include_correlation_fields: bool = False,
 ) -> dict[str, Any]:
     """Verify a loaded bundle without network access and return an explorer report."""
 
@@ -618,15 +619,21 @@ def verify_offline_input(
                     f"a non-compliant receipt must record blocked dispatch at index {index}",
                     index=index,
                 )
-        timeline.append(
-            _timeline_item(
-                index,
-                item,
-                claims[index - 1] if index else None,
-                anchor_report,
-                receiver_report,
-            )
+        timeline_item = _timeline_item(
+            index,
+            item,
+            claims[index - 1] if index else None,
+            anchor_report,
+            receiver_report,
         )
+        if include_correlation_fields:
+            timeline_item.update(
+                {
+                    "trace_id": item["trace_id"],
+                    "arguments_hash": item["arguments_hash"],
+                }
+            )
+        timeline.append(timeline_item)
 
     result = "verified" if full_evidence else "verified_chain_only"
     report: dict[str, Any] = {

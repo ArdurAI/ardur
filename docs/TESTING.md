@@ -4,6 +4,18 @@ The public tree includes curated Python and Go runtime code under `python/`
 and `go/`. GitHub Actions now covers runtime tests, repository hygiene,
 structured-file parsing, link checks, secret scanning, and CodeQL.
 
+When changing external runtime-evidence correlation, run:
+
+```bash
+python -m pytest python/tests/test_runtime_evidence.py -q
+```
+
+This focused suite generates ephemeral P-256 receipts, exercises normalized,
+Tetragon, and Falco JSONL adapters, and proves deterministic matching,
+ambiguity, parser bounds, redaction, symlink handling, CLI behavior, public
+fixture generation, and owner-only report output without network access or
+private credentials.
+
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.
 

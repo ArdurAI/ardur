@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "34d74485c74db1546a09de7fa952d0844b588ff3bfd6d45b5a72b1f71ef72a51"
+source_sha256: "b2c844b0e7403fc9c5990309ea55f0e0cffb25b87e8961ebff552333d3824265"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -79,6 +79,23 @@ are explicit verifier inputs whose fingerprints must be checked out of band.
 See
 [`docs/specs/offline-verification-bundle-v0.1.md`](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/).
 
+Correlate a verified receipt journal with an explicit local sensor format:
+
+```bash
+ardur evidence correlate \
+  ../docs/specs/conformance/runtime-evidence-v0.1/receipts.jsonl \
+  ../docs/specs/conformance/runtime-evidence-v0.1/tetragon.jsonl \
+  --source-format tetragon \
+  --receipt-public-key \
+    ../docs/specs/conformance/runtime-evidence-v0.1/receipt-public.pem
+```
+
+This is a no-network offline inspection path. Imported Tetragon/Falco or
+normalized JSON is `imported_unverified`; match confidence does not authenticate
+the sensor or prove complete coverage. Reports exclude raw commands, paths,
+destinations, source identifiers, credentials, and local paths. See the
+[`Runtime Evidence Correlation Profile`](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/).
+
 Generate and self-verify the synthetic DRP draft-10 profile fixture:
 
 ```bash
@@ -143,11 +160,12 @@ python/
 │   ├── policy_backend.py        # PolicyBackend protocol
 │   ├── proxy.py                 # Governance proxy + session lifecycle
 │   ├── receipt.py               # Execution Receipt issuance + verify
+│   ├── runtime_evidence.py      # Offline normalized/Tetragon/Falco correlation
 │   └── ...
-└── tests/                  # Curated test set (~23 files)
+└── tests/                  # Curated runtime, adapter, security, and release tests
 ```
 
-A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.3` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
 
 ## Protocol identifier rename
 

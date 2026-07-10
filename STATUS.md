@@ -26,6 +26,12 @@ Framework. See [`docs/coverage-map.md`](docs/coverage-map.md) for the full
 audit, [`docs/known-limitations.md`](docs/known-limitations.md) for the
 caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 
+The offline `ardur evidence correlate` command can now verify a receipt journal
+and compare it with operator-supplied normalized, Tetragon, or Falco JSONL. It
+does not deploy a sensor, authenticate imported JSON, or turn missing alerts
+into proof of no activity. This improves inspection without changing the
+automatic capture boundary above.
+
 ## Public Now
 
 - the product category and public intent are defined
@@ -33,7 +39,7 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 - the public-facing brand has moved to `Ardur`
 - public v0.1 specs are present under `docs/specs/` (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation); the draft-10-pinned DRP profile now emits RFC 8785/P-256 Authorization Objects and fail-closed verifies full transitive chains against external signer, instruction, finite-universe, log, revocation, and optional receipt-chain context while enforcing concrete resource/class/cwd bounds, with a portable seven-scenario implementation self-test bundle and deterministic CI report but no IETF/independent conformance claim; the v0.2 Execution Receipt hardening profile adds versioned RFC 8785 action receipts, legacy verification, and a signed session-final receipt-chain/kernel-integrity binding; the v0.1 transparency-anchor sidecar adds pending-state honesty plus offline Rekor v1 and separately keyed self-hosted inclusion verification; the v0.1 receiver-attestation envelope adds a separately keyed MCP shim, public golden fixture, and two-signature offline verification; the v0.1 Offline Verification Bundle composes full chains and sidecars into redacted CLI/JSON/static HTML reports with separate trust roots
 - curated Python runtime files and tests are present under `python/`, including the Ardur Personal Hub service (`personal_hub.py`), Claude Code hook (`claude_code_hook.py`), Claude telemetry/reporting (`claude_code_telemetry.py`, `claude_code_report.py`), Gemini CLI local-only hook fixture/reporting (`gemini_cli_hook.py`), Codex app-server local host-event fixture/reporting (`codex_app_server_fixture.py`), native-messaging host (`ardur_personal_native_host.py`), and `ARDUR.md` profile compiler (`ardur_profile.py`)
-- the `ardur` CLI ships subcommands for the protocol path (`issue`, `verify`, `anchor`, `drp-profile-fixture`, `receiver-attestation-fixture`, `offline-verification-fixture`, `attest`, `start`) and the Personal path (`hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `uninstall`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `profile init`, `protect claude-code`, `claude-code-hook`, `claude-code-report`, `gemini-cli-fixture`, `gemini-cli-hook`, `gemini-cli-report`, `codex-app-server-fixture`, `codex-app-server-event`, `codex-app-server-report`); the wheel also exposes `ardur-verify` as the no-service offline verifier and `ardur-drp-fixtures` as the portable DRP implementation-fixture runner
+- the `ardur` CLI ships subcommands for the protocol path (`issue`, `verify`, `evidence correlate`, `anchor`, `drp-profile-fixture`, `receiver-attestation-fixture`, `offline-verification-fixture`, `attest`, `start`) and the Personal path (`hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `uninstall`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `profile init`, `protect claude-code`, `claude-code-hook`, `claude-code-report`, `gemini-cli-fixture`, `gemini-cli-hook`, `gemini-cli-report`, `codex-app-server-fixture`, `codex-app-server-event`, `codex-app-server-report`); the wheel also exposes `ardur-verify` as the no-service offline verifier and `ardur-drp-fixtures` as the portable DRP implementation-fixture runner
 - the Claude Code plugin is present under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks plus a smoke script
 - curated Go runtime, governance, and operator files are present under `go/`; the AAT package implements the JWT issuance, derivation, proof-of-possession, constraint, and chain-verification path, while CWT integer-key mapping remains incomplete
 - runnable framework examples are present under `examples/`: LangChain, LangGraph, and AutoGen quickstarts; the Ardur Personal browser extension; the Ardur Personal desktop-observe adapter; the Ardur Personal native-messaging host; the Claude Code plugin pointer; and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
@@ -59,7 +65,7 @@ caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
   with stable verifier commands and artifact paths; this is separate from the
   current no-key JSON evidence harness
 - a tagged release with a regenerated Homebrew formula carrying Python resource stanzas, so non-technical users can install Ardur Personal without a source checkout
-- conformance test vectors (`docs/specs/conformance/`) — the v0.1 specs reference them by private layout; they are not yet imported into the public tree
+- broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
 

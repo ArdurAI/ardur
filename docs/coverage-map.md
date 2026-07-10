@@ -6,7 +6,7 @@ This page is the canonical reference linked from the README, `STATUS.md`,
 plugin documentation, and every example. When the capture surface changes,
 this page changes; everywhere else just links to it.
 
-Last updated: 2026-06-25. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
+Last updated: 2026-07-09. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
  - The handler also automatically removes in-memory evidence-log append state when sessions end or expire; it does not delete, rotate, archive, or rename evidence-log files.
 
 ## What Ardur captures today (v0.1)
@@ -25,7 +25,7 @@ Last updated: 2026-06-25. Current shipping version: v0.1 (tool-call boundary). C
 | Receipt chain integrity | Full — every receipt's `parent_receipt_hash` is SHA-256 of prior receipt's full JWT; ES256-signed | `receipt_id`, `parent_receipt_hash`, `parent_receipt_id`, `trace_id` |
 | Posture index | Derived local evidence only — summarizes local receipts/profile/redacted bundle without mutating them | `schema_version=ardur.posture_index.v0`, `positioning=derived_local_evidence`, chain status, verdict/boundary counts, coverage gaps |
 
-## What is *not* captured today (v0.1)
+## What is *not automatically captured* today (v0.1)
 
 | Gap | Why | Roadmap |
 |---|---|---|
@@ -37,6 +37,28 @@ Last updated: 2026-06-25. Current shipping version: v0.1 (tool-call boundary). C
 | **Anything outside the active session** — actions in another terminal, after `claude` exits, or before `ardur start` runs | We instrument a specific process tree. | Cross-session correlation is a separate research question. |
 | **Out-of-scope filesystem** — paths outside the Mission Passport's `resource_scope` | Intentional — scope is the user's protected boundary | A user can widen scope in `instructions.md`; not captured by default |
 | **Posture index as asset inventory** — `ardur posture scan` does not discover unmanaged apps, credentials, cloud assets, or provider-side state. | It is a report over local Ardur evidence artifacts, not a scanner with new sensors. | Future adapters can feed more evidence; the posture index must continue to label unsupported boundaries as gaps. |
+
+## Imported runtime-evidence correlation
+
+`ardur evidence correlate` is a separate offline inspection path. It first
+verifies a signed receipt journal, then correlates operator-supplied normalized,
+Tetragon, or Falco JSONL into a detached redacted report. It can make
+claim-vs-reality evidence easier to inspect, but it does not change what the
+configured hook captures automatically.
+
+The report separates:
+
+- **source assurance** (`imported_unverified` in v0.1);
+- **coverage** (`unknown` for Tetragon by default and `alert_only` for Falco);
+  and
+- **match confidence** (`high`, `medium`, `low`, or `ambiguous`).
+
+A high-confidence match is still unauthenticated corroboration. A missing event
+does not prove an action was absent. Raw commands, paths, destinations,
+workspaces, credentials, source identifiers, and local paths are removed from
+the report. See the
+[Runtime Evidence Correlation Profile](specs/runtime-evidence-correlation-v0.1.md)
+for the exact contract.
 
 ## Posture index positioning
 
@@ -54,7 +76,9 @@ emitted as `[REDACTED]`, and local absolute paths are replaced with hashed
 
 ## Boundary classes
 
-Three layers exist; we currently capture layer 1.
+Three layers exist. Configured hooks capture layer 1; imported sensor evidence
+can inspect selected layer-2 observations without claiming native sensor
+deployment, source authenticity, or complete coverage.
 
 Development note: `go/pkg/kernelcapture` contains a gated Linux process-lifecycle proof harness that can load/attach `sched/sched_process_exec` and `sched/sched_process_exit` eBPF tracepoint programs in a privileged Linux test environment, read exec/exit samples from a ringbuf, and project them through Ardur's correlation/evidence semantics. It also contains a bounded local Unix-domain daemon-control socket proof seam with fail-closed peer authorization, a capped in-memory session registry for authorized `register_session`/`session_status`/`end_session` requests, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots plus in-memory daemon-side snapshot retention for internal status/handoff code, a narrow local `session_status` client proof that rejects response expansion, a no-write status evidence-log planning seam that derives schema/digest/rotation plan data under daemon-owned custody paths, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions against a fake sink only, an injected filesystem append/rotation adapter that executes validated logical-path writes through caller-provided filesystem implementations with temp-dir test coverage, daemon-side `session_status` evidence-log wiring that appends successful status snapshots through that injected filesystem before retaining them without expanding the client protocol, and a no-mutation session handoff plan that derives daemon-owned hashed state/runtime paths plus cgroup allowlist preconditions. This is useful development evidence for the v0.5 direction, but it is not a production daemon, not persistent session storage, not production persistent status evidence-log storage, not daemon-owned evidence-log service wiring or restart-safe persistence, not a cgroup assignment mechanism, not a service installer, not client-visible protocol expansion, not live universal CLI capture, and not file/network/syscall coverage beyond process lifecycle metadata.
 
@@ -84,6 +108,11 @@ Ardur does **not** sign:
 - The kernel's actual response to a syscall (we don't observe it; layer 2 work).
 - The remote provider's reasoning or server-side actions (out of scope).
 - Anything the operating system did between two tool calls (layer 3 work).
+
+The runtime-evidence correlator also does not sign imported sensor JSON. It
+hashes exact input lines as pointers and labels the source
+`imported_unverified`; those hashes show which bytes were analyzed, not that a
+trusted sensor produced them.
 
 So when we say "cryptographically verifiable record", it's a record of **what tool calls Claude Code made** — not "everything that happened on your machine".
 

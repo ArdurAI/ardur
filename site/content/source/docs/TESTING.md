@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "0f744eb35d40c00e2cc5802804cf0425e4d7ff9a77049a4d032a2ffeee1a58b4"
+source_sha256: "f2df83c06a961ab5bc645e6722f432dff339fdfb30b1754b0b2769527a0511ca"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -20,6 +20,18 @@ This page is generated from the public repository source file. Edit the source f
 The public tree includes curated Python and Go runtime code under `python/`
 and `go/`. GitHub Actions now covers runtime tests, repository hygiene,
 structured-file parsing, link checks, secret scanning, and CodeQL.
+
+When changing external runtime-evidence correlation, run:
+
+```bash
+python -m pytest python/tests/test_runtime_evidence.py -q
+```
+
+This focused suite generates ephemeral P-256 receipts, exercises normalized,
+Tetragon, and Falco JSONL adapters, and proves deterministic matching,
+ambiguity, parser bounds, redaction, symlink handling, CLI behavior, public
+fixture generation, and owner-only report output without network access or
+private credentials.
 
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.

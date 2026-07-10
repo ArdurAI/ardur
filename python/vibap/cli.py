@@ -981,6 +981,8 @@ _PATH_ARG_SPECS = (
     "receipt_log",
     "local_log",
     "log_private_key",
+    "evidence_events",
+    "evidence_output",
 )
 
 
@@ -1736,6 +1738,102 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(render_cli_report(report))
     return 0
+
+
+def cmd_evidence_correlate(args: argparse.Namespace) -> int:
+    """Verify a receipt journal and correlate imported runtime evidence."""
+
+    from .offline_verification import OfflineVerificationError, verify_offline_path
+    from .runtime_evidence import (
+        RuntimeEvidenceError,
+        canonical_report_bytes,
+        correlate_verified_report,
+        load_runtime_events,
+        render_text_report,
+        write_report,
+    )
+
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+    try:
+        receipt_public_key = (
+            _load_p256_public_key(args.receipt_public_key, label="receipt public key")
+            if args.receipt_public_key is not None
+            else load_existing_public_key(keys_dir=args.keys_dir)
+        )
+        receipt_report = verify_offline_path(
+            args.journal,
+            receipt_public_key=receipt_public_key,
+            chain_only=True,
+            verify_expiry=args.verify_expiry,
+            redact=False,
+            include_correlation_fields=True,
+        )
+        event_batch = load_runtime_events(
+            args.evidence_events,
+            source_format=args.source_format,
+        )
+        report = correlate_verified_report(
+            receipt_report,
+            event_batch,
+            correlation_window_s=args.correlation_window_s,
+        )
+        payload = (
+            canonical_report_bytes(report)
+            if args.report_format == "json"
+            else render_text_report(report).encode("utf-8")
+        )
+        if args.evidence_output is not None:
+            write_report(args.evidence_output, payload)
+            _print_json(
+                {
+                    "ok": True,
+                    "condition": "runtime_evidence_report_written",
+                    "report_sha256": hashlib.sha256(payload).hexdigest(),
+                    "receipt_count": report["summary"]["receipt_count"],
+                    "event_count": report["summary"]["event_count"],
+                    "matched_event_count": report["summary"]["matched_event_count"],
+                    "source_assurance": report["event_source"]["assurance"],
+                }
+            )
+        elif args.report_format == "json":
+            sys.stdout.buffer.write(payload)
+        else:
+            sys.stdout.write(payload.decode("utf-8"))
+        return 0
+    except (
+        RuntimeEvidenceError,
+        OfflineVerificationError,
+        KeyDirectoryError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        response: dict[str, object] = {
+            "ok": False,
+            "valid": False,
+            "error": getattr(exc, "code", "runtime_evidence_correlation_failed"),
+            "message": str(exc),
+        }
+        line = getattr(exc, "line", None)
+        if line is not None:
+            response["event_line"] = line
+        index = getattr(exc, "index", None)
+        if index is not None:
+            response["receipt_index"] = index
+        _print_json(response)
+        return 1
+    except OSError:
+        _print_json(
+            {
+                "ok": False,
+                "valid": False,
+                "error": "runtime_evidence_io_failed",
+                "message": "runtime evidence correlation could not access a required local file safely",
+            }
+        )
+        return 1
 
 
 def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
@@ -4425,6 +4523,73 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable default report redaction for explicit local inspection",
     )
     verify.set_defaults(func=cmd_verify)
+
+    evidence = subparsers.add_parser(
+        "evidence",
+        help="correlate verified receipts with imported runtime evidence",
+    )
+    evidence_subparsers = evidence.add_subparsers(
+        dest="evidence_command", required=True
+    )
+    evidence_correlate = evidence_subparsers.add_parser(
+        "correlate",
+        help="verify a receipt journal and emit a redacted correlation report",
+    )
+    evidence_correlate.add_argument(
+        "journal",
+        type=Path,
+        help="signed receipt JSONL journal to verify before correlation",
+    )
+    evidence_correlate.add_argument(
+        "evidence_events",
+        metavar="EVENTS",
+        type=Path,
+        help="normalized, Tetragon, or Falco JSONL evidence input",
+    )
+    evidence_correlate.add_argument(
+        "--source-format",
+        choices=("normalized", "tetragon", "falco"),
+        required=True,
+        help="explicit adapter for the JSONL event source",
+    )
+    evidence_key_source = evidence_correlate.add_mutually_exclusive_group(
+        required=True
+    )
+    evidence_key_source.add_argument(
+        "--keys-dir",
+        type=str,
+        help="directory containing the trusted Ardur receipt issuer key",
+    )
+    evidence_key_source.add_argument(
+        "--receipt-public-key",
+        type=Path,
+        help="trusted receipt-issuer ES256 P-256 public key PEM",
+    )
+    evidence_correlate.add_argument(
+        "--correlation-window-s",
+        type=int,
+        default=30,
+        help="maximum receipt/event time difference in seconds (0..3600)",
+    )
+    evidence_correlate.add_argument(
+        "--verify-expiry",
+        action="store_true",
+        help="also enforce short receipt expiry windows during verification",
+    )
+    evidence_correlate.add_argument(
+        "--format",
+        dest="report_format",
+        choices=("json", "text"),
+        default="json",
+        help="redacted report format (default: json)",
+    )
+    evidence_correlate.add_argument(
+        "--output",
+        dest="evidence_output",
+        type=Path,
+        help="atomically write an owner-only report instead of printing it",
+    )
+    evidence_correlate.set_defaults(func=cmd_evidence_correlate)
 
     anchor = subparsers.add_parser(
         "anchor",
