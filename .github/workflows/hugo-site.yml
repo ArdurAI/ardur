@@ -2,18 +2,8 @@ name: hugo-site
 
 on:
   pull_request:
-    paths:
-      - "site/**"
-      - "**/*.md"
-      - "media/**"
-      - ".github/workflows/hugo-site.yml"
   push:
     branches: [main, dev]
-    paths:
-      - "site/**"
-      - "**/*.md"
-      - "media/**"
-      - ".github/workflows/hugo-site.yml"
   workflow_dispatch:
 
 permissions:
@@ -98,3 +88,19 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0
+
+  hugo-site:
+    name: hugo-site
+    if: ${{ always() }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the source-backed site build
+        env:
+          BUILD: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILD" != "success" ]; then
+            echo "::error::Hugo site build concluded $BUILD"
+            exit 1
+          fi
