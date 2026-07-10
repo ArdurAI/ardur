@@ -14,19 +14,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 )
 
 const (
-	linuxEBPFExecTracepoint     = "sched/sched_process_exec"
-	linuxEBPFExitTracepoint     = "sched/sched_process_exit"
-	processExecFilterControlKey = uint32(0)
-	processExecFilterDisabled   = uint8(0)
-	processExecFilterEnabled    = uint8(1)
-	processExecAllowedMarker    = uint8(1)
+	linuxEBPFExecTracepoint = "sched/sched_process_exec"
+	linuxEBPFExitTracepoint = "sched/sched_process_exit"
 )
 
 // LinuxEBPFExecSmokeOptions configures the narrow Phase 2 eBPF MVP smoke.
@@ -257,54 +252,6 @@ func fileReadable(path string) bool {
 		return false
 	}
 	return errors.Is(f.Close(), nil)
-}
-
-func enableProcessExecCgroupFilter(objs *processExecObjects) error {
-	return setProcessExecCgroupFilter(objs, true)
-}
-
-func disableProcessExecCgroupFilter(objs *processExecObjects) error {
-	return setProcessExecCgroupFilter(objs, false)
-}
-
-func setProcessExecCgroupFilter(objs *processExecObjects, enabled bool) error {
-	if objs == nil || objs.FilterControl == nil {
-		return fmt.Errorf("process-exec filter control map is not loaded")
-	}
-	value := processExecFilterDisabled
-	if enabled {
-		value = processExecFilterEnabled
-	}
-	if err := objs.FilterControl.Update(processExecFilterControlKey, value, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("update process-exec filter control map: %w", err)
-	}
-	return nil
-}
-
-func allowProcessExecCgroup(objs *processExecObjects, cgroupID uint64) error {
-	if objs == nil || objs.AllowedCgroups == nil {
-		return fmt.Errorf("process-exec cgroup allowlist map is not loaded")
-	}
-	if cgroupID == 0 {
-		return fmt.Errorf("cgroup id must be non-zero")
-	}
-	if err := objs.AllowedCgroups.Update(cgroupID, processExecAllowedMarker, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("update process-exec cgroup allowlist map for cgroup %d: %w", cgroupID, err)
-	}
-	return nil
-}
-
-func disallowProcessExecCgroup(objs *processExecObjects, cgroupID uint64) error {
-	if objs == nil || objs.AllowedCgroups == nil {
-		return fmt.Errorf("process-exec cgroup allowlist map is not loaded")
-	}
-	if cgroupID == 0 {
-		return nil
-	}
-	if err := objs.AllowedCgroups.Delete(cgroupID); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
-		return fmt.Errorf("delete process-exec cgroup allowlist map entry for cgroup %d: %w", cgroupID, err)
-	}
-	return nil
 }
 
 func currentUnifiedCgroupID() (uint64, error) {

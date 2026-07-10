@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -56,7 +57,7 @@ func (s *stubEvidenceFS) AppendFile(path string, data []byte, _ fs.FileMode) err
 func newTestDaemon(t *testing.T) *daemon {
 	t.Helper()
 	tmpDir := t.TempDir()
-	return &daemon{
+	d := &daemon{
 		log:                       testLogger(t),
 		registry:                  kernelcapture.NewDaemonSessionRegistry(),
 		evidenceDir:               filepath.Join(tmpDir, "evidence"),
@@ -69,6 +70,7 @@ func newTestDaemon(t *testing.T) *daemon {
 		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary:      kernelcapture.NewEnforceEventSummaryAccumulator(),
 		lifecycleCaptureSummaries: make(map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator),
+		lifecycleFilter:           newLifecycleFilterManager(),
 		fs:                        osEvidenceFS{},
 		tamperChain:               kernelcapture.NewTamperReceiptChain(),
 		seccompPolicy:             kernelcapture.NewSeccompPolicyStore(),
@@ -82,6 +84,8 @@ func newTestDaemon(t *testing.T) *daemon {
 			return nil
 		},
 	}
+	d.lifecycleFilter.markUnavailable(errors.New("lifecycle filter unavailable in unit test"))
+	return d
 }
 
 // testLogger returns a logger that writes to t.Log.
@@ -998,6 +1002,11 @@ func kernelReceiptFixture() (kernelcapture.ProcessEvent, kernelcapture.Synthetic
 
 func TestHandleAuthorizedRequest_RegisterUpdatesIndex(t *testing.T) {
 	d := newTestDaemon(t)
+	filter := newFakeLifecycleCgroupFilter()
+	d.lifecycleFilter = newLifecycleFilterManager()
+	if err := d.lifecycleFilter.install(filter); err != nil {
+		t.Fatalf("install lifecycle filter: %v", err)
+	}
 
 	const fakeStartTicks uint64 = 12345678
 	handshake := kernelcapture.DaemonProtocolPeerHandshake{
@@ -1036,10 +1045,34 @@ func TestHandleAuthorizedRequest_RegisterUpdatesIndex(t *testing.T) {
 	if !hasIndex {
 		t.Error("cgroup index not populated after handleAuthorizedRequest register_session")
 	}
+	if _, ok := filter.allowed[17]; !ok {
+		t.Fatal("register_session returned success before allowing its lifecycle cgroup")
+	}
+
+	duplicate := d.handleAuthorizedRequest(context.Background(), req, handshake)
+	if duplicate.OK {
+		t.Fatal("duplicate active registration unexpectedly succeeded")
+	}
+	if _, ok := filter.allowed[17]; !ok {
+		t.Fatal("rejected duplicate registration removed the active session's lifecycle cgroup")
+	}
+
+	d.onSessionEnded(req.RegisterSession.SessionID)
+	if _, ok := filter.allowed[17]; ok {
+		t.Fatal("session teardown left its lifecycle cgroup allowed")
+	}
 }
 
 func TestPruneExpiredSessions(t *testing.T) {
 	d := newTestDaemon(t)
+	filter := newFakeLifecycleCgroupFilter()
+	d.lifecycleFilter = newLifecycleFilterManager()
+	if err := d.lifecycleFilter.install(filter); err != nil {
+		t.Fatalf("install lifecycle filter: %v", err)
+	}
+	if added, err := d.lifecycleFilter.prepare(context.Background(), "phantom-session", 88); err != nil || !added {
+		t.Fatalf("prepare phantom lifecycle cgroup added=%t err=%v", added, err)
+	}
 
 	// Insert a session directly into the routing index without going through
 	// the registry, so we can test pruning of an unknown session.
@@ -1070,6 +1103,9 @@ func TestPruneExpiredSessions(t *testing.T) {
 	}
 	if stillInCapture {
 		t.Error("phantom session lifecycle capture summary not pruned")
+	}
+	if _, ok := filter.allowed[88]; ok {
+		t.Fatal("expired session left its lifecycle cgroup allowed")
 	}
 }
 
