@@ -16,6 +16,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PYPROJECT = REPO_ROOT / "python" / "pyproject.toml"
 DOCKERFILE = REPO_ROOT / "Dockerfile.proxy"
 LOCKFILE = REPO_ROOT / "packaging" / "oci" / "runtime-requirements.lock"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "oci-proxy.yml"
@@ -83,6 +84,21 @@ def test_oci_validator_rejects_mismatched_release_tag() -> None:
 def test_proxy_image_is_digest_pinned_non_root_and_hash_locked() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     lock = LOCKFILE.read_text(encoding="utf-8")
+    with PYPROJECT.open("rb") as handle:
+        project_dependencies = tomllib.load(handle)["project"]["dependencies"]
+    direct_packages: set[str] = set()
+    for requirement in project_dependencies:
+        match = re.match(r"[A-Za-z0-9_.-]+", requirement)
+        assert match is not None
+        direct_packages.add(re.sub(r"[-_.]+", "-", match.group()).lower())
+    locked_packages = {
+        re.sub(r"[-_.]+", "-", match.group(1)).lower()
+        for match in re.finditer(
+            r"^([A-Za-z0-9_-]+)==[^\s]+\s*\\$",
+            lock,
+            flags=re.MULTILINE,
+        )
+    }
 
     assert re.search(
         r"^ARG PYTHON_IMAGE=python:3\.13\.14-slim-trixie@sha256:[0-9a-f]{64}$",
@@ -99,6 +115,8 @@ def test_proxy_image_is_digest_pinned_non_root_and_hash_locked() -> None:
     assert lock.count("--hash=sha256:") >= 18
     assert "--index-url" not in lock
     assert "--trusted-host" not in lock
+    assert direct_packages <= locked_packages
+    assert "rfc8785==0.1.4 \\" in lock
 
 
 def test_proxy_smoke_enforces_runtime_restrictions_and_real_lifecycle() -> None:
