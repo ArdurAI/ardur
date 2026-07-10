@@ -1,0 +1,221 @@
+# Ardur Receiver Attestation v0.1
+
+## 1. Status
+
+This document defines a portable receiver-attestation envelope for immutable
+Ardur Execution Receipts. The envelope schema identifier is:
+
+```text
+ardur.receiver_attestation.v0.1
+```
+
+The normative JSON Schema is
+[`receiver-attestation-v0.1.schema.json`](./receiver-attestation-v0.1.schema.json).
+The executable golden bundle and public trust material are:
+
+- [`fixtures/receiver-attestation-v0.1.json`](./fixtures/receiver-attestation-v0.1.json)
+- [`fixtures/receiver-attestation-v0.1-receipt-public.pem`](./fixtures/receiver-attestation-v0.1-receipt-public.pem)
+- [`fixtures/receiver-attestation-v0.1-receiver-public.pem`](./fixtures/receiver-attestation-v0.1-receiver-public.pem)
+
+## 2. Trust boundary and immutable receipt
+
+An Execution Receipt is the governor's signed statement at decision time. A
+called service learns receiver evidence only when it observes the request and
+produces a response. Rewriting the original JWT afterward would invalidate its
+signature and receipt-chain descendants.
+
+Receiver evidence is therefore a sidecar envelope containing the exact compact
+receipt JWS plus an optional receiver JWS. The action receipt remains
+`evidence_level: self_signed`; a successfully verified receiver statement raises
+the envelope's effective `assurance_tier` to `receiver-attested`. These are
+different lifecycle facts and MUST NOT be collapsed into one mutable field.
+
+The envelope has exactly two states:
+
+- `self-attested`: `receiver_attestation` MUST be `null`.
+- `receiver-attested`: `receiver_attestation` MUST carry a complete JWS object.
+
+A label cannot promote assurance. A receiver-attested claim with no valid
+receiver signature fails schema or cryptographic verification.
+
+## 3. Envelope and subject binding
+
+The envelope carries:
+
+1. `schema_version`;
+2. explicit `assurance_tier`;
+3. `receipt_subject`, whose digest is
+   `SHA-256(ASCII(exact_compact_receipt_jws))`;
+4. the exact `receipt_jwt`; and
+5. either `null` or a receiver statement JWS with `receiver_id` and `key_id`.
+
+The receipt subject uses the same exact-byte binding as Ardur Transparency
+Anchor v0.1. A different payload byte, signature byte, or compact-JWS separator
+fails before receiver claims are evaluated.
+
+## 4. Receiver statement
+
+The receiver signs an RFC 8785-canonical ES256 compact JWS with media type:
+
+```text
+application/ardur.receiver-attestation+jwt
+```
+
+The protected header carries `alg: ES256`, the media type in `typ`, and the
+operator-pinned receiver key identifier in `kid`. The payload binds:
+
+- the exact receipt subject;
+- `receipt_id` and `action_id` (equal in v0.1);
+- `step_id` and the complete receipt `invocation_digest`;
+- a bounded authority summary copied from the verified receipt: actor, grant,
+  verifier, action class, target, resource family, side-effect class, verdict;
+- RFC 8785 SHA-256 digests of the exact MCP `tools/call` request and unsigned
+  `CallToolResult` response;
+- result status (`success` or `error`);
+- receiver identity, receiver timestamp, numeric `iat`, and a fresh `jti`; and
+- `attestation_id`, a SHA-256 commitment to all other statement claims.
+
+The authority summary proves what the receiver accepted from a valid Ardur
+receipt. It does not prove the truth of external authorization systems that are
+not represented by that receipt.
+
+## 5. MCP receiver shim
+
+`ReceiverAttestationShim` is framework-light and operates on MCP JSON-RPC
+objects. A receiver integration MUST perform the flow in this order:
+
+1. receive the action receipt and MCP `tools/call` request; the reference shim
+   accepts `params._meta["ai.ardur/execution-receipt"]` or a transport-specific
+   authenticated header/out-of-band value, and requires exact equality if both
+   are present;
+2. verify the receipt with an operator-pinned governor public key;
+3. require a `compliant` receipt whose tool and argument hash match the request;
+4. execute or refuse the tool according to receiver-local policy;
+5. sign the request, response, authority, action, and time bindings; and
+6. attach the envelope under result metadata key
+   `ai.ardur/receiver-attestation`.
+
+The response digest covers the response before Ardur metadata is attached,
+avoiding a circular signature. Other receiver metadata remains in the digest.
+Protocol-level JSON-RPC errors cannot carry result metadata; integrations that
+need evidence for those errors SHOULD persist the envelope through an
+out-of-band audit channel.
+
+Generate the public no-key fixture:
+
+```bash
+ardur receiver-attestation-fixture --output <fixture-dir>
+```
+
+The fixture generates signing keys only in memory. It persists the envelope,
+synthetic MCP request/responses, a verification report, and two public keys. It
+does not persist private keys or call a live MCP server.
+
+## 6. Offline verification
+
+Verification requires separate trust inputs:
+
+- the governor/receipt issuer ES256 public key; and
+- for `receiver-attested`, the receiver ES256 public key.
+
+The verifier independently checks the action receipt signature/schema and the
+receiver JWS signature/canonical payload. It then checks identity, action,
+authority, invocation, exact-receipt, and time-window bindings. The default
+receiver delay policy is 300 seconds with 60 seconds of clock skew.
+The receipt issuer and receiver public keys MUST be cryptographically distinct;
+key reuse fails verification because it cannot establish a second signer.
+
+```bash
+ardur verify \
+  --receiver-envelope <receiver-attestation.json> \
+  --keys-dir <receipt-issuer-keys> \
+  --receiver-public-key <receiver-public.pem> \
+  --mcp-request <mcp-request.json> \
+  --mcp-response <mcp-response.json>
+```
+
+The request and response files are optional because portable envelopes carry
+digests, not raw payloads. Without them, a valid report proves that the receiver
+signed those digests and that the request's tool/arguments were bound to the
+receipt. With them, `request_binding_checked` and `response_binding_checked`
+become true only after exact digest comparison.
+
+## 7. Operator opt-in
+
+Tool-server operators provision a dedicated P-256 receiver key outside the
+agent's authority and publish its public key through an authenticated channel.
+The private key SHOULD use mode `0600` or a managed signing service. Do not
+reuse the governor receipt key: independent keys and control planes are the
+source of the assurance gain.
+
+```python
+from vibap.receiver_attestation import ReceiverAttestationShim
+
+shim = ReceiverAttestationShim(
+    receiver_private_key=receiver_private_key,
+    receipt_public_key=trusted_governor_public_key,
+    receiver_id="spiffe://tools.example.com/server/files",
+    key_id="files-receiver:2026-07",
+)
+
+def handle_tools_call(receipt_jwt, request):
+    request["params"].setdefault("_meta", {})[
+        "ai.ardur/execution-receipt"
+    ] = receipt_jwt
+    response = execute_mcp_tool(request)
+    return shim.attach_to_mcp_response(
+        request=request,
+        response=response,
+    )
+```
+
+Key loading, rotation, receiver identity registration, rate limiting, local
+authorization, and audit retention remain operator responsibilities. The shim
+does not generate production keys.
+
+## 8. Failure behavior
+
+Verification fails closed for:
+
+- an unsupported or schema-invalid envelope;
+- dishonest assurance-tier/signature combinations;
+- an invalid, expired-at-reception, or non-compliant action receipt;
+- a receipt tool or arguments mismatch at the receiver;
+- an unknown receiver key, wrong algorithm, `typ`, `kid`, or receiver identity;
+- a noncanonical or invalidly signed receiver statement;
+- a mismatch in exact receipt, action, step, invocation, authority, request,
+  response, result status, timestamp, or attestation ID; or
+- a receiver statement outside the configured receipt-relative time window.
+
+## 9. Security properties and limitations
+
+- A valid receiver statement proves that the holder of the trusted receiver
+  key signed the bound observation. It does not prove the service's result was
+  correct or benevolent.
+- This profile provides per-receipt verification, not action-set completeness.
+  A suppressed call produces no receiver receipt, and an omitted envelope is
+  not detectable from this artifact alone.
+- Receiver/operator collusion and receiver-key compromise remain trust risks.
+- The envelope contains action metadata and timing. Raw request and response
+  bodies stay outside it, but their digests can still enable confirmation
+  attacks over low-entropy values.
+- The profile implements receiver signing from the Notarized Agents pattern.
+  It does not implement Sello HPKE encryption, owner-key token binding, public
+  discovery, or witness-cosigned log publication. Ardur Transparency Anchor
+  v0.1 can separately anchor the immutable action receipt.
+- Tool Receipts uses HMAC for a single-runtime verifier. Ardur uses separate
+  asymmetric keys because a shared HMAC key would let verifiers forge receiver
+  statements and would not support independent public-key verification.
+- MCP currently defines extensible result `_meta` but no standard
+  receiver-attestation field. `ai.ardur/receiver-attestation` is an Ardur
+  extension and clients must preserve it explicitly.
+
+## 10. Primary references
+
+- Notarized Agents / Sello: https://arxiv.org/abs/2606.04193
+- Tool Receipts / NabaOS: https://arxiv.org/abs/2603.10060
+- MCP Tools and `CallToolResult`:
+  https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+- RFC 8785, JSON Canonicalization Scheme:
+  https://www.rfc-editor.org/rfc/rfc8785.html
+- RFC 7515, JSON Web Signature: https://www.rfc-editor.org/rfc/rfc7515.html

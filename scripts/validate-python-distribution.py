@@ -199,6 +199,10 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
             PurePosixPath("vibap/_specs/transparency_anchor_v01.schema.json") in names,
             "wheel does not contain the embedded Transparency Anchor v0.1 schema",
         )
+        require(
+            PurePosixPath("vibap/_specs/receiver_attestation_v01.schema.json") in names,
+            "wheel does not contain the embedded Receiver Attestation v0.1 schema",
+        )
         for runtime_file in REQUIRED_RUNTIME_FILES:
             require(runtime_file in names, f"wheel is missing runtime file: {runtime_file}")
         for vendored_file in VENDORED_RFC8785_FILES:

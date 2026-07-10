@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f2b99c3f6c738a044951439eb9ee2f5a0670429482f61f1d0a28629c1030ab56"
+source_sha256: "0bb9df9e7629993823a40c7aac0670cc909bc264b676c95cd0539e2f0141f21d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -216,7 +216,8 @@ local paths or secret material. `--max-tool-calls 0` remains valid.
 
 ### `ardur verify`
 
-Verify either a Mission Passport or a portable receipt transparency anchor.
+Verify a Mission Passport, portable receipt transparency anchor, or receiver
+attestation envelope.
 
 ```text
 ardur verify --token JWT [--keys-dir DIR]
@@ -224,6 +225,12 @@ ardur verify --token JWT [--keys-dir DIR]
 ardur verify --anchor-bundle FILE --keys-dir DIR
              --transparency-log-key FILE
              [--max-registration-delay-s SECONDS]
+
+ardur verify --receiver-envelope FILE --keys-dir DIR
+             [--receiver-public-key FILE]
+             [--mcp-request FILE --mcp-response FILE]
+             [--max-attestation-delay-s SECONDS]
+             [--receiver-clock-skew-s SECONDS]
 ```
 
 Anchor mode performs no network request. It verifies the receipt JWS, exact
@@ -232,6 +239,16 @@ backend-specific material such as a Rekor Signed Entry Timestamp. A `pending`
 bundle exits non-zero; it is an honest absence of accepted inclusion evidence,
 not a partial success. The receipt issuer key and transparency-log key are
 separate trust inputs.
+
+Receiver-attestation mode also performs no network request. It always verifies
+the action receipt under the receipt issuer key. A `receiver-attested` envelope
+additionally requires a separately trusted P-256 receiver public key and
+verifies the receiver JWS, exact receipt/action/authority bindings, and the
+receipt-relative time window. A `self-attested` envelope has a literal null
+receiver signature and is reported at that lower tier. When exact MCP request
+and response JSON files are supplied, the verifier compares both receiver-
+signed digests and reports the two content bindings explicitly. A response file
+without its request fails closed.
 
 Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
 token verification, or any filesystem work. It exits non-zero and writes
@@ -266,6 +283,21 @@ a detached digest signature, and the receipt issuer public key as
 `hashedrekord` v0.0.1; it does not upload the full JWT. Rekor URLs require HTTPS.
 See the [Transparency Anchor v0.1 specification](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/)
 for trust, privacy, freshness, and split-view limitations.
+
+### `ardur receiver-attestation-fixture`
+
+Generate a synthetic MCP `tools/call` receiver co-signature bundle:
+
+```text
+ardur receiver-attestation-fixture --output DIR
+```
+
+The fixture performs the complete local flow and independently verifies the
+action and receiver signatures plus exact request/response digests. It persists
+only public keys and synthetic evidence; both private keys exist in memory only.
+It is not proof of integration with a live third-party MCP server. See the
+[Receiver Attestation v0.1 specification](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/)
+for operator integration and trust limitations.
 
 ### `ardur attest`
 

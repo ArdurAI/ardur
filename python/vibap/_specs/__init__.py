@@ -39,3 +39,12 @@ def transparency_anchor_v01_schema() -> dict:
         "transparency_anchor_v01.schema.json"
     ).read_text(encoding="utf-8")
     return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def receiver_attestation_v01_schema() -> dict:
+    """Return the parsed Receiver Attestation v0.1 JSON Schema."""
+    raw = files(__package__).joinpath(
+        "receiver_attestation_v01.schema.json"
+    ).read_text(encoding="utf-8")
+    return json.loads(raw)
