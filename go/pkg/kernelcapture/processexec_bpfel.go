@@ -12,6 +12,17 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	processExecMapAllowedCgroups          = "allowed_cgroups"
+	processExecMapEvents                  = "events"
+	processExecMapFilterControl           = "filter_control"
+	processExecProgHandleSchedProcessExec = "handle_sched_process_exec"
+	processExecProgHandleSchedProcessExit = "handle_sched_process_exit"
+)
+
 // loadProcessExec returns the embedded CollectionSpec for processExec.
 func loadProcessExec() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_ProcessExecBytes)
@@ -32,7 +43,7 @@ func loadProcessExec() (*ebpf.CollectionSpec, error) {
 //	*processExecMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadProcessExecObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadProcessExecObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadProcessExec()
 	if err != nil {
 		return err
