@@ -14,6 +14,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 |------|--------|-------|
 | [Conformance Profiles](./conformance-profiles-v0.1.md) | **migrated** | Public-import annotated |
 | [Delegation Grant (DG) Profile of AAT](./delegation-grant-profile-v0.1.md) | **migrated** | Public-import annotated |
+| [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) | **mapping published** | Draft-10-pinned field ledger and B2 target shape; not an IETF conformance or interoperability claim |
 | [Verifier Contract](./verifier-contract-v0.1.md) | **migrated** | Public-import annotated |
 | [Mission Declaration (MD)](./mission-declaration-v0.1.md) | **migrated** | Public-import annotated; clean-break protocol rename applied (`application/ardur.md+jwt`, `https://ardur.dev/...`) |
 | [Execution Receipt (ER)](./execution-receipt-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
@@ -53,19 +54,21 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 1. [Mission Declaration (MD)](./mission-declaration-v0.1.md) — the signed scope envelope the agent starts with
 2. [Delegation Grant (DG) Profile](./delegation-grant-profile-v0.1.md) — how child agents get strictly narrower authority
-3. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
-4. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
-5. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
-6. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating action receipts
-7. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
-8. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
-9. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-10. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
-11. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
+3. [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) — field-by-field draft-10 mapping and the target shape for DRP emit/verify
+4. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
+5. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
+6. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
+7. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating action receipts
+8. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
+9. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
+10. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+11. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
+12. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 
-- **AAT (Attenuating Authorization Tokens)** — IETF OAuth WG draft; MCEP's Delegation Grant is an AAT profile.
+- **AAT (Attenuating Authorization Tokens)** — individual Internet-Draft with no formal IETF standing; MCEP's current Delegation Grant profile is pinned to draft-00 while draft-01 migration is tracked in [#233](https://github.com/ArdurAI/ardur/issues/233).
+- **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur publishes a draft-10 mapping profile while emit/verify and interoperability evidence remain follow-up work.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
 - **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.
 - **Biscuit** — first-party-attenuation credential format; the DG profile's narrowing semantics rely on Biscuit's append-only block model (see [ADR-017](../decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md)).

@@ -18,6 +18,14 @@ the MCEP (Mission-Controlled Execution Protocol) mission-and-evidence layer.
 The DG wire format is the Attenuating Authorization Token (AAT) defined by
 `draft-niyikiza-oauth-attenuating-agent-tokens-00`.
 
+The live Datatracker document advanced to draft-01 on 2026-06-15. Draft-01 is
+an individual Internet-Draft with no formal IETF standing and changes material
+wire semantics, including removal of the draft-00 `aat_type` token-role
+claim. This v0.1 profile remains intentionally pinned to draft-00; a versioned
+migration audit is tracked in
+[#233](https://github.com/ArdurAI/ardur/issues/233). Implementations MUST NOT
+silently interpret draft-00 tokens under draft-01 rules.
+
 This profile is intentionally narrow:
 
 1. it adopts AAT token structure, derivation, and verification unchanged;
