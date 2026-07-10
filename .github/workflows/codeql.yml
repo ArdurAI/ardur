@@ -84,3 +84,27 @@ jobs:
         uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v3 (commit)
         with:
           category: "/language:${{ matrix.language }}"
+
+  codeql:
+    name: codeql
+    if: ${{ always() }}
+    needs:
+      - detect-languages
+      - analyze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require language detection and applicable analyses
+        env:
+          DETECT: ${{ needs['detect-languages'].result }}
+          LANGUAGES: ${{ needs['detect-languages'].outputs.languages }}
+          ANALYZE: ${{ needs.analyze.result }}
+        run: |
+          set -euo pipefail
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::Language detection concluded $DETECT"
+            exit 1
+          fi
+          if [ "$LANGUAGES" != "[]" ] && [ "$ANALYZE" != "success" ]; then
+            echo "::error::CodeQL analysis concluded $ANALYZE"
+            exit 1
+          fi

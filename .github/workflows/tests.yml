@@ -233,3 +233,43 @@ jobs:
           ARDUR_OLLAMA_API_KEY: ${{ secrets.ARDUR_OLLAMA_API_KEY }}
           ARDUR_OLLAMA_CLOUD_MODEL: ${{ vars.ARDUR_OLLAMA_CLOUD_MODEL }}
         run: python -m pytest tests/test_e2e_showcase.py -v -s --tb=short
+
+  tests:
+    name: tests
+    if: ${{ always() }}
+    needs:
+      - python-lint
+      - go-lint
+      - python
+      - go
+      - go-cve
+      - rwt-phase1
+      - examples-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every blocking test job
+        env:
+          PYTHON_LINT: ${{ needs['python-lint'].result }}
+          GO_LINT: ${{ needs['go-lint'].result }}
+          PYTHON: ${{ needs.python.result }}
+          GO: ${{ needs.go.result }}
+          GO_CVE: ${{ needs['go-cve'].result }}
+          RWT_PHASE1: ${{ needs['rwt-phase1'].result }}
+          EXAMPLES_SMOKE: ${{ needs['examples-smoke'].result }}
+        run: |
+          set -euo pipefail
+          require_success() {
+            local job="$1"
+            local result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error::Required job $job concluded $result"
+              exit 1
+            fi
+          }
+          require_success python-lint "$PYTHON_LINT"
+          require_success go-lint "$GO_LINT"
+          require_success python "$PYTHON"
+          require_success go "$GO"
+          require_success go-cve "$GO_CVE"
+          require_success rwt-phase1 "$RWT_PHASE1"
+          require_success examples-smoke "$EXAMPLES_SMOKE"

@@ -147,3 +147,31 @@ jobs:
             fi
           done
           exit "$fail"
+
+  validate-formats:
+    name: validate-formats
+    if: ${{ always() }}
+    needs:
+      - json
+      - yaml
+      - spec-schema-sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every format and schema job
+        env:
+          JSON_RESULT: ${{ needs.json.result }}
+          YAML_RESULT: ${{ needs.yaml.result }}
+          SPEC_SCHEMA_SYNC: ${{ needs['spec-schema-sync'].result }}
+        run: |
+          set -euo pipefail
+          require_success() {
+            local job="$1"
+            local result="$2"
+            if [ "$result" != "success" ]; then
+              echo "::error::Required job $job concluded $result"
+              exit 1
+            fi
+          }
+          require_success json "$JSON_RESULT"
+          require_success yaml "$YAML_RESULT"
+          require_success spec-schema-sync "$SPEC_SCHEMA_SYNC"
