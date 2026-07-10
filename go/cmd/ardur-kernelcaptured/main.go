@@ -67,6 +67,46 @@ type KernelReceiptEntry struct {
 	Receipt       kernelcapture.SyntheticKernelReceipt `json:"receipt"`
 }
 
+// sessionRoute owns mutable process-tree routing state for one session. Its
+// identity and correlator are immutable after publication. A successful
+// lockIfMatches leaves mu locked so the caller can hold a route lease through
+// correlation and evidence append; callers must invoke unlock afterward.
+type sessionRoute struct {
+	mu         sync.Mutex
+	sessionID  string
+	scope      *kernelcapture.ProcessTreeScope
+	correlator *kernelcapture.Correlator
+	active     bool
+}
+
+func newSessionRoute(sessionID string, scope *kernelcapture.ProcessTreeScope, correlator *kernelcapture.Correlator) *sessionRoute {
+	return &sessionRoute{
+		sessionID:  sessionID,
+		scope:      scope,
+		correlator: correlator,
+		active:     true,
+	}
+}
+
+func (r *sessionRoute) lockIfMatches(evt *kernelcapture.ProcessEvent) bool {
+	if r == nil || evt == nil {
+		return false
+	}
+	r.mu.Lock()
+	if !r.active || r.scope == nil || !r.scope.MatchesAndTrack(*evt) {
+		r.mu.Unlock()
+		return false
+	}
+	evt.SessionID = r.sessionID
+	return true
+}
+
+func (r *sessionRoute) unlock() {
+	if r != nil {
+		r.mu.Unlock()
+	}
+}
+
 // daemon holds all shared state for the running daemon process.
 type daemon struct {
 	log         *slog.Logger
@@ -75,12 +115,17 @@ type daemon struct {
 	peerPolicy  kernelcapture.DaemonPeerAuthorizationPolicy
 	evidenceDir string
 
-	// Routing index: cgroup_id → session_id, maintained under mu.
-	// Populated on register_session, removed on end_session / expiry.
-	mu          sync.RWMutex
-	cgroupIndex map[uint64]string
-	treeScopes  map[string]*kernelcapture.ProcessTreeScope
-	correlators map[string]*kernelcapture.Correlator
+	// Routing indexes are published under mu. routeIndex resolves immutable
+	// route pointers; mutable ProcessTreeScope state is protected by each
+	// route's own mutex. fallbackRoutes is copy-on-write and contains only
+	// zero-cgroup test/replay scopes, since nonzero scopes reject cgroup escape.
+	// Lock order is lifecycleDropMu -> mu -> sessionRoute.mu.
+	mu             sync.RWMutex
+	cgroupIndex    map[uint64]string
+	treeScopes     map[string]*kernelcapture.ProcessTreeScope
+	correlators    map[string]*kernelcapture.Correlator
+	routeIndex     map[string]*sessionRoute
+	fallbackRoutes []*sessionRoute
 
 	// enforce_events state, maintained under mu (session-scoped) plus two
 	// daemon-lifetime singletons for events that cannot be attributed to any
@@ -230,6 +275,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		cgroupIndex:               make(map[uint64]string),
 		treeScopes:                make(map[string]*kernelcapture.ProcessTreeScope),
 		correlators:               make(map[string]*kernelcapture.Correlator),
+		routeIndex:                make(map[string]*sessionRoute),
 		enforceChains:             make(map[string]*kernelcapture.EnforceReceiptChain),
 		enforceSummaries:          make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
 		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
@@ -797,12 +843,14 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	scope.SessionID = sessionID
 	d.treeScopes[sessionID] = &scope
 
-	d.correlators[sessionID] = kernelcapture.NewCorrelator(kernelcapture.CorrelatorOptions{
+	correlator := kernelcapture.NewCorrelator(kernelcapture.CorrelatorOptions{
 		Platform:         "linux",
 		CaptureBackend:   "linux_ebpf",
 		CorrelationGrace: 5 * time.Second,
 		RestartGrace:     3 * time.Second,
 	})
+	d.correlators[sessionID] = correlator
+	d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator))
 	d.enforceChains[sessionID] = kernelcapture.NewEnforceReceiptChain()
 	summary := kernelcapture.NewEnforceEventSummaryAccumulator()
 	lastTamperSeq, _ := d.tamperChain.Head()
@@ -844,6 +892,7 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 	d.mu.Lock()
+	d.retireSessionRouteLocked(sessionID)
 
 	// Best-effort: remove enforcement state from BPF maps — op_policy + managed
 	// gate (keyed by the routing scope's cgroup), then the (non-double-buffered)
@@ -886,33 +935,95 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	d.log.Info("session ended", "session_id", sessionID)
 }
 
-// routeEvent finds the session for a raw kernel event, runs process-tree
-// tracking, and returns the session_id + correlator. Returns ("", nil) if the
-// event belongs to no registered session.
-func (d *daemon) routeEvent(evt *kernelcapture.ProcessEvent) (string, *kernelcapture.Correlator) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+// publishSessionRouteLocked publishes route while d.mu is held. The fallback
+// snapshot is copy-on-write so event readers can use an old slice after
+// releasing d.mu without racing registration or retirement.
+func (d *daemon) publishSessionRouteLocked(route *sessionRoute) {
+	if route == nil || route.sessionID == "" {
+		return
+	}
+	d.retireSessionRouteLocked(route.sessionID)
+	if d.routeIndex == nil {
+		d.routeIndex = make(map[string]*sessionRoute)
+	}
+	d.routeIndex[route.sessionID] = route
+	if route.scope != nil && route.scope.CgroupID == 0 {
+		next := make([]*sessionRoute, len(d.fallbackRoutes)+1)
+		copy(next, d.fallbackRoutes)
+		next[len(d.fallbackRoutes)] = route
+		d.fallbackRoutes = next
+	}
+}
 
-	// Fast path: cgroup match.
+// retireSessionRouteLocked marks one route inactive and removes it from future
+// lookups while d.mu is held. Taking route.mu waits for an already-matched
+// event to finish correlation and evidence append before teardown continues.
+func (d *daemon) retireSessionRouteLocked(sessionID string) {
+	route := d.routeIndex[sessionID]
+	if route == nil {
+		return
+	}
+	route.mu.Lock()
+	route.active = false
+	isFallback := route.scope != nil && route.scope.CgroupID == 0
+	route.mu.Unlock()
+	delete(d.routeIndex, sessionID)
+	if !isFallback {
+		return
+	}
+	next := make([]*sessionRoute, 0, len(d.fallbackRoutes)-1)
+	for _, candidate := range d.fallbackRoutes {
+		if candidate != route {
+			next = append(next, candidate)
+		}
+	}
+	d.fallbackRoutes = next
+}
+
+// lockRouteEvent finds and locks the route for evt. A non-nil result owns the
+// route mutex; the caller must invoke route.unlock().
+func (d *daemon) lockRouteEvent(evt *kernelcapture.ProcessEvent) *sessionRoute {
+	if evt == nil {
+		return nil
+	}
+	d.mu.RLock()
+	var fastRoute *sessionRoute
 	if evt.CgroupID != 0 {
-		if sid, ok := d.cgroupIndex[evt.CgroupID]; ok {
-			scope := d.treeScopes[sid]
-			if scope != nil && scope.MatchesAndTrack(*evt) {
-				evt.SessionID = sid
-				return sid, d.correlators[sid]
-			}
+		if sessionID, ok := d.cgroupIndex[evt.CgroupID]; ok {
+			fastRoute = d.routeIndex[sessionID]
 		}
 	}
-	// Slow path: walk all sessions and check process tree membership.
-	// This handles subtree events where the child has escaped to a new cgroup
-	// (uncommon but possible).
-	for sid, scope := range d.treeScopes {
-		if scope.MatchesAndTrack(*evt) {
-			evt.SessionID = sid
-			return sid, d.correlators[sid]
+	fallbackRoutes := d.fallbackRoutes
+	d.mu.RUnlock()
+
+	if fastRoute != nil && fastRoute.lockIfMatches(evt) {
+		return fastRoute
+	}
+	// Only zero-cgroup test/replay scopes can match outside the cgroup index.
+	// Nonzero production scopes enforce exact cgroup equality in MatchesAndTrack.
+	start := 0
+	if len(fallbackRoutes) > 0 {
+		start = int(evt.PID % uint32(len(fallbackRoutes)))
+	}
+	for offset := range fallbackRoutes {
+		route := fallbackRoutes[(start+offset)%len(fallbackRoutes)]
+		if route != fastRoute && route.lockIfMatches(evt) {
+			return route
 		}
 	}
-	return "", nil
+	return nil
+}
+
+// routeEvent is the lookup-only test seam. Production event processing uses
+// lockRouteEvent directly and holds the route lease through evidence append.
+func (d *daemon) routeEvent(evt *kernelcapture.ProcessEvent) (string, *kernelcapture.Correlator) {
+	route := d.lockRouteEvent(evt)
+	if route == nil {
+		return "", nil
+	}
+	sessionID, correlator := route.sessionID, route.correlator
+	route.unlock()
+	return sessionID, correlator
 }
 
 // appendKernelReceipt writes one KernelReceiptEntry as a JSONL line to
@@ -1046,10 +1157,15 @@ func (d *daemon) appendAndPersistTamperEntryLocked(entry kernelcapture.TamperRec
 // processKernelEvent is called by the platform-specific event loop for each
 // event that arrives from the eBPF ringbuf.
 func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
-	sid, correlator := d.routeEvent(&evt)
-	if sid == "" || correlator == nil {
+	route := d.lockRouteEvent(&evt)
+	if route == nil {
 		return
 	}
+	defer route.unlock()
+	if route.correlator == nil {
+		return
+	}
+	sid, correlator := route.sessionID, route.correlator
 
 	receipt := correlator.Correlate(evt, kernelcapture.EventContext{})
 
@@ -1236,6 +1352,7 @@ func (d *daemon) pruneExpiredSessions() {
 	var expiredPolicies []expiredPolicy
 	for sid, scope := range d.treeScopes {
 		if _, err := d.registry.ActiveSession(sid); err != nil {
+			d.retireSessionRouteLocked(sid)
 			if scope.CgroupID != 0 {
 				delete(d.cgroupIndex, scope.CgroupID)
 				ep := expiredPolicy{cgroupID: scope.CgroupID}
