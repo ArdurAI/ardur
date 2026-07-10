@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "03acee461d41945a8d9f66ec2d3eb304f36910c11f0bf99e9801599b694461e2"
+source_sha256: "dbd5d5546e499bba786cb6c126932fa7cf6843773dcd29014b35b5fd4d6df3de"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -52,17 +52,24 @@ matching eBPF program. A record that is too short for that ABI, or otherwise
 cannot be decoded, produces a structured warning:
 
 ```text
-malformed ringbuf record drop_count=<n>
+malformed ringbuf record loss_epoch=<n>
 ```
 
-The daemon drops that record and continues reading. `drop_count` is the number
-of malformed records seen since the previous valid lifecycle event. If the next
-valid event correlates to a session, its kernel receipt carries that count as
-`capture_loss.ringbuf_dropped`; correlation then treats the evidence as
-degraded or insufficient rather than claiming a complete event stream. If the
-next valid event is not correlated, the current implementation resets the
-counter without writing it to a session receipt, so daemon logs remain the
-source of truth for the host-wide gap.
+The daemon drops that record and continues reading. `loss_epoch` is a monotonic
+daemon-lifetime identifier for a host-wide lifecycle capture gap. Because the
+malformed record has no trustworthy PID or cgroup, the daemon does not charge
+the gap to whichever session happens to produce the next valid event. Instead,
+every session active when the gap occurs records the same increment in its
+`lifecycle_capture` session-window summary. An uncorrelated valid event cannot
+clear the summary, and a session registered after the gap does not inherit it.
+
+Successful `session_status` and `end_session` responses expose the summary with
+`coverage_status`, `ringbuf_dropped`, `daemon_queue_dropped`, and the first and
+last affected loss epochs. The run bridge fetches this summary before ending a
+normal governed session and folds it into the signed attestation as
+`kernel_enforcement.lifecycle_capture`. The daemon retains the summary for the
+session lifetime and returns it on every status request; individual lifecycle
+receipts do not misrepresent the host-global gap as event-local capture loss.
 
 A malformed record points to a producer/consumer ABI mismatch, truncated
 sample, or corruption in the lifecycle event path. It is not the expected
@@ -75,8 +82,8 @@ startup and are reported by the loader before records can be emitted.
    build or release digest.
 2. Inspect startup logs for load, verifier, attach, or pinned-state reuse
    failures before the first malformed-record warning.
-3. Treat every malformed-record warning or nonzero
-   `capture_loss.ringbuf_dropped` value as an evidence gap; do not use affected
+3. Treat every malformed-record warning or `lifecycle_capture` summary whose
+   `coverage_status` is `degraded` as an evidence gap; do not use affected
    sessions to claim complete kernel observation for that interval.
 4. Restart with a matched daemon and eBPF artifact set. If warnings continue,
    preserve the daemon logs, kernel version, artifact digests, and the first
@@ -84,6 +91,6 @@ startup and are reported by the loader before records can be emitted.
 5. Use `--no-ringbuf` only to isolate the socket control plane. Record that
    capture and enforcement were intentionally unavailable during the test.
 
-The receipt counter is evidence-integrity metadata attached to the next
-correlated event, not a per-session packet-loss metric or a promise that every
-missing kernel event can be reconstructed.
+The summary is evidence-integrity metadata for a session's active time window,
+not a claim that the malformed record belonged to that session or a promise
+that any missing kernel event can be reconstructed.

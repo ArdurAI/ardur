@@ -469,7 +469,7 @@ def _kernel_enforcement_claim(
     session_id: str,
     correlation: kc.CorrelationResult,
 ) -> dict[str, Any] | None:
-    """Fetch the daemon's kernel-enforcement rollup for a correlated session.
+    """Fetch the daemon's signed kernel evidence rollup for a session.
 
     Returns ``None`` (never raises) when correlation was never established or
     the daemon cannot be reached — kernel enforcement data is an enhancement
@@ -485,9 +485,13 @@ def _kernel_enforcement_claim(
     except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError):
         return None
     enforcement = response.get("enforcement")
-    if not isinstance(enforcement, dict):
+    lifecycle_capture = response.get("lifecycle_capture")
+    if not isinstance(enforcement, dict) and not isinstance(lifecycle_capture, dict):
         return None
-    return enforcement
+    claim = dict(enforcement) if isinstance(enforcement, dict) else {}
+    if isinstance(lifecycle_capture, dict):
+        claim["lifecycle_capture"] = lifecycle_capture
+    return claim
 
 
 @dataclass

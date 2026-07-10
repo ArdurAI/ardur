@@ -1106,6 +1106,13 @@ class TestKernelEnforcementClaim:
                         "kill_switch_engaged_during_session": True,
                         "kill_switch_evidence_gap": False,
                     },
+                    "lifecycle_capture": {
+                        "coverage_status": "degraded",
+                        "ringbuf_dropped": 2,
+                        "daemon_queue_dropped": 0,
+                        "loss_epoch_start": 4,
+                        "loss_epoch_end": 5,
+                    },
                 },
             )
             try:
@@ -1127,6 +1134,13 @@ class TestKernelEnforcementClaim:
             "kill_switch_change_count": 2,
             "kill_switch_engaged_during_session": True,
             "kill_switch_evidence_gap": False,
+            "lifecycle_capture": {
+                "coverage_status": "degraded",
+                "ringbuf_dropped": 2,
+                "daemon_queue_dropped": 0,
+                "loss_epoch_start": 4,
+                "loss_epoch_end": 5,
+            },
         }
         assert daemon.received is not None
         assert daemon.received["method"] == "session_status"

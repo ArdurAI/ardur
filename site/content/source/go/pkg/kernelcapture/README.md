@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "c8e604d6880ec26c6c93a5502c1435b99790e7a80586b5b1a207b1ef64807571"
+source_sha256: "f3ef13e19867d08f9f10ebc9d6c2fb66e8f67f232d06befbb4e603bfd7d12952"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -27,6 +27,10 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - `correlation_confidence`
   - `coverage_status`
   - `capture_loss`
+- Exposes a session-window `lifecycle_capture` summary on daemon
+  `session_status` / `end_session` responses. Daemon-global malformed-record
+  loss degrades every session active during the same monotonic loss epoch and
+  is never charged to whichever session produces the next valid event.
 - Enforces honesty behavior:
   - ambiguous attribution => `insufficient_evidence`
   - degraded/unknown coverage => `insufficient_evidence`
@@ -147,8 +151,8 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
    - Rejects `session_status` and `end_session` attempts from the same UID/GID/PID when the daemon-observed process-start identity differs, so PID reuse cannot satisfy ownership by PID alone.
    - Exposes `ActiveSession`, `BuildActiveSessionHandoffPlan`, and `HandleAuthorizedSessionStatusSnapshot` so internal daemon status/handoff code can reuse the same active-session lookup before projecting a no-mutation handoff plan from daemon-owned custody paths.
    - Adds `DaemonSessionStatusSnapshotSink` and `DaemonSessionStatusSnapshotHandler` so a bounded local socket handler can retain detached daemon-internal status snapshots in memory while returning only a narrow protocol response.
-   - Adds `SendDaemonSessionStatusRequest`, a narrow local Unix-socket client proof for `session_status` responses that decodes only `DaemonProtocolResponse` and rejects response expansion.
-   - Keeps daemon-internal status snapshots out of the client-visible JSON-line protocol response: `session_status` still returns only the narrow status envelope.
+   - Adds `SendDaemonSessionStatusRequest`, a narrow local Unix-socket client proof for `session_status` responses that decodes only the bounded `DaemonProtocolResponse` schema and rejects unknown response fields.
+   - Keeps daemon-internal status snapshots out of the client-visible JSON-line protocol response: the runtime daemon may add reviewed `enforcement` and `lifecycle_capture` evidence summaries, but not custody paths, handoff plans, raw process metadata, or internal snapshot state.
    - Does not persist state across daemon restarts, install/start a service, create/assign cgroups, pin maps, execute commands, or perform live kernel enforcement.
 
 12. `BuildDaemonSessionStatusEvidenceLogPlan` (no-write evidence-log plan)

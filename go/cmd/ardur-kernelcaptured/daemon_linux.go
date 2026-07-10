@@ -98,7 +98,6 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 	source := kernelcapture.NewRingbufProcessSourceFromRingbufReader(handles.Reader())
 	// No defer source.Close() here: handles.Close() owns the reader.
 
-	var loss kernelcapture.CaptureLoss
 	// Empty scope: all events reach the router (per-session filtering is done
 	// in daemon.routeEvent via the cgroup index and ProcessTreeScope).
 	scope := kernelcapture.SessionScope{}
@@ -116,8 +115,8 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 				case kernelcapture.RingbufErrorContextCanceled, kernelcapture.RingbufErrorDeadlineExceeded:
 					return ctx.Err()
 				case kernelcapture.RingbufErrorMalformedRecord:
-					loss.RingbufDropped++
-					log.Warn("malformed ringbuf record", "drop_count", loss.RingbufDropped)
+					epoch := d.recordMalformedLifecycleRecord()
+					log.Warn("malformed ringbuf record", "loss_epoch", epoch)
 					continue
 				}
 			}
@@ -127,7 +126,6 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 			continue
 		}
 
-		d.processKernelEvent(evt, loss)
-		loss = kernelcapture.CaptureLoss{} // reset: drops since last good event have been reported
+		d.processKernelEvent(evt)
 	}
 }

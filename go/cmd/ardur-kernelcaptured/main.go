@@ -89,6 +89,11 @@ type daemon struct {
 	enforceSummaries     map[string]*kernelcapture.EnforceEventSummaryAccumulator
 	enforceOrphanChain   *kernelcapture.EnforceReceiptChain
 	enforceOrphanSummary *kernelcapture.EnforceEventSummaryAccumulator
+	// lifecycleCaptureSummaries retain daemon-global exec/exit capture gaps for
+	// every session that was active when each gap occurred. lossEpoch is a
+	// daemon-lifetime monotonic identifier shared by all affected sessions.
+	lifecycleCaptureSummaries map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator
+	lifecycleCaptureLossEpoch uint64
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
@@ -199,25 +204,26 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 	}
 
 	return &daemon{
-		log:                  log,
-		registry:             registry,
-		custodyPlan:          custodyPlan,
-		peerPolicy:           peerPolicy,
-		evidenceDir:          evidenceDir,
-		cgroupIndex:          make(map[uint64]string),
-		treeScopes:           make(map[string]*kernelcapture.ProcessTreeScope),
-		correlators:          make(map[string]*kernelcapture.Correlator),
-		enforceChains:        make(map[string]*kernelcapture.EnforceReceiptChain),
-		enforceSummaries:     make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
-		enforceOrphanChain:   kernelcapture.NewEnforceReceiptChain(),
-		enforceOrphanSummary: kernelcapture.NewEnforceEventSummaryAccumulator(),
-		fs:                   osEvidenceFS{},
-		tamperChain:          kernelcapture.NewTamperReceiptChain(),
-		seccompPolicy:        kernelcapture.NewSeccompPolicyStore(),
-		seccompListeners:     make(map[string]context.CancelFunc),
-		activeTier:           daemonTierNone,
-		appliedAllow:         make(map[string]*appliedAllowRecord),
-		cgroupVerifier:       verifyRegisterSessionCgroup,
+		log:                       log,
+		registry:                  registry,
+		custodyPlan:               custodyPlan,
+		peerPolicy:                peerPolicy,
+		evidenceDir:               evidenceDir,
+		cgroupIndex:               make(map[uint64]string),
+		treeScopes:                make(map[string]*kernelcapture.ProcessTreeScope),
+		correlators:               make(map[string]*kernelcapture.Correlator),
+		enforceChains:             make(map[string]*kernelcapture.EnforceReceiptChain),
+		enforceSummaries:          make(map[string]*kernelcapture.EnforceEventSummaryAccumulator),
+		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
+		enforceOrphanSummary:      kernelcapture.NewEnforceEventSummaryAccumulator(),
+		lifecycleCaptureSummaries: make(map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator),
+		fs:                        osEvidenceFS{},
+		tamperChain:               kernelcapture.NewTamperReceiptChain(),
+		seccompPolicy:             kernelcapture.NewSeccompPolicyStore(),
+		seccompListeners:          make(map[string]context.CancelFunc),
+		activeTier:                daemonTierNone,
+		appliedAllow:              make(map[string]*appliedAllowRecord),
+		cgroupVerifier:            verifyRegisterSessionCgroup,
 	}, nil
 }
 
@@ -321,11 +327,17 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		}
 	case kernelcapture.DaemonProtocolMethodEndSession:
 		if sessionID := req.EndSession; sessionID != nil {
+			if summary, ok := d.lifecycleCaptureSummaryForSession(sessionID.SessionID); ok {
+				resp.LifecycleCapture = &summary
+			}
 			d.onSessionEnded(sessionID.SessionID)
 		}
 	case kernelcapture.DaemonProtocolMethodSessionStatus:
 		if summary, ok := d.enforceSummaryForScope(resp.SessionID); ok {
 			resp.Enforcement = &summary
+		}
+		if summary, ok := d.lifecycleCaptureSummaryForSession(resp.SessionID); ok {
+			resp.LifecycleCapture = &summary
 		}
 		resp.SeccompListenerAttached = d.seccompListenerAttached(resp.SessionID)
 	case kernelcapture.DaemonProtocolMethodHealth:
@@ -774,6 +786,7 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	lastTamperSeq, _ := d.tamperChain.Head()
 	summary.InitializeTamperWindow(lastTamperSeq+1, d.expectedKillSwitchEngaged)
 	d.enforceSummaries[sessionID] = summary
+	d.lifecycleCaptureSummaries[sessionID] = kernelcapture.NewLifecycleCaptureSummaryAccumulator()
 
 	d.log.Info("session registered",
 		"session_id", sessionID,
@@ -820,6 +833,7 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	delete(d.correlators, sessionID)
 	delete(d.enforceChains, sessionID)
 	delete(d.enforceSummaries, sessionID)
+	delete(d.lifecycleCaptureSummaries, sessionID)
 	// Grab (and forget) the seccomp listener's cancel func here, under the
 	// same lock as the map deletes above; call it below, outside the lock,
 	// since the supervisor goroutine it stops may itself try to touch
@@ -995,16 +1009,13 @@ func (d *daemon) appendAndPersistTamperEntryLocked(entry kernelcapture.TamperRec
 
 // processKernelEvent is called by the platform-specific event loop for each
 // event that arrives from the eBPF ringbuf.
-func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent, loss kernelcapture.CaptureLoss) {
+func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 	sid, correlator := d.routeEvent(&evt)
 	if sid == "" || correlator == nil {
 		return
 	}
 
-	ctx := kernelcapture.EventContext{
-		CaptureLoss: loss,
-	}
-	receipt := correlator.Correlate(evt, ctx)
+	receipt := correlator.Correlate(evt, kernelcapture.EventContext{})
 
 	d.log.Debug("kernel event",
 		"session_id", sid,
@@ -1016,6 +1027,40 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent, loss kernelc
 		"verdict", receipt.Verdict,
 	)
 	d.appendKernelReceipt(sid, evt, receipt)
+}
+
+// recordLifecycleCaptureLoss records one daemon-global process lifecycle loss
+// epoch against every session active at that instant. It deliberately does not
+// attach the loss to a later event: the malformed record has no trustworthy
+// cgroup or PID, so event-based attribution would be arbitrary. The summaries
+// remain available for every session_status response until the session ends.
+func (d *daemon) recordLifecycleCaptureLoss(loss kernelcapture.CaptureLoss) uint64 {
+	if loss.RingbufDropped == 0 && loss.DaemonQueueDropped == 0 {
+		return 0
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lifecycleCaptureLossEpoch++
+	epoch := d.lifecycleCaptureLossEpoch
+	for _, summary := range d.lifecycleCaptureSummaries {
+		summary.RecordLoss(loss, epoch)
+	}
+	return epoch
+}
+
+func (d *daemon) recordMalformedLifecycleRecord() uint64 {
+	return d.recordLifecycleCaptureLoss(kernelcapture.CaptureLoss{RingbufDropped: 1})
+}
+
+func (d *daemon) lifecycleCaptureSummaryForSession(sessionID string) (kernelcapture.LifecycleCaptureSummary, bool) {
+	d.mu.RLock()
+	summary, ok := d.lifecycleCaptureSummaries[sessionID]
+	d.mu.RUnlock()
+	if !ok || summary == nil {
+		return kernelcapture.LifecycleCaptureSummary{}, false
+	}
+	return summary.Snapshot(), true
 }
 
 // pruneExpiredSessions removes sessions that the registry has expired so the
@@ -1046,6 +1091,7 @@ func (d *daemon) pruneExpiredSessions() {
 			delete(d.correlators, sid)
 			delete(d.enforceChains, sid)
 			delete(d.enforceSummaries, sid)
+			delete(d.lifecycleCaptureSummaries, sid)
 			if cancel, ok := d.seccompListeners[sid]; ok {
 				expiredSeccompCancels = append(expiredSeccompCancels, cancel)
 				delete(d.seccompListeners, sid)

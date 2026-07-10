@@ -117,6 +117,40 @@ func TestDaemonProtocolResponseDecodeRejectsInternalExpansion(t *testing.T) {
 	}
 }
 
+func TestDaemonProtocolResponseLifecycleCaptureRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	want := LifecycleCaptureSummary{
+		CoverageStatus:     LifecycleCaptureCoverageDegraded,
+		RingbufDropped:     2,
+		DaemonQueueDropped: 1,
+		LossEpochStart:     4,
+		LossEpochEnd:       6,
+	}
+	encoded, err := EncodeDaemonProtocolResponse(DaemonProtocolResponse{
+		ProtocolVersion:  DaemonProtocolVersion,
+		OK:               true,
+		Method:           DaemonProtocolMethodSessionStatus,
+		SessionID:        "session-1",
+		Status:           DaemonSessionStatusActive,
+		LifecycleCapture: &want,
+	})
+	if err != nil {
+		t.Fatalf("EncodeDaemonProtocolResponse returned error: %v", err)
+	}
+	if !bytes.Contains(encoded, []byte(`"lifecycle_capture":{"coverage_status":"degraded","ringbuf_dropped":2,"daemon_queue_dropped":1,"loss_epoch_start":4,"loss_epoch_end":6}`)) {
+		t.Fatalf("encoded lifecycle_capture = %s", encoded)
+	}
+
+	decoded, err := DecodeDaemonProtocolResponse(encoded)
+	if err != nil {
+		t.Fatalf("DecodeDaemonProtocolResponse returned error: %v", err)
+	}
+	if decoded.LifecycleCapture == nil || *decoded.LifecycleCapture != want {
+		t.Fatalf("decoded lifecycle_capture = %#v, want %#v", decoded.LifecycleCapture, want)
+	}
+}
+
 func TestDaemonProtocolValidationRejectsInvalidRequests(t *testing.T) {
 	t.Parallel()
 
