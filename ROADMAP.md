@@ -8,7 +8,7 @@ Already present:
 - research-informed positioning
 - current status and known gaps
 - public v0.1 specs (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation)
-- a draft-10-pinned DRP field mapping plus RFC 8785/P-256 emitter, full transitive external-trust and critical-bound verifier, and synthetic implementation fixture; raw RFC 3161 backend proof integration, independent interoperability, and conformance evidence remain pending
+- a draft-10-pinned DRP field mapping plus RFC 8785/P-256 emitter, full transitive external-trust and critical-bound verifier, and portable seven-scenario implementation self-test bundle/report; raw RFC 3161 backend proof integration and independent interoperability remain pending, and no IETF conformance is claimed
 - versioned RFC 8785 Execution Receipt v0.2 action payloads, legacy v0.1 verification, golden schema fixtures, and signed session-final receipt-chain/kernel-integrity binding
 - optional receipt transparency anchors with Rekor v1 and separately keyed self-hosted proof profiles
 - optional receiver-attested receipt envelopes with a separately keyed MCP shim, public golden fixture, and offline two-signature verification
@@ -36,7 +36,7 @@ Next hardening work:
 - live-provider OpenAI Agents SDK and Google ADK wrapper evidence beyond the current no-key fixtures
 - Codex hooks and Claude Desktop MCP packaging
 - re-recorded proof media using the packaged offline verifier and stable public fixture paths
-- conformance test vectors imported under `docs/specs/conformance/` to retire the "private layout" notes in the v0.1 specs
+- the historical MCEP Delegation-Core, MIC-State, MIC-Evidence, and IDM vectors imported under `docs/specs/conformance/`; the DRP-specific implementation self-test slice is already public and does not complete that broader work
 
 ## Proof Story
 

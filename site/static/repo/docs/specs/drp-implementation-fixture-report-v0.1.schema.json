@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/drp-implementation-fixture-report-v0.1.schema.json",
+  "title": "Ardur DRP Implementation Fixture Report v0.1",
+  "description": "Deterministic results for an Ardur DRP implementation self-test bundle. This report is not IETF or independent conformance evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_schema_version",
+    "bundle_id",
+    "bundle_sha256",
+    "draft",
+    "profile",
+    "evidence_class",
+    "ok",
+    "summary",
+    "scenarios",
+    "external_implementations",
+    "not_claimed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.drp_implementation_fixture_report.v0.1"
+    },
+    "bundle_schema_version": {
+      "const": "ardur.drp_implementation_fixture_bundle.v0.1"
+    },
+    "bundle_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "bundle_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "revision", "source", "status"],
+      "properties": {
+        "name": {
+          "const": "draft-nelson-agent-delegation-receipts"
+        },
+        "revision": {
+          "const": "10"
+        },
+        "source": {
+          "const": "https://datatracker.ietf.org/doc/draft-nelson-agent-delegation-receipts/10/"
+        },
+        "status": {
+          "const": "active-individual-internet-draft"
+        }
+      }
+    },
+    "profile": {
+      "const": "ardur.drp.v0.1"
+    },
+    "evidence_class": {
+      "const": "implementation-self-test"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "failed"],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/scenarioResult"
+      }
+    },
+    "external_implementations": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/externalImplementation"
+      }
+    },
+    "not_claimed": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "generic DRP compatibility",
+          "IETF conformance",
+          "independent implementation interoperability",
+          "raw RFC 3161 proof verification"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "scenarioResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_id",
+        "description",
+        "risk_class",
+        "decision",
+        "reason_code",
+        "receipt_id",
+        "receipt_id_status",
+        "expected_decision",
+        "expected_reason_code",
+        "expected_receipt_id",
+        "verifier_status",
+        "evidence_class",
+        "checks"
+      ],
+      "properties": {
+        "scenario_id": {
+          "type": "string",
+          "pattern": "^DRP-[A-Z0-9-]{2,64}$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "risk_class": {
+          "enum": [
+            "authorization_validity",
+            "authority_widening",
+            "temporal_validity",
+            "revocation",
+            "redelegation",
+            "wire_compatibility"
+          ]
+        },
+        "decision": {
+          "enum": ["PERMIT", "DENY"]
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reasonCode"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/nullableReceiptId"
+        },
+        "receipt_id_status": {
+          "enum": ["verified", "untrusted-input", "absent"]
+        },
+        "expected_decision": {
+          "enum": ["PERMIT", "DENY"]
+        },
+        "expected_reason_code": {
+          "$ref": "#/$defs/reasonCode"
+        },
+        "expected_receipt_id": {
+          "$ref": "#/$defs/nullableReceiptId"
+        },
+        "verifier_status": {
+          "enum": ["pass", "fail"]
+        },
+        "evidence_class": {
+          "const": "implementation-self-test"
+        },
+        "checks": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/checks"
+            }
+          ]
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipts",
+        "signatures",
+        "orchestrator_signatures",
+        "attenuation_edges",
+        "log_evidence",
+        "revocation_evidence",
+        "receipt_chain_evidence"
+      ],
+      "properties": {
+        "receipts": {"type": "integer", "minimum": 1, "maximum": 32},
+        "signatures": {"type": "integer", "minimum": 1, "maximum": 32},
+        "orchestrator_signatures": {"type": "integer", "minimum": 0, "maximum": 31},
+        "attenuation_edges": {"type": "integer", "minimum": 0, "maximum": 31},
+        "log_evidence": {"type": "integer", "minimum": 0, "maximum": 32},
+        "revocation_evidence": {"type": "integer", "minimum": 0, "maximum": 32},
+        "receipt_chain_evidence": {"type": "integer", "minimum": 0, "maximum": 32}
+      }
+    },
+    "externalImplementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source",
+        "revision",
+        "relationship",
+        "status",
+        "evidence"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source": {"type": ["string", "null"], "format": "uri", "maxLength": 2048},
+        "revision": {"type": ["string", "null"], "maxLength": 128},
+        "relationship": {"enum": ["draft-author", "independent"]},
+        "status": {"enum": ["incompatible-wire", "not-demonstrated"]},
+        "evidence": {"type": "string", "minLength": 1, "maxLength": 2048}
+      }
+    },
+    "reasonCode": {
+      "type": "string",
+      "pattern": "^(verified|[A-Z][A-Z0-9_]{1,63})$"
+    },
+    "nullableReceiptId": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^rec_[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}
