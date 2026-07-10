@@ -4,6 +4,7 @@ import base64
 import copy
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from jsonschema import Draft202012Validator
 
-import vibap.transparency as transparency_module
 from vibap.canonical_json import canonical_json_bytes
 from vibap.cli import main as cli_main
 from vibap.proxy import Decision, PolicyEvent
@@ -424,7 +424,7 @@ def test_local_backend_fails_explicitly_without_posix_locking(
         ed25519.Ed25519PrivateKey.generate(),
         origin="operator.example/log",
     )
-    monkeypatch.setattr(transparency_module, "fcntl", None)
+    monkeypatch.setattr(sys.modules["vibap.transparency"], "fcntl", None)
 
     with pytest.raises(TransparencyError, match="POSIX file locking"):
         backend.submit(pending_anchor_bundle(token, backend_kind=BACKEND_LOCAL_SIGNED))

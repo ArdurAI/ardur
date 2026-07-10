@@ -49,7 +49,6 @@ MAX_BUNDLE_BYTES = 2 * 1024 * 1024
 MAX_LOG_BYTES = 64 * 1024 * 1024
 MAX_NOTE_BYTES = 128 * 1024
 MAX_NOTE_SIGNATURES = 16
-_SHA256_HEX_LENGTH = 64
 
 
 class TransparencyError(ValueError):
@@ -68,7 +67,12 @@ class AnchorBackend(Protocol):
         pending_bundle: Mapping[str, Any],
         *,
         receipt_private_key: ec.EllipticCurvePrivateKey | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        """Submit a pending bundle and return the anchored bundle.
+
+        Protocol abstract method; implementations must override.
+        """
+        raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +167,8 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
         try:
             tmp.unlink()
         except FileNotFoundError:
+            # tmp was already consumed by os.replace or a prior cleanup;
+            # nothing to unlink.
             pass
 
 
