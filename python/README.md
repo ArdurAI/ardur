@@ -79,6 +79,20 @@ the sensor or prove complete coverage. Reports exclude raw commands, paths,
 destinations, source identifiers, credentials, and local paths. See the
 [`Runtime Evidence Correlation Profile`](../docs/specs/runtime-evidence-correlation-v0.1.md).
 
+Run the Linux governance-overhead smoke contract from a source checkout:
+
+```bash
+python ../scripts/run-linux-governance-benchmark.py \
+  --mode smoke \
+  --source-ref "$(git rev-parse HEAD)" \
+  --output-dir /tmp/ardur-linux-benchmark
+```
+
+Smoke mode validates execution and report shape; it is not performance
+evidence. The manual Linux stress profile and optional paired-sensor contract
+are documented in the
+[`Linux Governance Overhead Harness`](../docs/benchmarks/linux-governance-overhead.md).
+
 Generate and self-verify the synthetic DRP draft-10 profile fixture:
 
 ```bash
@@ -137,6 +151,7 @@ python/
 │   ├── claude_code_hook.py      # Claude Code PreToolUse/PostToolUse adapter
 │   ├── claude_code_telemetry.py # Claude Code tool → declared-telemetry mapper
 │   ├── cli.py                   # ardur CLI entrypoint
+│   ├── linux_benchmark.py       # Linux governance overhead report harness
 │   ├── mission.py               # Mission Declaration parsing + cache
 │   ├── passport.py              # Passport issuance + verify
 │   ├── personal_hub.py          # Local Ardur Personal Hub service + adapter API

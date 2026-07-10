@@ -2,7 +2,7 @@
 title: "Docs"
 description: "These docs describe the public product direction and the engineering boundaries"
 source_path: "docs/README.md"
-source_sha256: "b4699a6b8b46584489686c16854273eb022cec813b85f0f0f35c368c45c94e6c"
+source_sha256: "2f7a1acee2b4bec26cd67d29e8edde5a864df8a750f6d71db1481566691f432f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -38,6 +38,8 @@ coverage are in active development.
 - [Protocol Roots](/__ardur_internal__/source/docs/protocol-roots/)
 - [Public Import Plan](/__ardur_internal__/source/docs/public-import-plan/)
 - [Testing](/__ardur_internal__/source/docs/testing/)
+- [Linux Governance Overhead Harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/) —
+  repeatable smoke/stress reports with explicit measurement classes and claim limits
 - [Ardur Personal Hub](/__ardur_internal__/source/docs/guides/ardur-personal-hub/)
 - [Agent Instructions](/__ardur_internal__/source/docs/agent-instructions/readme/)
 - [Engineering Standards](/__ardur_internal__/source/docs/engineering-standards/)

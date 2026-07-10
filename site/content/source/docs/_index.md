@@ -31,6 +31,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`agent-instructions/`](/__ardur_internal__/source/docs/agent-instructions/)
 - [`articles/`](/__ardur_internal__/source/docs/articles/)
 - [`audit/`](/__ardur_internal__/source/docs/audit/)
+- [`benchmarks/`](/__ardur_internal__/source/docs/benchmarks/)
 - [`comparisons/`](/__ardur_internal__/source/docs/comparisons/)
 - [`decisions/`](/__ardur_internal__/source/docs/decisions/)
 - [`demo/`](/__ardur_internal__/source/docs/demo/)

@@ -44,6 +44,7 @@ REQUIRED_RUNTIME_FILES = (
     PurePosixPath("vibap/drp_conformance.py"),
     PurePosixPath("vibap/drp_fixture.py"),
     PurePosixPath("vibap/launch_gate.py"),
+    PurePosixPath("vibap/linux_benchmark.py"),
     PurePosixPath("vibap/offline_verification.py"),
     PurePosixPath("vibap/offline_verification_fixture.py"),
     PurePosixPath("vibap/runtime_evidence.py"),

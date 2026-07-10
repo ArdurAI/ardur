@@ -41,6 +41,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`drp-implementation-fixture-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/drp-implementation-fixture-report-v0.1.schema.json)
 - [`execution-receipt-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json)
 - [`execution-receipt-v0.2.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.2.schema.json)
+- [`linux-governance-benchmark-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/linux-governance-benchmark-report-v0.1.schema.json)
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)
 - [`offline-verification-bundle-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/offline-verification-bundle-v0.1.schema.json)
 - [`receiver-attestation-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/receiver-attestation-v0.1.schema.json)

@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "4a357a6da8360ae1462686aaed3f314986d1b7cdf2f80fb13ed734aa75343073"
+source_sha256: "adf82ba2a27404605afabb590b00037ecb9920373d20bb14acb8ca43be88596d"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -49,6 +49,11 @@ does not deploy a sensor, authenticate imported JSON, or turn missing alerts
 into proof of no activity. This improves inspection without changing the
 automatic capture boundary above.
 
+The Linux governance-overhead harness now provides a schema-validated PR smoke
+and manual stress profile. It measures configured governance paths and optional
+operator-supplied paired commands; it does not establish universal overhead or
+complete sensor coverage.
+
 ## Public Now
 
 - the product category and public intent are defined
@@ -85,6 +90,7 @@ automatic capture boundary above.
 - broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
+- cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 
 ## What We Still Need To Resolve
 
@@ -98,7 +104,7 @@ automatic capture boundary above.
 - a tagged, packaged distribution on PyPI / Homebrew / OCI suitable for non-technical users
 - full deployment material for cluster, identity, and receipt storage paths
 - the full public docs spine (the current set is the public-safe subset)
-- benchmark-heavy material
+- benchmark corpora and independently reproduced cross-host performance claims beyond the public local harness
 - internal planning, lane, and session artifacts
 - Trusted Execution Environment (TEE) attestation as a general hardware-rooted production claim — see `docs/known-limitations.md`
 

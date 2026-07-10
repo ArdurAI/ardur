@@ -1,0 +1,65 @@
+name: Linux governance benchmark
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - ".github/workflows/linux-benchmark.yml"
+      - "docs/benchmarks/**"
+      - "docs/specs/linux-governance-benchmark-report-v0.1.schema.json"
+      - "python/vibap/linux_benchmark.py"
+      - "python/vibap/_specs/**"
+      - "python/tests/test_linux_benchmark.py"
+      - "scripts/run-linux-governance-benchmark.py"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Benchmark workload profile"
+        required: true
+        default: stress
+        type: choice
+        options:
+          - stress
+          - smoke
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Linux ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'smoke' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Ardur with test dependencies
+        working-directory: python
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Run benchmark contract tests
+        run: python -m pytest -q python/tests/test_linux_benchmark.py
+
+      - name: Run Linux benchmark
+        env:
+          BENCHMARK_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'smoke' }}
+        run: |
+          python scripts/run-linux-governance-benchmark.py \
+            --mode "$BENCHMARK_MODE" \
+            --source-ref "$GITHUB_SHA" \
+            --output-dir "$RUNNER_TEMP/ardur-linux-benchmark"
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: linux-governance-benchmark-${{ github.run_id }}
+          path: ${{ runner.temp }}/ardur-linux-benchmark/
+          if-no-files-found: error
+          retention-days: 7
