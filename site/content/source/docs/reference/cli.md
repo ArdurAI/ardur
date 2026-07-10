@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "df1ef51c9763031ffdafa21179369c996eb0f4b9cc06a96a159cb8627c213e08"
+source_sha256: "41442be742319cbc75c7c8559e82e3bfffa28c0486b59eba2b237b4afa892d78"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -328,6 +328,28 @@ only public keys and synthetic evidence; both private keys exist in memory only.
 It is not proof of integration with a live third-party MCP server. See the
 [Receiver Attestation v0.1 specification](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/)
 for operator integration and trust limitations.
+
+### `ardur drp-profile-fixture`
+
+Generate a synthetic root/child/grandchild DRP draft-10 profile chain and
+immediately reload and verify it:
+
+```text
+ardur drp-profile-fixture --output DIR
+```
+
+`DIR` may be empty or contain only a prior copy of the six declared fixture
+artifacts. Unexpected entries cause a fail-closed error before any write.
+
+The output contains the receipt chain, finite tool universe, explicitly
+preverified context facts, three public signer keys, and a verification report.
+The concrete action context includes the resource, arguments, side-effect
+class, and cwd required to enforce the signed critical bounds.
+Private keys exist only in memory. The fixture demonstrates Ardur's
+RFC 8785/P-256 profile emitter and full-chain verifier; it is not raw RFC 3161
+proof, independent implementation interoperability, IETF conformance, or
+current revocation evidence. See the
+[Ardur DRP Profile v0.1 specification](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/).
 
 ### `ardur offline-verification-fixture`
 

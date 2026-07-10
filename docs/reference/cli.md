@@ -312,6 +312,28 @@ It is not proof of integration with a live third-party MCP server. See the
 [Receiver Attestation v0.1 specification](../specs/receiver-attestation-v0.1.md)
 for operator integration and trust limitations.
 
+### `ardur drp-profile-fixture`
+
+Generate a synthetic root/child/grandchild DRP draft-10 profile chain and
+immediately reload and verify it:
+
+```text
+ardur drp-profile-fixture --output DIR
+```
+
+`DIR` may be empty or contain only a prior copy of the six declared fixture
+artifacts. Unexpected entries cause a fail-closed error before any write.
+
+The output contains the receipt chain, finite tool universe, explicitly
+preverified context facts, three public signer keys, and a verification report.
+The concrete action context includes the resource, arguments, side-effect
+class, and cwd required to enforce the signed critical bounds.
+Private keys exist only in memory. The fixture demonstrates Ardur's
+RFC 8785/P-256 profile emitter and full-chain verifier; it is not raw RFC 3161
+proof, independent implementation interoperability, IETF conformance, or
+current revocation evidence. See the
+[Ardur DRP Profile v0.1 specification](../specs/ardur-drp-profile-v0.1.md).
+
 ### `ardur offline-verification-fixture`
 
 Generate a synthetic full-evidence receipt chain and immediately verify it:

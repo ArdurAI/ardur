@@ -8,6 +8,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PASSPORT_SOURCE = REPO_ROOT / "python" / "vibap" / "passport.py"
 MAPPING_PATH = REPO_ROOT / "docs" / "specs" / "ardur-drp-mapping-v0.1.json"
+PROFILE_SCHEMA_PATH = (
+    REPO_ROOT / "docs" / "specs" / "ardur-drp-profile-v0.1.schema.json"
+)
 
 
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
@@ -42,7 +45,9 @@ def _string_dict_keys(node: ast.Dict, constants: dict[str, str]) -> set[str]:
             keys.add(constants[key.id])
             continue
         else:
-            raise AssertionError("passport wire dictionaries must use literal string keys")
+            raise AssertionError(
+                "passport wire dictionaries must use literal string keys"
+            )
     return keys
 
 
@@ -56,7 +61,9 @@ def _issued_passport_claims(tree: ast.Module) -> set[str]:
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "claims":
                     if not isinstance(node.value, ast.Dict):
-                        raise AssertionError("issue_passport claims must be a literal dictionary")
+                        raise AssertionError(
+                            "issue_passport claims must be a literal dictionary"
+                        )
                     claims.update(_string_dict_keys(node.value, constants))
                 if (
                     isinstance(target, ast.Subscript)
@@ -80,7 +87,9 @@ def _derived_passport_claims(tree: ast.Module) -> set[str]:
         for keyword in node.keywords:
             if keyword.arg == "extra_claims":
                 if not isinstance(keyword.value, ast.Dict):
-                    raise AssertionError("derive_child_passport extra_claims must be literal")
+                    raise AssertionError(
+                        "derive_child_passport extra_claims must be literal"
+                    )
                 return _string_dict_keys(keyword.value, constants)
     raise AssertionError("missing derive_child_passport extra_claims")
 
@@ -102,10 +111,18 @@ def test_drp_mapping_covers_legacy_python_passport_claims() -> None:
 def test_drp_mapping_has_no_duplicate_source_fields() -> None:
     document = json.loads(MAPPING_PATH.read_text(encoding="utf-8"))
     keys = [
-        (entry["source_surface"], entry["source_path"])
-        for entry in document["entries"]
+        (entry["source_surface"], entry["source_path"]) for entry in document["entries"]
     ]
 
     assert len(keys) == len(set(keys))
     assert document["status"] == "mapping-only"
     assert document["drp"]["formal_ietf_standing"] is False
+
+
+def test_drp_mapping_required_extension_fields_match_profile_schema() -> None:
+    mapping = json.loads(MAPPING_PATH.read_text(encoding="utf-8"))
+    schema = json.loads(PROFILE_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    assert set(mapping["profile_shape"]["ardur_required_fields"]) == set(
+        schema["$defs"]["xArdur"]["required"]
+    )

@@ -17,6 +17,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 - [`README.md`](/__ardur_internal__/source/docs/specs/readme/)
 - [`ardur-drp-mapping-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-mapping-v0.1/)
+- [`ardur-drp-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/)
 - [`conformance-profiles-v0.1.md`](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/)
 - [`delegation-grant-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/)
 - [`execution-receipt-eat-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/)
@@ -33,6 +34,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 ## Hosted Artifacts
 
 - [`ardur-drp-mapping-v0.1.json`](/__ardur_internal__/repo/docs/specs/ardur-drp-mapping-v0.1.json)
+- [`ardur-drp-profile-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/ardur-drp-profile-v0.1.schema.json)
 - [`execution-receipt-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json)
 - [`execution-receipt-v0.2.schema.json`](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.2.schema.json)
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)

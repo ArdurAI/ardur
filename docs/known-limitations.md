@@ -45,6 +45,31 @@ after bundle assembly may still verify cryptographically. Static JSON/HTML
 reports are derived views, not new signed evidence; retain the source bundle,
 trust-root fingerprints, and verifier command for reproduction.
 
+## DRP draft-profile proof boundary
+
+Ardur implements the `ardur.drp.v0.1` Authorization Object emitter and
+full-transitive-chain verifier pinned to DRP draft-10. The draft is an
+individual Internet-Draft with no formal IETF standing.
+
+The verifier consumes `DRPVerifiedLogEvidence` only after a separately trusted
+backend has validated raw inclusion/TSA proof. Ardur does not yet ship a raw
+RFC 3161 token parser/verifier for this profile. Supplying that object from
+receipt claims without external proof validation violates the contract.
+Existing action-receipt transparency anchors are not automatically DRP
+pre-action delegation-log evidence.
+
+Likewise, `receiptChainAnchor.state = "present"` is accepted only with a
+matching `DRPVerifiedReceiptChainEvidence` value produced by a separately
+trusted action-chain verifier. The profile does not turn a signed reference
+into proof of the referenced action chain. Concrete verification requests must
+also carry trusted operation/resource arguments, side-effect classification,
+and cwd context; model-supplied labels are not a sufficient enforcement input.
+
+The public root/child/grandchild fixture contains synthetic preverified context
+facts so the runtime API can be reproduced offline. It is not raw RFC 3161
+proof, independent implementation interoperability, IETF conformance, or
+current revocation evidence. Those evidence obligations remain issue #180.
+
 ## Product limits
 
 Ardur is not:

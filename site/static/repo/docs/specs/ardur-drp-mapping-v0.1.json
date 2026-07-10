@@ -56,11 +56,15 @@
       "toolSchemaHash"
     ],
     "ardur_extension_path": "metadata.x-ardur",
+    "implementation_schema": "docs/specs/ardur-drp-profile-v0.1.schema.json",
+    "delegation_log_evidence_lifecycle": "The signed critical extension carries a required backend and subject=receipt-id. Independently verified external inclusion/TSA evidence binds the final receiptId after signing; proof output is not embedded in the pre-ID body.",
+    "receipt_chain_evidence_lifecycle": "A present receiptChainAnchor is a signed commitment. Independently verified external action-chain evidence must match its trace ID, head receipt ID, and head receipt JWT digest before PERMIT.",
     "ardur_required_fields": [
       "profile",
       "critical",
       "issuer",
       "subject",
+      "audience",
       "delegationGrantId",
       "missionRef",
       "policy",
@@ -97,7 +101,7 @@
     "revocation_freshness": "Offline verification MUST DENY when revocationRequired is true; otherwise it MUST report the revocation observation boundary.",
     "strict_action_subset": "A draft-10 sub-receipt MUST have a strict proper subset of parent allowedActions; a chain that narrows only arguments, budget, or time is not exportable as a draft-10 sub-receipt.",
     "finite_scope_universe_required": "Wildcard expansion and strict-subset checks MUST use an authenticated finite tool/resource universe bound by toolSchemaHash; otherwise the verifier MUST DENY as insufficient evidence.",
-    "delegation_log_anchor_required": "A delegation receipt MUST have pre-action append-only-log and authoritative TSA evidence as required by draft-10; an Ardur action-receipt transparency sidecar is not automatically equivalent.",
+    "delegation_log_anchor_required": "A delegation receipt MUST sign the required log backend and receipt-id proof subject, then present independently verified external pre-action append-only-log and authoritative TSA evidence binding the final receiptId; proof output MUST NOT be embedded in the pre-ID body, and an Ardur action-receipt transparency sidecar is not automatically equivalent.",
     "tsa_evidence_required": "A projected action-log timestamp MUST be backed by the draft-required authoritative log/TSA evidence or be reported as insufficient evidence.",
     "p256_profile_selected": "The draft-10 interoperability mode MUST use P-256 for root and orchestrator signatures; AAT holder keys remain separate capability-token keys."
   },
