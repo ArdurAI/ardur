@@ -128,6 +128,7 @@ def wait_for_health(
                 if response.status == 200 and payload.get("status") == "ok":
                     return
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            # Startup races are expected; the bounded loop raises at the deadline.
             pass
         time.sleep(0.1)
     raise DemoError(
