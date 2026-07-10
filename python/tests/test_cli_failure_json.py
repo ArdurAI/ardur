@@ -1889,13 +1889,18 @@ def test_protect_claude_code_empty_home_returns_invalid(tmp_path, capsys, home):
         assert str(tmp_path) not in step.get("detail", "")
 
 
-def test_protect_claude_code_explicit_dot_home_still_succeeds(tmp_path, capsys):
+def test_protect_claude_code_explicit_dot_home_still_succeeds(
+    tmp_path, capsys, monkeypatch
+):
     """Explicit ``--home .`` (current working directory) remains valid and must
     not be rejected by the empty/whitespace guard. Only empty/whitespace-only
     strings are rejected; an explicit ``.`` is a deliberate CWD choice.
     """
     project = tmp_path / "project"
     project.mkdir()
+    runtime_dir = tmp_path / "runtime-cwd"
+    runtime_dir.mkdir()
+    monkeypatch.chdir(runtime_dir)
     rc, payload = _run_cli_and_read_json(
         [
             "protect",
@@ -1913,6 +1918,10 @@ def test_protect_claude_code_explicit_dot_home_still_succeeds(tmp_path, capsys):
 
     assert rc == 0
     assert payload["ok"] is True
+    assert (runtime_dir / "active_mission.jwt").is_file()
+    assert (runtime_dir / "claude-code-pre_tool_use").is_file()
+    assert (runtime_dir / "keys" / "passport_private.pem").is_file()
+    assert (runtime_dir / "keys" / "passport_public.pem").is_file()
 
 
 def test_protect_claude_code_home_regular_file_returns_invalid(tmp_path, capsys):
