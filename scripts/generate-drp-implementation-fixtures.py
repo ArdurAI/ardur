@@ -48,7 +48,7 @@ def _atomic_public_write(path: Path, value: Mapping[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     descriptor: int | None = None
     try:
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = None
             handle.write(canonical_json_bytes(dict(value)) + b"\n")
@@ -61,6 +61,7 @@ def _atomic_public_write(path: Path, value: Mapping[str, Any]) -> None:
         try:
             temporary.unlink()
         except FileNotFoundError:
+            # Successful replacement consumes the temporary path.
             pass
 
 

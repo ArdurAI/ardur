@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import socket
+import stat
 import subprocess
 import sys
 import urllib.request
@@ -220,6 +221,8 @@ def test_generator_emits_public_self_verifying_bundle(tmp_path: Path) -> None:
     actual = run_drp_conformance_bundle(bundle)
     assert actual == json.loads(report.read_text(encoding="utf-8"))
     assert actual["summary"] == {"total": 7, "passed": 7, "failed": 0}
+    assert stat.S_IMODE(bundle.stat().st_mode) == 0o600
+    assert stat.S_IMODE(report.stat().st_mode) == 0o600
     fixture_text = bundle.read_text(encoding="utf-8")
     assert "BEGIN PRIVATE KEY" not in fixture_text
     assert "BEGIN EC PRIVATE KEY" not in fixture_text

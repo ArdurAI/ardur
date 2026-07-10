@@ -325,6 +325,7 @@ def write_drp_conformance_report(path: str | Path, report: Mapping[str, Any]) ->
         try:
             temporary.unlink()
         except FileNotFoundError:
+            # Successful replacement consumes the temporary path.
             pass
 
 
