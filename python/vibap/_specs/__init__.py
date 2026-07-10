@@ -120,3 +120,14 @@ def runtime_evidence_correlation_report_v01_schema() -> dict:
         .read_text(encoding="utf-8")
     )
     return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def linux_governance_benchmark_report_v01_schema() -> dict:
+    """Return the parsed Linux Governance Benchmark Report v0.1 schema."""
+    raw = (
+        files(__package__)
+        .joinpath("linux_governance_benchmark_report_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)

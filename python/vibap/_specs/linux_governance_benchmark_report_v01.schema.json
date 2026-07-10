@@ -1,0 +1,575 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/linux-governance-benchmark-report-v0.1.schema.json",
+  "title": "Ardur Linux Governance Benchmark Report v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {"mode": {"const": "smoke"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "optional_runtime_sensor": {
+            "properties": {"status": {"const": "not_measured"}},
+            "required": ["status"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"mode": {"const": "stress"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "properties": {"claim_eligible": {"const": true}},
+            "required": ["claim_eligible"]
+          },
+          "config": {
+            "properties": {
+              "sample_count": {"type": "integer", "minimum": 100}
+            },
+            "required": ["sample_count"]
+          },
+          "source_ref": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{7,64}$"
+          }
+        }
+      }
+    }
+  ],
+  "required": [
+    "schema_version",
+    "mode",
+    "generated_at",
+    "source_ref",
+    "environment",
+    "config",
+    "governance_only",
+    "imported_evidence_processing",
+    "sustained_governance",
+    "optional_runtime_sensor",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.linux_governance_benchmark_report.v0.1"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["smoke", "stress"]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_ref": {
+      "$ref": "#/$defs/boundedString"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "config": {
+      "$ref": "#/$defs/config"
+    },
+    "governance_only": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 32,
+      "items": {
+        "allOf": [
+          {"$ref": "#/$defs/latencyMetric"},
+          {
+            "properties": {
+              "measurement_class": {"const": "governance_only"}
+            }
+          }
+        ]
+      }
+    },
+    "imported_evidence_processing": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "allOf": [
+          {"$ref": "#/$defs/latencyMetric"},
+          {
+            "properties": {
+              "measurement_class": {
+                "const": "imported_evidence_processing"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "sustained_governance": {
+      "$ref": "#/$defs/resourceMeasurement"
+    },
+    "optional_runtime_sensor": {
+      "$ref": "#/$defs/sensorMeasurement"
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    }
+  },
+  "$defs": {
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "finiteNonnegative": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000000000000
+    },
+    "finitePercent": {
+      "type": "number",
+      "minimum": -1000000,
+      "maximum": 1000000
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "unit": {"const": "microseconds"}
+            },
+            "required": ["unit"]
+          },
+          "then": {
+            "properties": {
+              "p50": {"$ref": "#/$defs/finiteNonnegative"},
+              "p95": {"$ref": "#/$defs/finiteNonnegative"},
+              "p99": {"$ref": "#/$defs/finiteNonnegative"},
+              "min": {"$ref": "#/$defs/finiteNonnegative"},
+              "max": {"$ref": "#/$defs/finiteNonnegative"},
+              "mean": {"$ref": "#/$defs/finiteNonnegative"}
+            }
+          },
+          "else": {
+            "properties": {
+              "p50": {"$ref": "#/$defs/finitePercent"},
+              "p95": {"$ref": "#/$defs/finitePercent"},
+              "p99": {"$ref": "#/$defs/finitePercent"},
+              "min": {"$ref": "#/$defs/finitePercent"},
+              "max": {"$ref": "#/$defs/finitePercent"},
+              "mean": {"$ref": "#/$defs/finitePercent"}
+            }
+          }
+        }
+      ],
+      "required": [
+        "unit",
+        "sample_count",
+        "p50",
+        "p95",
+        "p99",
+        "min",
+        "max",
+        "mean"
+      ],
+      "properties": {
+        "unit": {
+          "type": "string",
+          "enum": ["microseconds", "percent"]
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "p50": {"type": "number"},
+        "p95": {"type": "number"},
+        "p99": {"type": "number"},
+        "min": {"type": "number"},
+        "max": {"type": "number"},
+        "mean": {"type": "number"}
+      }
+    },
+    "latencyMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "measurement_class",
+        "methodology",
+        "warmup_count",
+        "latency",
+        "throughput_ops_per_second",
+        "notes"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]{1,96}$"
+        },
+        "measurement_class": {
+          "type": "string",
+          "enum": ["governance_only", "imported_evidence_processing"]
+        },
+        "methodology": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "warmup_count": {
+          "$ref": "#/$defs/count"
+        },
+        "latency": {
+          "$ref": "#/$defs/distribution"
+        },
+        "throughput_ops_per_second": {
+          "$ref": "#/$defs/finiteNonnegative"
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {"claim_eligible": {"const": true}},
+            "required": ["claim_eligible"]
+          },
+          "then": {
+            "properties": {
+              "os": {"const": "Linux"},
+              "claim_status": {"const": "eligible_linux_host"}
+            }
+          },
+          "else": {
+            "properties": {
+              "claim_status": {"const": "non_linux_smoke_only"}
+            }
+          }
+        }
+      ],
+      "required": [
+        "os",
+        "architecture",
+        "kernel_release",
+        "python_version",
+        "cpu_count",
+        "cpu_model",
+        "clock",
+        "claim_eligible",
+        "claim_status"
+      ],
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "architecture": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "kernel_release": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "python_version": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "cpu_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "cpu_model": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "clock": {
+          "const": "time.perf_counter_ns"
+        },
+        "claim_eligible": {
+          "type": "boolean"
+        },
+        "claim_status": {
+          "type": "string",
+          "enum": ["eligible_linux_host", "non_linux_smoke_only"]
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "warmup_count",
+        "sample_count",
+        "sustained_operations",
+        "evidence_event_count",
+        "policy_rule_counts"
+      ],
+      "properties": {
+        "warmup_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "sustained_operations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "evidence_event_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "policy_rule_counts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          }
+        }
+      }
+    },
+    "resourceMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "methodology",
+        "operation_count",
+        "wall_seconds",
+        "user_cpu_seconds",
+        "system_cpu_seconds",
+        "cpu_utilization_percent",
+        "throughput_ops_per_second",
+        "python_heap_peak_bytes",
+        "linux_rss_start_kib",
+        "linux_rss_end_kib",
+        "linux_rss_hwm_kib",
+        "notes"
+      ],
+      "properties": {
+        "name": {
+          "const": "sustained_proxy_permit_end_to_end"
+        },
+        "methodology": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "operation_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "wall_seconds": {
+          "$ref": "#/$defs/finiteNonnegative"
+        },
+        "user_cpu_seconds": {
+          "$ref": "#/$defs/finiteNonnegative"
+        },
+        "system_cpu_seconds": {
+          "$ref": "#/$defs/finiteNonnegative"
+        },
+        "cpu_utilization_percent": {
+          "$ref": "#/$defs/finiteNonnegative"
+        },
+        "throughput_ops_per_second": {
+          "$ref": "#/$defs/finiteNonnegative"
+        },
+        "python_heap_peak_bytes": {
+          "$ref": "#/$defs/count"
+        },
+        "linux_rss_start_kib": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/count"}
+          ]
+        },
+        "linux_rss_end_kib": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/count"}
+          ]
+        },
+        "linux_rss_hwm_kib": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/count"}
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "sensorMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "measured"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "repetitions": {"type": "integer", "minimum": 3},
+              "baseline_command_sha256": {"$ref": "#/$defs/sha256"},
+              "instrumented_command_sha256": {"$ref": "#/$defs/sha256"},
+              "baseline_latency": {
+                "allOf": [
+                  {"$ref": "#/$defs/distribution"},
+                  {"properties": {"unit": {"const": "microseconds"}}}
+                ]
+              },
+              "instrumented_latency": {
+                "allOf": [
+                  {"$ref": "#/$defs/distribution"},
+                  {"properties": {"unit": {"const": "microseconds"}}}
+                ]
+              },
+              "overhead_percent": {
+                "allOf": [
+                  {"$ref": "#/$defs/distribution"},
+                  {"properties": {"unit": {"const": "percent"}}}
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "repetitions": {"const": 0},
+              "baseline_command_sha256": {"type": "null"},
+              "instrumented_command_sha256": {"type": "null"},
+              "baseline_latency": {"type": "null"},
+              "instrumented_latency": {"type": "null"},
+              "overhead_percent": {"type": "null"}
+            }
+          }
+        }
+      ],
+      "required": [
+        "status",
+        "methodology",
+        "reason",
+        "repetitions",
+        "baseline_command_sha256",
+        "instrumented_command_sha256",
+        "baseline_latency",
+        "instrumented_latency",
+        "overhead_percent",
+        "notes"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_measured", "measured"]
+        },
+        "methodology": {
+          "const": "operator_supplied_shell_free_paired_commands"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "repetitions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "baseline_command_sha256": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/sha256"}
+          ]
+        },
+        "instrumented_command_sha256": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/sha256"}
+          ]
+        },
+        "baseline_latency": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/distribution"}
+          ]
+        },
+        "instrumented_latency": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/distribution"}
+          ]
+        },
+        "overhead_percent": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/distribution"}
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    }
+  }
+}

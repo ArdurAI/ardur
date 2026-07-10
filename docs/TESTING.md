@@ -16,13 +16,40 @@ ambiguity, parser bounds, redaction, symlink handling, CLI behavior, public
 fixture generation, and owner-only report output without network access or
 private credentials.
 
+When changing governance performance paths or the Linux benchmark report, run:
+
+```bash
+python -m pytest python/tests/test_linux_benchmark.py -q
+python scripts/run-linux-governance-benchmark.py \
+  --mode smoke --source-ref "$(git rev-parse HEAD)" \
+  --output-dir /tmp/ardur-linux-benchmark
+```
+
+The focused suite verifies the canonical/embedded schema pair, nearest-rank
+percentiles, production policy/proxy/receipt paths, owner-only artifacts,
+non-Linux claim gating, strict paired-command parsing, redaction, and stable
+subprocess failures. The dedicated `linux-benchmark` workflow runs smoke on
+relevant pull requests and offers manual Linux stress dispatch; it is not
+scheduled. See the
+[benchmark guide](benchmarks/linux-governance-overhead.md) for interpretation.
+
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.
 
 ## What Runs Today
 
-Five GitHub Actions workflows. Most run on push to `dev`/`main` and on every
-pull request; `link-check` runs on PRs and a weekly cron only.
+The repository uses dedicated GitHub Actions workflows for runtime, security,
+format, site, link, package, OCI, kernel, and benchmark gates. Most run on push
+to `dev`/`main` and on every pull request; `link-check` alone has a weekly cron,
+while Linux benchmark stress is manual.
+
+### `linux-benchmark` — shape smoke + manual stress
+
+[`/.github/workflows/linux-benchmark.yml`](../.github/workflows/linux-benchmark.yml)
+
+- Relevant pull requests run the focused benchmark tests and Linux smoke profile.
+- Manual dispatch defaults to stress and uploads the JSON/Markdown report for seven days.
+- No scheduled performance run exists; shared-runner variance and CI cost would make those numbers misleading.
 
 ### `secret-scan` — gitleaks + forbidden-term gate
 

@@ -21,6 +21,8 @@ coverage are in active development.
 - [Protocol Roots](protocol-roots.md)
 - [Public Import Plan](public-import-plan.md)
 - [Testing](TESTING.md)
+- [Linux Governance Overhead Harness](benchmarks/linux-governance-overhead.md) —
+  repeatable smoke/stress reports with explicit measurement classes and claim limits
 - [Ardur Personal Hub](guides/ardur-personal-hub.md)
 - [Agent Instructions](agent-instructions/README.md)
 - [Engineering Standards](engineering-standards.md)

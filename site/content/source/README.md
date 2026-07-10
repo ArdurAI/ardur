@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "ae52b74c4cb29c049955bce6b320b26601f21361be5c2b8f112969ff8bfbf3da"
+source_sha256: "47749a71b6b6194c22e2cde7623dfb1770bec09d1462a1ed58facd18b57db088"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -46,6 +46,14 @@ assurance, and coverage limits. It does not deploy or authenticate a sensor,
 and a high-confidence association to imported JSON is corroboration rather
 than independent proof.
 
+For performance engineering, the
+[Linux governance overhead harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)
+produces schema-validated JSON and Markdown reports that keep governance-only
+latency, imported-evidence processing, sustained resource use, and optional
+paired sensor overhead separate. Pull requests run a small shape-only smoke;
+host-specific stress results are manual evidence, not a universal overhead
+claim.
+
 [Research](/__ardur_internal__/source/research/) · [Status](/__ardur_internal__/source/status/) · [Coverage Map](/__ardur_internal__/source/docs/coverage-map/) · [Roadmap](/__ardur_internal__/source/roadmap/) · [Media](/__ardur_internal__/source/media-notes/) · [Articles](/__ardur_internal__/source/docs/articles/readme/) · [Docs](/__ardur_internal__/source/docs/readme/) · [Reference](/__ardur_internal__/source/docs/reference/readme/) · [Phase 1 Demo Packet](/__ardur_internal__/source/docs/guides/phase1-demo-packet/) · [Read the Phase 1 Evidence Bundle](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) · [Evidence Site Source](/__ardur_internal__/source/site/readme/)
 
 ## Verification Snapshot
@@ -54,7 +62,7 @@ At the reviewed `dev` tree on 2026-07-09, the current gates were:
 
 | Gate | Verified result |
 |---|---|
-| Python local matrix (Python 3.13) | 1,572 passed, 32 skipped; CI separately enforces its coverage threshold |
+| Python local matrix (Python 3.13) | 1,595 passed, 32 skipped; CI separately enforces its coverage threshold |
 | Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, seccomp smoke, and full `ardur run --enforce` seccomp E2E passed |
@@ -182,6 +190,7 @@ This repo currently includes:
 - current status and what is still being resolved
 - public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus a draft-10-pinned DRP mapping and executable profile with RFC 8785/P-256 emit, external-trust full-chain and critical-bound verification, and a portable seven-scenario implementation self-test bundle/report (not an IETF or independent interoperability claim), the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, a receiver-attestation profile with a two-key offline verifier and MCP shim fixture, and a full offline-verification bundle/profile with redacted CLI/JSON/static HTML explorer reports
 - Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
+- a Linux governance-overhead harness with a closed report schema, PR smoke workflow, manual stress profile, owner-only artifacts, and an opt-in shell-free paired-sensor mode
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, receiver-envelope verification, detached normalized/Tetragon/Falco runtime-evidence correlation, and no-key DRP/receiver/offline-verification fixtures), plus the deterministic `ardur-drp-fixtures` runner
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
 - runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`

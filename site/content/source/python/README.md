@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "b2c844b0e7403fc9c5990309ea55f0e0cffb25b87e8961ebff552333d3824265"
+source_sha256: "9564e1ec568527a64a02ecbfd9b9bebde2a9350775cc8573f48bc04bc1fb1083"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -96,6 +96,20 @@ the sensor or prove complete coverage. Reports exclude raw commands, paths,
 destinations, source identifiers, credentials, and local paths. See the
 [`Runtime Evidence Correlation Profile`](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/).
 
+Run the Linux governance-overhead smoke contract from a source checkout:
+
+```bash
+python ../scripts/run-linux-governance-benchmark.py \
+  --mode smoke \
+  --source-ref "$(git rev-parse HEAD)" \
+  --output-dir /tmp/ardur-linux-benchmark
+```
+
+Smoke mode validates execution and report shape; it is not performance
+evidence. The manual Linux stress profile and optional paired-sensor contract
+are documented in the
+[`Linux Governance Overhead Harness`](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/).
+
 Generate and self-verify the synthetic DRP draft-10 profile fixture:
 
 ```bash
@@ -154,6 +168,7 @@ python/
 │   ├── claude_code_hook.py      # Claude Code PreToolUse/PostToolUse adapter
 │   ├── claude_code_telemetry.py # Claude Code tool → declared-telemetry mapper
 │   ├── cli.py                   # ardur CLI entrypoint
+│   ├── linux_benchmark.py       # Linux governance overhead report harness
 │   ├── mission.py               # Mission Declaration parsing + cache
 │   ├── passport.py              # Passport issuance + verify
 │   ├── personal_hub.py          # Local Ardur Personal Hub service + adapter API
