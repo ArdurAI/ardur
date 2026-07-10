@@ -718,8 +718,8 @@ def verify_receipt(
     replay_cache: MutableSet[str] | None = None,
     trusted_issuer_bindings: dict[str, set[str] | list[str] | tuple[str, ...]] | None = None,
     verify_expiry: bool = True,
-    iat_future_skew_s: int = _IAT_FUTURE_SKEW_S,
-    iat_past_skew_s: int = _IAT_PAST_SKEW_S,
+    iat_future_skew_s: int | None = _IAT_FUTURE_SKEW_S,
+    iat_past_skew_s: int | None = _IAT_PAST_SKEW_S,
     now_fn: "callable[..., float] | None" = None,
 ) -> dict[str, Any]:
     """Verify a single Execution Receipt JWT.
@@ -817,6 +817,8 @@ def verify_chain(
     public_key: ec.EllipticCurvePublicKey,
     *,
     verify_expiry: bool = True,
+    iat_future_skew_s: int | None = _IAT_FUTURE_SKEW_S,
+    iat_past_skew_s: int | None = _IAT_PAST_SKEW_S,
 ) -> list[dict[str, Any]]:
     """Verify receipt signatures and the receipt-chain hash."""
     tokens = [_receipt_token(item) for item in receipts]
@@ -824,7 +826,13 @@ def verify_chain(
     for index, token in enumerate(tokens):
         try:
             verified_claims.append(
-                verify_receipt(token, public_key, verify_expiry=verify_expiry)
+                verify_receipt(
+                    token,
+                    public_key,
+                    verify_expiry=verify_expiry,
+                    iat_future_skew_s=iat_future_skew_s,
+                    iat_past_skew_s=iat_past_skew_s,
+                )
             )
         except jwt.PyJWTError as exc:
             raise ReceiptChainError(

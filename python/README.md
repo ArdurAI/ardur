@@ -36,13 +36,31 @@ ardur issue \
 ardur verify --token <token-from-issue-output>
 ```
 
+That walks through key generation, mission compilation, ES256-signed passport
+issuance, and verification - all local, no LLM calls.
+
 Every durable receipt sink also queues an idempotent local transparency-anchor
 sidecar. Network submission is a separate `ardur anchor` operation, and
 `ardur verify --anchor-bundle ...` verifies completed proofs offline with an
 independently supplied log public key. See
 [`docs/specs/transparency-anchor-v0.1.md`](../docs/specs/transparency-anchor-v0.1.md).
 
-That walks through key generation, mission compilation, ES256-signed passport issuance, and verification — all local, no LLM calls.
+The package also ships a no-service offline verifier and synthetic full-evidence
+fixture:
+
+```bash
+ardur offline-verification-fixture --output ./offline-fixture
+ardur-verify ./offline-fixture/offline-verification-v0.1.json \
+  --receipt-public-key ./offline-fixture/offline-verification-v0.1-receipt-public.pem \
+  --transparency-log-key ./offline-fixture/offline-verification-v0.1-log-public.pem \
+  --receiver-public-key ./offline-fixture/offline-verification-v0.1-receiver-public.pem \
+  --html-report ./offline-fixture/verified.html
+```
+
+The evidence bundle never supplies its own trusted keys. The three public PEMs
+are explicit verifier inputs whose fingerprints must be checked out of band.
+See
+[`docs/specs/offline-verification-bundle-v0.1.md`](../docs/specs/offline-verification-bundle-v0.1.md).
 
 ## Ardur Personal Hub
 

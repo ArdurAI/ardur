@@ -199,10 +199,20 @@ local paths or secret material. `--max-tool-calls 0` remains valid.
 
 ### `ardur verify`
 
-Verify a Mission Passport, portable receipt transparency anchor, or receiver
-attestation envelope.
+Verify a full offline receipt evidence bundle, an explicitly downgraded receipt
+journal, a Mission Passport, a portable receipt transparency anchor, or a
+receiver attestation envelope.
 
 ```text
+ardur verify EVIDENCE.json
+             --receipt-public-key FILE
+             --transparency-log-key FILE
+             --receiver-public-key FILE
+             [--html-report FILE] [--json]
+             [--unsafe-show-sensitive]
+
+ardur verify RECEIPTS.jsonl --receipt-public-key FILE --chain-only
+
 ardur verify --token JWT [--keys-dir DIR]
 
 ardur verify --anchor-bundle FILE --keys-dir DIR
@@ -215,6 +225,26 @@ ardur verify --receiver-envelope FILE --keys-dir DIR
              [--max-attestation-delay-s SECONDS]
              [--receiver-clock-skew-s SECONDS]
 ```
+
+Full-bundle mode performs no network request and requires independent receipt,
+transparency-log, and receiver public-key inputs. It verifies the ordered
+receipt chain and every inclusion proof. Compliant receipts require a receiver
+co-signature; denied or insufficient-evidence receipts require an explicit
+self-attested envelope because successful enforcement prevented receiver
+dispatch. Output states `verification_mode: offline` and
+`revocation_checked: false`, fingerprints all trust roots, and discloses stale-
+revocation and completeness limits.
+
+Raw JSONL receipt journals require `--chain-only`. The result is
+`verified_chain_only`; removing sidecars cannot silently produce a full
+`verified` result. `--verify-expiry` optionally enforces short runtime expiry
+windows during archival review.
+
+Reports are redacted by default. `--unsafe-show-sensitive` is an explicit
+local-only opt-in. `--html-report` writes an atomic mode-`0600`, no-JavaScript
+static report whose evidence-derived values are HTML-escaped. The dedicated
+`ardur-verify` console entry point is an alias for `ardur verify` and ships in
+the same wheel/sdist without requiring a running Ardur service.
 
 Anchor mode performs no network request. It verifies the receipt JWS, exact
 receipt-digest binding, RFC 6962 inclusion path, signed checkpoint, and any
@@ -281,6 +311,21 @@ only public keys and synthetic evidence; both private keys exist in memory only.
 It is not proof of integration with a live third-party MCP server. See the
 [Receiver Attestation v0.1 specification](../specs/receiver-attestation-v0.1.md)
 for operator integration and trust limitations.
+
+### `ardur offline-verification-fixture`
+
+Generate a synthetic full-evidence receipt chain and immediately verify it:
+
+```text
+ardur offline-verification-fixture --output DIR
+```
+
+The output contains one bundle, three public trust-root PEMs, and redacted
+JSON/HTML reports. Receipt, log, and receiver private keys exist only in memory.
+The three-step fixture demonstrates receiver-attested PERMITs and an explicitly
+blocked/self-attested DENY; it is not proof of online revocation freshness,
+action-set completeness, or a live third-party MCP deployment. See the
+[Offline Verification Bundle v0.1 specification](../specs/offline-verification-bundle-v0.1.md).
 
 ### `ardur attest`
 

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Ardur Offline Verification Report</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; color: #172022; background: #f4f6f5; }
+    header { padding: 28px max(24px, 5vw); color: #fff; background: #173d36; }
+    main { padding: 24px max(24px, 5vw) 48px; }
+    h1, h2 { letter-spacing: 0; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: #c9d2cf; border: 1px solid #c9d2cf; }
+    .metric { padding: 14px; background: #fff; }
+    table { width: 100%; margin-top: 20px; border-collapse: collapse; background: #fff; }
+    th, td { padding: 10px; border: 1px solid #d8dfdc; text-align: left; vertical-align: top; }
+    th { background: #e7ecea; }
+    code { overflow-wrap: anywhere; }
+    .notice { padding: 12px; border-left: 4px solid #b46a13; background: #fff7e8; }
+    @media (max-width: 800px) { table { display: block; overflow-x: auto; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ardur Offline Verification</h1>
+    <p>VERIFIED | full-evidence</p>
+  </header>
+  <main>
+    <p class="notice">Offline mode. Revocation was not checked. Evidence-derived values are redacted by default and HTML-escaped at this rendering sink.</p>
+    <section class="summary" aria-label="Verification summary">
+      <div class="metric"><strong>3</strong><br>Receipts</div>
+      <div class="metric"><strong>2</strong><br>PERMIT</div>
+      <div class="metric"><strong>1</strong><br>DENY</div>
+      <div class="metric"><strong>0</strong><br>ERROR</div>
+      <div class="metric"><strong>3</strong><br>Anchored</div>
+      <div class="metric"><strong>2</strong><br>Receiver-attested</div>
+    </section>
+    <h2>Verification Material</h2>
+    <p>Source SHA-256: <code>15bce6f821086d4f4fa63cca00da0e786fbefcc4914631159446a51bf6ee5a63</code></p>
+    <ul><li>receipt-issuer: <code>sha256:b7b256a140d90424d5561cacf3f66a3f1ebef03c8386f433285cffc1171c4208</code></li><li>transparency-log: <code>sha256:fe38f45083041a2e2f1d0b3a68a621e0589866fa8d4b8262e0870c8c7b014c53</code></li><li>receiver: <code>sha256:d6fb4bb87fc1de72ecd9df8121f156cef2024df3510135c175c4f522c4557bde</code></li></ul>
+    <h2>Chronological Timeline</h2>
+    <table>
+      <thead><tr><th>#</th><th>Time</th><th>Decision</th><th>Action</th><th>Authority</th><th>Policy</th><th>Cost</th><th>Evidence</th></tr></thead>
+      <tbody><tr><td>0</td><td>2027-01-15T08:00:00Z</td><td><strong>PERMIT</strong><br>synthetic permit token=[REDACTED]</td><td>read_file<br><code>https://example.test/items?api_key=[REDACTED]&amp;view=&lt;script&gt;fixture&lt;/script&gt;</code></td><td><code>grant:offline-verification-fixture</code><br>no signed budget narrowing at this step</td><td>native: Allow (synthetic permit token=[REDACTED])</td><td>cost_usd=0.001, token_count=100</td><td>receipt: valid<br>chain: valid<br>anchor: true<br>anchor ref: <code>anchor:f84c9cab189308c0b112e882a4c8bde6f68e85e7d0d8703658dc90a3cbaca524</code><br>log: fixture.ardur.dev/offline [0]<br>receiver: verified<br>receiver ref: <code>receiver-attestation:1ad9ce371e0c4cd86879c3c270a96d03c738f5b2ba2138c4d0ed6147894db898</code><br>receiver id: spiffe://fixture.ardur.dev/tool/offline</td></tr><tr><td>1</td><td>2027-01-15T08:00:10Z</td><td><strong>DENY</strong><br>synthetic policy denial password=[REDACTED]</td><td>write_file<br><code>workspace/public-fixture-1.txt</code></td><td><code>grant:offline-verification-fixture</code><br>signed budget delta consume 1; remaining budget decreased in tool_calls</td><td>native: Deny (synthetic policy denial password=[REDACTED])</td><td>cost_usd=0.002, token_count=200</td><td>receipt: valid<br>chain: valid<br>anchor: true<br>anchor ref: <code>anchor:35e666d43e3a3512e9ad66073f4dae766ed7d2526d264c8dd7af3d8da5ee0951</code><br>log: fixture.ardur.dev/offline [1]<br>receiver: not-dispatched<br>receiver ref: <code>not-dispatched</code><br>receiver id: none</td></tr><tr><td>2</td><td>2027-01-15T08:00:20Z</td><td><strong>PERMIT</strong><br>synthetic permit token=[REDACTED]</td><td>read_file<br><code>workspace/public-fixture-2.txt</code></td><td><code>grant:offline-verification-fixture</code><br>signed budget delta consume 1; remaining budget decreased in tool_calls</td><td>native: Allow (synthetic permit token=[REDACTED])</td><td>cost_usd=0.003, token_count=300</td><td>receipt: valid<br>chain: valid<br>anchor: true<br>anchor ref: <code>anchor:e24c3d0fc9068cb18e67a3920f48c02c75f0bb718c024f423a130d857bca804c</code><br>log: fixture.ardur.dev/offline [2]<br>receiver: verified<br>receiver ref: <code>receiver-attestation:8c2b25622e182fd7bba5871fe62a3f844e581db1952c7051ecd541e2d7c63f40</code><br>receiver id: spiffe://fixture.ardur.dev/tool/offline</td></tr></tbody>
+    </table>
+    <h2>Limitations</h2>
+    <ul><li>offline verification did not query a revocation registry</li><li>a receipt revoked after signing may remain cryptographically valid offline</li><li>valid signatures do not prove receiver correctness, action-set completeness, or non-collusion</li><li>grant changes alone do not prove scope containment without the signed grant artifacts</li></ul>
+  </main>
+</body>
+</html>

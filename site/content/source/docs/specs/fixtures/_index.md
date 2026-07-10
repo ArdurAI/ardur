@@ -16,6 +16,11 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 ## Hosted Artifacts
 
 - [`execution-receipt-v0.2-action.json`](/__ardur_internal__/repo/docs/specs/fixtures/execution-receipt-v0.2-action.json)
+- [`offline-verification-v0.1-log-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1-log-public.pem)
+- [`offline-verification-v0.1-receipt-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1-receipt-public.pem)
+- [`offline-verification-v0.1-receiver-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1-receiver-public.pem)
+- [`offline-verification-v0.1-report.json`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1-report.json)
+- [`offline-verification-v0.1.json`](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1.json)
 - [`receiver-attestation-v0.1-receipt-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1-receipt-public.pem)
 - [`receiver-attestation-v0.1-receiver-public.pem`](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1-receiver-public.pem)
 - [`receiver-attestation-v0.1.json`](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1.json)

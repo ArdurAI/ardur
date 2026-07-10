@@ -41,6 +41,8 @@ PLUGIN_ASSETS = (
 )
 REQUIRED_RUNTIME_FILES = (
     PurePosixPath("vibap/launch_gate.py"),
+    PurePosixPath("vibap/offline_verification.py"),
+    PurePosixPath("vibap/offline_verification_fixture.py"),
     PurePosixPath("vibap/transparency.py"),
 )
 VENDORED_RFC8785_FILES = (
@@ -177,7 +179,11 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
         )
         require(
             dict(entry_points["console_scripts"])
-            == {"ardur": "vibap.cli:main", "ardur-proxy": "vibap.cli:main"},
+            == {
+                "ardur": "vibap.cli:main",
+                "ardur-proxy": "vibap.cli:main",
+                "ardur-verify": "vibap.offline_verification:main",
+            },
             "console entry points differ from the release contract",
         )
         license_path = dist_info / "licenses" / "LICENSE"
@@ -202,6 +208,10 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
         require(
             PurePosixPath("vibap/_specs/receiver_attestation_v01.schema.json") in names,
             "wheel does not contain the embedded Receiver Attestation v0.1 schema",
+        )
+        require(
+            PurePosixPath("vibap/_specs/offline_verification_bundle_v01.schema.json") in names,
+            "wheel does not contain the embedded Offline Verification Bundle v0.1 schema",
         )
         for runtime_file in REQUIRED_RUNTIME_FILES:
             require(runtime_file in names, f"wheel is missing runtime file: {runtime_file}")

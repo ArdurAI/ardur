@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "16ea85f4222fe62833582e782977e432fff49dfa0774c799d8d3e0b8d60a9d85"
+source_sha256: "33818d0656c0dbb1929f1d86dc2d9ef10a9c9c36013fa2e8d1ede1644871261d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -171,9 +171,9 @@ This repo currently includes:
 - the product thesis and launch direction
 - a short research-informed positioning summary
 - current status and what is still being resolved
-- public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, and a receiver-attestation profile with a two-key offline verifier and MCP shim fixture
+- public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, a receiver-attestation profile with a two-key offline verifier and MCP shim fixture, and a full offline-verification bundle/profile with redacted CLI/JSON/static HTML explorer reports
 - Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
-- the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, receiver-envelope verification, and the no-key receiver-attestation fixture)
+- the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, receiver-envelope verification, and no-key receiver/offline-verification fixtures)
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
 - runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
 - dedicated Python (3.10 + 3.13) and Go CI under `.github/workflows/tests.yml`, including the offline examples-smoke regression in `python/tests/test_examples_smoke.py` and a required fresh-volume Compose demo lifecycle, plus CodeQL, link-check, secret-scan, format validation, and the Hugo build

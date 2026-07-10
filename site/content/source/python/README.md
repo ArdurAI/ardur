@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "d33e7d7ccf984639f9ddc4bf9f53b6c7c17ff7731a4283b7451dbbe3fd2a504f"
+source_sha256: "3aa1639dee4459719abd4f227852dda197ba2b482a88ff2e3bc483cd400b1fc0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -53,13 +53,31 @@ ardur issue \
 ardur verify --token <token-from-issue-output>
 ```
 
+That walks through key generation, mission compilation, ES256-signed passport
+issuance, and verification - all local, no LLM calls.
+
 Every durable receipt sink also queues an idempotent local transparency-anchor
 sidecar. Network submission is a separate `ardur anchor` operation, and
 `ardur verify --anchor-bundle ...` verifies completed proofs offline with an
 independently supplied log public key. See
 [`docs/specs/transparency-anchor-v0.1.md`](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/).
 
-That walks through key generation, mission compilation, ES256-signed passport issuance, and verification — all local, no LLM calls.
+The package also ships a no-service offline verifier and synthetic full-evidence
+fixture:
+
+```bash
+ardur offline-verification-fixture --output ./offline-fixture
+ardur-verify ./offline-fixture/offline-verification-v0.1.json \
+  --receipt-public-key ./offline-fixture/offline-verification-v0.1-receipt-public.pem \
+  --transparency-log-key ./offline-fixture/offline-verification-v0.1-log-public.pem \
+  --receiver-public-key ./offline-fixture/offline-verification-v0.1-receiver-public.pem \
+  --html-report ./offline-fixture/verified.html
+```
+
+The evidence bundle never supplies its own trusted keys. The three public PEMs
+are explicit verifier inputs whose fingerprints must be checked out of band.
+See
+[`docs/specs/offline-verification-bundle-v0.1.md`](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/).
 
 ## Ardur Personal Hub
 
