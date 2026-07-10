@@ -302,6 +302,21 @@ struct {
 	__uint(max_entries, 1 << 14);  // 16 KB
 } enforce_events SEC(".maps");
 
+// enforce_events_dropped (issue #122) counts decision events lost when the
+// enforce_events ringbuf is full: bpf_ringbuf_reserve returns NULL in
+// emit_event and the record is dropped in-kernel. cilium/ebpf's ringbuf.Record
+// carries no lost-sample counter (unlike perf), so without this the daemon
+// reports LostSamples=0 forever and the hash-chained receipt log silently
+// under-counts denials under load — a gap the "no gaps" claim cannot see.
+// A single global __u64, incremented atomically; the daemon reads it and folds
+// the delta into the enforcement summary's LostSamples.
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key,   __u32);
+	__type(value, __u64);
+} enforce_events_dropped SEC(".maps");
+
 // Per-CPU scratch map for the path LPM key — avoids a 272-byte BPF stack alloc.
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -681,8 +696,14 @@ static __always_inline void emit_event(
 {
 	struct ardur_enforce_event *ev =
 		bpf_ringbuf_reserve(&enforce_events, sizeof(*ev), 0);
-	if (!ev)
+	if (!ev) {
+		// Ringbuf full — record the drop so it is counted, not silent (#122).
+		__u32 zero = 0;
+		__u64 *dropped = bpf_map_lookup_elem(&enforce_events_dropped, &zero);
+		if (dropped)
+			__sync_fetch_and_add(dropped, 1);
 		return;
+	}
 	__builtin_memset(ev, 0, sizeof(*ev));
 	ev->cgroup_id    = cgroup_id;
 	ev->pid          = (__u32)(bpf_get_current_pid_tgid() >> 32);

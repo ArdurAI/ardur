@@ -360,6 +360,12 @@ func (d *daemon) appendEnforceReceiptLine(scope string, entry kernelcapture.Enfo
 // before any cgroup attribution is possible, so it cannot be charged to one
 // session's accumulator and is reported as pipeline-wide context instead.
 func (d *daemon) enforceSummaryForScope(scope string) (kernelcapture.EnforceEventSummary, bool) {
+	// Keep the session-window counters and global tamper-chain head coherent with
+	// an in-flight kill-switch transaction. This snapshot is copied unchanged
+	// into the run bridge's signed kernel_enforcement attestation claim.
+	d.tamperWriteMu.Lock()
+	defer d.tamperWriteMu.Unlock()
+
 	d.mu.RLock()
 	acc, ok := d.enforceSummaries[scope]
 	d.mu.RUnlock()
@@ -373,5 +379,6 @@ func (d *daemon) enforceSummaryForScope(scope string) (kernelcapture.EnforceEven
 	if scope != enforceOrphanScope && d.enforceOrphanSummary != nil {
 		snap.LostSamples = d.enforceOrphanSummary.Snapshot().LostSamples
 	}
+	snap.TamperChainLastSeq, snap.TamperChainDigest = d.tamperChain.Head()
 	return snap, true
 }

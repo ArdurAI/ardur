@@ -85,6 +85,11 @@ func runRestartSurvivalScenario() error {
 		CgroupManagedPath:   pinDir + "/cgroup_managed",
 		KillSwitchPath:      pinDir + "/kill_switch",
 		EnforceEventsPath:   pinDir + "/enforce_events",
+		// The #122 drop counter is part of the pinned set too — omitting it
+		// would leave tryLoadPinnedGuardState requiring an 11th pin that never
+		// exists, so every "restart" would fall back to a fresh load and this
+		// scenario would silently stop proving restart survival at all.
+		EnforceEventsDroppedPath: pinDir + "/enforce_events_dropped",
 	}
 	defer kernelcapture.RemovePinnedGuardState(paths)
 

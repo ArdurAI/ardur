@@ -16,11 +16,13 @@ import (
 	"testing"
 )
 
-func TestDefaultPinnedGuardPaths_AllTenPathsDistinctAndNonEmpty(t *testing.T) {
+func TestDefaultPinnedGuardPaths_AllElevenPathsDistinctAndNonEmpty(t *testing.T) {
 	paths := DefaultPinnedGuardPaths()
 	all := paths.allPaths()
-	if len(all) != 10 {
-		t.Fatalf("allPaths() returned %d paths, want 10", len(all))
+	// 3 LSM links + 6 policy maps + enforce_events ringbuf + its #122 drop
+	// counter = 11.
+	if len(all) != 11 {
+		t.Fatalf("allPaths() returned %d paths, want 11", len(all))
 	}
 	seen := make(map[string]bool, len(all))
 	for _, p := range all {
@@ -62,6 +64,8 @@ func TestTryLoadPinnedGuardState_FalseWhenNoPinsExist(t *testing.T) {
 		CgroupManagedPath:   base + "cgroup_managed",
 		KillSwitchPath:      base + "kill_switch",
 		EnforceEventsPath:   base + "enforce_events",
+
+		EnforceEventsDroppedPath: base + "enforce_events_dropped",
 	}
 
 	h, ok := tryLoadPinnedGuardState(paths)
@@ -89,6 +93,8 @@ func TestRemovePinnedGuardState_NeverErrorsOnMissingPins(t *testing.T) {
 		CgroupManagedPath:   base + "cgroup_managed",
 		KillSwitchPath:      base + "kill_switch",
 		EnforceEventsPath:   base + "enforce_events",
+
+		EnforceEventsDroppedPath: base + "enforce_events_dropped",
 	}
 	// Must not panic.
 	RemovePinnedGuardState(paths)

@@ -877,7 +877,16 @@ class TestKernelEnforcementClaim:
                     "method": "session_status",
                     "session_id": "sess-x",
                     "status": "active",
-                    "enforcement": {"total_events": 2, "verdict_counts": {"denied": 2}},
+                    "enforcement": {
+                        "total_events": 2,
+                        "verdict_counts": {"denied": 2},
+                        "tamper_chain_start_seq": 4,
+                        "tamper_chain_last_seq": 6,
+                        "tamper_chain_digest": "feedface",
+                        "kill_switch_change_count": 2,
+                        "kill_switch_engaged_during_session": True,
+                        "kill_switch_evidence_gap": False,
+                    },
                 },
             )
             try:
@@ -890,7 +899,16 @@ class TestKernelEnforcementClaim:
         finally:
             shutil.rmtree(sock_dir, ignore_errors=True)
 
-        assert result == {"total_events": 2, "verdict_counts": {"denied": 2}}
+        assert result == {
+            "total_events": 2,
+            "verdict_counts": {"denied": 2},
+            "tamper_chain_start_seq": 4,
+            "tamper_chain_last_seq": 6,
+            "tamper_chain_digest": "feedface",
+            "kill_switch_change_count": 2,
+            "kill_switch_engaged_during_session": True,
+            "kill_switch_evidence_gap": False,
+        }
         assert daemon.received is not None
         assert daemon.received["method"] == "session_status"
         assert daemon.received["session_status"]["session_id"] == "sess-x"

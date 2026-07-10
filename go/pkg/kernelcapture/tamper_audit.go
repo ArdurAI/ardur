@@ -94,14 +94,47 @@ func RunTamperAudit(auditor GuardLinkAuditor, expectedKillSwitchEngaged bool) Ta
 	return result
 }
 
-// TamperReceiptEntry is one hash-chained, sequenced tamper-audit record.
+// KillSwitchChangeEvent (issue #123) records one set_kill_switch state
+// transition as an attributed, hash-chained entry in the tamper receipt chain.
+//
+// Before this, a change to the GLOBAL, fail-open kill switch (engaged ⇒ every
+// governed cgroup stops being enforced) left no receipt at all: only a stderr
+// log line, plus — up to a full audit interval later — an audit tick that
+// reads expected==actual (the daemon updated expectedKillSwitchEngaged at the
+// same moment) and therefore reports OK, so the single most consequential
+// enforcement-state change in the system was invisible in the evidence log.
+// Recording it here puts the change in the same hash-chained, offline-
+// verifiable stream as the audit ticks, sequenced and attributed to the peer
+// that requested it, so disabling enforcement is itself tamper-evident.
+type KillSwitchChangeEvent struct {
+	ChangedAt time.Time `json:"changed_at"`
+	// PriorEngaged / Engaged are the kill-switch state before and after this
+	// change, so the receipt records a transition (e.g. false→true = someone
+	// disabled enforcement host-wide), not just a resulting value.
+	PriorEngaged bool `json:"prior_engaged"`
+	Engaged      bool `json:"engaged"`
+	// ActorUID / ActorPID attribute the change to the authenticated socket peer
+	// (SO_PEERCRED) that requested it — set_kill_switch is admin-gated to uid 0,
+	// so ActorUID is 0, but ActorPID still pins which root process did it.
+	ActorUID uint32 `json:"actor_uid"`
+	ActorPID uint32 `json:"actor_pid"`
+}
+
+// TamperReceiptEntry is one hash-chained, sequenced record in the daemon's
+// tamper-evidence stream. Every entry is either a periodic audit tick (Result
+// populated, KillSwitch nil) or a set_kill_switch change (KillSwitch non-nil,
+// Result zero) — both share the one Seq/hash chain so a kill-switch change is
+// as gap-detectable and tamper-evident as an audit tick. The KillSwitch field
+// is omitempty, so audit-tick entries marshal (and therefore hash) exactly as
+// they did before #123 added it: existing chains still verify unchanged.
 type TamperReceiptEntry struct {
-	SchemaVersion string            `json:"schema_version"`
-	Seq           uint64            `json:"seq"`
-	PrevHash      string            `json:"prev_hash"`
-	Hash          string            `json:"hash"`
-	RecordedAt    time.Time         `json:"recorded_at"`
-	Result        TamperAuditResult `json:"result"`
+	SchemaVersion string                 `json:"schema_version"`
+	Seq           uint64                 `json:"seq"`
+	PrevHash      string                 `json:"prev_hash"`
+	Hash          string                 `json:"hash"`
+	RecordedAt    time.Time              `json:"recorded_at"`
+	Result        TamperAuditResult      `json:"result"`
+	KillSwitch    *KillSwitchChangeEvent `json:"kill_switch,omitempty"`
 }
 
 // TamperReceiptChain maintains a monotonic seq + SHA-256 hash chain of tamper
@@ -130,6 +163,40 @@ func (c *TamperReceiptChain) Append(entry TamperReceiptEntry) (TamperReceiptEntr
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	finalized, err := c.finalizeNext(entry)
+	if err != nil {
+		return TamperReceiptEntry{}, err
+	}
+	c.commit(finalized)
+	return finalized, nil
+}
+
+// AppendPersisted finalizes entry, calls persist while the chain is locked,
+// and advances the chain only after persistence succeeds. This keeps a failed
+// JSONL append from creating an in-memory sequence/hash gap that the next
+// successful on-disk entry could never verify across.
+func (c *TamperReceiptChain) AppendPersisted(
+	entry TamperReceiptEntry,
+	persist func(TamperReceiptEntry) error,
+) (TamperReceiptEntry, error) {
+	if persist == nil {
+		return TamperReceiptEntry{}, fmt.Errorf("kernelcapture: tamper receipt persister is required")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	finalized, err := c.finalizeNext(entry)
+	if err != nil {
+		return TamperReceiptEntry{}, err
+	}
+	if err := persist(finalized); err != nil {
+		return TamperReceiptEntry{}, fmt.Errorf("kernelcapture: persist tamper receipt entry: %w", err)
+	}
+	c.commit(finalized)
+	return finalized, nil
+}
+
+func (c *TamperReceiptChain) finalizeNext(entry TamperReceiptEntry) (TamperReceiptEntry, error) {
 	entry.Seq = c.nextSeq
 	entry.PrevHash = c.lastHash
 	entry.Hash = ""
@@ -138,10 +205,12 @@ func (c *TamperReceiptChain) Append(entry TamperReceiptEntry) (TamperReceiptEntr
 		return TamperReceiptEntry{}, fmt.Errorf("kernelcapture: hash tamper receipt entry: %w", err)
 	}
 	entry.Hash = hash
+	return entry, nil
+}
 
+func (c *TamperReceiptChain) commit(entry TamperReceiptEntry) {
 	c.nextSeq++
 	c.lastHash = entry.Hash
-	return entry, nil
 }
 
 // LastHash returns the hash of the most recently appended entry, or "" if the
@@ -157,6 +226,13 @@ func (c *TamperReceiptChain) Len() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.nextSeq - 1
+}
+
+// Head returns the last committed sequence and hash from one coherent snapshot.
+func (c *TamperReceiptChain) Head() (uint64, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.nextSeq - 1, c.lastHash
 }
 
 func hashTamperReceiptEntry(entry TamperReceiptEntry) (string, error) {

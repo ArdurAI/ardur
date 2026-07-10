@@ -214,6 +214,10 @@ func TestEnforceEventSummaryAccumulator_RecordsCountsAndDigest(t *testing.T) {
 	acc.RecordReceipt(e2, "bpf_lsm:permissive")
 
 	acc.RecordLostSamples(3)
+	acc.InitializeTamperWindow(7, false)
+	acc.RecordKillSwitchChange(true)
+	acc.RecordKillSwitchChange(false)
+	acc.RecordKillSwitchEvidenceGap(false)
 
 	snap := acc.Snapshot()
 	if snap.TotalEvents != 2 {
@@ -233,5 +237,14 @@ func TestEnforceEventSummaryAccumulator_RecordsCountsAndDigest(t *testing.T) {
 	}
 	if snap.ChainDigest != e2.Hash {
 		t.Errorf("ChainDigest = %q, want chain head %q", snap.ChainDigest, e2.Hash)
+	}
+	if snap.TamperChainStartSeq != 7 {
+		t.Errorf("TamperChainStartSeq = %d, want 7", snap.TamperChainStartSeq)
+	}
+	if snap.KillSwitchChangeCount != 2 || !snap.KillSwitchEngagedDuringSession {
+		t.Errorf("kill-switch summary = %+v, want two changes and engaged-during-session", snap)
+	}
+	if !snap.KillSwitchEvidenceGap {
+		t.Error("KillSwitchEvidenceGap = false, want true")
 	}
 }

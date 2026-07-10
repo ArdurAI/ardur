@@ -1,6 +1,7 @@
 package kernelcapture_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
@@ -110,6 +111,46 @@ func TestTamperReceiptChain_AppendSequencesAndHashChains(t *testing.T) {
 	}
 	if !ok {
 		t.Fatalf("expected chain to verify intact, broke at %d", brokenAt)
+	}
+}
+
+func TestTamperReceiptChain_AppendPersistedFailureDoesNotAdvance(t *testing.T) {
+	t.Parallel()
+	chain := kernelcapture.NewTamperReceiptChain()
+	sentinel := errors.New("disk unavailable")
+
+	_, err := chain.AppendPersisted(
+		kernelcapture.TamperReceiptEntry{SchemaVersion: kernelcapture.TamperReceiptSchema},
+		func(kernelcapture.TamperReceiptEntry) error { return sentinel },
+	)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("AppendPersisted error = %v, want %v", err, sentinel)
+	}
+	seq, digest := chain.Head()
+	if seq != 0 || digest != "" || chain.Len() != 0 {
+		t.Fatalf("failed persistence advanced chain: seq=%d digest=%q len=%d", seq, digest, chain.Len())
+	}
+
+	var persisted kernelcapture.TamperReceiptEntry
+	finalized, err := chain.AppendPersisted(
+		kernelcapture.TamperReceiptEntry{SchemaVersion: kernelcapture.TamperReceiptSchema},
+		func(entry kernelcapture.TamperReceiptEntry) error {
+			persisted = entry
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("successful AppendPersisted: %v", err)
+	}
+	if finalized.Seq != 1 || finalized.PrevHash != "" || finalized.Hash == "" {
+		t.Fatalf("first committed entry after failure = %+v", finalized)
+	}
+	if persisted.Seq != finalized.Seq || persisted.PrevHash != finalized.PrevHash || persisted.Hash != finalized.Hash {
+		t.Fatalf("persisted entry = %+v, finalized = %+v", persisted, finalized)
+	}
+	seq, digest = chain.Head()
+	if seq != 1 || digest != finalized.Hash {
+		t.Fatalf("committed head = (%d, %q), want (1, %q)", seq, digest, finalized.Hash)
 	}
 }
 

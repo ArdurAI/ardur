@@ -94,6 +94,12 @@ class TestIssueAttestationForSessionKernelEnforcement:
             "verdict_counts": {"denied": 2, "compliant": 1},
             "tier_coverage": {"bpf_lsm:enforce": 3},
             "chain_digest": "deadbeef",
+            "tamper_chain_start_seq": 4,
+            "tamper_chain_last_seq": 6,
+            "tamper_chain_digest": "feedface",
+            "kill_switch_change_count": 2,
+            "kill_switch_engaged_during_session": True,
+            "kill_switch_evidence_gap": False,
         }
 
         _jwt_token, claims = proxy.issue_attestation_for_session(
