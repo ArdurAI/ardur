@@ -1,9 +1,9 @@
 # Kernel Capture Daemon Operations
 
 `ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket
-control plane and kernel event consumers. This reference describes two
-operator-visible conditions: control-plane-only mode and malformed process
-lifecycle records.
+control plane and kernel event consumers. This reference describes
+control-plane-only mode, process-lifecycle cgroup filtering, and capture-loss
+evidence.
 
 ## Control-plane-only mode
 
@@ -27,6 +27,43 @@ Do not use `--no-ringbuf` as a production fallback for a failing event
 consumer. A healthy socket in this mode proves control-plane liveness only; it
 does not prove that a governed process is observed or constrained below the
 tool-call boundary.
+
+## Process lifecycle cgroup filter
+
+The production lifecycle consumer pins `filter_control` and `allowed_cgroups`
+with its exec/exit tracepoint links, ringbuf, and producer-drop counter as one
+restart generation. An older generation without either filter-map pin is
+removed before a fresh attach; partial old and new generations are not reused
+together.
+
+At startup the daemon temporarily makes the filter permissive, clears stale
+allowlist entries inherited from any prior daemon lifetime, restores every
+currently admitted session, and then enables filtering. An enabled filter with
+an empty allowlist is the normal idle state: no unrelated host exec/exit events
+enter Ardur's lifecycle ringbuf when no governed session exists.
+
+For each `register_session`, the daemon adds the verified nonzero cgroup before
+the registry can return success and before the launch gate is released. A map
+update failure rejects that registration so the enabled producer cannot omit
+the new session. Session end and TTL expiry first retire the userspace route and
+wait for already-matched evidence work, then remove the cgroup. Multiple active
+sessions retain independent entries. The BPF allowlist capacity is 4,096,
+matching the daemon session registry's active-session limit.
+
+If startup reconciliation itself fails, the daemon leaves filtering disabled
+and continues the prior permissive capture behavior rather than enabling a
+partial allowlist that could hide governed events. It logs the degradation; the
+resource-isolation benefit is unavailable for that daemon lifetime. If the
+control map cannot be switched to that known-permissive state, new session
+registration fails instead of risking an enabled stale allowlist that omits the
+session. When the consumer detaches cleanly, it leaves pinned filtering enabled
+with an empty allowlist so pinned tracepoints do not fill the ringbuf while no
+reader exists.
+
+This is producer-side resource and completeness isolation. The userspace router
+still validates session ownership before writing evidence. It does not claim
+universal process capture, observe provider-hidden actions, or write unrelated
+host events into session evidence.
 
 ## Lifecycle capture loss
 
@@ -79,7 +116,8 @@ before records can be emitted.
 1. Confirm that the daemon binary and eBPF objects came from the same reviewed
    build or release digest.
 2. Inspect startup logs for load, verifier, attach, or pinned-state reuse
-   failures before the first malformed-record warning.
+   failures, and for lifecycle cgroup-filter reconciliation warnings, before
+   the first malformed-record warning.
 3. Treat every producer-drop or malformed-record warning, or any
    `lifecycle_capture` summary whose
    `coverage_status` is `degraded` as an evidence gap; do not use affected

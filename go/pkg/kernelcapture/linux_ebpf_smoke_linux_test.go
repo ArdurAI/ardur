@@ -319,10 +319,12 @@ func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
 	dir := filepath.Join("/sys/fs/bpf", fmt.Sprintf("ardur-test-restart-%d", os.Getpid()))
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	paths := PinnedEBPFPaths{
-		ExecLinkPath:         filepath.Join(dir, "exec_tp_link"),
-		ExitLinkPath:         filepath.Join(dir, "exit_tp_link"),
-		EventsMapPath:        filepath.Join(dir, "process_lifecycle_events"),
-		DroppedEventsMapPath: filepath.Join(dir, "process_lifecycle_events_dropped"),
+		ExecLinkPath:          filepath.Join(dir, "exec_tp_link"),
+		ExitLinkPath:          filepath.Join(dir, "exit_tp_link"),
+		EventsMapPath:         filepath.Join(dir, "process_lifecycle_events"),
+		DroppedEventsMapPath:  filepath.Join(dir, "process_lifecycle_events_dropped"),
+		FilterControlMapPath:  filepath.Join(dir, "process_lifecycle_filter_control"),
+		AllowedCgroupsMapPath: filepath.Join(dir, "process_lifecycle_allowed_cgroups"),
 	}
 
 	// ── First "boot": fresh load, attach, and pin. ──────────────────────
@@ -339,6 +341,19 @@ func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
 			t.Fatalf("expected pin at %s after first load: %v", p, statErr)
 		}
 	}
+	testCgroupID, err := currentUnifiedCgroupID()
+	if err != nil {
+		first.Close()
+		t.Fatalf("resolve test cgroup: %v", err)
+	}
+	if err := first.AllowLifecycleCgroup(testCgroupID); err != nil {
+		first.Close()
+		t.Fatalf("allow test cgroup before restart: %v", err)
+	}
+	if err := first.SetLifecycleCgroupFilterEnabled(true); err != nil {
+		first.Close()
+		t.Fatalf("enable lifecycle cgroup filter before restart: %v", err)
+	}
 
 	// Close the Go-side handles WITHOUT unpinning: this simulates the daemon
 	// process exiting while the kernel keeps the pinned links (and thus the
@@ -351,6 +366,21 @@ func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
 		t.Fatalf("second (restart) LoadAndAttachProcessExecEBPFPinned: %v", err)
 	}
 	defer second.Close()
+	var controlKey uint32
+	var controlValue uint8
+	if err := second.filterControl().Lookup(&controlKey, &controlValue); err != nil {
+		t.Fatalf("read reopened filter control map: %v", err)
+	}
+	if controlValue != processExecFilterEnabled {
+		t.Fatalf("reopened filter control = %d, want enabled", controlValue)
+	}
+	var allowedValue uint8
+	if err := second.allowedCgroups().Lookup(&testCgroupID, &allowedValue); err != nil {
+		t.Fatalf("read reopened allowed-cgroups map: %v", err)
+	}
+	if allowedValue != processExecAllowedMarker {
+		t.Fatalf("reopened allowed marker = %d, want %d", allowedValue, processExecAllowedMarker)
+	}
 
 	source := NewRingbufProcessSourceFromRingbufReader(second.Reader())
 

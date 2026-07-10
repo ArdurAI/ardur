@@ -92,6 +92,15 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 	if pinErr := handles.PinningError(); pinErr != nil {
 		log.Warn("process lifecycle pinning unavailable; restart survival disabled", "error", pinErr)
 	}
+	if err := d.lifecycleFilter.install(handles); err != nil {
+		log.Warn("process lifecycle cgroup filter unavailable; using permissive capture when safe and rejecting registration otherwise", "error", err)
+	} else {
+		defer func() {
+			if err := d.lifecycleFilter.detach(handles); err != nil {
+				log.Warn("quiesce process lifecycle cgroup filter", "error", err)
+			}
+		}()
+	}
 	d.setLifecycleDropCounter(handles.LifecycleDroppedTotal)
 	defer d.setLifecycleDropCounter(nil)
 
@@ -103,8 +112,8 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 	source := kernelcapture.NewRingbufProcessSourceFromRingbufReader(handles.Reader())
 	// No defer source.Close() here: handles.Close() owns the reader.
 
-	// Empty scope: all events reach the router (per-session filtering is done
-	// in daemon.routeEvent via the cgroup index and ProcessTreeScope).
+	// Empty userspace scope: the BPF producer already limits delivery to daemon-
+	// managed cgroups. The router still verifies ownership before persistence.
 	scope := kernelcapture.SessionScope{}
 
 	for {

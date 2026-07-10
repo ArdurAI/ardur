@@ -8,23 +8,50 @@ import (
 	"testing"
 )
 
-func TestNormalizePinnedEBPFPathsDerivesDropCounterSibling(t *testing.T) {
+func TestProcessExecAllowedCgroupsCapacityMatchesSessionRegistry(t *testing.T) {
+	spec, err := loadProcessExec()
+	if err != nil {
+		t.Fatalf("load process-exec collection spec: %v", err)
+	}
+	allowed := spec.Maps[processExecMapAllowedCgroups]
+	if allowed == nil {
+		t.Fatal("process-exec collection spec is missing allowed_cgroups")
+	}
+	if got, want := int(allowed.MaxEntries), DefaultDaemonSessionRegistryMaxSessions; got != want {
+		t.Fatalf("allowed_cgroups max entries = %d, registry capacity = %d", got, want)
+	}
+}
+
+func TestNormalizePinnedEBPFPathsDerivesLifecycleMapSiblings(t *testing.T) {
 	paths := normalizePinnedEBPFPaths(PinnedEBPFPaths{
 		EventsMapPath: "/sys/fs/bpf/ardur/custom_events",
 	})
-	want := "/sys/fs/bpf/ardur/process_lifecycle_events_dropped"
-	if paths.DroppedEventsMapPath != want {
-		t.Fatalf("DroppedEventsMapPath = %q, want %q", paths.DroppedEventsMapPath, want)
+	wants := map[string]string{
+		"DroppedEventsMapPath":  "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
+		"FilterControlMapPath":  "/sys/fs/bpf/ardur/process_lifecycle_filter_control",
+		"AllowedCgroupsMapPath": "/sys/fs/bpf/ardur/process_lifecycle_allowed_cgroups",
+	}
+	gots := map[string]string{
+		"DroppedEventsMapPath":  paths.DroppedEventsMapPath,
+		"FilterControlMapPath":  paths.FilterControlMapPath,
+		"AllowedCgroupsMapPath": paths.AllowedCgroupsMapPath,
+	}
+	for field, want := range wants {
+		if got := gots[field]; got != want {
+			t.Errorf("%s = %q, want %q", field, got, want)
+		}
 	}
 }
 
 func TestRemovePinnedProcessExecStateRemovesCompleteAndPartialSets(t *testing.T) {
 	dir := t.TempDir()
 	paths := PinnedEBPFPaths{
-		ExecLinkPath:         filepath.Join(dir, "exec"),
-		ExitLinkPath:         filepath.Join(dir, "exit"),
-		EventsMapPath:        filepath.Join(dir, "events"),
-		DroppedEventsMapPath: filepath.Join(dir, "dropped"),
+		ExecLinkPath:          filepath.Join(dir, "exec"),
+		ExitLinkPath:          filepath.Join(dir, "exit"),
+		EventsMapPath:         filepath.Join(dir, "events"),
+		DroppedEventsMapPath:  filepath.Join(dir, "dropped"),
+		FilterControlMapPath:  filepath.Join(dir, "filter_control"),
+		AllowedCgroupsMapPath: filepath.Join(dir, "allowed_cgroups"),
 	}
 	for _, path := range pinnedProcessExecPaths(paths) {
 		if err := os.WriteFile(path, []byte("pin"), 0o600); err != nil {

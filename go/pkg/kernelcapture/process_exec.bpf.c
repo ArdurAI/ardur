@@ -15,7 +15,7 @@
 #define ARDUR_FILTER_CONTROL_KEY 0
 #define ARDUR_FILTER_DISABLED 0
 #define ARDUR_FILTER_ENABLED 1
-#define ARDUR_ALLOWED_CGROUPS_MAX 1024
+#define ARDUR_ALLOWED_CGROUPS_MAX 4096
 
 struct ns_common {
     unsigned int inum;

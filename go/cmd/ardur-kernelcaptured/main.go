@@ -149,6 +149,9 @@ type daemon struct {
 	lifecycleDropBaselineSet bool
 	lifecycleDropReadFailed  bool
 	lifecycleDropSourceGone  bool
+	// lifecycleFilter owns the process-exec producer allowlist. It has its own
+	// lock because map updates must not run under routing or policy-map locks.
+	lifecycleFilter *lifecycleFilterManager
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
@@ -281,6 +284,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary:      kernelcapture.NewEnforceEventSummaryAccumulator(),
 		lifecycleCaptureSummaries: make(map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator),
+		lifecycleFilter:           newLifecycleFilterManager(),
 		fs:                        osEvidenceFS{},
 		tamperChain:               kernelcapture.NewTamperReceiptChain(),
 		seccompPolicy:             kernelcapture.NewSeccompPolicyStore(),
@@ -354,6 +358,7 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 	// the claim is one the peer legitimately owns before the registry accepts
 	// it, so a peer cannot register (and then govern/tamper) a cgroup belonging
 	// to another workload.
+	lifecycleFilterAdded := false
 	if req.Method == kernelcapture.DaemonProtocolMethodRegisterSession && req.RegisterSession != nil {
 		if err := d.cgroupVerifier(handshake, req.RegisterSession, d.log); err != nil {
 			return kernelcapture.DaemonProtocolResponse{
@@ -378,10 +383,27 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 				Error:           fmt.Sprintf("register_session cgroup collision check failed: %v", err),
 			}
 		}
+		var err error
+		lifecycleFilterAdded, err = d.lifecycleFilter.prepare(ctx, req.RegisterSession.SessionID, req.RegisterSession.CgroupID)
+		if err != nil {
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          req.Method,
+				SessionID:       req.RegisterSession.SessionID,
+				OK:              false,
+				Error:           fmt.Sprintf("register_session lifecycle cgroup filter failed: %v", err),
+			}
+		}
 	}
 
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
 	if !resp.OK {
+		if lifecycleFilterAdded {
+			if err := d.lifecycleFilter.remove(req.RegisterSession.SessionID); err != nil {
+				d.log.Warn("roll back lifecycle cgroup filter after rejected registration",
+					"session_id", req.RegisterSession.SessionID, "error", err)
+			}
+		}
 		return resp
 	}
 	switch req.Method {
@@ -926,6 +948,10 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	seccompCancel, hadSeccompListener := d.seccompListeners[sessionID]
 	delete(d.seccompListeners, sessionID)
 	d.mu.Unlock()
+	if err := d.lifecycleFilter.remove(sessionID); err != nil {
+		d.log.Warn("remove lifecycle cgroup filter on session end",
+			"session_id", sessionID, "error", err)
+	}
 
 	kernelcapture.RemoveSeccompPolicy(d.seccompPolicy, sessionID)
 	if hadSeccompListener && seccompCancel != nil {
@@ -1377,6 +1403,12 @@ func (d *daemon) pruneExpiredSessions() {
 		}
 	}
 	d.mu.Unlock()
+	for _, sid := range expiredSessionIDs {
+		if err := d.lifecycleFilter.remove(sid); err != nil {
+			d.log.Warn("remove lifecycle cgroup filter on session expiry",
+				"session_id", sid, "error", err)
+		}
+	}
 
 	// Release BPF enforcement state for expired sessions (op_policy + managed
 	// gate + allowlist entries), so a TTL-expired session's policy doesn't
@@ -1616,6 +1648,9 @@ func main() {
 	defer cancel()
 
 	var wg sync.WaitGroup
+	if *noRingbuf {
+		d.lifecycleFilter.markUnavailable(errors.New("process lifecycle ringbuf disabled by --no-ringbuf"))
+	}
 
 	// Control-plane goroutine.
 	wg.Add(1)
@@ -1659,8 +1694,11 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := runEBPFConsumer(ctx, d, log); err != nil && ctx.Err() == nil {
-				log.Error("eBPF consumer stopped", "error", err)
+			if err := runEBPFConsumer(ctx, d, log); err != nil {
+				d.lifecycleFilter.markUnavailable(err)
+				if ctx.Err() == nil {
+					log.Error("eBPF consumer stopped", "error", err)
+				}
 			}
 		}()
 
