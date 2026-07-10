@@ -162,6 +162,46 @@ def test_register_session_roundtrip(sockdir: Path) -> None:
     assert payload["ttl_seconds"] == 3600
 
 
+def test_register_receipt_roundtrip(sockdir: Path) -> None:
+    sock = sockdir / "receipt.sock"
+    daemon = _FakeDaemon(
+        sock,
+        {
+            "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+            "ok": True,
+            "method": "register_receipt",
+            "session_id": "sess-1",
+            "status": "registered",
+        },
+    )
+    daemon.start()
+    try:
+        response = kc.KernelCaptureClient(sock).register_receipt(
+            session_id="sess-1",
+            receipt_id="receipt:0123456789abcdef",
+        )
+    finally:
+        daemon.close()
+
+    assert response["status"] == "registered"
+    assert daemon.received == {
+        "protocol_version": kc.DAEMON_PROTOCOL_VERSION,
+        "method": "register_receipt",
+        "register_receipt": {
+            "session_id": "sess-1",
+            "receipt_id": "receipt:0123456789abcdef",
+        },
+    }
+
+
+@pytest.mark.parametrize("field", ["session_id", "receipt_id"])
+def test_register_receipt_validates_required_fields(tmp_path: Path, field: str) -> None:
+    values = {"session_id": "sess-1", "receipt_id": "receipt:a"}
+    values[field] = ""
+    with pytest.raises(ValueError, match=field):
+        kc.KernelCaptureClient(tmp_path / "missing.sock").register_receipt(**values)
+
+
 def test_client_raises_on_daemon_error(sockdir: Path) -> None:
     sock = sockdir / "c.sock"
     daemon = _FakeDaemon(

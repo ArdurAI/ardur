@@ -2,7 +2,7 @@ name: kernel-enforce
 
 # Privileged Linux CI for the two-tier kernel enforcement bridge
 # (go/pkg/kernelcapture/process_guard.bpf.c — BPF-LSM; seccomp_notify_linux.go
-# — seccomp user-notify). Three jobs:
+# — seccomp user-notify). Four jobs:
 #
 #   bpf-generate — compiles process_guard.bpf.c with the same toolchain
 #     (Ubuntu 24.04 default clang, currently 18.x) used to produce the
@@ -32,9 +32,11 @@ name: kernel-enforce
 #     re-apply), assert execve is still denied. This is the one thing
 #     bpf-generate cannot prove: that the compiled program actually enforces
 #     — and keeps enforcing across a restart — on a live kernel, not just
-#     that it loads. In the same VM boot, also runs the full `ardur run
-#     --enforce` CLI against a real agent (docs/demo/enforce-e2e/run.sh) —
-#     issue #104's "no ardur run full-flow e2e in CI" gap, BPF-LSM half.
+#     that it loads. In the same VM boot, a permissive `ardur run` workload
+#     exercises the signed-receipt-to-process-lifecycle observability metric
+#     on the real BPF stream. Full enforce-mode launch bootstrap remains open
+#     in issue #241; these two checks must not be presented as one full-flow
+#     proof.
 #
 #   seccomp-smoke — the seccomp user-notify tier's equivalent proof (plan
 #     E4, the common-case fallback for hosts where BPF-LSM never loads).
@@ -66,9 +68,10 @@ name: kernel-enforce
 #
 # kernel-smoke starts as continue-on-error: true — promote it to a required
 # check once a burn-in period confirms the virtme-ng invocation and kernel
-# cmdline handling are stable on GitHub-hosted runners (its new `ardur run`
-# full-flow step is unverified against live CI as of this writing — see that
-# step's own comment). seccomp-smoke and ardur-run-e2e-seccomp need no such
+# cmdline handling are stable on GitHub-hosted runners (its real-BPF metric
+# step is verified only when the fail-fast workflow emits a signed non-empty
+# result — see that step's own comment). seccomp-smoke and
+# ardur-run-e2e-seccomp need no such
 # VM and have been verified directly (the latter by hand, reproducing the
 # exact commands this job runs, against a real kernel before this workflow
 # job existed), so they are required checks from the start.
@@ -225,12 +228,11 @@ jobs:
         working-directory: go
         run: go build -o /tmp/ardur-guard-smoke ./cmd/ardur-guard-smoke
 
-      # Also build + install what the full `ardur run --enforce` BPF-LSM
-      # demo (docs/demo/enforce-e2e/run.sh) needs, so the vng boot below can
-      # run it directly instead of just the piecewise ardur-guard-smoke —
-      # this is issue #104's "no ardur run full-flow e2e in CI" gap, closed
-      # for the BPF-LSM tier the same way seccomp-smoke's sibling job closes
-      # it for the seccomp tier. virtme-ng's guest shares the runner's own
+# Also build + install what the real-BPF observability workload
+# (docs/demo/enforce-e2e/run.sh) needs, so the vng boot below can exercise
+# the `ardur run` bridge in addition to the piecewise ardur-guard-smoke.
+# This proves issue #39's metric path; it does not close the BPF-LSM
+# enforce-mode bootstrap tracked in #241. virtme-ng's guest shares the runner's own
       # root filesystem (a different kernel over the same userspace, not a
       # separate image) — confirmed by ardur-guard-smoke above already being
       # visible to vng's --exec without copying it into any guest-specific
@@ -299,19 +301,12 @@ jobs:
             --append "lsm=bpf" \
             --exec /tmp/ardur-guard-smoke
 
-      # issue #104's "no ardur run full-flow e2e in CI" gap, BPF-LSM half:
-      # the same boot, but --exec docs/demo/enforce-e2e/run.sh (via the
-      # ci-vng-enforce.sh wrapper, since --exec takes no arguments of its
-      # own) instead of the piecewise ardur-guard-smoke — the real `ardur
-      # run --enforce` CLI, a real agent process, a real forbidden execve
-      # refused by the kernel, and offline hash-chain + attestation
-      # verification, exactly as verified manually in
-      # docs/demo/enforce-e2e.md (that manual Docker-based verification is
-      # what proved this sequence works at all — this step is its first run
-      # against actual GitHub-hosted virtme-ng, unverified until this
-      # workflow actually runs in CI, the same position kernel-smoke itself
-      # started from before its own ~6-round-trip burn-in).
-      - name: Boot with BPF-LSM active and run the full ardur run --enforce demo
+      # Issue #39's metric proof uses the real `ardur run` bridge, signed
+      # receipt registration, BPF process-lifecycle stream, and attestation
+      # verifier. It runs permissively because the direct guard smoke above
+      # already proves BPF-LSM enforcement while the full enforce-mode launch
+      # bootstrap remains tracked separately in #241.
+      - name: Boot with BPF-LSM active and verify the observability-gap metric
         run: |
           VNG="$(command -v vng)"
           test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }
@@ -319,7 +314,7 @@ jobs:
             --verbose \
             --run \
             --append "lsm=bpf" \
-            --exec "$PWD/docs/demo/enforce-e2e/ci-vng-enforce.sh"
+            --exec "$PWD/docs/demo/enforce-e2e/ci-vng-observability-gap.sh"
 
   seccomp-smoke:
     name: seccomp-smoke

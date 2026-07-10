@@ -2,7 +2,7 @@
 title: "Runtime Evidence Correlation Profile v0.1"
 description: "Status: **implemented external-evidence inspection profile**"
 source_path: "docs/specs/runtime-evidence-correlation-v0.1.md"
-source_sha256: "e8229df42b56abd1d569b1c0cf7b84b9d38d14970bd2ba36dfa89f4dac97f3d3"
+source_sha256: "5660687b7bd8796273b2e0b759cb12597a463b2955b633cf529587c203f0bfb5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -222,8 +222,10 @@ local path.
   controls. Operators should still protect private sensor files.
 - There is no network or cloud cost in this command. Storage and CPU cost are
   local and bounded by the limits above.
-- Sensor authenticity, attested coverage, the observability-gap metric in #39,
-  and the measured Linux overhead experiment in #166 remain separate work.
+- Sensor authenticity and attested coverage remain outside this imported-file
+  profile. The native Linux `ardur run` observability-gap metric in #39 and the
+  measured Linux overhead experiment in #166 are separate evidence surfaces;
+  neither is inferred from an imported report.
 
 ## Primary references
 

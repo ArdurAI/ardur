@@ -78,9 +78,16 @@ emitted as `[REDACTED]`, and local absolute paths are replaced with hashed
 
 Three layers exist. Configured hooks capture layer 1; imported sensor evidence
 can inspect selected layer-2 observations without claiming native sensor
-deployment, source authenticity, or complete coverage.
-
-Development note: `go/pkg/kernelcapture` contains a gated Linux process-lifecycle proof harness that can load/attach `sched/sched_process_exec` and `sched/sched_process_exit` eBPF tracepoint programs in a privileged Linux test environment, read exec/exit samples from a ringbuf, and project them through Ardur's correlation/evidence semantics. It also contains a bounded local Unix-domain daemon-control socket proof seam with fail-closed peer authorization, a capped in-memory session registry for authorized `register_session`/`session_status`/`end_session` requests, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots plus in-memory daemon-side snapshot retention for internal status/handoff code, a narrow local `session_status` client proof that rejects response expansion, a no-write status evidence-log planning seam that derives schema/digest/rotation plan data under daemon-owned custody paths, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions against a fake sink only, an injected filesystem append/rotation adapter that executes validated logical-path writes through caller-provided filesystem implementations with temp-dir test coverage, daemon-side `session_status` evidence-log wiring that appends successful status snapshots through that injected filesystem before retaining them without expanding the client protocol, and a no-mutation session handoff plan that derives daemon-owned hashed state/runtime paths plus cgroup allowlist preconditions. This is useful development evidence for the v0.5 direction, but it is not a production daemon, not persistent session storage, not production persistent status evidence-log storage, not daemon-owned evidence-log service wiring or restart-safe persistence, not a cgroup assignment mechanism, not a service installer, not client-visible protocol expansion, not live universal CLI capture, and not file/network/syscall coverage beyond process lifecycle metadata.
+deployment, source authenticity, or complete coverage. Separately, a Linux
+`ardur run` that successfully registers its cgroup with the live
+`ardur-kernelcaptured` daemon receives native process exec/exit capture for that
+session. The proxy registers each receipt before releasing the evaluated
+action, and the signed attestation carries captured/correlated/uncorrelated
+counts plus an observed-effect gap ratio. Capture loss degrades that metric.
+This conditional native path is not host-wide universal CLI capture, persistent
+session storage, file/network effect capture, provider-hidden visibility, or a
+claim that an authenticated session-owner receipt was independently verified
+by the daemon.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -89,8 +96,8 @@ Development note: `go/pkg/kernelcapture` contains a gated Linux process-lifecycl
 │   ↳ planned: v0.2 (working-dir snapshots)           │
 ├─────────────────────────────────────────────────────┤
 │ Layer 2 — Process / kernel boundary                 │
-│   Process tree, syscalls, network sockets           │
-│   ↳ planned: v0.5 (Linux eBPF) / v1.0 (macOS ESF)   │
+│   Linux cgroup process exec/exit       ← conditional │
+│   Other syscalls/network/macOS ESF     ← roadmap     │
 ├─────────────────────────────────────────────────────┤
 │ Layer 1 — Tool-call boundary           ← shipping   │
 │   Every Claude Code tool invocation, signed         │

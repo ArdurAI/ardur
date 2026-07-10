@@ -34,6 +34,15 @@ session's cgroup:
     response: {"protocol_version": "kernelcapture.daemon.v1", "ok": true,
                "method": "apply_policy", "session_id": ...}
 
+``register_receipt`` reports one bounded opaque governance receipt identifier
+after the proxy signs it and before the evaluated action is released. The
+daemon accepts it only from the peer that owns the active session and supplies
+the PID, cgroup, and observation time from daemon-owned state:
+
+    request:  {"protocol_version": "kernelcapture.daemon.v1",
+               "method": "register_receipt",
+               "register_receipt": {"session_id": ..., "receipt_id": ...}}
+
 The daemon authenticates the peer at the socket layer (SO_PEERCRED on Linux),
 so the client carries no token. Daemon-owned path fields and peer-identity
 fields are rejected by the daemon if a client tries to smuggle them in; this
@@ -284,6 +293,28 @@ class KernelCaptureClient:
                 "protocol_version": DAEMON_PROTOCOL_VERSION,
                 "method": "apply_policy",
                 "apply_policy": apply_policy,
+            }
+        )
+
+    def register_receipt(self, *, session_id: str, receipt_id: str) -> dict[str, Any]:
+        """Register one governance receipt before the governed action runs.
+
+        The daemon derives PID, cgroup, peer identity, and observation time
+        from its active session state. Only the opaque receipt identifier is
+        accepted from the session-owning client.
+        """
+        if not session_id:
+            raise ValueError("session_id is required")
+        if not receipt_id:
+            raise ValueError("receipt_id is required")
+        return self._roundtrip(
+            {
+                "protocol_version": DAEMON_PROTOCOL_VERSION,
+                "method": "register_receipt",
+                "register_receipt": {
+                    "session_id": session_id,
+                    "receipt_id": receipt_id,
+                },
             }
         )
 

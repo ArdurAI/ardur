@@ -15,6 +15,11 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   failures and malformed userspace records degrade every session active during
   the same monotonic loss epoch and are never charged to whichever session
   produces the next valid event. Source-specific counters remain distinct.
+- Accepts bounded, deduplicated `register_receipt` requests only from the peer
+  that owns the active session, then emits a session-window
+  `observability_gap` summary for captured process exec/exit effects. Empty
+  samples are `not_measured`; capture loss produces `degraded`; ratios never
+  claim universal file, network, provider-hidden, or host-effect coverage.
 - Enforces honesty behavior:
   - ambiguous attribution => `insufficient_evidence`
   - degraded/unknown coverage => `insufficient_evidence`

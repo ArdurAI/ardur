@@ -86,7 +86,7 @@ func newBenchmarkRouteDaemon(sessionCount int) *daemon {
 		d.treeScopes[sessionID] = &scope
 		correlator := kernelcapture.NewCorrelator(kernelcapture.CorrelatorOptions{})
 		d.correlators[sessionID] = correlator
-		d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator))
+		d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator, nil))
 	}
 	return d
 }
@@ -101,7 +101,7 @@ func newBenchmarkFallbackRouteDaemon(sessionCount int) *daemon {
 		d.treeScopes[sessionID] = &scope
 		correlator := kernelcapture.NewCorrelator(kernelcapture.CorrelatorOptions{})
 		d.correlators[sessionID] = correlator
-		d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator))
+		d.publishSessionRouteLocked(newSessionRoute(sessionID, &scope, correlator, nil))
 	}
 	return d
 }

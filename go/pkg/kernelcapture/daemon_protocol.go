@@ -14,6 +14,7 @@ const (
 
 	DaemonProtocolMethodHealth          = "health"
 	DaemonProtocolMethodRegisterSession = "register_session"
+	DaemonProtocolMethodRegisterReceipt = "register_receipt"
 	DaemonProtocolMethodEndSession      = "end_session"
 	DaemonProtocolMethodSessionStatus   = "session_status"
 	DaemonProtocolMethodApplyPolicy     = "apply_policy"
@@ -30,6 +31,7 @@ const (
 	EnforcementTierNone    = "none"
 
 	MaxDaemonProtocolTTLSeconds = 24 * 60 * 60
+	MaxDaemonReceiptIDBytes     = 512
 
 	// MaxDaemonPolicyGeneration is the largest generation value the daemon will
 	// accept in an apply_policy request. Generation 0 is reserved to mean
@@ -48,6 +50,7 @@ type DaemonProtocolRequest struct {
 	Method          string                        `json:"method"`
 	Health          *DaemonHealthRequest          `json:"health,omitempty"`
 	RegisterSession *DaemonRegisterSessionRequest `json:"register_session,omitempty"`
+	RegisterReceipt *DaemonRegisterReceiptRequest `json:"register_receipt,omitempty"`
 	EndSession      *DaemonEndSessionRequest      `json:"end_session,omitempty"`
 	SessionStatus   *DaemonSessionStatusRequest   `json:"session_status,omitempty"`
 	ApplyPolicy     *DaemonApplyPolicyRequest     `json:"apply_policy,omitempty"`
@@ -104,6 +107,15 @@ type DaemonRegisterSessionRequest struct {
 	HandoffMetadata map[string]any `json:"handoff_metadata,omitempty"`
 }
 
+// DaemonRegisterReceiptRequest reports one governance receipt to the daemon
+// before the governed action is released. The daemon supplies the session's
+// process identity, cgroup, and observation time from its own state; the client
+// may provide only the opaque receipt identifier.
+type DaemonRegisterReceiptRequest struct {
+	SessionID string `json:"session_id"`
+	ReceiptID string `json:"receipt_id"`
+}
+
 type DaemonEndSessionRequest struct {
 	SessionID string `json:"session_id"`
 	TraceID   string `json:"trace_id,omitempty"`
@@ -132,6 +144,10 @@ type DaemonProtocolResponse struct {
 	// for every concurrently active session because a malformed host-level record
 	// cannot be attributed to whichever session produces the next valid event.
 	LifecycleCapture *LifecycleCaptureSummary `json:"lifecycle_capture,omitempty"`
+	// ObservabilityGap measures only the process lifecycle effects captured for
+	// this session. It never represents universal file, network, or host-effect
+	// coverage, and its status degrades with LifecycleCapture loss.
+	ObservabilityGap *ObservabilityGapSummary `json:"observability_gap,omitempty"`
 	// EnforcementTier carries which kernel enforcement tier is currently
 	// active — EnforcementTierBPFLSM, EnforcementTierSeccomp, or
 	// EnforcementTierNone — on successful health responses. The daemon
@@ -236,7 +252,7 @@ func DecodeDaemonProtocolResponse(data []byte) (DaemonProtocolResponse, error) {
 		return DaemonProtocolResponse{}, fmt.Errorf("%w: unsupported response protocol version %q", ErrDaemonProtocol, resp.ProtocolVersion)
 	}
 	switch resp.Method {
-	case "", DaemonProtocolMethodHealth, DaemonProtocolMethodRegisterSession,
+	case "", DaemonProtocolMethodHealth, DaemonProtocolMethodRegisterSession, DaemonProtocolMethodRegisterReceipt,
 		DaemonProtocolMethodEndSession, DaemonProtocolMethodSessionStatus,
 		DaemonProtocolMethodApplyPolicy, DaemonProtocolMethodSetKillSwitch:
 	default:
@@ -251,39 +267,66 @@ func ValidateDaemonProtocolRequest(req DaemonProtocolRequest) error {
 	}
 	switch req.Method {
 	case DaemonProtocolMethodHealth:
-		if req.Health == nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
+		if req.Health == nil || req.RegisterSession != nil || req.RegisterReceipt != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: health request must include only health payload", ErrDaemonProtocol)
 		}
 	case DaemonProtocolMethodRegisterSession:
-		if req.RegisterSession == nil || req.Health != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
+		if req.RegisterSession == nil || req.Health != nil || req.RegisterReceipt != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: register_session request must include only register_session payload", ErrDaemonProtocol)
 		}
 		return validateDaemonRegisterSession(*req.RegisterSession)
+	case DaemonProtocolMethodRegisterReceipt:
+		if req.RegisterReceipt == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
+			return fmt.Errorf("%w: register_receipt request must include only register_receipt payload", ErrDaemonProtocol)
+		}
+		return validateDaemonRegisterReceipt(*req.RegisterReceipt)
 	case DaemonProtocolMethodEndSession:
-		if req.EndSession == nil || req.Health != nil || req.RegisterSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
+		if req.EndSession == nil || req.Health != nil || req.RegisterSession != nil || req.RegisterReceipt != nil || req.SessionStatus != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: end_session request must include only end_session payload", ErrDaemonProtocol)
 		}
 		if strings.TrimSpace(req.EndSession.SessionID) == "" {
 			return fmt.Errorf("%w: end_session session_id is required", ErrDaemonProtocol)
 		}
 	case DaemonProtocolMethodSessionStatus:
-		if req.SessionStatus == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
+		if req.SessionStatus == nil || req.Health != nil || req.RegisterSession != nil || req.RegisterReceipt != nil || req.EndSession != nil || req.ApplyPolicy != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: session_status request must include only session_status payload", ErrDaemonProtocol)
 		}
 		if strings.TrimSpace(req.SessionStatus.SessionID) == "" {
 			return fmt.Errorf("%w: session_status session_id is required", ErrDaemonProtocol)
 		}
 	case DaemonProtocolMethodApplyPolicy:
-		if req.ApplyPolicy == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.SetKillSwitch != nil {
+		if req.ApplyPolicy == nil || req.Health != nil || req.RegisterSession != nil || req.RegisterReceipt != nil || req.EndSession != nil || req.SessionStatus != nil || req.SetKillSwitch != nil {
 			return fmt.Errorf("%w: apply_policy request must include only apply_policy payload", ErrDaemonProtocol)
 		}
 		return validateDaemonApplyPolicy(*req.ApplyPolicy)
 	case DaemonProtocolMethodSetKillSwitch:
-		if req.SetKillSwitch == nil || req.Health != nil || req.RegisterSession != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil {
+		if req.SetKillSwitch == nil || req.Health != nil || req.RegisterSession != nil || req.RegisterReceipt != nil || req.EndSession != nil || req.SessionStatus != nil || req.ApplyPolicy != nil {
 			return fmt.Errorf("%w: set_kill_switch request must include only set_kill_switch payload", ErrDaemonProtocol)
 		}
 	default:
 		return fmt.Errorf("%w: unknown method %q", ErrDaemonProtocol, req.Method)
+	}
+	return nil
+}
+
+func validateDaemonRegisterReceipt(req DaemonRegisterReceiptRequest) error {
+	if strings.TrimSpace(req.SessionID) == "" {
+		return fmt.Errorf("%w: register_receipt session_id is required", ErrDaemonProtocol)
+	}
+	receiptID := strings.TrimSpace(req.ReceiptID)
+	if receiptID == "" {
+		return fmt.Errorf("%w: register_receipt receipt_id is required", ErrDaemonProtocol)
+	}
+	if receiptID != req.ReceiptID {
+		return fmt.Errorf("%w: register_receipt receipt_id must not contain surrounding whitespace", ErrDaemonProtocol)
+	}
+	if len(receiptID) > MaxDaemonReceiptIDBytes {
+		return fmt.Errorf("%w: register_receipt receipt_id exceeds %d bytes", ErrDaemonProtocol, MaxDaemonReceiptIDBytes)
+	}
+	for _, ch := range receiptID {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || strings.ContainsRune("._:-", ch)) {
+			return fmt.Errorf("%w: register_receipt receipt_id contains unsupported characters", ErrDaemonProtocol)
+		}
 	}
 	return nil
 }

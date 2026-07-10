@@ -12,8 +12,10 @@ The parent only does pipe/fork/wait/write-to-stdout after the policy lands —
 none of which are hooked operations — so STRICT fail-closed does not brick it.
 """
 import errno
+import json
 import os
 import time
+import urllib.request
 
 DELAY = float(os.environ.get("AGENT_DELAY", "4"))
 
@@ -28,6 +30,25 @@ print(f"AGENT: sleeping {DELAY}s for apply_policy to land...", flush=True)
 time.sleep(DELAY)
 
 target = os.environ.get("AGENT_EXEC_TARGET", "/bin/echo")
+request = urllib.request.Request(
+    os.environ["ARDUR_PROXY_URL"] + "/evaluate",
+    data=json.dumps(
+        {
+            "session_id": os.environ["ARDUR_SESSION_ID"],
+            "tool_name": "Bash",
+            "arguments": {"command": target},
+        }
+    ).encode(),
+    method="POST",
+    headers={
+        "Authorization": "Bearer " + os.environ["ARDUR_API_TOKEN"],
+        "Content-Type": "application/json",
+    },
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    governance = json.loads(response.read())
+print(f"AGENT: governance decision={governance['decision']} before exec", flush=True)
+
 r, w = os.pipe()  # CLOEXEC by default (PEP 446): auto-closed on a successful execve
 pid = os.fork()
 if pid == 0:
@@ -42,6 +63,7 @@ if pid == 0:
 os.close(w)
 payload = os.read(r, 16).decode().strip()
 os.waitpid(pid, 0)
+time.sleep(0.5)  # let the daemon consume the child exit before session_status
 
 if payload == "":
     print(f"AGENT: exec({target}) SUCCEEDED — not blocked", flush=True)

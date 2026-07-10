@@ -129,7 +129,8 @@ class _FakeKernelDaemon:
     """A multi-turn AF_UNIX stand-in for the kernelcapture daemon.
 
     Unlike a one-shot fake, this accepts a full ``ardur run`` sequence —
-    ``register_session``, ``apply_policy``, and (on cleanup) ``end_session`` —
+    ``register_session``, ``apply_policy``, ``register_receipt``, and (on
+    cleanup) ``end_session`` —
     each over its own connection (matching ``KernelCaptureClient._roundtrip``,
     which opens one connection per call), and records every request it saw.
     """
@@ -379,8 +380,27 @@ def test_ardur_run_applies_kernel_policy_when_daemon_available(
     methods = [req.get("method") for req in daemon.received]
     assert "register_session" in methods
     assert "apply_policy" in methods
+    assert methods.count("register_receipt") == 3
     # apply_policy must follow register_session (called "after cgroup registration").
     assert methods.index("apply_policy") > methods.index("register_session")
+    assert methods.index("register_receipt") > methods.index("apply_policy")
+
+    receipt_entries = [
+        json.loads(line)
+        for line in Path(result.receipts_path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    registered_ids = [
+        request["register_receipt"]["receipt_id"]
+        for request in daemon.received
+        if request.get("method") == "register_receipt"
+    ]
+    assert registered_ids == [entry["receipt_id"] for entry in receipt_entries]
+    assert all(
+        request["register_receipt"]["session_id"] == result.session_id
+        for request in daemon.received
+        if request.get("method") == "register_receipt"
+    )
 
     apply_req = next(req["apply_policy"] for req in daemon.received if req.get("method") == "apply_policy")
     assert apply_req["session_id"] == result.session_id
@@ -1123,6 +1143,14 @@ class TestKernelEnforcementClaim:
                         "loss_epoch_start": 4,
                         "loss_epoch_end": 5,
                     },
+                    "observability_gap": {
+                        "status": "degraded",
+                        "effect_scope": "process_lifecycle",
+                        "captured_effects": 2,
+                        "correlated_effects": 1,
+                        "uncorrelated_effects": 1,
+                        "observed_effect_gap_ratio": 0.5,
+                    },
                 },
             )
             try:
@@ -1150,6 +1178,14 @@ class TestKernelEnforcementClaim:
                 "daemon_queue_dropped": 0,
                 "loss_epoch_start": 4,
                 "loss_epoch_end": 5,
+            },
+            "observability_gap": {
+                "status": "degraded",
+                "effect_scope": "process_lifecycle",
+                "captured_effects": 2,
+                "correlated_effects": 1,
+                "uncorrelated_effects": 1,
+                "observed_effect_gap_ratio": 0.5,
             },
         }
         assert daemon.received is not None

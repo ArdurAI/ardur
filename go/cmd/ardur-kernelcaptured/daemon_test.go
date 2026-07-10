@@ -70,6 +70,7 @@ func newTestDaemon(t *testing.T) *daemon {
 		enforceOrphanChain:        kernelcapture.NewEnforceReceiptChain(),
 		enforceOrphanSummary:      kernelcapture.NewEnforceEventSummaryAccumulator(),
 		lifecycleCaptureSummaries: make(map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator),
+		observabilityGaps:         make(map[string]*kernelcapture.ObservabilityGapAccumulator),
 		lifecycleFilter:           newLifecycleFilterManager(),
 		fs:                        osEvidenceFS{},
 		tamperChain:               kernelcapture.NewTamperReceiptChain(),
@@ -516,7 +517,7 @@ func TestProcessKernelEventReleasesRouteWithNilCorrelator(t *testing.T) {
 	d := newTestDaemon(t)
 	scope := kernelcapture.NewProcessTreeScope(100, 42)
 	scope.SessionID = "nil-correlator-session"
-	route := newSessionRoute("nil-correlator-session", &scope, nil)
+	route := newSessionRoute("nil-correlator-session", &scope, nil, nil)
 	d.mu.Lock()
 	d.cgroupIndex[42] = route.sessionID
 	d.treeScopes[route.sessionID] = &scope

@@ -2,7 +2,7 @@
 title: "Execution Receipt v0.2"
 description: "This document defines the v0.2 action-receipt changes over"
 source_path: "docs/specs/execution-receipt-v0.2.md"
-source_sha256: "77d413f6c5019114069fc892ab2f146e1410e9f2db196c9f43fd28fcf62a6df1"
+source_sha256: "a5bed49214eeb0759dd3d64b5c34606d927320c4aefa92e9f25e8910797c1b29"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -113,7 +113,16 @@ The `kernel_enforcement` rollup carries, when observed:
   `kill_switch_evidence_gap`; and
 - `lifecycle_capture.coverage_status`, `ringbuf_dropped`,
   `producer_ringbuf_dropped`, `malformed_records`,
-  `producer_counter_evidence_gap`, `daemon_queue_dropped`, and loss epochs.
+  `producer_counter_evidence_gap`, `daemon_queue_dropped`, and loss epochs; and
+- `observability_gap` process-lifecycle scope and event classes, authenticated
+  session-owner receipt assurance, receipt/effect counts, status, and the
+  observed-effect gap ratio when the captured sample is non-empty.
+
+`observability_gap.observed_effect_gap_ratio` is the fraction of daemon-captured
+process exec/exit effects that were not correlated to a registered governance
+receipt. It is not a universal effect-coverage fraction. An empty sample MUST
+be `not_measured` and omit the ratio. Capture loss MUST produce `degraded`, not
+`measured`, even when the observed-sample ratio is zero.
 
 Kill-switch transitions remain attributed entries in the daemon's tamper
 receipt chain. The signed session attestation binds that chain's head and its
