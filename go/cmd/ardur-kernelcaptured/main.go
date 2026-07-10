@@ -1776,7 +1776,9 @@ func main() {
 	<-ctx.Done()
 	log.Info("shutting down", "reason", ctx.Err())
 	_ = sdNotify("STOPPING=1")
-	svr.Close()
+	if err := svr.Close(); err != nil {
+		log.Error("failed to close control socket server", "error", err)
+	}
 	wg.Wait()
 	log.Info("ardur-kernelcaptured stopped")
 }
