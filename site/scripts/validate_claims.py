@@ -14,6 +14,28 @@ SITE_ROOT = REPO_ROOT / "site"
 CLAIMS_PATH = SITE_ROOT / "data" / "claims.json"
 CONTENT_ROOT = SITE_ROOT / "content"
 
+REQUIRED_BOUNDARY_CLAIM_ID = "configured-tool-boundary"
+PUBLIC_FRAMING_PATHS = (
+    Path("README.md"),
+    Path("STATUS.md"),
+    Path("go/README.md"),
+    Path("site/content/_index.md"),
+    Path("site/content/build/python-go.md"),
+    Path("site/content/get-started.md"),
+    Path("site/content/how-it-works.md"),
+    Path("site/content/proof.md"),
+)
+FORBIDDEN_PUBLIC_PHRASES = (
+    "blocks anything outside that boundary",
+    "proof of every decision",
+    "no bypass, no direct access",
+    "the agent never touches resources it shouldn't",
+    "captures every claude code tool-call invocation",
+    "complete implementation of the attenuating authorization token",
+    "every single tool call went through ardur first",
+    "every `permit` was correct",
+)
+
 REQUIRED_FIELDS = {
     "id",
     "title",
@@ -23,7 +45,7 @@ REQUIRED_FIELDS = {
     "claim_type",
     "surface",
     "framework",
-    "source_paths"
+    "source_paths",
 }
 
 ALLOWED_MATURITY = {"public-now", "in-progress", "not-public-yet"}
@@ -32,7 +54,7 @@ ALLOWED_EVIDENCE_LEVEL = {
     "code-and-doc",
     "doc-and-manifest",
     "limitation-backed",
-    "spec"
+    "spec",
 }
 
 
@@ -60,7 +82,9 @@ def validate_claim(claim: dict[str, object], seen: set[str]) -> str:
         fail(f"claim is missing required fields: {', '.join(missing)}")
 
     claim_id = claim["id"]
-    if not isinstance(claim_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]+", claim_id):
+    if not isinstance(claim_id, str) or not re.fullmatch(
+        r"[a-z0-9][a-z0-9-]+", claim_id
+    ):
         fail(f"invalid claim id: {claim_id!r}")
     if claim_id in seen:
         fail(f"duplicate claim id: {claim_id}")
@@ -100,6 +124,17 @@ def validate_claim(claim: dict[str, object], seen: set[str]) -> str:
     return claim_id
 
 
+def validate_public_framing(seen: set[str]) -> None:
+    if REQUIRED_BOUNDARY_CLAIM_ID not in seen:
+        fail(f"missing required boundary claim: {REQUIRED_BOUNDARY_CLAIM_ID}")
+
+    for relative_path in PUBLIC_FRAMING_PATHS:
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8").lower()
+        for phrase in FORBIDDEN_PUBLIC_PHRASES:
+            if phrase in text:
+                fail(f"{relative_path}: forbidden public overclaim phrase: {phrase!r}")
+
+
 def main() -> int:
     seen: set[str] = set()
     claims = load_claims()
@@ -107,6 +142,7 @@ def main() -> int:
         if not isinstance(claim, dict):
             fail("every claim entry must be an object")
         validate_claim(claim, seen)
+    validate_public_framing(seen)
 
     print(f"validated {len(claims)} public-site claims")
     return 0

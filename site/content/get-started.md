@@ -1,6 +1,6 @@
 ---
 title: "Get Started"
-description: "Install Ardur and run your first governed AI session in 5 minutes."
+description: "Run the current source-checkout governance proof without a provider API key."
 weight: 5
 maturity: ["public-now"]
 claim_types: ["orientation"]
@@ -11,7 +11,8 @@ evidence_levels: ["code-and-doc"]
 
 ## Pick your path
 
-Ardur works anywhere Python 3.10+ runs. Choose the setup that matches your setup.
+The source-checkout governance loop works anywhere Python 3.10+ runs. Choose
+the setup that matches your host.
 
 ---
 
@@ -26,8 +27,8 @@ cd ardur/python
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 3. Install dependencies
-pip install pyjwt cryptography
+# 3. Install the local package
+pip install -e .
 
 # 4. Verify it works
 PYTHONPATH=. python -c "from vibap.passport import generate_keypair; generate_keypair()"
@@ -44,7 +45,7 @@ PYTHONPATH=. python -c "from vibap.passport import generate_keypair; generate_ke
 git clone https://github.com/ArdurAI/ardur.git
 cd ardur/python
 python3 -m venv .venv && source .venv/bin/activate
-pip install pyjwt cryptography
+pip install -e .
 
 # 2. Optional: build the Go AAT engine
 cd ../go && go build ./...
@@ -63,10 +64,11 @@ for the current `ardur start --host` and TLS boundary.
 
 ---
 
-### Docker (coming soon)
+### Docker
 
-A Docker Compose file and prebuilt images are on the roadmap. For now, clone
-the repo and run directly.
+The authenticated evaluator stack is available from a source checkout through
+`make demo`. Published release images remain gated; see the
+[MVP evaluator guide]({{< relref "/source/docs/mvp-evaluator-guide/" >}}).
 
 ---
 
@@ -74,8 +76,9 @@ the repo and run directly.
 
 ### With Ollama (local models)
 
-Ardur works with any model running in Ollama. The proxy is provider-agnostic —
-it evaluates tool calls, not model outputs.
+The proxy evaluates tool requests routed to it, not model outputs. Ollama can
+be used by a configured harness; this is not automatic discovery of every
+model action.
 
 ```bash
 # Start Ollama with a local model
@@ -97,8 +100,8 @@ export OLLAMA_API_KEY="your-api-key"
 PYTHONPATH=python python tests/run_cloud_model_test.py "$MODEL_NAME"
 ```
 
-This runs a real-world test: a cloud model builds a complete web application
-while every tool call goes through Ardur's governance check.
+This optional harness routes its configured tool requests through Ardur's
+governance check. Its historical aggregate report is not the first-run proof.
 
 ### With Claude Code
 
@@ -126,40 +129,27 @@ Runnable quickstarts live in the examples directory:
 
 ## Run your first governed session
 
-Here's the shortest end-to-end path:
+The shortest current end-to-end path is provider-free and cleans up its own
+temporary state:
 
 ```bash
-# 1. Start the governance proxy
-cd python
-PYTHONPATH=. python -m vibap.cli hub start
-
-# 2. In another terminal, issue a mission passport
-PYTHONPATH=. python -m vibap.cli issue \
-  --agent-id "my-agent" \
-  --mission "read files in /tmp and write reports" \
-  --allowed-tools read_file write_file \
-  --resource-scope /tmp \
-  --max-tool-calls 50
-
-# 3. Use the token to start a session
-# (The CLI prints the token — copy it)
-curl -k -X POST https://127.0.0.1:<port>/session/start \
-  -H "Content-Type: application/json" \
-  -d '{"token": "<your-token>"}'
-
-# 4. Evaluate tool calls through the proxy
-curl -k -X POST https://127.0.0.1:<port>/evaluate \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": "<session-id>", "tool_name": "read_file", "arguments": {"path": "/tmp/test.txt"}}'
+git clone https://github.com/ArdurAI/ardur.git
+cd ardur
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e python/
+python scripts/run-no-key-mvp-demo.py
 ```
 
-Each `/evaluate` call returns PERMIT or DENY with a signed receipt.
+The demo reaches a `PERMIT`, a `DENY`, and a locally verified signed
+attestation. It disables TLS and bearer auth only for its loopback child
+process; it is not a production launch command.
 
 ---
 
 ## Next steps
 
-- [See real-world test results]({{< relref "/proof" >}}) — cloud models governed by Ardur
+- [Review current evidence]({{< relref "/evidence" >}})
 - [Read the CLI reference]({{< relref "/source/docs/reference/cli/" >}})
 - [Understand the security model]({{< relref "/source/docs/security-model/" >}})
 - [Browse the examples]({{< relref "/examples" >}})

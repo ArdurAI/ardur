@@ -1,6 +1,29 @@
 {
   "claims": [
     {
+      "id": "configured-tool-boundary",
+      "title": "Ardur governs calls observed at a configured tool boundary",
+      "body": "When a supported adapter or proxy routes a tool request through Ardur, the runtime evaluates the request before that integration dispatches it and emits an issuer-signed, hash-linked receipt. This is a configured-boundary claim: it does not establish universal capture, third-party witnessing, provider-hidden behavior, or side effects below the tool call.",
+      "evidence_level": "code-and-doc",
+      "maturity": "public-now",
+      "claim_type": "runtime-boundary",
+      "surface": ["docs", "python", "scripts"],
+      "framework": ["framework-agnostic", "claude-code"],
+      "source_paths": [
+        "README.md",
+        "STATUS.md",
+        "docs/coverage-map.md",
+        "docs/known-limitations.md",
+        "docs/guides/claude-code-mvp-quickstart.md",
+        "scripts/run-claude-deny-demo.py",
+        "python/vibap/claude_code_hook.py",
+        "python/vibap/proxy.py",
+        "python/vibap/receipt.py",
+        "python/tests/test_claude_deny_demo.py",
+        "python/tests/test_claude_code_hook.py"
+      ]
+    },
+    {
       "id": "mission-boundary",
       "title": "Mission boundaries are the product center",
       "body": "Ardur binds agent sessions to declared missions and makes runtime decisions over tools, resources, flat runtime budgets, and delegation reservations. Mission-declared lineage_budgets are a v0.1 protocol goal, not a current runtime claim: non-empty lineage_budgets fail closed at compile/issue time until compiler/verifier support lands.",

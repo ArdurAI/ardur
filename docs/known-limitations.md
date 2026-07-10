@@ -25,11 +25,19 @@ evidence, Ardur must classify the result as `insufficient_evidence` (resulting
 in an `unknown` verdict at the session/verifier level) rather than safe. See
 [`coverage-map.md`](coverage-map.md) for the receipt-level evidence taxonomy.
 
+Ardur's current first-run proof is a configured tool-boundary proof. It can
+verify the issuer signature and hash linkage on receipts for calls observed by
+the adapter or proxy. It does not prove that every host or provider action was
+observed, and it does not add an independent third-party witness to a
+self-issued receipt. Transparency anchoring and receiver co-signing are
+separate roadmap work.
+
 ## Product limits
 
 Ardur is not:
 
 - a sandbox by itself
+- a universal discovery layer for calls that bypass its configured adapter
 - a universal semantic-safety engine
 - a replacement for identity, workload isolation, or network controls
 

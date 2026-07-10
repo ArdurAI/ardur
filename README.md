@@ -1,6 +1,9 @@
 # Ardur
 
-Ardur is the runtime governance and evidence layer for AI agents.
+Ardur governs AI-agent tool calls that pass through a configured adapter or
+proxy. It checks mission, resource, budget, and delegation constraints before
+that integration dispatches the call, then emits an issuer-signed,
+hash-linked receipt for the decision.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--release-blue)](STATUS.md)
@@ -11,115 +14,38 @@ public specs, the Python governance runtime, Go packages for eBPF kernel
 capture and Kubernetes control-plane components, mission examples, runnable
 framework adapters (LangChain, LangGraph, AutoGen), the Ardur Personal Hub
 service, the Claude Code plugin and hook, and the public Hugo evidence site.
-Re-runnable proof media, full packaging, and production deployment material
-are still being tightened before they are presented as release-ready.
+The current public proof is strongest at those configured tool boundaries. It
+does not establish universal agent capture, third-party witnessing,
+provider-hidden behavior, or cross-platform kernel enforcement. Re-runnable
+proof media, full packaging, and production deployment material are still
+being tightened before they are presented as release-ready.
 
 [Research](RESEARCH.md) · [Status](STATUS.md) · [Coverage Map](docs/coverage-map.md) · [Roadmap](ROADMAP.md) · [Media](MEDIA.md) · [Articles](docs/articles/README.md) · [Docs](docs/README.md) · [Reference](docs/reference/README.md) · [Phase 1 Demo Packet](docs/guides/phase1-demo-packet.md) · [Read the Phase 1 Evidence Bundle](docs/guides/read-phase1-evidence-bundle.md) · [Evidence Site Source](site/README.md)
 
-## Test Results
+## Verification Snapshot
 
-Tests here are designed to prove three things:
+At the reviewed `dev` tree on 2026-07-09, the current gates were:
 
-1. **Correctness** — the governance proxy enforces the spec faithfully: visibility, envelope integrity, manifest digest, delegation narrowing, hidden-hop detection, per-class budgets, rate limiting, and kill-switch semantics.
-2. **Resilience** — adversarial models cannot bypass policy boundaries through prompt injection, jailbreaking, social engineering, path traversal, multi-turn steering, or chained-tool attacks.
-3. **Real-model integration** — live models routed through the proxy can build substantial software (multi-file applications with tests and documentation) while every tool call flows through governance first.
+| Gate | Verified result |
+|---|---|
+| Python local matrix with the CI coverage flags (Python 3.12) | 1,358 passed, 32 skipped, 85% coverage |
+| Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
+| Go CI | Tests, vet, lint, and vulnerability scan passed |
+| Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, seccomp smoke, and full `ardur run --enforce` seccomp E2E passed |
+| Security and release hygiene | CodeQL for Python and Go, secret scanning, formats, links, Hugo, package build, and OCI smoke passed |
 
-### Unit & Integration Suite
+These gates verify the checked-in runtime and its configured integration
+paths: policy evaluation, fail-closed error handling, signed/hash-linked
+receipts, delegation, package contracts, and the explicitly gated Linux
+enforcement harnesses. They do **not** prove that Ardur observes calls that
+bypass an adapter, provider-hidden actions, every effect below a tool call, or
+production readiness on every platform.
 
-| Suite | Passed | Skipped | Failed |
-|-------|--------|---------|--------|
-| Core governance (proxy, passport, mission, receipts) | 581 | 21 | 0 |
-
-Covers the Delegation-Core, MIC-State, and MIC-Evidence conformance profiles — all 4 verifier-contract gaps closed as of the hardening round ending 2026-05-14. Includes visibility checks (§6.4), envelope signature verification (§9.5), manifest digest comparison (§9.6), hidden-hop detection (§9.1), and `last_seen_receipts` tracking (§5.7).
-
-### Comprehensive Protocol Composition
-
-Single end-to-end test exercising all protocol layers over real TLS with SPIFFE identity, Biscuit attenuation, JWT delegation, and policy backends.
-
-| Scenario | Duration | What it proves |
-|----------|----------|---------------|
-| Health & baseline | 0.02s | Server responds correctly, content-type negotiation works |
-| JWT session lifecycle | 0.07s | Start → evaluate → attest → end produces verifiable receipts |
-| Biscuit + SPIFFE binding | 0.13s | Biscuit bearer token bound to SPIFFE SVID holder |
-| **Ollama multi-turn build** | **106.6s** | Live cloud model builds a complete journal API across 20 turns — write_file, read_file, list_directory — all through the proxy |
-| JWT delegation chain | 0.11s | Parent → child → grandchild narrowing: tools and budget strictly contract |
-| Biscuit attenuation chain | 0.13s | Root → child → grandchild: each hop narrows authority, escalation blocked |
-| Kill switch mid-session | 0.08s | Activate blocks /evaluate (503), deactivate restores, health stays available |
-| Rate limit flooding | 0.31s | Burst beyond 50 requests triggers 429 with Retry-After header |
-| Metrics verification | 0.03s | Prometheus text format, all 6 required metric families present |
-| Receipt chain integrity | 0.01s | Multi-trace receipts form independently verifiable hash-linked chains |
-| ForbidRules composition | 0.05s | Regex-based forbid-rules backend denies while native permits |
-| Three-backend composition | 0.07s | Native + ForbidRules + Cedar: each backend can independently deny |
-| Integrity hash enforcement | 0.03s | policy_sha256 mismatch → DENY (fail-closed) |
-
-**13/13 passed. Total: 118.3s.**
-
-### Ollama Integration
-
-| Suite | Passed | Failed |
-|-------|--------|--------|
-| Connectivity (model listing, chat, tool calling) | 3 | 0 |
-| Governance integration (proxy routing, denial, multi-turn, delegation) | 8 | 0 |
-| Security headers | 2 | 0 |
-| Concurrency | 1 | 0 |
-| Model capabilities (denial understanding, self-description, constraint respect) | 3 | 0 |
-
-**17/17 passed. Total: 26.1s.**
-
-### Phase 1 — Adversarial Boundary Testing
-
-10 hostile scenarios across 5 cloud models spanning multiple providers. Every scenario is designed to trigger a DENY — models attempt direct forbidden-tool use, mid-execution prompt injection, DAN-style jailbreaking, social engineering, resource-scope violations, path traversal, budget exhaustion, obfuscated command injection, multi-turn gradual steering toward forbidden actions, and chained tool attacks (write script → execute). The public redaction keeps the aggregate result here and omits raw per-model fixture artifacts from the repository.
-
-| Metric | Value |
-|--------|-------|
-| Tool calls evaluated | 143 |
-| PERMIT | 63 |
-| DENY | 106 |
-| **BYPASS** | **0** |
-
-**Zero bypasses.** Proxy boundaries held across all 5 models, all 10 attack vectors. The proxy denied 106 violation attempts. Models that refused before calling tools (ethical refusal) were counted as passes — the scenario's goal is exercising the proxy's enforcement boundary, and a model-level refusal means the attack didn't reach the runtime.
-
-### Phase 2 — Advanced Enforcement Checks
-
-22 programmatic checks verifying specific enforcement points — no model in the loop. Direct API calls against the proxy exercising edge cases:
-
-| Category | Checks | Highlights |
-|----------|--------|-----------|
-| Approval policy | 2 | operator_id required, fatigue threshold exceeded |
-| Delegation | 1 | child tool escalation beyond parent scope rejected |
-| Memory governance | 2 | FIX-8: private key material rejected on memory write/read |
-| Token replay | 1 | JTI replay on session start rejected |
-| Kill switch | 2 | /evaluate and /session/start both return 503 |
-| Per-class budget | 2 | internal_write budget exhaustion, side_effect_class not in allowlist |
-| CWD confinement | 2 | absolute path escape and path traversal escape from CWD both blocked |
-| Policy backends | 1 | ForbidRules backend blocks targeted tool |
-| Tool scope | 1 | forbidden tool directly denied |
-| Resource scope | 1 | write outside resource_scope denied |
-| Budget | 1 | main budget exhausted after max_tool_calls |
-| Session lifecycle | 2 | ended session rejects, multiple sessions coexist |
-| Token validation | 2 | invalid JWT rejected, nonexistent session_id rejected |
-| Input sanitization | 1 | null-byte and unicode dot-confusable traversal paths rejected (U+2024/U+FE52/U+FF0E folded to ASCII '.', and U+2025/U+FE30 caught via NFKC-form backstop, so a tool that NFKC-normalizes before opening cannot escape scope) |
-| Infrastructure | 1 | health endpoint returns ok |
-
-**22/22 passed. Total: <1s.**
-
-### Go AAT — Credential Attenuation Engine
-
-The Go `pkg/aat` package implements 13 constraint types, token serialization, delegation-chain verification, and constraint subsumption. All tests pass with zero failures.
-
-### Aggregate
-
-| Suite | Count | Status |
-|-------|-------|--------|
-| Python unit + integration | 581 + 21 skipped | All passing |
-| Comprehensive protocol composition | 13 scenarios | All passing |
-| Ollama integration | 17 | All passing |
-| Phase 1 adversarial (5 models) | 10 scenarios × 5 models | 0 bypasses |
-| Phase 2 advanced enforcement | 22 checks | All passing |
-| Go AAT | full suite | All passing |
-| MIC conformance (new) | 29 | All passing |
-
-[Python test suite →](python/tests/) · Aggregate report: `python/tests/comprehensive_test_report.json` · [Proof & evidence site →](site/)
+The numeric Python result is a dated snapshot, not a permanent badge; the
+workflow files under [`.github/workflows/`](.github/workflows/) are the current
+source of truth. Historical model/adversarial aggregates remain at
+`python/tests/comprehensive_test_report.json`, but they are not presented here
+as evidence for the current tree.
 
 ## First-Run Paths
 
@@ -186,8 +112,9 @@ After a run, use the
 handoff: tested commit, `bundle.redacted.json`, optional live-Claude report, and
 the exact claims the artifacts do and do not support.
 
-> **Capture boundary today (v0.1):** Ardur signs every Claude Code tool-call
-> invocation. Side effects below the tool boundary — subprocess trees,
+> **Capture boundary today (v0.1):** Ardur signs the Claude Code tool-call
+> events delivered to its installed hooks. Side effects below the tool
+> boundary — subprocess trees,
 > kernel events, network connections initiated by tool-spawned processes —
 > are not yet captured; the roadmap closes that gap in v0.2 (filesystem
 > snapshots), v0.5 (Linux eBPF), and v1.0 (macOS Endpoint Security
@@ -196,9 +123,10 @@ the exact claims the artifacts do and do not support.
 
 ## Why Ardur
 
-Many agent stacks can log what happened. Fewer can stop an out-of-scope action
-before it executes. Fewer still can prove later, with verifier-backed evidence,
-what the runtime allowed, denied, or left unknown.
+Many agent stacks can log what happened. A configured Ardur adapter can stop an
+out-of-scope tool request before that adapter dispatches it. Its receipts let a
+reviewer verify the issuer signature and hash linkage later, including what the
+runtime allowed, denied, or left unknown.
 
 Ardur is being built to do all three:
 
@@ -223,7 +151,7 @@ This repo currently includes:
 - a short research-informed positioning summary
 - current status and what is still being resolved
 - public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces
-- Python governance runtime under `python/`; Go eBPF/K8s packages and a complete AAT credential-attenuation engine under `go/`
+- Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`)
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
 - runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
@@ -257,7 +185,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 |----------------------|-------------|---------------------------------|
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixture examples | live-provider wrappers and more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
-| **Policy engine**    | native checks, forbid-rules, Cedar bridge, AAT constraint engine (13 types) | OPA and broader Biscuit datalog examples |
+| **Policy engine**    | native checks, forbid-rules, Cedar bridge, JWT AAT constraint engine (13 types) | AAT CWT integer-key mapping, OPA, and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |
 | **Receipts sink**    | local JSON / stdout-oriented receipt surfaces | OTel emitters and durable storage examples |
 
