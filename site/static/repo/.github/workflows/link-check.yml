@@ -2,9 +2,6 @@ name: link-check
 
 on:
   pull_request:
-    paths:
-      - "**/*.md"
-      - ".github/workflows/link-check.yml"
   schedule:
     - cron: "0 14 * * 1"  # Mondays 14:00 UTC
   workflow_dispatch:
@@ -53,3 +50,19 @@ jobs:
             --exclude-path '^site/content/'
             './**/*.md'
           fail: true
+
+  link-check:
+    name: link-check
+    if: ${{ always() }}
+    needs: lychee
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require link validation
+        env:
+          LYCHEE: ${{ needs.lychee.result }}
+        run: |
+          set -euo pipefail
+          if [ "$LYCHEE" != "success" ]; then
+            echo "::error::Link validation concluded $LYCHEE"
+            exit 1
+          fi
