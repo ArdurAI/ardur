@@ -678,6 +678,7 @@ def _copy_to_destination_staging_file(
             try:
                 staged.unlink()
             except FileNotFoundError:
+                # Another cleanup path already established the desired absence.
                 pass
         raise
 
@@ -706,6 +707,7 @@ def _remove_staging_file(path: Path | None) -> None:
     try:
         path.unlink()
     except FileNotFoundError:
+        # Staging cleanup is intentionally idempotent.
         pass
 
 
@@ -716,6 +718,7 @@ def _restore_destination(path: Path, *, existed: bool, backup: Path | None) -> N
         try:
             path.unlink()
         except FileNotFoundError:
+            # A missing destination already matches the pre-transaction state.
             pass
 
 
