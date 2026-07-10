@@ -2,7 +2,7 @@
 title: "LangGraph + Ardur quickstart"
 description: "A LangGraph agent making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a small set of tools (read, write, summarize), "
 source_path: "examples/langgraph-quickstart/README.md"
-source_sha256: "bc739eaef49408bd3d33fea4827e061062f120e33d6d59d8d62611e9b986cc03"
+source_sha256: "8652ff8484ebfec46ab1ebe5c2ea85a7d13209b4c28bd844eed30d01d00b8b0e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -38,7 +38,7 @@ langgraph-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install (this repo, `pip install -e ../../python[dev]`)
 - `langgraph ^0.2.0` plus the `langchain-*` family (already pulled by `[dev]` extras for the LangChain demo)
 - LLM access: local Ollama, an OpenAI-compatible gateway, or an Anthropic API key

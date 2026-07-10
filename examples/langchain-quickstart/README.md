@@ -22,7 +22,7 @@ langchain-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
 - `langchain ^0.3.0` plus `langchain-core ^0.3.0`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic`, `langgraph`
 - LLM access: any provider that LangChain supports — local Ollama, an OpenAI-compatible gateway, an Anthropic API key, etc.

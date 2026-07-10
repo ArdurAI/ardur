@@ -21,7 +21,7 @@ langgraph-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install (this repo, `pip install -e ../../python[dev]`)
 - `langgraph ^0.2.0` plus the `langchain-*` family (already pulled by `[dev]` extras for the LangChain demo)
 - LLM access: local Ollama, an OpenAI-compatible gateway, or an Anthropic API key

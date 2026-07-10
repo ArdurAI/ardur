@@ -2,7 +2,7 @@
 title: "LangChain + Ardur quickstart"
 description: "A LangChain agent making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a small set of tools (read, write, summarize), "
 source_path: "examples/langchain-quickstart/README.md"
-source_sha256: "e9a8b8f433d053dae487b6fdc31f1bb9e850cce8b1c4db342332287497792f39"
+source_sha256: "d5e278292309051e8322d7c2fdde549f67f6bf7c3e08d03db32548af0829bc22"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -39,7 +39,7 @@ langchain-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
 - `langchain ^0.3.0` plus `langchain-core ^0.3.0`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic`, `langgraph`
 - LLM access: any provider that LangChain supports — local Ollama, an OpenAI-compatible gateway, an Anthropic API key, etc.

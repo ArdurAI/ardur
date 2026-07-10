@@ -15,16 +15,10 @@
 # identifiers are baked in — the runtime expects ARDUR_PROVIDER plus
 # the matching *_MODEL env vars at run time.
 
-# FIX-9 (2026-04-28): production builds MUST digest-pin the base image.
-# Resolve the current digest with:
-#   skopeo inspect docker://docker.io/library/python:3.13-slim \
-#     --format '{{.Digest}}'
-# Then change the FROM line to:
-#   FROM python:3.13-slim@sha256:<digest>
-# The published demo image keeps the tag-pinned form so unprivileged
-# contributors can reproduce it; CI/release builds should swap to a
-# digest before pushing to a registry consumers will pull from.
-FROM python:3.14-slim
+# Keep the tag for readable dependency updates while the immutable multi-arch
+# index digest prevents a registry tag re-push from changing published builds.
+# biscuit-python 0.4.0 embeds PyO3 0.24.1, whose supported ceiling is 3.13.
+FROM python:3.13.14-slim-trixie@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
