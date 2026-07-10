@@ -30,6 +30,7 @@ EXPECTED_URLS = {
     "Discussions": "https://github.com/ArdurAI/ardur/discussions",
 }
 EXPECTED_SUMMARY = "Runtime governance and signed evidence for AI agent tool calls"
+EXPECTED_OS_CLASSIFIER = "Operating System :: POSIX"
 PLUGIN_ASSETS = (
     PurePosixPath(".claude-plugin/plugin.json"),
     PurePosixPath("hooks/hooks.json"),
@@ -38,7 +39,10 @@ PLUGIN_ASSETS = (
     PurePosixPath("hooks/subagent_start"),
     PurePosixPath("hooks/subagent_stop"),
 )
-REQUIRED_RUNTIME_FILES = (PurePosixPath("vibap/launch_gate.py"),)
+REQUIRED_RUNTIME_FILES = (
+    PurePosixPath("vibap/launch_gate.py"),
+    PurePosixPath("vibap/transparency.py"),
+)
 VENDORED_RFC8785_FILES = (
     PurePosixPath("vibap/_vendor/rfc8785/LICENSE"),
     PurePosixPath("vibap/_vendor/rfc8785/UPSTREAM.md"),
@@ -105,6 +109,15 @@ def validate_metadata(metadata_bytes: bytes, expected_version: str) -> None:
     )
     require(metadata["Requires-Python"] == ">=3.10", "Requires-Python must be >=3.10")
     require(metadata["License-Expression"] == "MIT", "license expression must be MIT")
+    classifiers = metadata.get_all("Classifier", [])
+    require(
+        EXPECTED_OS_CLASSIFIER in classifiers,
+        "wheel must declare the POSIX operating-system classifier",
+    )
+    require(
+        "Operating System :: OS Independent" not in classifiers,
+        "wheel must not claim OS-independent runtime support",
+    )
     require(
         "rfc8785<0.2,>=0.1.4" in metadata.get_all("Requires-Dist", []),
         "wheel must declare the RFC 8785 runtime dependency",
@@ -181,6 +194,10 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
         require(
             PurePosixPath("vibap/_specs/execution_receipt_v02.schema.json") in names,
             "wheel does not contain the embedded Execution Receipt v0.2 schema",
+        )
+        require(
+            PurePosixPath("vibap/_specs/transparency_anchor_v01.schema.json") in names,
+            "wheel does not contain the embedded Transparency Anchor v0.1 schema",
         )
         for runtime_file in REQUIRED_RUNTIME_FILES:
             require(runtime_file in names, f"wheel is missing runtime file: {runtime_file}")
@@ -312,6 +329,15 @@ def validate(dist_dir: Path, expected_tag: str | None = None) -> tuple[Path, Pat
     )
     require(config["requires-python"] == ">=3.10", "source Python floor must be >=3.10")
     require(config["license"] == "MIT", "source license expression must be MIT")
+    classifiers = config["classifiers"]
+    require(
+        EXPECTED_OS_CLASSIFIER in classifiers,
+        "source must declare the POSIX operating-system classifier",
+    )
+    require(
+        "Operating System :: OS Independent" not in classifiers,
+        "source must not claim OS-independent runtime support",
+    )
     require(
         config["urls"] == EXPECTED_URLS,
         "source project URLs differ from canonical URLs",

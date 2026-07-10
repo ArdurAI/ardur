@@ -39,6 +39,7 @@ from .passport import (
     MissionPassport,
     _ensure_default_home_dir,
     generate_keypair,
+    load_existing_private_key,
     load_existing_public_key,
     issue_passport,
     load_mission_file,
@@ -962,7 +963,18 @@ def _start_api_token_invalid_failure(args: argparse.Namespace) -> dict[str, obje
     return None
 
 
-_PATH_ARG_SPECS = ("keys_dir", "state_dir", "log_path", "tls_cert", "tls_key")
+_PATH_ARG_SPECS = (
+    "keys_dir",
+    "state_dir",
+    "log_path",
+    "tls_cert",
+    "tls_key",
+    "anchor_bundle",
+    "transparency_log_key",
+    "receipt_log",
+    "local_log",
+    "log_private_key",
+)
 
 
 def _path_arg_is_empty(value: object) -> bool:
@@ -1443,6 +1455,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if path_failure is not None:
         _print_json(path_failure)
         return 1
+    if args.anchor_bundle is not None:
+        return _cmd_verify_anchor(args)
     keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
     if keys_dir_failure is not None:
         return keys_dir_failure
@@ -1467,6 +1481,170 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return 1
     _print_json({"valid": True, "claims": claims})
     return 0
+
+
+def _load_transparency_public_key(path: Path):  # type: ignore[no-untyped-def]
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+
+    if not path.is_file():
+        raise FileNotFoundError(f"transparency log public key not found: {path}")
+    key = serialization.load_pem_public_key(path.read_bytes())
+    if not isinstance(key, (ec.EllipticCurvePublicKey, ed25519.Ed25519PublicKey)):
+        raise ValueError("transparency log public key must be ECDSA or Ed25519")
+    return key
+
+
+def _cmd_verify_anchor(args: argparse.Namespace) -> int:
+    from .transparency import (
+        AnchorVerificationError,
+        TransparencyError,
+        load_anchor_bundle,
+        verify_anchor_bundle,
+    )
+
+    if args.transparency_log_key is None:
+        _print_json(
+            {
+                "valid": False,
+                "error": "transparency_log_key_required",
+                "message": "Anchor verification requires --transparency-log-key.",
+            }
+        )
+        return 1
+    if args.max_registration_delay_s < 0:
+        _print_json(
+            {
+                "valid": False,
+                "error": "registration_delay_invalid",
+                "message": "--max-registration-delay-s must be zero or greater.",
+            }
+        )
+        return 1
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    try:
+        receipt_public_key = load_existing_public_key(keys_dir=args.keys_dir)
+        log_public_key = _load_transparency_public_key(args.transparency_log_key)
+        bundle = load_anchor_bundle(args.anchor_bundle)
+        report = verify_anchor_bundle(
+            bundle,
+            receipt_public_key=receipt_public_key,
+            log_public_key=log_public_key,
+            max_registration_delay_s=args.max_registration_delay_s,
+        )
+    except (
+        AnchorVerificationError,
+        TransparencyError,
+        KeyDirectoryError,
+        FileNotFoundError,
+        PermissionError,
+        OSError,
+        ValueError,
+    ) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "anchor_verification_failed",
+                "message": str(exc),
+            }
+        )
+        return 1
+    _print_json(report)
+    return 0
+
+
+def _load_local_log_private_key(path: Path):  # type: ignore[no-untyped-def]
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    if not path.is_file():
+        raise FileNotFoundError(f"local transparency-log private key not found: {path}")
+    if os.name == "posix" and path.stat().st_mode & 0o077:
+        raise PermissionError("local transparency-log private key must use mode 0600 or stricter")
+    key = serialization.load_pem_private_key(path.read_bytes(), password=None)
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise ValueError("local transparency-log private key must be Ed25519")
+    return key
+
+
+def cmd_anchor(args: argparse.Namespace) -> int:
+    from .transparency import (
+        BACKEND_LOCAL_SIGNED,
+        LocalSignedLogBackend,
+        RekorV1Backend,
+        TransparencyError,
+        anchor_store_for_receipt_log,
+        drain_anchor_store,
+    )
+
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+    store = anchor_store_for_receipt_log(args.receipt_log)
+    try:
+        receipt_private_key = None
+        if args.backend == BACKEND_LOCAL_SIGNED:
+            if args.local_log is None or args.log_private_key is None or not args.origin:
+                raise TransparencyError(
+                    "local anchoring requires --local-log, --log-private-key, and --origin"
+                )
+            backend = LocalSignedLogBackend(
+                args.local_log,
+                _load_local_log_private_key(args.log_private_key),
+                origin=args.origin,
+            )
+        else:
+            if args.keys_dir is None:
+                raise TransparencyError(
+                    "Rekor anchoring requires --keys-dir with the existing receipt issuer key"
+                )
+            receipt_private_key = load_existing_private_key(keys_dir=args.keys_dir)
+            backend = RekorV1Backend(
+                args.rekor_url,
+                allow_insecure_loopback=args.allow_insecure_loopback,
+            )
+        results = drain_anchor_store(
+            store,
+            backend,
+            receipt_private_key=receipt_private_key,
+        )
+    except (
+        TransparencyError,
+        KeyDirectoryError,
+        FileNotFoundError,
+        PermissionError,
+        OSError,
+        ValueError,
+    ) as exc:
+        _print_json(
+            {
+                "ok": False,
+                "error": "anchor_submission_failed",
+                "message": str(exc),
+            }
+        )
+        return 1
+    output = {
+        "ok": all(result.status == "anchored" for result in results),
+        "store": str(store),
+        "processed": len(results),
+        "anchored": sum(result.status == "anchored" for result in results),
+        "pending": sum(result.status == "pending" for result in results),
+        "results": [
+            {
+                "anchor_id": result.anchor_id,
+                "status": result.status,
+                "path": str(result.path),
+                **({"error": result.error} if result.error else {}),
+            }
+            for result in results
+        ],
+    }
+    _print_json(output)
+    return 0 if output["ok"] else 1
 
 
 def _attest_failure_condition(exc: Exception) -> tuple[str, str]:
@@ -3778,10 +3956,59 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
     issue.set_defaults(func=cmd_issue)
 
-    verify = subparsers.add_parser("verify", help="verify a mission passport JWT")
-    verify.add_argument("--token", required=True, help="passport token to verify")
+    verify = subparsers.add_parser("verify", help="verify a mission passport or receipt anchor")
+    verify_input = verify.add_mutually_exclusive_group(required=True)
+    verify_input.add_argument("--token", help="passport token to verify")
+    verify_input.add_argument(
+        "--anchor-bundle",
+        type=Path,
+        help="portable receipt transparency-anchor JSON bundle",
+    )
     verify.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    verify.add_argument(
+        "--transparency-log-key",
+        type=Path,
+        help="trusted transparency-log public key PEM for offline anchor verification",
+    )
+    verify.add_argument(
+        "--max-registration-delay-s",
+        type=int,
+        default=86_400,
+        help="maximum allowed delay between receipt iat and log integration",
+    )
     verify.set_defaults(func=cmd_verify)
+
+    anchor = subparsers.add_parser(
+        "anchor",
+        help="drain pending receipt anchors outside the governance decision path",
+    )
+    anchor.add_argument(
+        "--receipt-log",
+        type=Path,
+        required=True,
+        help="receipt JSONL path whose sibling anchor store should be drained",
+    )
+    anchor.add_argument(
+        "--backend",
+        choices=["c2sp-local-v1", "rekor-v1"],
+        required=True,
+        help="transparency backend used for pending anchors",
+    )
+    anchor.add_argument("--keys-dir", type=str, help="receipt signing keys (required by Rekor v1)")
+    anchor.add_argument("--local-log", type=Path, help="self-hosted append-only log JSONL path")
+    anchor.add_argument("--log-private-key", type=Path, help="self-hosted log Ed25519 private key PEM")
+    anchor.add_argument("--origin", help="C2SP checkpoint origin for the self-hosted log")
+    anchor.add_argument(
+        "--rekor-url",
+        default="https://rekor.sigstore.dev",
+        help="Rekor base URL (HTTPS required)",
+    )
+    anchor.add_argument(
+        "--allow-insecure-loopback",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    anchor.set_defaults(func=cmd_anchor)
 
     attest = subparsers.add_parser("attest", help="issue a behavioral attestation for a saved session")
     attest.add_argument("--session", required=True, help="session identifier / passport jti")

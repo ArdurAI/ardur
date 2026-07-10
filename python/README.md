@@ -36,6 +36,12 @@ ardur issue \
 ardur verify --token <token-from-issue-output>
 ```
 
+Every durable receipt sink also queues an idempotent local transparency-anchor
+sidecar. Network submission is a separate `ardur anchor` operation, and
+`ardur verify --anchor-bundle ...` verifies completed proofs offline with an
+independently supplied log public key. See
+[`docs/specs/transparency-anchor-v0.1.md`](../docs/specs/transparency-anchor-v0.1.md).
+
 That walks through key generation, mission compilation, ES256-signed passport issuance, and verification — all local, no LLM calls.
 
 ## Ardur Personal Hub

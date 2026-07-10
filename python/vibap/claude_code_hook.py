@@ -154,6 +154,9 @@ def append_receipt(state: ChainState, signed_jwt: str) -> None:
 def _append_receipt_unlocked(state: ChainState, signed_jwt: str) -> None:
     with open(state.file, "a", encoding="utf-8") as f:
         f.write(signed_jwt.strip() + "\n")
+    from .transparency import queue_receipt_anchor_best_effort
+
+    queue_receipt_anchor_best_effort(signed_jwt, state.file)
 
 
 def _append_subagent_event_unlocked(state: ChainState, record: Mapping[str, Any]) -> None:

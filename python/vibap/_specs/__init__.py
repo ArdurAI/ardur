@@ -30,3 +30,12 @@ def mission_declaration_v01_schema() -> dict:
         "mission_declaration_v01.schema.json"
     ).read_text(encoding="utf-8")
     return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def transparency_anchor_v01_schema() -> dict:
+    """Return the parsed Transparency Anchor v0.1 JSON Schema."""
+    raw = files(__package__).joinpath(
+        "transparency_anchor_v01.schema.json"
+    ).read_text(encoding="utf-8")
+    return json.loads(raw)

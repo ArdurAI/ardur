@@ -4862,6 +4862,13 @@ class GovernanceProxy:
         with self._receipts_log_lock:
             with self.receipts_log_path.open("a", encoding="utf-8") as handle:
                 handle.write(line)
+        signed_jwt = entry.get("jwt")
+        if isinstance(signed_jwt, str):
+            # Queueing is local-only and best effort; an unavailable anchor
+            # store must never change the governance decision just recorded.
+            from .transparency import queue_receipt_anchor_best_effort
+
+            queue_receipt_anchor_best_effort(signed_jwt, self.receipts_log_path)
         grant_id = entry.get("grant_id")
         receipt_id = entry.get("receipt_id")
         if grant_id and receipt_id:

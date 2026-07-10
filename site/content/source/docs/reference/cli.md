@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "89b36cf0a9eea41a39410935c14bcccd1964fc29cc090d973e384ed999731544"
+source_sha256: "f2b99c3f6c738a044951439eb9ee2f5a0670429482f61f1d0a28629c1030ab56"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,7 +22,7 @@ The `ardur` console entry point ships with the Python package. After
 
 The CLI splits into two groups:
 
-- **Protocol path** — `start`, `issue`, `verify`, `attest`. Used by builders
+- **Protocol path** — `start`, `issue`, `verify`, `anchor`, `attest`. Used by builders
   who want to issue Mission Passports and run a governance proxy directly.
 - **Personal path** — `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`,
   `uninstall`, `run`, `desktop-observe`, `personal-native-host`,
@@ -216,11 +216,22 @@ local paths or secret material. `--max-tool-calls 0` remains valid.
 
 ### `ardur verify`
 
-Verify a Mission Passport signature and decode its claims.
+Verify either a Mission Passport or a portable receipt transparency anchor.
 
 ```text
 ardur verify --token JWT [--keys-dir DIR]
+
+ardur verify --anchor-bundle FILE --keys-dir DIR
+             --transparency-log-key FILE
+             [--max-registration-delay-s SECONDS]
 ```
+
+Anchor mode performs no network request. It verifies the receipt JWS, exact
+receipt-digest binding, RFC 6962 inclusion path, signed checkpoint, and any
+backend-specific material such as a Rekor Signed Entry Timestamp. A `pending`
+bundle exits non-zero; it is an honest absence of accepted inclusion evidence,
+not a partial success. The receipt issuer key and transparency-log key are
+separate trust inputs.
 
 Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
 token verification, or any filesystem work. It exits non-zero and writes
@@ -230,6 +241,31 @@ values of `path_arg_invalid`, a message, a detail, and placeholder-only
 `ardur <command> --keys-dir .`. The failure path keeps stderr empty, emits no
 traceback, does not echo raw local paths or secrets, and leaves no artifacts.
 An explicit `--keys-dir .` is still accepted.
+
+### `ardur anchor`
+
+Drain pending receipt sidecars outside the governance decision path.
+
+```text
+ardur anchor --receipt-log FILE --backend c2sp-local-v1
+             --local-log FILE --log-private-key FILE --origin NAME
+
+ardur anchor --receipt-log FILE --backend rekor-v1
+             --keys-dir DIR [--rekor-url HTTPS_URL]
+```
+
+Receipt sinks persist an idempotent pending sidecar next to each receipt log.
+This command submits those sidecars and atomically moves successful proofs into
+the sibling `anchored/` directory. Backend failures leave the source bundle in
+`pending/`, return a non-zero exit code, and report a bounded error string for
+retry. They never alter the already-recorded PERMIT/DENY receipt.
+
+The self-hosted backend requires a separately administered Ed25519 log key and
+emits C2SP signed checkpoints. The Rekor backend submits only the receipt digest,
+a detached digest signature, and the receipt issuer public key as
+`hashedrekord` v0.0.1; it does not upload the full JWT. Rekor URLs require HTTPS.
+See the [Transparency Anchor v0.1 specification](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/)
+for trust, privacy, freshness, and split-view limitations.
 
 ### `ardur attest`
 
