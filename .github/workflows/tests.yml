@@ -184,6 +184,37 @@ jobs:
         working-directory: python
         run: python -m pytest tests/test_examples_governance_integration.py tests/test_examples_smoke.py -v --tb=short
 
+  demo-smoke:
+    name: "Demo stack smoke"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      COMPOSE_PROJECT_NAME: ardur-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      ARDUR_SPIRE_SERVER_PORT: "18081"
+      ARDUR_PROXY_PORT: "18443"
+      ARDUR_HUB_PORT: "18765"
+      ARDUR_API_TOKEN: ci-demo-token
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Start the full demo stack and wait for health
+        run: make demo DEMO_UP_ARGS="--detach --wait --wait-timeout 240"
+
+      - name: Verify health, PERMIT, DENY, and signed attestation
+        run: ./scripts/verify-mvp.sh
+
+      - name: Show demo status and logs on failure
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color
+
+      - name: Remove demo containers and volumes
+        if: always()
+        run: make demo-down
+
   latency-bench:
     name: "Latency benchmarks (informational)"
     runs-on: ubuntu-latest
@@ -245,6 +276,7 @@ jobs:
       - go-cve
       - rwt-phase1
       - examples-smoke
+      - demo-smoke
     runs-on: ubuntu-latest
     steps:
       - name: Require every blocking test job
@@ -256,6 +288,7 @@ jobs:
           GO_CVE: ${{ needs['go-cve'].result }}
           RWT_PHASE1: ${{ needs['rwt-phase1'].result }}
           EXAMPLES_SMOKE: ${{ needs['examples-smoke'].result }}
+          DEMO_SMOKE: ${{ needs['demo-smoke'].result }}
         run: |
           set -euo pipefail
           require_success() {
@@ -273,3 +306,4 @@ jobs:
           require_success go-cve "$GO_CVE"
           require_success rwt-phase1 "$RWT_PHASE1"
           require_success examples-smoke "$EXAMPLES_SMOKE"
+          require_success demo-smoke "$DEMO_SMOKE"

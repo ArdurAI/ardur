@@ -28,7 +28,7 @@ At the reviewed `dev` tree on 2026-07-09, the current gates were:
 
 | Gate | Verified result |
 |---|---|
-| Python local matrix with the CI coverage flags (Python 3.12) | 1,358 passed, 32 skipped, 85% coverage |
+| Python local matrix with the CI coverage flags (Python 3.13) | 1,363 passed, 32 skipped, 85% coverage |
 | Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, seccomp smoke, and full `ardur run --enforce` seccomp E2E passed |
@@ -84,7 +84,9 @@ for the expected bundle result and the optional live-Claude path.
 `make demo` plus [`scripts/verify-mvp.sh`](scripts/verify-mvp.sh) is the
 authenticated Docker path. Configure `ARDUR_API_TOKEN` before starting it; the
 [MVP evaluator guide](docs/mvp-evaluator-guide.md) contains the tested,
-copy-paste authenticated lifecycle.
+copy-paste authenticated lifecycle. CI starts this full stack from fresh named
+volumes and requires the health, `PERMIT`, `DENY`, and signed-attestation
+lifecycle to pass before the aggregate test gate succeeds.
 
 ## Fastest MVP Path: Claude Code
 
@@ -155,7 +157,7 @@ This repo currently includes:
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`)
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
 - runnable framework adapters under `examples/`: LangChain, LangGraph, AutoGen, browser extension, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixtures. JSON mission examples remain in `examples/missions/`
-- dedicated Python (3.10 + 3.13) and Go CI under `.github/workflows/tests.yml`, including the offline examples-smoke regression in `python/tests/test_examples_smoke.py`, plus CodeQL, link-check, secret-scan, format validation, and the Hugo build
+- dedicated Python (3.10 + 3.13) and Go CI under `.github/workflows/tests.yml`, including the offline examples-smoke regression in `python/tests/test_examples_smoke.py` and a required fresh-volume Compose demo lifecycle, plus CodeQL, link-check, secret-scan, format validation, and the Hugo build
 - the Hugo public evidence site source under `site/`, with each public claim linkable to its backing source file
 - bootstrap and verification scripts under `scripts/` (`conductor-bootstrap.sh`, `setup-dev.sh`, `check-local.sh`)
 - agent-specific public guides under [`docs/agent-instructions/`](docs/agent-instructions/) (Conductor, Codex, Claude)

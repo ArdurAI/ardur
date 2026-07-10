@@ -4,13 +4,14 @@
 ARDUROOT := $(shell pwd)
 PYDIR   := python
 GODIR   := go
+DEMO_UP_ARGS ?=
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 	 awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 demo: ## Start the full MVP stack (docker compose up --build)
-	docker compose up --build
+	docker compose up --build $(DEMO_UP_ARGS)
 
 demo-down: ## Stop and remove the full MVP stack
 	docker compose down -v
