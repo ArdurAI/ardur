@@ -38,6 +38,7 @@ PLUGIN_ASSETS = (
     PurePosixPath("hooks/subagent_start"),
     PurePosixPath("hooks/subagent_stop"),
 )
+REQUIRED_RUNTIME_FILES = (PurePosixPath("vibap/launch_gate.py"),)
 
 
 class DistributionValidationError(ValueError):
@@ -167,6 +168,8 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
             PurePosixPath("vibap/_specs/mission_declaration_v01.schema.json") in names,
             "wheel does not contain the embedded mission schema",
         )
+        for runtime_file in REQUIRED_RUNTIME_FILES:
+            require(runtime_file in names, f"wheel is missing runtime file: {runtime_file}")
         expected_plugin_files = plugin_files()
         plugin_root = PurePosixPath("vibap/_plugins/claude-code")
         actual_plugin_files = {
@@ -224,6 +227,12 @@ def validate_sdist(sdist_path: Path, expected_version: str) -> None:
             require(
                 path in names and names[path].isfile(),
                 f"sdist is missing {relative_path}",
+            )
+        for runtime_file in REQUIRED_RUNTIME_FILES:
+            path = root / runtime_file
+            require(
+                path in names and names[path].isfile(),
+                f"sdist is missing runtime file: {runtime_file}",
             )
         require(
             read_required(archive.extractfile(names[root / "LICENSE"]), "sdist LICENSE")

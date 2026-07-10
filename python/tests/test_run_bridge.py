@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from argparse import Namespace
 import json
+import os
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -567,6 +569,132 @@ def test_wrap_command_with_seccomp_shim_builds_expected_argv(monkeypatch: pytest
         "claude",
         "--foo",
     ]
+
+
+def test_wrap_command_with_launch_gate_builds_expected_argv() -> None:
+    assert run_bridge._wrap_command_with_launch_gate(["agent", "--flag"], ready_fd=17) == [
+        sys.executable,
+        "-I",
+        str(Path(run_bridge.__file__).with_name("launch_gate.py")),
+        "--ready-fd",
+        "17",
+        "--",
+        "agent",
+        "--flag",
+    ]
+
+
+def test_launch_gate_fails_closed_when_parent_does_not_release(tmp_path: Path) -> None:
+    marker = tmp_path / "target-ran"
+    read_fd, write_fd = os.pipe()
+    proc = subprocess.Popen(
+        run_bridge._wrap_command_with_launch_gate(
+            [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+            ready_fd=read_fd,
+        ),
+        pass_fds=(read_fd,),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    os.close(read_fd)
+    os.close(write_fd)
+
+    _stdout, stderr = proc.communicate(timeout=5)
+    assert proc.returncode == 125
+    assert b"parent exited before releasing target" in stderr
+    assert not marker.exists()
+
+
+def test_launch_gate_ignores_project_local_module_shadow(tmp_path: Path) -> None:
+    shadow_marker = tmp_path / "shadow-ran"
+    target_marker = tmp_path / "target-ran"
+    shadow_package = tmp_path / "vibap"
+    shadow_package.mkdir()
+    (shadow_package / "__init__.py").write_text("", encoding="utf-8")
+    (shadow_package / "launch_gate.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+
+    read_fd, write_fd = os.pipe()
+    proc = subprocess.Popen(
+        run_bridge._wrap_command_with_launch_gate(
+            [sys.executable, "-c", f"from pathlib import Path; Path({str(target_marker)!r}).touch()"],
+            ready_fd=read_fd,
+        ),
+        cwd=tmp_path,
+        pass_fds=(read_fd,),
+    )
+    os.close(read_fd)
+    os.write(write_fd, b"\x01")
+    os.close(write_fd)
+
+    assert proc.wait(timeout=5) == 0
+    assert target_marker.is_file()
+    assert not shadow_marker.exists()
+
+
+def test_ardur_run_gates_target_through_registration_and_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "target-ran"
+    target = tmp_path / "target.py"
+    target.write_text(
+        f"import os\nfrom pathlib import Path\nPath({str(marker)!r}).write_text(str(os.getpid()))\n",
+        encoding="utf-8",
+    )
+    cgroup_path = tmp_path / "run-cgroup"
+    cgroup_path.mkdir()
+
+    class FakeCgroup:
+        cgroup_id = 4242
+        path = cgroup_path
+        adopted_pid: int | None = None
+        cleaned = False
+
+        def adopt_pid(self, pid: int) -> None:
+            self.adopted_pid = pid
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+
+    fake_cgroup = FakeCgroup()
+    monkeypatch.setattr(kc, "create_run_cgroup", lambda _session_id: fake_cgroup)
+    monkeypatch.setattr(
+        run_bridge,
+        "_plan_seccomp_shim",
+        lambda *, enabled: SeccompShimPlan(tier=kc.ENFORCEMENT_TIER_BPF_LSM, wrapped=False),
+    )
+
+    def correlate(**kwargs: object) -> kc.CorrelationResult:
+        assert fake_cgroup.adopted_pid == kwargs["pid"]
+        assert not marker.exists(), "target executed before daemon registration completed"
+        return kc.CorrelationResult(
+            available=True,
+            reason="test registration complete",
+            method="test",
+            cgroup_id=fake_cgroup.cgroup_id,
+            cgroup_path=str(fake_cgroup.path),
+        )
+
+    def apply_policy(**_kwargs: object) -> dict[str, object]:
+        assert not marker.exists(), "target executed before BPF policy application completed"
+        return {"applied": True, "reason": "test policy applied"}
+
+    monkeypatch.setattr(run_bridge, "_correlate_launch", correlate)
+    monkeypatch.setattr(run_bridge, "_apply_kernel_policy", apply_policy)
+
+    result = run_governed(
+        command=[sys.executable, str(target)],
+        mission="Gate target exec through kernel registration.",
+        home=tmp_path / "gate-home",
+        via="env",
+    )
+
+    assert result.exit_code == 0
+    assert marker.is_file()
+    assert int(marker.read_text(encoding="utf-8")) == fake_cgroup.adopted_pid
+    assert fake_cgroup.cleaned is True
 
 
 def test_verify_seccomp_listener_attached_true(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
