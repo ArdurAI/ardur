@@ -29,6 +29,8 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e python/
 
+python3 scripts/run-claude-deny-demo.py
+
 python3 scripts/run-rwt-phase1-fresh-user.py \
   --expected-origin-dev "$(git rev-parse --short=12 origin/dev)" \
   --output-dir /tmp/ardur-rwt-phase1
@@ -43,6 +45,12 @@ stale or mismatched pins still block the proof path.
 The bundle is the primary shareable proof artifact for a no-key run. Read it
 with [Read The Phase 1 Evidence Bundle](read-phase1-evidence-bundle.md) before
 copying any claim into a demo note, launch draft, or issue response.
+
+The short deny demo is the live talk-track opener: it deliberately presents a
+destructive Bash request to the real local hook adapter, requires the deny
+before host dispatch, verifies that its canary is unchanged, and validates the
+signed violation receipt. Its file-state checks are not independent process or
+kernel evidence; the broader RWT bundle remains the shareable evidence ledger.
 
 Required no-key signals:
 
@@ -98,7 +106,7 @@ that reveal more about the host than the demo needs.
 |---|---|---|
 | Source-checkout install and Python package import. | PyPI/Homebrew/OCI release readiness. | Tagged package-manager release after packaging gates. |
 | `ARDUR.md` creation and Claude Code protection setup. | Account login, provider setup, or hosted service deployment. | Friendlier installer and proof viewers. |
-| Simulated Claude Code hook allow/deny receipts with chain verification. | Provider-hidden reasoning or server-side tool calls. | More host adapters with the same evidence boundary. |
+| Deliberate Claude Code hook denial before host dispatch, with signed receipt and post-deny canary check. | Independent process/kernel evidence or proof of provider-hidden behavior. | Filesystem snapshot and Linux eBPF correlation phases. |
 | Redacted no-key `bundle.redacted.json` with explicit claim mapping. | Subprocess, kernel, filesystem, or network capture below the tool boundary. | Filesystem snapshot and Linux eBPF capture phases. |
 | Optional live-Claude report when the local binary is already authenticated. | Universal CLI support across Codex, Gemini, Kimi, or future tools. | Tool-agnostic CLI/kernel capture work. |
 
