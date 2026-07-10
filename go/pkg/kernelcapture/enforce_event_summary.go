@@ -39,6 +39,24 @@ type EnforceEventSummary struct {
 	// chain head. A verifier who trusts this digest (e.g. because it was
 	// attested) can validate the full evidence log against it.
 	ChainDigest string `json:"chain_digest,omitempty"`
+	// TamperChainStartSeq is the first global tamper-chain sequence that could
+	// have occurred during this session. TamperChainLastSeq/TamperChainDigest
+	// identify the coherent chain head captured by session_status and therefore
+	// by the signed kernel_enforcement attestation claim.
+	TamperChainStartSeq uint64 `json:"tamper_chain_start_seq,omitempty"`
+	TamperChainLastSeq  uint64 `json:"tamper_chain_last_seq,omitempty"`
+	TamperChainDigest   string `json:"tamper_chain_digest,omitempty"`
+	// KillSwitchChangeCount counts committed global kill-switch transitions
+	// while this session was active. EngagedDuringSession remains true after a
+	// later disengage so an engage->disengage interval cannot disappear from the
+	// final signed snapshot.
+	KillSwitchChangeCount          uint64 `json:"kill_switch_change_count"`
+	KillSwitchEngagedDuringSession bool   `json:"kill_switch_engaged_during_session"`
+	// KillSwitchEvidenceGap is set on any receipt-persistence failure, even when
+	// the compensating kernel-state rollback succeeds, because partial I/O can
+	// leave the evidence file uncertain. It prevents that uncertainty from being
+	// represented as a fully evidenced session.
+	KillSwitchEvidenceGap bool `json:"kill_switch_evidence_gap"`
 }
 
 // EnforceEventSummaryAccumulator accumulates EnforceEventSummary counters as
@@ -93,16 +111,55 @@ func (a *EnforceEventSummaryAccumulator) RecordLostSamples(n uint64) {
 	a.summary.LostSamples += n
 }
 
+// InitializeTamperWindow records the first global tamper sequence that may
+// overlap this session and whether enforcement was already suspended when the
+// session was registered.
+func (a *EnforceEventSummaryAccumulator) InitializeTamperWindow(startSeq uint64, killSwitchEngaged bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.summary.TamperChainStartSeq = startSeq
+	a.summary.KillSwitchEngagedDuringSession = killSwitchEngaged
+}
+
+// RecordKillSwitchChange records one committed transition affecting this
+// active session. Once engaged, the during-session flag stays true even after
+// a later disengage.
+func (a *EnforceEventSummaryAccumulator) RecordKillSwitchChange(engaged bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.summary.KillSwitchChangeCount++
+	if engaged {
+		a.summary.KillSwitchEngagedDuringSession = true
+	}
+}
+
+// RecordKillSwitchEvidenceGap marks that the kernel state may have changed
+// without a committed receipt because both persistence and rollback failed.
+func (a *EnforceEventSummaryAccumulator) RecordKillSwitchEvidenceGap(engaged bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.summary.KillSwitchEvidenceGap = true
+	if engaged {
+		a.summary.KillSwitchEngagedDuringSession = true
+	}
+}
+
 // Snapshot returns a detached copy of the current summary.
 func (a *EnforceEventSummaryAccumulator) Snapshot() EnforceEventSummary {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := EnforceEventSummary{
-		TotalEvents: a.summary.TotalEvents,
-		OrphanCount: a.summary.OrphanCount,
-		LostSamples: a.summary.LostSamples,
-		LastSeq:     a.summary.LastSeq,
-		ChainDigest: a.summary.ChainDigest,
+		TotalEvents:                    a.summary.TotalEvents,
+		OrphanCount:                    a.summary.OrphanCount,
+		LostSamples:                    a.summary.LostSamples,
+		LastSeq:                        a.summary.LastSeq,
+		ChainDigest:                    a.summary.ChainDigest,
+		TamperChainStartSeq:            a.summary.TamperChainStartSeq,
+		TamperChainLastSeq:             a.summary.TamperChainLastSeq,
+		TamperChainDigest:              a.summary.TamperChainDigest,
+		KillSwitchChangeCount:          a.summary.KillSwitchChangeCount,
+		KillSwitchEngagedDuringSession: a.summary.KillSwitchEngagedDuringSession,
+		KillSwitchEvidenceGap:          a.summary.KillSwitchEvidenceGap,
 	}
 	if len(a.summary.VerdictCounts) > 0 {
 		out.VerdictCounts = make(map[string]uint64, len(a.summary.VerdictCounts))

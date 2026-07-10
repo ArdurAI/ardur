@@ -105,6 +105,13 @@ type daemon struct {
 	// state change from external tampering.
 	tamperChain               *kernelcapture.TamperReceiptChain
 	expectedKillSwitchEngaged bool
+	// tamperWriteMu serializes the live-state snapshot, kill-switch mutation,
+	// transactional chain append, and JSONL write. This keeps audit ticks from
+	// observing a new map state before its attributed change receipt and keeps
+	// the on-disk line order identical to Seq order. Distinct from applyMu: a
+	// kill-switch change holds applyMu (a map mutation) but audit ticks do not,
+	// so applyMu cannot serialize both evidence writers.
+	tamperWriteMu sync.Mutex
 
 	// seccompPolicy holds the seccomp tier's OP_NET_CONNECT policy (plan
 	// E4) — always kept in sync by handleApplyPolicy regardless of which
@@ -625,7 +632,10 @@ func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest, ha
 	}
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
+	d.tamperWriteMu.Lock()
+	defer d.tamperWriteMu.Unlock()
 	sw := req.SetKillSwitch
+	prior := d.expectedKillSwitch()
 	if err := kernelcapture.SetKillSwitch(d.policyMaps, sw.Engaged); err != nil {
 		d.log.Error("set_kill_switch failed", "engaged", sw.Engaged, "error", err)
 		return kernelcapture.DaemonProtocolResponse{
@@ -635,10 +645,63 @@ func (d *daemon) handleSetKillSwitch(req kernelcapture.DaemonProtocolRequest, ha
 			Error:           fmt.Sprintf("set kill switch: %v", err),
 		}
 	}
+	if prior == sw.Engaged {
+		d.log.Info("kill switch already in requested state", "engaged", sw.Engaged,
+			"peer_uid", handshake.Authorization.UID, "peer_pid", handshake.Authorization.PID)
+		return kernelcapture.DaemonProtocolResponse{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+			OK:              true,
+		}
+	}
+	// Record the transition as an attributed, hash-chained tamper receipt (#123)
+	// BEFORE returning OK, so a caller that sees success can rely on the change
+	// having been committed to the evidence stream, not just the kernel map.
+	finalized, err := d.recordKillSwitchChangeLocked(prior, sw.Engaged, handshake.Authorization)
+	if err != nil {
+		rollbackErr := kernelcapture.SetKillSwitch(d.policyMaps, prior)
+		if rollbackErr != nil {
+			d.mu.Lock()
+			d.expectedKillSwitchEngaged = sw.Engaged
+			for _, summary := range d.enforceSummaries {
+				summary.RecordKillSwitchEvidenceGap(sw.Engaged)
+			}
+			d.mu.Unlock()
+			d.log.Error("kill switch changed without durable evidence and rollback failed",
+				"engaged", sw.Engaged, "prior", prior, "evidence_error", err,
+				"rollback_error", rollbackErr, "peer_uid", handshake.Authorization.UID,
+				"peer_pid", handshake.Authorization.PID)
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+				OK:              false,
+				Error:           fmt.Sprintf("kill switch changed but evidence persistence failed and rollback failed; kernel state requires inspection: evidence=%v; rollback=%v", err, rollbackErr),
+			}
+		}
+		d.mu.Lock()
+		for _, summary := range d.enforceSummaries {
+			summary.RecordKillSwitchEvidenceGap(false)
+		}
+		d.mu.Unlock()
+		d.log.Error("kill switch evidence persistence failed; kernel state rolled back",
+			"requested", sw.Engaged, "restored", prior, "error", err,
+			"peer_uid", handshake.Authorization.UID, "peer_pid", handshake.Authorization.PID)
+		return kernelcapture.DaemonProtocolResponse{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
+			OK:              false,
+			Error:           fmt.Sprintf("persist kill switch evidence: %v; kernel state restored to engaged=%v", err, prior),
+		}
+	}
 	d.mu.Lock()
 	d.expectedKillSwitchEngaged = sw.Engaged
+	for _, summary := range d.enforceSummaries {
+		summary.RecordKillSwitchChange(sw.Engaged)
+	}
 	d.mu.Unlock()
-	d.log.Warn("kill switch changed", "engaged", sw.Engaged)
+	d.log.Warn("kill switch changed", "engaged", sw.Engaged, "prior", prior,
+		"tamper_seq", finalized.Seq, "peer_uid", handshake.Authorization.UID,
+		"peer_pid", handshake.Authorization.PID)
 	return kernelcapture.DaemonProtocolResponse{
 		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
 		Method:          kernelcapture.DaemonProtocolMethodSetKillSwitch,
@@ -687,6 +750,8 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	if sessionID == "" || reg == nil {
 		return
 	}
+	d.tamperWriteMu.Lock()
+	defer d.tamperWriteMu.Unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -705,7 +770,10 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 		RestartGrace:     3 * time.Second,
 	})
 	d.enforceChains[sessionID] = kernelcapture.NewEnforceReceiptChain()
-	d.enforceSummaries[sessionID] = kernelcapture.NewEnforceEventSummaryAccumulator()
+	summary := kernelcapture.NewEnforceEventSummaryAccumulator()
+	lastTamperSeq, _ := d.tamperChain.Head()
+	summary.InitializeTamperWindow(lastTamperSeq+1, d.expectedKillSwitchEngaged)
+	d.enforceSummaries[sessionID] = summary
 
 	d.log.Info("session registered",
 		"session_id", sessionID,
@@ -844,14 +912,29 @@ func (d *daemon) expectedKillSwitch() bool {
 // chained and written regardless of Drift, so the chain itself is evidence
 // that audits kept running — a gap in Seq is as suspicious as a drift entry.
 func (d *daemon) recordTamperAudit(result kernelcapture.TamperAuditResult, log *slog.Logger) {
+	d.tamperWriteMu.Lock()
+	defer d.tamperWriteMu.Unlock()
+	d.recordTamperAuditLocked(result, log)
+}
+
+// recordCurrentTamperAudit serializes the live-state snapshot with explicit
+// kill-switch changes, so an audit tick cannot observe the new map state before
+// its attributed change receipt is committed.
+func (d *daemon) recordCurrentTamperAudit(auditor kernelcapture.GuardLinkAuditor, log *slog.Logger) {
+	d.tamperWriteMu.Lock()
+	defer d.tamperWriteMu.Unlock()
+	d.recordTamperAuditLocked(kernelcapture.RunTamperAudit(auditor, d.expectedKillSwitch()), log)
+}
+
+func (d *daemon) recordTamperAuditLocked(result kernelcapture.TamperAuditResult, log *slog.Logger) {
 	entry := kernelcapture.TamperReceiptEntry{
 		SchemaVersion: kernelcapture.TamperReceiptSchema,
 		RecordedAt:    time.Now().UTC(),
 		Result:        result,
 	}
-	finalized, err := d.tamperChain.Append(entry)
+	finalized, err := d.appendAndPersistTamperEntryLocked(entry)
 	if err != nil {
-		log.Warn("hash-chain tamper receipt", "error", err)
+		log.Warn("persist tamper audit receipt", "error", err)
 		return
 	}
 	if result.Drift {
@@ -859,27 +942,55 @@ func (d *daemon) recordTamperAudit(result kernelcapture.TamperAuditResult, log *
 	} else {
 		log.Debug("tamper audit tick clean", "seq", finalized.Seq)
 	}
+}
 
-	line, err := json.Marshal(finalized)
-	if err != nil {
-		log.Warn("marshal tamper receipt", "error", err)
-		return
+// recordKillSwitchChangeLocked hash-chains one set_kill_switch state transition into
+// the same tamper-evidence stream as the audit ticks (issue #123), attributed
+// to the peer that requested it, so toggling the global fail-open kill switch
+// leaves an offline-verifiable receipt instead of only a stderr line the next
+// audit tick can't even see. handleSetKillSwitch holds tamperWriteMu across the
+// map write and this call, and treats an error as a failed operation with a
+// compensating map rollback.
+func (d *daemon) recordKillSwitchChangeLocked(prior, engaged bool, actor kernelcapture.DaemonPeerAuthorization) (kernelcapture.TamperReceiptEntry, error) {
+	now := time.Now().UTC()
+	entry := kernelcapture.TamperReceiptEntry{
+		SchemaVersion: kernelcapture.TamperReceiptSchema,
+		RecordedAt:    now,
+		KillSwitch: &kernelcapture.KillSwitchChangeEvent{
+			ChangedAt:    now,
+			PriorEngaged: prior,
+			Engaged:      engaged,
+			ActorUID:     actor.UID,
+			ActorPID:     actor.PID,
+		},
 	}
-	line = append(line, '\n')
+	return d.appendAndPersistTamperEntryLocked(entry)
+}
 
+// appendAndPersistTamperEntryLocked assigns a sequence/hash and appends the
+// JSONL line while tamperWriteMu is held. The chain commits only after the
+// append succeeds, so a persistence failure cannot create a hidden sequence
+// gap in the next successful on-disk entry.
+func (d *daemon) appendAndPersistTamperEntryLocked(entry kernelcapture.TamperReceiptEntry) (kernelcapture.TamperReceiptEntry, error) {
 	dir := filepath.Join(d.evidenceDir, "_tamper")
 	path := filepath.Join(dir, "tamper_audit.jsonl")
 	if err := prevalidateKernelReceiptAppendPath(d.fs, d.evidenceDir, dir, path); err != nil {
-		log.Warn("prevalidate tamper receipt path", "path", path, "error", err)
-		return
+		return kernelcapture.TamperReceiptEntry{}, fmt.Errorf("prevalidate tamper receipt path %q: %w", path, err)
 	}
 	if err := d.fs.MkdirAll(dir, 0o700); err != nil {
-		log.Warn("create evidence dir for tamper receipt", "path", dir, "error", err)
-		return
+		return kernelcapture.TamperReceiptEntry{}, fmt.Errorf("create tamper evidence directory %q: %w", dir, err)
 	}
-	if err := d.fs.AppendFile(path, line, 0o600); err != nil {
-		log.Warn("append tamper receipt", "path", path, "error", err)
-	}
+	return d.tamperChain.AppendPersisted(entry, func(finalized kernelcapture.TamperReceiptEntry) error {
+		line, err := json.Marshal(finalized)
+		if err != nil {
+			return fmt.Errorf("marshal tamper receipt: %w", err)
+		}
+		line = append(line, '\n')
+		if err := d.fs.AppendFile(path, line, 0o600); err != nil {
+			return fmt.Errorf("append tamper receipt %q: %w", path, err)
+		}
+		return nil
+	})
 }
 
 // processKernelEvent is called by the platform-specific event loop for each
@@ -1085,24 +1196,40 @@ func prevalidateKernelReceiptPathNotSymlink(fsys evidenceFS, path string, label 
 	return nil
 }
 
-func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) (err error) {
+func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, perm)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := f.Close(); err == nil {
-			err = closeErr
+	start, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return errors.Join(err, f.Close())
+	}
+	rollback := func(cause error) error {
+		truncateErr := f.Truncate(start)
+		var syncErr error
+		if truncateErr == nil {
+			syncErr = f.Sync()
 		}
-	}()
+		return errors.Join(cause, truncateErr, syncErr, f.Close())
+	}
 	written, err := f.Write(data)
 	if err != nil {
-		return err
+		return rollback(err)
 	}
 	if written != len(data) {
-		return io.ErrShortWrite
+		return rollback(io.ErrShortWrite)
 	}
-	return err
+	if err := f.Sync(); err != nil {
+		return rollback(err)
+	}
+	if err := f.Close(); err != nil {
+		// A successful fsync committed the complete line, but report close
+		// failure only after restoring the original append offset when possible.
+		truncateErr := os.Truncate(path, start)
+		return errors.Join(err, truncateErr)
+	}
+	return nil
 }
 
 func main() {

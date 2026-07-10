@@ -45,6 +45,15 @@ type ProcessGuardHandles struct {
 // close it independently; Close() on the handles cleans it up.
 func (h *ProcessGuardHandles) Reader() *ringbuf.Reader { return h.reader }
 
+// DroppedEventsMap returns the enforce_events_dropped counter map (issue #122):
+// a single-slot BPF_MAP_TYPE_ARRAY the BPF program increments with an atomic
+// add every time a ringbuf reserve fails, i.e. every enforcement event the
+// kernel decided but could not deliver to userspace. The daemon reads this to
+// report kernel-side drops the ringbuf's own LostSamples (a ring-full count the
+// verifier reports only on some kernels) does not surface. May be nil on the
+// error paths that never populate objs; callers must nil-check.
+func (h *ProcessGuardHandles) DroppedEventsMap() *ebpf.Map { return h.objs.EnforceEventsDropped }
+
 // Close releases all BPF objects in reverse-acquisition order.
 func (h *ProcessGuardHandles) Close() {
 	if h.reader != nil {
@@ -150,12 +159,13 @@ func LoadAndAttachProcessGuardEBPF() (*ProcessGuardHandles, error) {
 // BPF-LSM links and its policy-state maps (issue #124).
 //
 // Unlike the process-exec tracepoint (PinnedEBPFPaths: 2 links + 1 ringbuf
-// map), the guard has three LSM links and seven maps. Only the six maps that
-// hold policy STATE plus the enforce_events ringbuf are listed here — the
-// three per-CPU scratch maps (file_allow_scratch, net_lpm_scratch,
-// path_lpm_scratch) are working memory the BPF program repopulates on every
-// invocation; they carry no state worth preserving across a restart and are
-// safe to recreate empty on every load.
+// map), the guard has three LSM links and eight maps. Only the six maps that
+// hold policy STATE plus the enforce_events ringbuf and its drop counter
+// (enforce_events_dropped, issue #122) are listed here — the three per-CPU
+// scratch maps (file_allow_scratch, net_lpm_scratch, path_lpm_scratch) are
+// working memory the BPF program repopulates on every invocation; they carry
+// no state worth preserving across a restart and are safe to recreate empty on
+// every load.
 type PinnedGuardPaths struct {
 	BprmLinkPath       string
 	FileOpenLinkPath   string
@@ -168,6 +178,12 @@ type PinnedGuardPaths struct {
 	CgroupManagedPath   string
 	KillSwitchPath      string
 	EnforceEventsPath   string
+	// EnforceEventsDroppedPath pins the enforce_events_dropped counter map
+	// (issue #122). The BPF program increments it whenever a ringbuf reserve
+	// fails, so a restarted daemon can keep reading a monotonic drop total the
+	// still-attached programs never reset — without a pin the fresh reload would
+	// see a zeroed map and under-report kernel-side drops as it does today.
+	EnforceEventsDroppedPath string
 }
 
 // allPaths returns every pin path, for the "ensure directory, then pin"
@@ -177,7 +193,7 @@ func (p PinnedGuardPaths) allPaths() []string {
 		p.BprmLinkPath, p.FileOpenLinkPath, p.SocketConnLinkPath,
 		p.CgroupOpPolicyPath, p.CgroupPathAllowPath, p.CgroupFileAllowPath,
 		p.CgroupNetAllowPath, p.CgroupManagedPath, p.KillSwitchPath,
-		p.EnforceEventsPath,
+		p.EnforceEventsPath, p.EnforceEventsDroppedPath,
 	}
 }
 
@@ -197,6 +213,8 @@ func DefaultPinnedGuardPaths() PinnedGuardPaths {
 		CgroupManagedPath:   base + "cgroup_managed",
 		KillSwitchPath:      base + "kill_switch",
 		EnforceEventsPath:   base + "enforce_events",
+
+		EnforceEventsDroppedPath: base + "enforce_events_dropped",
 	}
 }
 
@@ -209,14 +227,15 @@ func DefaultPinnedGuardPaths() PinnedGuardPaths {
 //
 // On first start (no pinned state at paths): loads and attaches the eBPF
 // program as usual (LoadAndAttachProcessGuardEBPF), then pins all three LSM
-// links and the six policy-state maps (+ the enforce_events ringbuf map) to
-// bpffs. The pinned links keep the LSM hooks — and thus enforcement — live in
+// links and the six policy-state maps (+ the enforce_events ringbuf map and
+// its enforce_events_dropped drop counter) to bpffs. The pinned links keep the
+// LSM hooks — and thus enforcement — live in
 // the kernel even after this daemon process exits; the pinned maps keep every
 // applied policy's contents intact, so there is nothing to "re-apply" after a
 // restart that successfully reuses these pins: the kernel never stopped
 // enforcing what was already applied.
 //
-// On restart (all ten pins present): loads them back without re-attaching or
+// On restart (all eleven pins present): loads them back without re-attaching or
 // re-applying anything, matching the tracepoint's restart path. The three LSM
 // programs have been continuously attached and enforcing in the kernel since
 // the prior daemon start; this call just re-establishes this process's
@@ -248,7 +267,7 @@ func LoadAndAttachProcessGuardEBPFPinned(paths PinnedGuardPaths) (*ProcessGuardH
 
 	// Each pin is independently non-fatal: a partial pin set (e.g. links
 	// pinned but a map pin fails) makes tryLoadPinnedGuardState fail on the
-	// next restart — by design, since it requires all ten — falling back to
+	// next restart — by design, since it requires all eleven — falling back to
 	// this fresh-load path again rather than reusing inconsistent state.
 	pins := []struct {
 		path string
@@ -264,6 +283,7 @@ func LoadAndAttachProcessGuardEBPFPinned(paths PinnedGuardPaths) (*ProcessGuardH
 		{paths.CgroupManagedPath, h.objs.CgroupManaged.Pin},
 		{paths.KillSwitchPath, h.objs.KillSwitch.Pin},
 		{paths.EnforceEventsPath, h.objs.EnforceEvents.Pin},
+		{paths.EnforceEventsDroppedPath, h.objs.EnforceEventsDropped.Pin},
 	}
 	for _, p := range pins {
 		if mkErr := os.MkdirAll(filepath.Dir(p.path), 0o700); mkErr == nil {
@@ -283,9 +303,10 @@ func RemovePinnedGuardState(paths PinnedGuardPaths) {
 	}
 }
 
-// tryLoadPinnedGuardState attempts to load all three LSM links and all seven
-// (six policy + enforce_events) maps from bpffs. Returns ok=true only if
-// every one of the ten succeeds; otherwise it closes any partially-opened
+// tryLoadPinnedGuardState attempts to load all three LSM links and all eight
+// (six policy + enforce_events + its drop counter) maps from bpffs. Returns
+// ok=true only if every one of the eleven succeeds; otherwise it closes any
+// partially-opened
 // handles and returns ok=false so the caller falls back to a fresh
 // load/attach/pin rather than binding a reader or policy maps to inconsistent
 // state (e.g. links attached but pointing at maps this process never
@@ -366,6 +387,11 @@ func tryLoadPinnedGuardState(paths PinnedGuardPaths) (*ProcessGuardHandles, bool
 		closeAll()
 		return nil, false
 	}
+	enforceEventsDropped, ok := loadMap(paths.EnforceEventsDroppedPath)
+	if !ok {
+		closeAll()
+		return nil, false
+	}
 
 	bprmProgID, err := linkProgramID(bprmLink)
 	if err != nil {
@@ -405,6 +431,7 @@ func tryLoadPinnedGuardState(paths PinnedGuardPaths) (*ProcessGuardHandles, bool
 	h.objs.CgroupManaged = cgroupManaged
 	h.objs.KillSwitch = killSwitch
 	h.objs.EnforceEvents = enforceEvents
+	h.objs.EnforceEventsDropped = enforceEventsDropped
 	// processGuardPrograms fields are left at their zero value (nil
 	// *ebpf.Program): cilium/ebpf's Program.Close() and Map.Close() are both
 	// nil-receiver-safe, so ProcessGuardHandles.Close() -> objs.Close() works

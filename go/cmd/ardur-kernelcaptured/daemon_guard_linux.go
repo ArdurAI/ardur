@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
 )
 
@@ -115,7 +116,7 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 
 	go runTamperAuditTicker(ctx, handles, d, log)
 
-	return consumeEnforceEvents(ctx, ringbufEnforceEventReader{handles.Reader()}, d, log)
+	return consumeEnforceEvents(ctx, newRingbufEnforceEventReader(handles.Reader(), handles.DroppedEventsMap(), log), d, log)
 }
 
 // runTamperAuditTicker re-verifies the loaded guard's links and kill-switch
@@ -130,8 +131,7 @@ func runTamperAuditTicker(ctx context.Context, handles *kernelcapture.ProcessGua
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			result := kernelcapture.RunTamperAudit(handles, d.expectedKillSwitch())
-			d.recordTamperAudit(result, log)
+			d.recordCurrentTamperAudit(handles, log)
 		}
 	}
 }
@@ -148,18 +148,81 @@ func runTamperAuditTicker(ctx context.Context, handles *kernelcapture.ProcessGua
 // prefers that as the returned error when it's set, so there's no need to
 // pattern-match cancellation-flavored error text here too.
 //
-// LostSamples is always 0: unlike perf.Record, cilium/ebpf's ringbuf.Record
-// carries no lost-sample counter at any version — BPF_MAP_TYPE_RINGBUF
-// reservation failures happen inside the BPF program itself (emit_event's
-// bpf_ringbuf_reserve returning NULL) and are never surfaced to the
-// userspace reader. There is nothing this adapter can report here; the field
-// exists in enforceEventRecord for a future producer that can supply it
-// (e.g. a perf-buffer-backed transport), not for this one.
+// LostSamples reporting (issue #122): cilium/ebpf's ringbuf.Record carries no
+// lost-sample counter — BPF_MAP_TYPE_RINGBUF reservation failures happen inside
+// the BPF program itself (emit_event's bpf_ringbuf_reserve returning NULL) and
+// are never surfaced to the userspace reader, so this adapter historically
+// reported a hardcoded 0 and the daemon's "no gaps" accounting was silently
+// blind to every kernel-side drop. To make that accounting honest,
+// process_guard.bpf.c now increments a dedicated enforce_events_dropped counter
+// map (atomic add) on each reserve failure, and this adapter reads that counter
+// once per delivered event, reporting the increase since the previous event as
+// that record's LostSamples. That routes kernel-side drops into the exact same
+// per-session summary path perf-style lost samples would use
+// (consumeEnforceEvents -> enforceOrphanSummary.RecordLostSamples). If the
+// counter is unavailable — nil map (an older pin set without it) or a transient
+// lookup failure — LostSamples falls back to 0; a missing drop count must never
+// stall enforcement-event delivery.
+//
+// Drops are observed lazily, matching perf's "attach the lost count to the next
+// good sample" contract: a reserve failure is only reported on the NEXT
+// successfully-delivered event. The startup baseline is snapshotted from the
+// (pinned, #124) counter so this daemon reports only drops during its own run,
+// not the monotonic total inherited from a prior lifetime — see
+// newRingbufEnforceEventReader.
 type ringbufEnforceEventReader struct {
 	r *ringbuf.Reader
+	// dropTotal returns the current monotonic kernel drop total from
+	// enforce_events_dropped and true, or (0, false) when the counter is
+	// unavailable. Held as a func (rather than the *ebpf.Map directly) so the
+	// delta accounting in droppedSinceLast is unit-testable without a live map.
+	dropTotal     func() (uint64, bool)
+	lastDropCount uint64
 }
 
-func (a ringbufEnforceEventReader) Read() (enforceEventRecord, error) {
+// newRingbufEnforceEventReader builds the adapter over the enforce_events
+// ringbuf reader and its enforce_events_dropped counter map (either may drive
+// its behaviour independently; dropped may be nil). It snapshots the counter's
+// current value as the baseline so only drops occurring during THIS daemon's
+// run are reported as LostSamples — the counter is pinned and monotonic across
+// restarts (#124), so without this snapshot a restart would re-report every
+// historical drop the previous daemon already accounted for. A nonzero baseline
+// is logged once, since those pre-restart drops won't appear in this daemon's
+// live stream.
+func newRingbufEnforceEventReader(r *ringbuf.Reader, dropped *ebpf.Map, log *slog.Logger) *ringbufEnforceEventReader {
+	dropTotal := func() (uint64, bool) {
+		if dropped == nil {
+			return 0, false
+		}
+		var zero uint32
+		var total uint64
+		if err := dropped.Lookup(&zero, &total); err != nil {
+			return 0, false
+		}
+		return total, true
+	}
+	return newRingbufEnforceEventReaderFromSource(r, dropTotal, log)
+}
+
+// newRingbufEnforceEventReaderFromSource is the map-agnostic core of
+// newRingbufEnforceEventReader: it takes the counter source directly so the
+// baseline-snapshot and delta accounting can be exercised in tests without a
+// live BPF map. dropTotal may be nil (drop reporting disabled).
+func newRingbufEnforceEventReaderFromSource(r *ringbuf.Reader, dropTotal func() (uint64, bool), log *slog.Logger) *ringbufEnforceEventReader {
+	a := &ringbufEnforceEventReader{r: r, dropTotal: dropTotal}
+	if dropTotal != nil {
+		if total, ok := dropTotal(); ok {
+			a.lastDropCount = total
+			if total > 0 && log != nil {
+				log.Warn("enforce_events drop counter nonzero at guard load (drops from a prior daemon lifetime; not replayed into this run's stream)",
+					"kernel_dropped_total", total)
+			}
+		}
+	}
+	return a
+}
+
+func (a *ringbufEnforceEventReader) Read() (enforceEventRecord, error) {
 	record, err := a.r.Read()
 	if err != nil {
 		if err == ringbuf.ErrClosed {
@@ -167,5 +230,32 @@ func (a ringbufEnforceEventReader) Read() (enforceEventRecord, error) {
 		}
 		return enforceEventRecord{}, fmt.Errorf("enforce_events ringbuf read: %w", err)
 	}
-	return enforceEventRecord{RawSample: record.RawSample}, nil
+	return enforceEventRecord{
+		RawSample:   record.RawSample,
+		LostSamples: a.droppedSinceLast(),
+	}, nil
+}
+
+// droppedSinceLast returns how far the kernel drop counter has advanced since
+// the previous call, updating the running baseline. Returns 0 when the counter
+// is unavailable. If the counter appears to have gone backwards it re-baselines
+// and returns 0 rather than a spurious huge delta: the kernel value is a
+// monotonic __sync_fetch_and_add total, but a fresh (unpinned) map after a
+// restart could reset our frame of reference, and a lost count must never be
+// reported as a negative-turned-enormous unsigned spike.
+func (a *ringbufEnforceEventReader) droppedSinceLast() uint64 {
+	if a.dropTotal == nil {
+		return 0
+	}
+	total, ok := a.dropTotal()
+	if !ok {
+		return 0
+	}
+	if total <= a.lastDropCount {
+		a.lastDropCount = total
+		return 0
+	}
+	delta := total - a.lastDropCount
+	a.lastDropCount = total
+	return delta
 }

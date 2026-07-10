@@ -116,16 +116,17 @@ type processGuardProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type processGuardMapSpecs struct {
-	CgroupFileAllow  *ebpf.MapSpec `ebpf:"cgroup_file_allow"`
-	CgroupManaged    *ebpf.MapSpec `ebpf:"cgroup_managed"`
-	CgroupNetAllow   *ebpf.MapSpec `ebpf:"cgroup_net_allow"`
-	CgroupOpPolicy   *ebpf.MapSpec `ebpf:"cgroup_op_policy"`
-	CgroupPathAllow  *ebpf.MapSpec `ebpf:"cgroup_path_allow"`
-	EnforceEvents    *ebpf.MapSpec `ebpf:"enforce_events"`
-	FileAllowScratch *ebpf.MapSpec `ebpf:"file_allow_scratch"`
-	KillSwitch       *ebpf.MapSpec `ebpf:"kill_switch"`
-	NetLpmScratch    *ebpf.MapSpec `ebpf:"net_lpm_scratch"`
-	PathLpmScratch   *ebpf.MapSpec `ebpf:"path_lpm_scratch"`
+	CgroupFileAllow      *ebpf.MapSpec `ebpf:"cgroup_file_allow"`
+	CgroupManaged        *ebpf.MapSpec `ebpf:"cgroup_managed"`
+	CgroupNetAllow       *ebpf.MapSpec `ebpf:"cgroup_net_allow"`
+	CgroupOpPolicy       *ebpf.MapSpec `ebpf:"cgroup_op_policy"`
+	CgroupPathAllow      *ebpf.MapSpec `ebpf:"cgroup_path_allow"`
+	EnforceEvents        *ebpf.MapSpec `ebpf:"enforce_events"`
+	EnforceEventsDropped *ebpf.MapSpec `ebpf:"enforce_events_dropped"`
+	FileAllowScratch     *ebpf.MapSpec `ebpf:"file_allow_scratch"`
+	KillSwitch           *ebpf.MapSpec `ebpf:"kill_switch"`
+	NetLpmScratch        *ebpf.MapSpec `ebpf:"net_lpm_scratch"`
+	PathLpmScratch       *ebpf.MapSpec `ebpf:"path_lpm_scratch"`
 }
 
 // processGuardVariableSpecs contains global variables before they are loaded into the kernel.
@@ -154,16 +155,17 @@ func (o *processGuardObjects) Close() error {
 //
 // It can be passed to loadProcessGuardObjects or ebpf.CollectionSpec.LoadAndAssign.
 type processGuardMaps struct {
-	CgroupFileAllow  *ebpf.Map `ebpf:"cgroup_file_allow"`
-	CgroupManaged    *ebpf.Map `ebpf:"cgroup_managed"`
-	CgroupNetAllow   *ebpf.Map `ebpf:"cgroup_net_allow"`
-	CgroupOpPolicy   *ebpf.Map `ebpf:"cgroup_op_policy"`
-	CgroupPathAllow  *ebpf.Map `ebpf:"cgroup_path_allow"`
-	EnforceEvents    *ebpf.Map `ebpf:"enforce_events"`
-	FileAllowScratch *ebpf.Map `ebpf:"file_allow_scratch"`
-	KillSwitch       *ebpf.Map `ebpf:"kill_switch"`
-	NetLpmScratch    *ebpf.Map `ebpf:"net_lpm_scratch"`
-	PathLpmScratch   *ebpf.Map `ebpf:"path_lpm_scratch"`
+	CgroupFileAllow      *ebpf.Map `ebpf:"cgroup_file_allow"`
+	CgroupManaged        *ebpf.Map `ebpf:"cgroup_managed"`
+	CgroupNetAllow       *ebpf.Map `ebpf:"cgroup_net_allow"`
+	CgroupOpPolicy       *ebpf.Map `ebpf:"cgroup_op_policy"`
+	CgroupPathAllow      *ebpf.Map `ebpf:"cgroup_path_allow"`
+	EnforceEvents        *ebpf.Map `ebpf:"enforce_events"`
+	EnforceEventsDropped *ebpf.Map `ebpf:"enforce_events_dropped"`
+	FileAllowScratch     *ebpf.Map `ebpf:"file_allow_scratch"`
+	KillSwitch           *ebpf.Map `ebpf:"kill_switch"`
+	NetLpmScratch        *ebpf.Map `ebpf:"net_lpm_scratch"`
+	PathLpmScratch       *ebpf.Map `ebpf:"path_lpm_scratch"`
 }
 
 func (m *processGuardMaps) Close() error {
@@ -174,6 +176,7 @@ func (m *processGuardMaps) Close() error {
 		m.CgroupOpPolicy,
 		m.CgroupPathAllow,
 		m.EnforceEvents,
+		m.EnforceEventsDropped,
 		m.FileAllowScratch,
 		m.KillSwitch,
 		m.NetLpmScratch,

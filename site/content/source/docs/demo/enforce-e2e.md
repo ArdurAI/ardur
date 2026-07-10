@@ -2,7 +2,7 @@
 title: "ardur run --enforce` — kernel enforcement end-to-end demo"
 description: "This demo drives the **whole Epic A enforcement stack together** on a real"
 source_path: "docs/demo/enforce-e2e.md"
-source_sha256: "f13bdbebab3335c5c3a4c8ddb495afd7d543bb6d27fb1336f8fa5d6d48746383"
+source_sha256: "df3bbb7337035ceefa32cde022fcfc023434889c54ea72fc7256d7924f1850e9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -131,9 +131,26 @@ The attestation carries the rollup (Op codes: `1`=EXEC, `2`=FILE_READ,
 "kernel_enforcement": {
   "total_events": 2, "verdict_counts": {"denied": 2},
   "tier_coverage": {"bpf_lsm:enforce": 2}, "last_seq": 2,
-  "chain_digest": "caca42ff…"
+  "chain_digest": "caca42ff…",
+  "tamper_chain_start_seq": 1,
+  "kill_switch_change_count": 0,
+  "kill_switch_engaged_during_session": false,
+  "kill_switch_evidence_gap": false
 }
 ```
+
+If the global kernel kill switch changes while a session is active, the daemon
+first appends an attributed transition to `_tamper/tamper_audit.jsonl`. The
+session snapshot then also carries `tamper_chain_last_seq` and
+`tamper_chain_digest`; the signed attestation therefore commits to that global
+tamper-chain head. `tamper_chain_start_seq` delimits the first chain entry that
+could overlap the session, `kill_switch_change_count` counts committed
+transitions in that window, and `kill_switch_engaged_during_session` stays true
+after a later disengage so a suspension interval cannot disappear from the
+final state. `kill_switch_evidence_gap` is conservative: it becomes true if a
+receipt cannot be persisted, even when the daemon successfully rolls the kernel
+map back. A caller receives `OK:false` for that operation rather than success
+without evidence.
 
 ## Run — permissive (control)
 
