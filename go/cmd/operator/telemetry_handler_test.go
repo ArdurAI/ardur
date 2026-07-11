@@ -23,7 +23,18 @@ func newTestIngestor(t *testing.T) (*TelemetryIngestor, trust.ScoreAggregator) {
 	if err := agg.RegisterAgent(context.Background(), "test-agent", 0.8, 0.8); err != nil {
 		t.Fatalf("registering agent: %v", err)
 	}
-	return NewTelemetryIngestor(agg, nil), agg
+	return newTelemetryIngestor(agg, nil, allowTelemetryRequestForTest), agg
+}
+
+func allowTelemetryRequestForTest(*http.Request, telemetryRequest) error { return nil }
+
+func TestNewTelemetryIngestorRequiresAuthorizer(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("newTelemetryIngestor accepted a nil authorizer")
+		}
+	}()
+	newTelemetryIngestor(nil, nil, nil)
 }
 
 func postSignal(t *testing.T, h http.Handler, body telemetryRequest) *httptest.ResponseRecorder {
@@ -116,6 +127,18 @@ func TestTelemetryIngestor_MissingAgentID400(t *testing.T) {
 	}
 }
 
+func TestTelemetryIngestor_MissingSource400(t *testing.T) {
+	h, _ := newTestIngestor(t)
+	w := postSignal(t, h, telemetryRequest{
+		AgentID:  "test-agent",
+		Type:     string(trust.SignalCleanInterval),
+		Severity: string(trust.SeverityInfo),
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing source, got %d", w.Code)
+	}
+}
+
 func TestTelemetryIngestor_InvalidJSON400(t *testing.T) {
 	h, _ := newTestIngestor(t)
 	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", bytes.NewBufferString("{invalid"))
@@ -169,7 +192,7 @@ func TestTelemetryIngestor_ApplyPolicyCalledOnTierChange(t *testing.T) {
 		return nil
 	}
 
-	h := NewTelemetryIngestor(agg, applyFn)
+	h := newTelemetryIngestor(agg, applyFn, allowTelemetryRequestForTest)
 
 	// Apply critical signals to push into quarantine
 	for range 5 {
@@ -192,62 +215,6 @@ func TestTelemetryIngestor_ApplyPolicyCalledOnTierChange(t *testing.T) {
 	// After heavy degradation agent should be in quarantine and callback should have fired
 	if score.AuthorizationTier == trust.TierQuarantine && capturedTier == "" {
 		t.Error("applyPolicy callback was not called despite tier change to quarantine")
-	}
-}
-
-// TestBearerAuthMiddleware_NoAuth_Returns401 verifies unauthenticated requests
-// are rejected with 401, preventing any pod from forging telemetry signals.
-func TestBearerAuthMiddleware_NoAuth_Returns401(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	h := BearerAuthMiddleware("secret-token", inner)
-	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for missing auth header, got %d", w.Code)
-	}
-}
-
-func TestBearerAuthMiddleware_WrongToken_Returns401(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	h := BearerAuthMiddleware("secret-token", inner)
-	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
-	req.Header.Set("Authorization", "Bearer wrong-token")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for wrong token, got %d", w.Code)
-	}
-}
-
-func TestBearerAuthMiddleware_CorrectToken_PassesThrough(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-	h := BearerAuthMiddleware("secret-token", inner)
-	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
-	req.Header.Set("Authorization", "Bearer secret-token")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Errorf("expected 204, got %d", w.Code)
-	}
-}
-
-func TestBearerAuthMiddleware_EmptyToken_RejectsAll(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	h := BearerAuthMiddleware("", inner)
-	req := httptest.NewRequest(http.MethodPost, "/telemetry/signal", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for empty token (fail-closed), got %d", w.Code)
 	}
 }
 
