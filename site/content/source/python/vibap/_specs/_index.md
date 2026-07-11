@@ -26,4 +26,5 @@ This section lists hosted documentation and mirrored artifacts generated from `p
 - [`receiver_attestation_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/receiver_attestation_v01.schema.json)
 - [`runtime_evidence_correlation_report_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/runtime_evidence_correlation_report_v01.schema.json)
 - [`runtime_evidence_event_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/runtime_evidence_event_v01.schema.json)
+- [`tool_server_preflight_report_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/tool_server_preflight_report_v01.schema.json)
 - [`transparency_anchor_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/transparency_anchor_v01.schema.json)

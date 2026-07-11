@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "6ef6717035d891b9953e2a90c404e9be0938da3dba75435618eef3f527a3c716"
+source_sha256: "cc53ce73d5dee8aacd02b3e73eb2e03284f8fb24f0823395c546a0c8b9979b57"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -83,6 +83,19 @@ Important boundary: those hardening directions must not be marketed as fully
 proven protections until their proof entries reach L5 for the claimed scope.
 
 ## Network and secrets posture
+
+Before enablement, `ardur preflight tool-server` can inspect strict JSON MCP and
+tool-server configuration for broad filesystem/network grants, shell execution,
+secret-like environment exposure, instruction-like metadata, missing content
+pins, and ungated side effects. It opens bounded input without following a
+final-component symlink and never starts the server, imports its code, reads
+referenced secrets, or contacts configured endpoints. Evidence is redacted and
+the generated policy skeleton keeps resource/network scopes empty by default.
+
+This scanner is advisory and incomplete by design. Tool annotations and
+descriptions are untrusted hints, and a clean static report does not establish
+runtime behavior, dependency safety, binary provenance, or endpoint identity.
+See [`Tool-Server Preflight v0.1`](/__ardur_internal__/source/docs/specs/tool-server-preflight-v0.1/).
 
 - SSRF-sensitive destinations should be denied by policy where the capability
   is claimed as release-gated.

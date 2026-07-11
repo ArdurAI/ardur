@@ -89,6 +89,14 @@ from .claude_code_daemon import install_native_pre_tool_use_command, resolve_nat
 from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
 from .run_bridge import VALID_VIA_MODES, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
+from .tool_preflight import (
+    FAIL_ON_CHOICES,
+    ToolPreflightError,
+    error_response as tool_preflight_error_response,
+    fail_threshold_reached,
+    render_tool_preflight_markdown,
+    scan_tool_server_config,
+)
 
 
 _ATTEST_SESSION_ID_RE = re.compile(
@@ -2819,6 +2827,55 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
+    """Statically inspect a tool-server configuration without executing it."""
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    try:
+        report = scan_tool_server_config(args.config)
+        payload = (
+            json.dumps(report, indent=2, sort_keys=True) + "\n"
+            if args.format == "json"
+            else render_tool_preflight_markdown(report)
+        )
+        threshold_reached = fail_threshold_reached(report, args.fail_on)
+        if args.output is not None:
+            encoded = payload.encode("utf-8")
+            write_report(args.output, encoded)
+            _print_json(
+                {
+                    "ok": not threshold_reached,
+                    "condition": "tool_server_preflight_report_written",
+                    "analysis_mode": "static_non_executing",
+                    "verdict": report["summary"]["verdict"],
+                    "finding_count": report["summary"]["finding_count"],
+                    "fail_on": args.fail_on,
+                    "threshold_reached": threshold_reached,
+                    "report_sha256": hashlib.sha256(encoded).hexdigest(),
+                }
+            )
+        else:
+            sys.stdout.write(payload)
+        return 2 if threshold_reached else 0
+    except ToolPreflightError as exc:
+        response = tool_preflight_error_response(exc)
+    except RuntimeEvidenceError as exc:
+        response = {
+            "ok": False,
+            "error": exc.code,
+            "condition": exc.code,
+            "message": str(exc),
+            "analysis_mode": "static_non_executing",
+        }
+    if args.format == "json":
+        _print_json(response)
+    else:
+        print(f"Error: {response['message']}")
+        print(f"Condition: {response['condition']}")
+    return 1
+
+
 def _posture_report_input_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -5225,6 +5282,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="output format (default: markdown)",
     )
     posture_report.set_defaults(func=cmd_posture_report)
+
+    preflight = subparsers.add_parser(
+        "preflight",
+        help="statically inspect tool-server configuration before enablement",
+    )
+    preflight_subparsers = preflight.add_subparsers(
+        dest="preflight_command", required=True
+    )
+    tool_server_preflight = preflight_subparsers.add_parser(
+        "tool-server",
+        help="scan strict JSON MCP/tool-server configuration without executing it",
+    )
+    tool_server_preflight.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="strict JSON MCP client config or static tool manifest",
+    )
+    tool_server_preflight.add_argument(
+        "--format",
+        choices=("json", "markdown"),
+        default="json",
+        help="report format (default: json)",
+    )
+    tool_server_preflight.add_argument(
+        "--output",
+        type=Path,
+        help="atomically write an owner-only report instead of printing it",
+    )
+    tool_server_preflight.add_argument(
+        "--fail-on",
+        choices=FAIL_ON_CHOICES,
+        default="none",
+        help="return exit 2 when this severity or higher is present (default: none)",
+    )
+    tool_server_preflight.set_defaults(func=cmd_tool_server_preflight)
 
     hub = subparsers.add_parser("hub", help="start the local Ardur Personal Hub")
     hub.add_argument("--host", default=DEFAULT_HUB_HOST, help="bind address")

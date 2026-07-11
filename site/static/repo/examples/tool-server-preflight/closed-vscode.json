@@ -1,0 +1,39 @@
+{
+  "servers": {
+    "workspace-reader": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@example/workspace-reader@1.2.3"
+      ],
+      "sandboxEnabled": true,
+      "allowedDirectories": [
+        "${workspaceFolder}"
+      ],
+      "tools": [
+        {
+          "name": "read_document",
+          "description": "Read one document from the configured workspace.",
+          "annotations": {
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        }
+      ]
+    }
+  },
+  "sandbox": {
+    "filesystem": {
+      "allowRead": [
+        "${workspaceFolder}"
+      ],
+      "allowWrite": []
+    },
+    "network": {
+      "allowedDomains": []
+    }
+  }
+}
