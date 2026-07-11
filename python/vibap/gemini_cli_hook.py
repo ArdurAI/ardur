@@ -62,7 +62,19 @@ class ChainState:
 
 
 class FixtureProjectDirError(ValueError):
-    """Raised when a fixture project path cannot safely receive context files."""
+    """Raised when a fixture project path cannot safely receive context files.
+
+    A ``ValueError`` subclass so it is still caught by the generic handler, but
+    distinct enough for the CLI to emit a structured, sanitized failure response
+    instead of the raw exception text. Carries a stable ``condition`` attribute
+    so callers can distinguish empty/whitespace, symlink, and existing-file
+    failures without parsing exception prose.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
 
 
 class FixturePathError(ValueError):
@@ -250,10 +262,22 @@ def _write_private_text(path: Path, content: str) -> None:
 
 
 def _validate_fixture_project_dir(project: Path) -> None:
+    raw = str(project)
+    if not raw.strip():
+        raise FixtureProjectDirError(
+            "fixture project directory must not be empty or whitespace-only",
+            condition="gemini_cli_fixture_project_dir_empty",
+        )
     if project.is_symlink() and not project.exists():
-        raise FixtureProjectDirError("fixture project directory is a dangling symlink")
+        raise FixtureProjectDirError(
+            "fixture project directory is a dangling symlink",
+            condition="gemini_cli_fixture_project_dir_not_directory",
+        )
     if project.exists() and not project.is_dir():
-        raise FixtureProjectDirError("fixture project directory must be a directory")
+        raise FixtureProjectDirError(
+            "fixture project directory must be a directory",
+            condition="gemini_cli_fixture_project_dir_not_directory",
+        )
 
 
 def _validate_fixture_path_not_file(path: Path, *, label: str, condition: str) -> None:
@@ -295,23 +319,45 @@ def _fixture_path_failure_response(*, condition: str, label: str, arg_name: str)
     }
 
 
-def fixture_project_dir_failure_response() -> dict[str, Any]:
-    condition = "gemini_cli_fixture_project_dir_not_directory"
+def fixture_project_dir_failure_response(condition: str = "gemini_cli_fixture_project_dir_not_directory") -> dict[str, Any]:
+    """Structured failure response for an invalid ``--project-dir`` argument.
+
+    Mirrors the fixture path-failure convention: a stable ``condition``/
+    ``error`` pair, a human-readable ``message`` with no raw exception text or
+    local paths, a ``detail`` explaining how to choose a valid directory, and
+    placeholder-only ``next_steps``.
+    """
+
+    messages = {
+        "gemini_cli_fixture_project_dir_empty": (
+            "Gemini CLI fixture project directory is empty."
+        ),
+        "gemini_cli_fixture_project_dir_not_directory": (
+            "Gemini CLI fixture project directory is not a directory."
+        ),
+    }
+    details = {
+        "gemini_cli_fixture_project_dir_empty": (
+            "The --project-dir argument is empty or whitespace-only. "
+            "Provide a project directory path where Ardur can write GEMINI.md."
+        ),
+        "gemini_cli_fixture_project_dir_not_directory": (
+            "The --project-dir argument points at an existing non-directory. "
+            "Use an existing project directory or a new directory path that Ardur can create."
+        ),
+    }
     return {
         "ok": False,
         "error": condition,
         "condition": condition,
-        "message": "Gemini CLI fixture project directory is not a directory.",
-        "detail": (
-            "The --project-dir argument points at an existing non-directory. "
-            "Use an existing project directory or a new directory path that Ardur can create."
-        ),
+        "message": messages.get(condition, "Gemini CLI fixture project directory is invalid."),
+        "detail": details.get(condition, "Provide a project directory path for the --project-dir argument."),
         "next_steps": [
             {
                 "condition": condition,
                 "action": "rerun_gemini_fixture_with_project_directory",
                 "command": "ardur gemini-cli-fixture --project-dir <your-project>",
-                "detail": "Replace <your-project> with a directory path, not a regular file.",
+                "detail": "Replace <your-project> with a directory path (new or existing, not a file, symlink, or empty value).",
             }
         ],
     }
@@ -320,7 +366,7 @@ def fixture_project_dir_failure_response() -> dict[str, Any]:
 def build_local_fixture(
     *,
     home: Path | None = None,
-    project_dir: Path | None = None,
+    project_dir: str | Path | None = None,
     chain_dir: Path | None = None,
     keys_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -331,7 +377,13 @@ def build_local_fixture(
     real Gemini install unless the caller explicitly points ``home`` there.
     """
     gemini_home_raw = Path(home or _default_gemini_fixture_home()).expanduser()
-    project_raw = Path(project_dir or Path.cwd()).expanduser()
+    project_raw_value = str(project_dir) if project_dir is not None else ""
+    if not project_raw_value.strip():
+        raise FixtureProjectDirError(
+            "fixture project directory must not be empty or whitespace-only",
+            condition="gemini_cli_fixture_project_dir_empty",
+        )
+    project_raw = Path(project_raw_value).expanduser()
     ardur_chain_raw = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser()
     # Validate raw paths for dangling symlinks before resolve() follows them.
     _validate_fixture_path_not_file(gemini_home_raw, label="home", condition="gemini_cli_fixture_home_not_directory")
@@ -1087,7 +1139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--phase", choices=["pre", "fixture", "report"], help="hook/helper phase")
     parser.add_argument("--keys-dir", type=Path, help="Ardur signing keys directory")
     parser.add_argument("--home", type=Path, help="explicit Gemini home for fixture writes; defaults to isolated Ardur local state")
-    parser.add_argument("--project-dir", type=Path, help="project directory for fixture generation")
+    parser.add_argument("--project-dir", type=str, help="project directory for fixture generation")
     parser.add_argument("--chain-dir", type=Path, help="Gemini receipt chain directory")
     parser.add_argument("--verify-expiry", action="store_true", help="enforce short receipt expiry while verifying reports")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -1110,8 +1162,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 chain_dir=args.chain_dir,
                 keys_dir=args.keys_dir,
             )
-        except FixtureProjectDirError:
-            _print_json(fixture_project_dir_failure_response())
+        except FixtureProjectDirError as exc:
+            _print_json(fixture_project_dir_failure_response(exc.condition))
             return 1
         _print_json(build_shareable_context(fixture))
         return 0

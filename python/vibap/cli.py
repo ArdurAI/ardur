@@ -84,7 +84,7 @@ from .codex_app_server_fixture import (
     _fixture_path_failure_response as codex_fixture_path_failure_response,
     handle_host_event as handle_codex_host_event,
 )
-from .posture_index import build_posture_index, format_posture_report
+from .posture_index import build_posture_index, format_posture_report, posture_receipts_failure_response, PostureReceiptsError
 from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
 from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
 from .run_bridge import VALID_VIA_MODES, run_governed_cli
@@ -2447,8 +2447,8 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
             chain_dir=args.chain_dir,
             keys_dir=args.keys_dir,
         )
-    except GeminiFixtureProjectDirError:
-        _print_json(gemini_fixture_project_dir_failure_response())
+    except GeminiFixtureProjectDirError as exc:
+        _print_json(gemini_fixture_project_dir_failure_response(exc.condition))
         return 1
     except GeminiFixturePathError as exc:
         _print_json(gemini_fixture_path_failure_response(
@@ -2567,8 +2567,8 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
             chain_dir=args.chain_dir,
             keys_dir=args.keys_dir,
         )
-    except CodexFixtureProjectDirError:
-        _print_json(codex_fixture_project_dir_failure_response())
+    except CodexFixtureProjectDirError as exc:
+        _print_json(codex_fixture_project_dir_failure_response(exc.condition))
         return 1
     except CodexFixturePathError as exc:
         _print_json(codex_fixture_path_failure_response(
@@ -2611,13 +2611,17 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
 
 
 def cmd_posture_scan(args: argparse.Namespace) -> int:
-    posture = build_posture_index(
-        receipts=args.receipts,
-        keys_dir=args.keys_dir,
-        profile=args.profile,
-        evidence_bundle=args.evidence_bundle,
-        verify_expiry=args.verify_expiry,
-    )
+    try:
+        posture = build_posture_index(
+            receipts=args.receipts,
+            keys_dir=args.keys_dir,
+            profile=args.profile,
+            evidence_bundle=args.evidence_bundle,
+            verify_expiry=args.verify_expiry,
+        )
+    except PostureReceiptsError as exc:
+        _print_json(posture_receipts_failure_response(exc.condition))
+        return 1
     if args.format == "json":
         _print_json(posture)
         return 0
@@ -4830,7 +4834,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="explicit Gemini home/settings directory to populate; defaults to isolated Ardur local fixture state",
     )
-    gemini_fixture.add_argument("--project-dir", type=Path, help="project directory that receives GEMINI.md")
+    gemini_fixture.add_argument("--project-dir", type=str, help="project directory that receives GEMINI.md")
     gemini_fixture.add_argument("--chain-dir", type=Path, help="Ardur Gemini receipt chain directory")
     gemini_fixture.add_argument("--keys-dir", type=Path, help="signing keys directory")
     gemini_fixture.set_defaults(func=cmd_gemini_cli_fixture)
@@ -4866,7 +4870,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="explicit Codex home/config directory to populate; defaults to isolated Ardur local fixture state",
     )
-    codex_fixture.add_argument("--project-dir", type=Path, help="project directory that receives CODEX.md")
+    codex_fixture.add_argument("--project-dir", type=str, help="project directory that receives CODEX.md")
     codex_fixture.add_argument("--chain-dir", type=Path, help="Ardur Codex receipt chain directory")
     codex_fixture.add_argument("--keys-dir", type=Path, help="signing keys directory")
     codex_fixture.set_defaults(func=cmd_codex_app_server_fixture)
@@ -4895,7 +4899,7 @@ def build_parser() -> argparse.ArgumentParser:
         "scan",
         help="scan receipt/profile/evidence artifacts into a posture JSON document",
     )
-    posture_scan.add_argument("--receipts", type=Path, required=True, help="receipt chain directory or receipts.jsonl file")
+    posture_scan.add_argument("--receipts", type=str, required=True, help="receipt chain directory or receipts.jsonl file")
     posture_scan.add_argument("--keys-dir", type=Path, help="directory containing passport_public.pem for read-only verification")
     posture_scan.add_argument("--profile", type=Path, help="optional ARDUR.md profile to digest")
     posture_scan.add_argument("--evidence-bundle", type=Path, help="optional redacted no-key evidence bundle to summarize")

@@ -265,3 +265,82 @@ def test_codex_fixture_valid_inputs_still_work(tmp_path: Path) -> None:
     assert chain_dir.exists()
     assert keys_dir.exists()
     assert (project_dir / "CODEX.md").exists()
+
+
+def test_codex_fixture_rejects_project_dir_empty(tmp_path: Path) -> None:
+    """Empty --project-dir must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        "--project-dir", "",
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "codex_app_server_fixture_project_dir_empty"
+    assert output["condition"] == "codex_app_server_fixture_project_dir_empty"
+    assert "empty" in output["message"].lower()
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not chain_dir.exists()
+    assert not keys_dir.exists()
+
+
+def test_codex_fixture_rejects_project_dir_whitespace(tmp_path: Path) -> None:
+    """Whitespace-only --project-dir must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        "--project-dir", "   ",
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "codex_app_server_fixture_project_dir_empty"
+    assert output["condition"] == "codex_app_server_fixture_project_dir_empty"
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not chain_dir.exists()
+    assert not keys_dir.exists()

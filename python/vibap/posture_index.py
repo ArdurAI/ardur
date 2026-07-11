@@ -41,6 +41,21 @@ _UNKNOWN_BOUNDARY_BY_TOOL = {
 }
 
 
+class PostureReceiptsError(ValueError):
+    """Raised when the ``--receipts`` argument fails pre-validation.
+
+    A ``ValueError`` subclass so it is still caught by the generic handler in
+    ``cmd_posture_scan()``, but distinct enough for the CLI to emit a
+    structured, sanitized failure response instead of silently scanning the
+    current working directory. Carries a stable ``condition`` attribute.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
+
+
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -333,7 +348,7 @@ def _posture_next_steps(chain_verification: Mapping[str, Any], coverage_gaps: se
 
 def build_posture_index(
     *,
-    receipts: Path,
+    receipts: str | Path,
     keys_dir: Path | None = None,
     profile: Path | None = None,
     evidence_bundle: Path | None = None,
@@ -344,7 +359,14 @@ def build_posture_index(
     ``keys_dir`` is intentionally read-only: unlike passport helpers, this
     function never creates missing key material just to verify archived receipts.
     """
-    roots = [receipts]
+    receipts_raw_value = str(receipts) if receipts is not None else ""
+    if not receipts_raw_value.strip():
+        raise PostureReceiptsError(
+            "receipts path must not be empty or whitespace-only",
+            condition="posture_receipts_empty",
+        )
+    receipts_path = Path(receipts_raw_value).expanduser()
+    roots = [receipts_path]
     if keys_dir is not None:
         roots.append(keys_dir)
     if profile is not None:
@@ -360,7 +382,7 @@ def build_posture_index(
     all_claims: list[dict[str, Any]] = []
     coverage_gaps: set[str] = set()
     unknown_boundary_count = 0
-    receipt_paths = _receipt_files(receipts)
+    receipt_paths = _receipt_files(receipts_path)
 
     if not receipt_paths:
         coverage_gaps.add("missing_receipt_telemetry")
@@ -449,7 +471,7 @@ def build_posture_index(
             "not live enterprise-wide discovery, provider-hidden visibility, or kernel/process capture."
         ),
         "inputs": {
-            "receipts": redactor.text(str(receipts)),
+            "receipts": redactor.text(str(receipts_path)),
             "keys_dir": redactor.text(str(keys_dir)) if keys_dir is not None else None,
             "profile": redactor.text(str(profile)) if profile is not None else None,
             "evidence_bundle": redactor.text(str(evidence_bundle)) if evidence_bundle is not None else None,
@@ -566,3 +588,40 @@ def format_posture_report(posture: Mapping[str, Any]) -> str:
 
     lines.append("")
     return "\n".join(lines)
+
+
+def posture_receipts_failure_response(condition: str = "posture_receipts_empty") -> dict[str, Any]:
+    """Structured failure response for an invalid ``--receipts`` argument.
+
+    Mirrors the fixture validation convention: a stable ``condition``/``error``
+    pair, a human-readable ``message`` with no raw exception text or local
+    paths, a ``detail`` explaining how to choose a valid receipts path, and
+    placeholder-only ``next_steps``.
+    """
+
+    messages = {
+        "posture_receipts_empty": (
+            "Posture scan receipts path is empty."
+        ),
+    }
+    details = {
+        "posture_receipts_empty": (
+            "The --receipts argument is empty or whitespace-only. "
+            "Provide a receipt chain directory or a receipts.jsonl file path."
+        ),
+    }
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": messages.get(condition, "Posture scan receipts path is invalid."),
+        "detail": details.get(condition, "Provide a receipt chain directory or receipts.jsonl file path for the --receipts argument."),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_posture_scan_with_receipts",
+                "command": "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json",
+                "detail": "Replace <chain-dir> with a local Ardur receipt chain directory or receipts.jsonl file path.",
+            }
+        ],
+    }

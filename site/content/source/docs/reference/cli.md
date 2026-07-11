@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "469a462c8cfa1ef6d1bac3d367bab290097f5f676c6a911b0eb822a7b4d112dc"
+source_sha256: "b88aca9a741c487089ee1ac92c125f222d2340795e71ff3112fc2470756c98fa"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1142,12 +1142,14 @@ server-side enforcement claim.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target
-does not exist), the command fails closed with exit code `1` and prints a JSON
-response with `ok: false`, matching `error` and `condition` fields, a concise
-`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
-of `gemini_cli_fixture_home_not_directory`,
+does not exist), or `--project-dir` is empty or whitespace-only, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields, a concise `message`, a `detail`, and
+placeholder-only `next_steps`. The `condition` is one of
+`gemini_cli_fixture_home_not_directory`,
 `gemini_cli_fixture_chain_dir_not_directory`,
-`gemini_cli_fixture_keys_dir_not_directory`, or
+`gemini_cli_fixture_keys_dir_not_directory`,
+`gemini_cli_fixture_project_dir_empty`, or
 `gemini_cli_fixture_project_dir_not_directory` depending on which argument
 failed. Validation runs before any fixture file is written, so a rejected input
 leaves no fixture artifacts behind. Valid directory inputs are created or reused
@@ -1229,12 +1231,14 @@ harness for visible local Codex app-server or host-event-style fields only.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target
-does not exist), the command fails closed with exit code `1` and prints a JSON
-response with `ok: false`, matching `error` and `condition` fields, a concise
-`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
-of `codex_app_server_fixture_home_not_directory`,
+does not exist), or `--project-dir` is empty or whitespace-only, the command
+fails closed with exit code `1` and prints a JSON response with `ok: false`,
+matching `error` and `condition` fields, a concise `message`, a `detail`, and
+placeholder-only `next_steps`. The `condition` is one of
+`codex_app_server_fixture_home_not_directory`,
 `codex_app_server_fixture_chain_dir_not_directory`,
-`codex_app_server_fixture_keys_dir_not_directory`, or
+`codex_app_server_fixture_keys_dir_not_directory`,
+`codex_app_server_fixture_project_dir_empty`, or
 `codex_app_server_fixture_project_dir_not_directory` depending on which argument
 failed. Validation runs before any fixture file is written, so a rejected input
 leaves no fixture artifacts behind. Valid directory inputs are created or reused
@@ -1318,6 +1322,14 @@ or proof of effects outside the captured tool-call boundary.
 Credential-like values are emitted as `[REDACTED]`; local absolute paths are
 replaced with stable `<PATH:...>` placeholders so reports can be shared without
 leaking private workstation paths.
+
+If `--receipts` is empty or whitespace-only, the command fails closed with exit
+code `1` and prints a JSON response with `ok: false`, matching `error` and
+`condition` fields (`posture_receipts_empty`), a concise `message`, a `detail`,
+and placeholder-only `next_steps`. This prevents a silent fallback to scanning
+the current working directory when the argument is accidentally left blank.
+Existing receipt-chain directories and `receipts.jsonl` files remain valid
+inputs; only the empty/whitespace case is rejected before scanning.
 
 When receipt evidence is missing, unverified because public keys are unavailable,
 or broken by failed chain verification, the JSON output includes a `next_steps`

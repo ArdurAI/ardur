@@ -380,3 +380,60 @@ def test_cli_posture_report_missing_input_markdown_returns_next_steps_without_pa
     assert "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json > <posture-json>" in captured.out
     assert str(tmp_path) not in captured.out
     assert "Traceback" not in captured.out
+
+
+def test_cli_scan_rejects_empty_receipts_path(tmp_path, capsys):
+    """Empty --receipts must fail closed instead of silently scanning CWD."""
+    from vibap.cli import main
+
+    rc = main(["posture", "scan", "--receipts", "", "--keys-dir", str(tmp_path), "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_receipts_empty"
+    assert posture["condition"] == "posture_receipts_empty"
+    assert "empty" in posture["message"].lower()
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_cli_scan_rejects_whitespace_receipts_path(tmp_path, capsys):
+    """Whitespace-only --receipts must fail closed instead of silently scanning CWD."""
+    from vibap.cli import main
+
+    rc = main(["posture", "scan", "--receipts", "   ", "--keys-dir", str(tmp_path), "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_receipts_empty"
+    assert posture["condition"] == "posture_receipts_empty"
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_build_posture_index_rejects_empty_receipts():
+    """Module-level API must also reject empty receipts."""
+    from vibap.posture_index import PostureReceiptsError, build_posture_index
+
+    raised = False
+    try:
+        build_posture_index(receipts="")
+    except PostureReceiptsError as exc:
+        raised = True
+        assert exc.condition == "posture_receipts_empty"
+    assert raised, "expected PostureReceiptsError for empty receipts"
+
+
+def test_build_posture_index_rejects_whitespace_receipts():
+    """Module-level API must also reject whitespace-only receipts."""
+    from vibap.posture_index import PostureReceiptsError, build_posture_index
+
+    raised = False
+    try:
+        build_posture_index(receipts="   ")
+    except PostureReceiptsError as exc:
+        raised = True
+        assert exc.condition == "posture_receipts_empty"
+    assert raised, "expected PostureReceiptsError for whitespace receipts"
