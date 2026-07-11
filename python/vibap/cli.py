@@ -1920,6 +1920,81 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_telemetry_export(args: argparse.Namespace) -> int:
+    """Verify a receipt journal and export conservative governance telemetry."""
+
+    from .receipt_telemetry import (
+        TelemetryExportError,
+        export_otlp_http,
+        jsonl_bytes,
+        otlp_bundle_bytes,
+        otlp_payloads,
+        verified_governance_events,
+        write_export,
+    )
+
+    try:
+        receipt_public_key = (
+            _load_p256_public_key(
+                args.receipt_public_key, label="receipt public key"
+            )
+            if args.receipt_public_key is not None
+            else load_existing_public_key(keys_dir=args.keys_dir)
+        )
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError):
+        _print_json(
+            {
+                "ok": False,
+                "error": "receipt_public_key_invalid",
+                "message": "The trusted receipt public key could not be loaded.",
+            }
+        )
+        return 1
+
+    try:
+        events = verified_governance_events(
+            args.journal,
+            receipt_public_key=receipt_public_key,
+            verify_expiry=args.verify_expiry,
+        )
+        payloads = otlp_payloads(events)
+        artifact = (
+            jsonl_bytes(events)
+            if args.export_format == "jsonl"
+            else otlp_bundle_bytes(payloads)
+        )
+        if args.telemetry_output is not None:
+            write_export(args.telemetry_output, artifact)
+        deliveries = (
+            export_otlp_http(
+                payloads,
+                endpoint=args.otlp_endpoint,
+                timeout_s=args.timeout_s,
+            )
+            if args.otlp_endpoint is not None
+            else []
+        )
+    except TelemetryExportError as exc:
+        _print_json({"ok": False, "error": exc.code, "message": str(exc)})
+        return 1
+
+    if args.telemetry_output is None and args.otlp_endpoint is None:
+        sys.stdout.write(artifact.decode("utf-8"))
+    else:
+        _print_json(
+            {
+                "ok": True,
+                "schema_version": "ardur.governance_telemetry_export.v0.1",
+                "event_count": len(events),
+                "format": args.export_format,
+                "output_written": args.telemetry_output is not None,
+                "deliveries": deliveries,
+                "raw_content_exported": False,
+            }
+        )
+    return 0
+
+
 def _load_local_log_private_key(path: Path):  # type: ignore[no-untyped-def]
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -4872,6 +4947,65 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically write an owner-only report instead of printing it",
     )
     evidence_correlate.set_defaults(func=cmd_evidence_correlate)
+
+    telemetry = subparsers.add_parser(
+        "telemetry",
+        help="export verified governance receipts as redacted telemetry",
+    )
+    telemetry_subparsers = telemetry.add_subparsers(
+        dest="telemetry_command", required=True
+    )
+    telemetry_export = telemetry_subparsers.add_parser(
+        "export",
+        help="verify a receipt journal and emit JSONL or OTLP/HTTP traces and logs",
+    )
+    telemetry_export.add_argument(
+        "journal",
+        type=Path,
+        help="signed receipt JSONL journal to verify before export",
+    )
+    telemetry_key_source = telemetry_export.add_mutually_exclusive_group(
+        required=True
+    )
+    telemetry_key_source.add_argument(
+        "--keys-dir",
+        type=str,
+        help="directory containing the trusted Ardur receipt issuer key",
+    )
+    telemetry_key_source.add_argument(
+        "--receipt-public-key",
+        type=Path,
+        help="trusted receipt-issuer ES256 P-256 public key PEM",
+    )
+    telemetry_export.add_argument(
+        "--format",
+        dest="export_format",
+        choices=("jsonl", "otlp-json"),
+        default="jsonl",
+        help="local artifact format (default: jsonl)",
+    )
+    telemetry_export.add_argument(
+        "--output",
+        dest="telemetry_output",
+        type=Path,
+        help="atomically write an owner-only local artifact instead of stdout",
+    )
+    telemetry_export.add_argument(
+        "--otlp-endpoint",
+        help="OTLP/HTTP base URL; remote endpoints require HTTPS",
+    )
+    telemetry_export.add_argument(
+        "--timeout-s",
+        type=int,
+        default=10,
+        help="per-signal OTLP request timeout from 1 to 60 seconds",
+    )
+    telemetry_export.add_argument(
+        "--verify-expiry",
+        action="store_true",
+        help="also enforce short receipt expiry windows during export",
+    )
+    telemetry_export.set_defaults(func=cmd_telemetry_export)
 
     anchor = subparsers.add_parser(
         "anchor",

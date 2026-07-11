@@ -506,6 +506,10 @@
             "null"
           ]
         },
+        "rule_id": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Stable policy label or rule identifier selected by the policy configuration."
+        },
         "eval_ms": {
           "type": "number",
           "minimum": 0

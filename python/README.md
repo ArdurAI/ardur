@@ -79,6 +79,23 @@ the sensor or prove complete coverage. Reports exclude raw commands, paths,
 destinations, source identifiers, credentials, and local paths. See the
 [`Runtime Evidence Correlation Profile`](../docs/specs/runtime-evidence-correlation-v0.1.md).
 
+Export a verified receipt chain as redacted JSONL or standards-shaped
+OTLP/HTTP JSON traces and logs:
+
+```bash
+ardur telemetry export receipts.jsonl \
+  --receipt-public-key receipt-public.pem \
+  --format jsonl \
+  --output governance-events.jsonl
+```
+
+Add `--otlp-endpoint https://collector.example` to post one trace request and
+one log request. Remote collectors require HTTPS; plain HTTP is limited to
+loopback. The exporter verifies signatures and chain linkage before projection
+and excludes raw prompts, tool arguments, targets, paths, and policy-reason
+prose. Collector credentials can be supplied through the standard
+`OTEL_EXPORTER_OTLP*_HEADERS` environment variables.
+
 Run the Linux governance-overhead smoke contract from a source checkout:
 
 ```bash

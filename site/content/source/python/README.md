@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "9564e1ec568527a64a02ecbfd9b9bebde2a9350775cc8573f48bc04bc1fb1083"
+source_sha256: "5180404253589a247c27037c7a464412a00fb5353ecfc30bf363e461e7896e31"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -95,6 +95,23 @@ normalized JSON is `imported_unverified`; match confidence does not authenticate
 the sensor or prove complete coverage. Reports exclude raw commands, paths,
 destinations, source identifiers, credentials, and local paths. See the
 [`Runtime Evidence Correlation Profile`](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/).
+
+Export a verified receipt chain as redacted JSONL or standards-shaped
+OTLP/HTTP JSON traces and logs:
+
+```bash
+ardur telemetry export receipts.jsonl \
+  --receipt-public-key receipt-public.pem \
+  --format jsonl \
+  --output governance-events.jsonl
+```
+
+Add `--otlp-endpoint https://collector.example` to post one trace request and
+one log request. Remote collectors require HTTPS; plain HTTP is limited to
+loopback. The exporter verifies signatures and chain linkage before projection
+and excludes raw prompts, tool arguments, targets, paths, and policy-reason
+prose. Collector credentials can be supplied through the standard
+`OTEL_EXPORTER_OTLP*_HEADERS` environment variables.
 
 Run the Linux governance-overhead smoke contract from a source checkout:
 

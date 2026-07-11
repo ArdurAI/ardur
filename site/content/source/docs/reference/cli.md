@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "8217d7a9d1f61db951bdb3e2b06f80515e1ac70731d74fcde767336ced2421b0"
+source_sha256: "f553072cc5e96b58018c0a8514a0efb579f0f08ed385d7c350f62ef9ca77f91f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,7 +22,7 @@ The `ardur` console entry point ships with the Python package. After
 
 The CLI splits into two groups:
 
-- **Protocol path** — `start`, `issue`, `verify`, `evidence correlate`, `anchor`, `attest`. Used by builders
+- **Protocol path** — `start`, `issue`, `verify`, `evidence correlate`, `telemetry export`, `anchor`, `attest`. Used by builders
   who want to issue Mission Passports and run a governance proxy directly.
 - **Personal path** — `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`,
   `uninstall`, `run`, `desktop-observe`, `personal-native-host`,
@@ -326,6 +326,43 @@ path.
 
 See the [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/)
 and [public no-network fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/).
+
+### `ardur telemetry export`
+
+Verify a signed receipt journal, emit conservative local telemetry, and
+optionally send both OTLP/HTTP JSON signals:
+
+```text
+ardur telemetry export RECEIPTS.jsonl
+                       (--receipt-public-key FILE | --keys-dir DIR)
+                       [--format jsonl|otlp-json]
+                       [--output FILE]
+                       [--otlp-endpoint URL]
+                       [--timeout-s 10]
+                       [--verify-expiry]
+```
+
+The command verifies every signature, parent hash, trace/run lineage, and
+receipt ordering before export. JSONL is the default local format. The
+`otlp-json` local format is an inspection bundle containing separate
+`ExportTraceServiceRequest` and `ExportLogsServiceRequest` objects.
+`--otlp-endpoint` posts those objects to `/v1/traces` and `/v1/logs`.
+
+Remote collectors require HTTPS; plain HTTP is limited to loopback. Supply
+collector headers through standard `OTEL_EXPORTER_OTLP_HEADERS`,
+`OTEL_EXPORTER_OTLP_TRACES_HEADERS`, or
+`OTEL_EXPORTER_OTLP_LOGS_HEADERS` environment variables so credentials do
+not appear in process arguments. Unsafe framing headers and CR/LF injection are
+rejected. The command does not retry, and any OTLP partial rejection fails.
+
+Raw prompts, tool arguments, targets, paths, policy-reason prose, tokens, and
+model input/output are never exported. Signed digests, receipt/parent IDs,
+actor/verifier/grant IDs, tri-state outcomes, rule/source labels, reason codes,
+budget state, and risk classifications remain. `--output` uses atomic mode
+`0600` writes and rejects symlink targets.
+
+See [Governance Telemetry v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) and its
+[golden event](/__ardur_internal__/repo/docs/specs/conformance/governance-telemetry-v0.1/events.jsonl).
 
 ### `ardur anchor`
 

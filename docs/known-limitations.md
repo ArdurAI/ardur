@@ -77,6 +77,15 @@ independence, verify an external registration service, or replace the gated
 privacy and consent review for real-agent traces. Current in-repo benchmark
 scenarios remain deterministic harness fixtures.
 
+Governance telemetry export is a detached, verified projection of the receipt
+journal. It does not prove the journal is complete, re-check revocation by
+default, guarantee end-to-end delivery, authenticate or operate a collector,
+configure retention/access control, or make a telemetry backend part of the
+signed evidence chain. OTLP retry is deliberately left to operator-controlled
+collection; reruns can duplicate records, so sinks should deduplicate on
+`ardur.receipt.id`. Vendor-specific SIEM, LLM-observability, and EDR
+connectors remain separate work.
+
 ## Product limits
 
 Ardur is not:
