@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "bd022039da79ac33d27c3c06a80b8c3eb48d4d42ee2fe96ab2804731c685a5d6"
+source_sha256: "f1ab864cdfa1434e9003c0942b26fcf30d2b6ca07cc9489c39a0eb84d89bd1bf"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -49,6 +49,18 @@ subprocess failures. The dedicated `linux-benchmark` workflow runs smoke on
 relevant pull requests and offers manual Linux stress dispatch; it is not
 scheduled. See the
 [benchmark guide](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/) for interpretation.
+
+When changing the independent AuditBench artifact pipeline, run:
+
+```bash
+make bench-independent-test
+```
+
+This exercises strict and duplicate-name JSON parsing, raw-capture replay,
+oracle/evidence separation, blind annotator roles, bundle provenance,
+disagreement adjudication, protocol and corpus sealing, symlink/path/drift
+rejection, held-out coverage, and tri-state score metrics. The test fixtures are
+pipeline fixtures, not independently labeled benchmark evidence.
 
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.

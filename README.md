@@ -54,6 +54,11 @@ paired sensor overhead separate. Pull requests run a small shape-only smoke;
 host-specific stress results are manual evidence, not a universal overhead
 claim.
 
+The [AuditBench independent evaluation profile](docs/specs/auditbench-independent-evaluation-v0.1.md)
+adds strict raw-capture replay, blind two-view annotations, content sealing, and
+held-out tri-state scoring. The pipeline is implemented; no independently
+labeled headline corpus or comparative result is claimed yet.
+
 [Research](RESEARCH.md) · [Status](STATUS.md) · [Coverage Map](docs/coverage-map.md) · [Roadmap](ROADMAP.md) · [Media](MEDIA.md) · [Articles](docs/articles/README.md) · [Docs](docs/README.md) · [Reference](docs/reference/README.md) · [Phase 1 Demo Packet](docs/guides/phase1-demo-packet.md) · [Read the Phase 1 Evidence Bundle](docs/guides/read-phase1-evidence-bundle.md) · [Evidence Site Source](site/README.md)
 
 ## Verification Snapshot

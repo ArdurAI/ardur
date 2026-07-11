@@ -9,6 +9,7 @@ Already present:
 - current status and known gaps
 - public v0.1 specs (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation)
 - a draft-10-pinned DRP field mapping plus RFC 8785/P-256 emitter, full transitive external-trust and critical-bound verifier, and portable seven-scenario implementation self-test bundle/report; raw RFC 3161 backend proof integration and independent interoperability remain pending, and no IETF conformance is claimed
+- a versioned AuditBench independent-evaluation pipeline for strict capture replay, blind annotation, adjudication, content sealing, and held-out scoring; independent annotators, privacy-approved real traces, external preregistration, and headline results remain pending
 - versioned RFC 8785 Execution Receipt v0.2 action payloads, legacy v0.1 verification, golden schema fixtures, and signed session-final receipt-chain/kernel-integrity binding
 - optional receipt transparency anchors with Rekor v1 and separately keyed self-hosted proof profiles
 - optional receiver-attested receipt envelopes with a separately keyed MCP shim, public golden fixture, and offline two-signature verification

@@ -2,7 +2,7 @@
 title: "Roadmap"
 description: "Already present:"
 source_path: "ROADMAP.md"
-source_sha256: "5d47d3c093084a86f3deb957cfd17655175f2eb131f308e77c8da06fd812dfda"
+source_sha256: "6fee2c0838cb649e91f45a5bcb49ae30a34ef03dcb59868fa8aa78c63e3e3515"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["roadmap"]
@@ -26,6 +26,7 @@ Already present:
 - current status and known gaps
 - public v0.1 specs (Mission Declaration, Delegation Grant, Execution Receipt and EAT profile, Verifier Contract, Conformance Profiles, IDM extension, Revocation)
 - a draft-10-pinned DRP field mapping plus RFC 8785/P-256 emitter, full transitive external-trust and critical-bound verifier, and portable seven-scenario implementation self-test bundle/report; raw RFC 3161 backend proof integration and independent interoperability remain pending, and no IETF conformance is claimed
+- a versioned AuditBench independent-evaluation pipeline for strict capture replay, blind annotation, adjudication, content sealing, and held-out scoring; independent annotators, privacy-approved real traces, external preregistration, and headline results remain pending
 - versioned RFC 8785 Execution Receipt v0.2 action payloads, legacy v0.1 verification, golden schema fixtures, and signed session-final receipt-chain/kernel-integrity binding
 - optional receipt transparency anchors with Rekor v1 and separately keyed self-hosted proof profiles
 - optional receiver-attested receipt envelopes with a separately keyed MCP shim, public golden fixture, and offline two-signature verification

@@ -85,6 +85,27 @@ repository**. This is intentional: the corpus carries privacy-sensitive
 information and requires independent labeling to avoid ground-truth leakage
 into the evaluators.
 
+The versioned engineering pipeline for that future corpus is implemented under
+`go/benchmark/independent` with three commands:
+
+- `auditbench-oracle` strictly normalizes a raw capture into full-oracle and
+  projected-evidence views;
+- `auditbench-label` creates one-view blind bundles and requires independent
+  annotation/adjudication evidence;
+- `auditbench-score` seals the frozen study and verifies held-out tri-state
+  scoring against that exact seal.
+
+Run its hostile pipeline tests with:
+
+```sh
+cd go && go test -race -count=1 ./benchmark/independent ./cmd/auditbench-oracle ./cmd/auditbench-label ./cmd/auditbench-score
+```
+
+See
+[`docs/specs/auditbench-independent-evaluation-v0.1.md`](docs/specs/auditbench-independent-evaluation-v0.1.md)
+for the artifact contract and proof boundary. Passing these tests proves the
+pipeline, not the existence of independent labels or a headline corpus.
+
 The following items remain gated on the separately-labeled corpus:
 
 - Scaled evaluation over the full headline corpus (50+ scenarios per label class)
