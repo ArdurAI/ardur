@@ -2,7 +2,7 @@
 title: "Ardur vs OAuth (and the managed-agent-auth direction)"
 description: "**Status:** Working comparison. Will gain links and quantitative numbers as Phase 7 benchmark data lands. The technical claims here should hold without those numbers; the numbers a"
 source_path: "docs/comparisons/oauth-and-managed-agent-auth.md"
-source_sha256: "9f448f0a1e5ee99eb6549ab069f42bf8b42a25c66e0dbad9dafa0562c39cbc91"
+source_sha256: "5eaf48617b8348fcf7624788579c9fb7dfaefe7ab0a8ef09f3ecd0c9aa08c523"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["comparison"]
@@ -38,7 +38,7 @@ Read the Cloudflare post and the surrounding direction. They're solving real pro
 - **Agent identity.** A capability for an agent to authenticate as itself, with first-class identity provider integration. Without this, every other agent-auth conversation is built on sand.
 - **Token issuance to autonomous code.** Replacing static API keys baked into agent configs with rotated, revocable tokens. Strict improvement over the status quo.
 - **Per-resource scope enforcement.** "This token can read GitHub Issues but not push to repos." Resource servers know how to enforce this; OAuth scopes carry it.
-- **Token attenuation in flight.** Newer drafts (AAT, transaction tokens) let intermediaries narrow a token before forwarding. Ardur's Delegation Grant v0.1 is pinned to [AAT draft-00](https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-00); draft-01 is an incompatible individual-draft revision and is rejected pending a versioned migration.
+- **Token attenuation in flight.** Newer drafts (AAT, transaction tokens) let intermediaries narrow a token before forwarding. Ardur preserves its draft-00 Delegation Grant v0.1 contract and separately implements the positively discriminated [AAT draft-01](https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-01) DG v0.2 profile. Both documents are individual Internet-Drafts, and Ardur does not claim IETF conformance or independent interoperability.
 
 If your agent only does one or two tool calls per session, OAuth + AAT is probably enough governance for you. The cost is low, the tooling is mature, and the existing enterprise IDP integration is real value you don't get for free anywhere else.
 

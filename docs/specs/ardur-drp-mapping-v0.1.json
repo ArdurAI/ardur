@@ -10,11 +10,13 @@
   },
   "aat_source": {
     "implementation_document": "draft-niyikiza-oauth-attenuating-agent-tokens-00",
+    "additional_profile_document": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+    "additional_profile": "ardur.dg.aat-draft-01.v0.2",
     "live_document_observed": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
     "live_url": "https://datatracker.ietf.org/doc/draft-niyikiza-oauth-attenuating-agent-tokens/",
     "formal_ietf_standing": false,
-    "migration_issue": "https://github.com/ArdurAI/ardur/issues/233",
-    "note": "This mapping classifies the current draft-00 implementation; it does not silently apply draft-01 token-role semantics."
+    "migration_issue": "https://github.com/ArdurAI/ardur/issues/246",
+    "note": "The draft-00 wire remains supported. Draft-01 is dispatched only by the explicit Ardur DG v0.2 profile; mixed or unprofiled wire forms fail closed."
   },
   "source_surfaces": {
     "delegation_grant": {
@@ -167,7 +169,21 @@
       "source_path": "aat_type",
       "classification": "extension",
       "drp_path": "metadata.x-ardur.capabilityTokenRef.tokenType",
-      "rationale": "The profile accepts only the delegation token type; DRP has no equivalent discriminator."
+      "rationale": "DG v0.1 uses the draft-00 token-type discriminator. DG v0.2 omits it and uses chain-position semantics; DRP has no equivalent field."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "ardur_dg_profile",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.profile",
+      "rationale": "Positive Ardur profile discrimination prevents draft-01 tokens from being silently interpreted under DG v0.2."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "ardur_approval_refs",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.approvalRequirements",
+      "rationale": "Signed approval requirement references are append-only across AAT derivation and remain critical external-verification inputs."
     },
     {
       "source_surface": "delegation_grant",

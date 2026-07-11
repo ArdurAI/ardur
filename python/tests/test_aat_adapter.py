@@ -106,11 +106,12 @@ def _issue_aat(
     del_depth: int = 0,
     del_max_depth: int = 2,
     par_hash: str | None = None,
+    dg_profile: str | None = None,
+    include_sub: bool = True,
 ) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
         "iss": "https://tenuo.example/issuer",
-        "sub": "aat-agent",
         "iat": now,
         "exp": now + 300,
         "jti": grant_id or str(uuid.uuid4()),
@@ -125,10 +126,14 @@ def _issue_aat(
         ],
         "cnf": {"jwk": {"kid": "holder-key"}},
     }
+    if include_sub:
+        claims["sub"] = "aat-agent"
     if aat_type is not None:
         claims["aat_type"] = aat_type
     if par_hash is not None:
         claims["par_hash"] = par_hash
+    if dg_profile is not None:
+        claims["ardur_dg_profile"] = dg_profile
     if mission_ref is not None:
         claims["mission_ref"] = mission_ref
     return jwt.encode(claims, private_key, algorithm=ALGORITHM)
@@ -266,6 +271,39 @@ def test_aat_draft_01_wire_fails_with_explicit_revision_error(
         PermissionError,
         match=aat_adapter_module.AAT_UNSUPPORTED_REVISION,
     ):
+        aat_adapter_module.decode_aat_claims(aat_token, public_key)
+
+
+def test_aat_draft_01_profile_routes_to_full_chain_verifier(
+    private_key,
+    public_key,
+):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        aat_type=None,
+        dg_profile=aat_adapter_module.AAT_DG_PROFILE_V02,
+        include_sub=False,
+    )
+
+    with pytest.raises(PermissionError, match="Go full-chain verifier"):
+        aat_adapter_module.decode_aat_claims(aat_token, public_key)
+
+
+def test_aat_draft_01_profile_rejects_mixed_aat_type(
+    private_key,
+    public_key,
+):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        aat_type="delegation",
+        dg_profile=aat_adapter_module.AAT_DG_PROFILE_V02,
+    )
+
+    with pytest.raises(PermissionError, match="must omit aat_type"):
         aat_adapter_module.decode_aat_claims(aat_token, public_key)
 
 

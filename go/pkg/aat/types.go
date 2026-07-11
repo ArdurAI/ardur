@@ -4,18 +4,24 @@
 //
 // Spec reference:
 //   - draft-niyikiza-oauth-attenuating-agent-tokens-00
-//   - Section 3: Token Types and Structure
+//   - draft-niyikiza-oauth-attenuating-agent-tokens-01
 //
 // The companion CWT integer claim-key mapping remains pending; see ClaimKeys.
 package aat
 
-import jose "github.com/go-jose/go-jose/v4"
+import (
+	"time"
+
+	jose "github.com/go-jose/go-jose/v4"
+)
 
 const (
 	AuthorizationDetailType  = "attenuating_agent_token"
 	SigningAlgorithmEdDSA    = "EdDSA"
 	SupportedDraftRevision   = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
-	UnsupportedDraftRevision = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
+	Draft01Revision          = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
+	UnsupportedDraftRevision = Draft01Revision
+	DGProfileV02             = "ardur.dg.aat-draft-01.v0.2"
 
 	// TODO(B.5/Appendix-D.3): assign integer claim keys in the companion CWT
 	// profile document once Appendix D.3 is translated into repo-local
@@ -81,6 +87,11 @@ type Token struct {
 	DelegationMaxDepth int                   `json:"del_max_depth"`
 	ParentHash         string                `json:"par_hash,omitempty"`
 	Authorization      []AuthorizationDetail `json:"authorization_details,omitempty"`
+
+	// DG v0.2 profile claims. They are absent from the draft-00 profile.
+	Profile      string   `json:"ardur_dg_profile,omitempty"`
+	MissionRef   any      `json:"mission_ref,omitempty"`
+	ApprovalRefs []string `json:"ardur_approval_refs,omitempty"`
 
 	// Unknown top-level claims are intentionally preserved for future extension
 	// handling. Per AAT §3.4, unrecognized top-level claims do not by themselves
@@ -165,7 +176,17 @@ type PoPJWT struct {
 	IssuedAt     int64          `json:"iat"`
 	AATID        string         `json:"aat_id"`
 	AATTool      string         `json:"aat_tool"`
+	AATAudience  string         `json:"aat_aud,omitempty"`
 	HTA          map[string]any `json:"hta"`
+}
+
+// VerifyChainOpts carries Ardur DG profile inputs that are intentionally not
+// inferred from attacker-controlled token claims.
+type VerifyChainOpts struct {
+	Now                   time.Time
+	Audience              string
+	ReceiptSignerJWK      jose.JSONWebKey
+	SatisfiedApprovalRefs map[string]struct{}
 }
 
 // ChainLink captures one adjacent parent/child relationship in a chain.

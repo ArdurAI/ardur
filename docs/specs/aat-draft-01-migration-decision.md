@@ -2,20 +2,14 @@
 
 ## Status
 
-Ardur's Delegation Grant profile remains pinned to
-`draft-niyikiza-oauth-attenuating-agent-tokens-00` for the v0.2.0 release.
-Draft-01 tokens are rejected explicitly. This is a time-bounded compatibility
-decision, not a claim that draft-00 is current or standardized.
+**Reviewed 2026-07-11.** Ardur preserves the existing
+`draft-niyikiza-oauth-attenuating-agent-tokens-00` DG v0.1 contract and adds
+the separately identified `ardur.dg.aat-draft-01.v0.2` profile over draft-01.
+This is a versioned addition, not an in-place reinterpretation of draft-00.
 
-Review this decision no later than 2026-09-15, and earlier if any of these
-events occurs:
-
-1. the v0.2.0 release promotion completes;
-2. a newer AAT revision is published; or
-3. an independent draft-01 implementation fixture becomes available.
-
-[Issue #246](https://github.com/ArdurAI/ardur/issues/246) owns that review and
-the versioned draft-01 implementation path after v0.2.0.
+[Issue #246](https://github.com/ArdurAI/ardur/issues/246) owns this completed
+review and implementation. Independent draft-01 interoperability remains not
+demonstrated and must not be inferred from the Ardur-generated fixture.
 
 The field-level source record is
 [`aat-draft-00-to-01-change-ledger.json`](./aat-draft-00-to-01-change-ledger.json).
@@ -56,8 +50,10 @@ DG v0.1 uses this contract:
 3. Existing draft-00 tokens continue through the draft-00 verifier.
 4. Draft-01 tokens are not downgraded, rewritten, or interpreted under
    draft-00 rules.
-5. Any future draft-01 support requires a new DG profile version and explicit
-   cross-version fixtures.
+5. Draft-01 support is entered only through the exact DG v0.2 profile
+   identifier; a draft-01 token without it is rejected.
+6. A mixed token containing both `aat_type` and `ardur_dg_profile` is rejected.
+7. Derivation cannot cross from DG v0.1 to DG v0.2 or back.
 
 The Go package is the formal root-to-leaf chain verifier. The Python adapter
 is a narrow post-signature mapping shim for the existing runtime and is not a
@@ -92,23 +88,35 @@ draft-01 migration choice. The v0.1 verifier therefore also:
 - returns a typed unsupported-revision denial instead of panicking when
   draft-01's missing `aat_type` is observed.
 
-These changes make existing draft-00 behavior match its claimed profile; they
-do not add draft-01 compatibility.
+These changes continue to define the draft-00 path. Draft-01 behavior is
+implemented separately by DG v0.2 and does not weaken the v0.1 checks.
 
-## Migration Exit Criteria
+## Review Outcome
 
-A future DG profile may select draft-01 only after it provides:
+DG v0.2 satisfies the engineering criteria through:
 
-1. a versioned wire identifier and deterministic draft-00/draft-01 dispatch;
-2. role and key-separation rules that replace the removed `aat_type` invariant;
-3. handling for every removed draft-00 core constraint;
-4. an audience-binding policy for PoP;
-5. organic root, child, and grandchild fixtures from at least one independent
-   implementation; and
-6. explicit proof that AAT holder keys are not confused with DRP receipt
-   signer keys.
+1. the exact `ardur.dg.aat-draft-01.v0.2` wire identifier and deterministic
+   revision dispatch;
+2. chain-position roles plus fresh holder keys at every derivation;
+3. rejection of `pattern`, `regex`, `cel`, and `not` under the draft-01 core
+   vocabulary;
+4. mandatory `aat_aud` verification against independently configured
+   enforcement audience;
+5. append-only signed approval requirements that are accepted only when the
+   verifier independently receives every satisfied reference;
+6. mission-reference preservation and explicit separation of AAT holder keys
+   from the configured DRP receipt signer key; and
+7. a deterministic organic root/child/grandchild implementation fixture.
+
+The independent-fixture criterion is not met. No independent draft-01 JWT
+fixture was found during this review. The available draft-author Tenuo fixture
+uses a different CBOR warrant wire format and is not independent of the draft
+authors. This blocks interoperability claims, not the versioned Ardur profile.
+
+The complete v0.2 contract is
+[`delegation-grant-profile-v0.2.md`](./delegation-grant-profile-v0.2.md).
 
 ## Claim Boundary
 
-This decision is an Ardur compatibility profile. It is not IETF conformance,
-IETF endorsement, or demonstrated independent interoperability.
+This decision and DG v0.2 are Ardur compatibility artifacts. They are not IETF
+conformance, IETF endorsement, or demonstrated independent interoperability.

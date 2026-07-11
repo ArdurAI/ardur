@@ -165,15 +165,19 @@ make reproduce
 
 ## Go AAT Test Suite
 
-The `go/pkg/aat` package has 49 tests covering the full AAT specification:
+The `go/pkg/aat` package has 74 named tests covering the draft-00 DG v0.1
+contract and the version-dispatched draft-01 DG v0.2 profile. The fixture
+command has an additional byte-for-byte artifact regression:
 
 ```bash
-cd go && go test ./pkg/aat/... -v
+cd go && go test ./pkg/aat ./cmd/aat-draft01-fixture -v
 ```
 
-Covers: all 13 constraint Check/Subsumes functions, IssueRoot validation,
-DeriveChild depth/TTL/capability enforcement, BuildPoPJWT/VerifyPoPJWT
-round-trips, full §7 chain verification scenarios, and Registry operations.
+Covers: all 13 draft-00 constraint Check/Subsumes functions, the nine
+draft-01 core constraints, IssueRoot validation, DeriveChild
+depth/TTL/capability enforcement, BuildPoPJWT/VerifyPoPJWT round-trips, full
+chain verification, revision dispatch, audience and approval enforcement,
+holder/receipt-key separation, deterministic fixtures, and Registry operations.
 
 ## Cloud Model Governance Tests
 

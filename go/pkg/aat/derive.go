@@ -27,6 +27,10 @@ type IssueRootOpts struct {
 	Authorization      []AuthorizationDetail
 	Signer             ed25519.PrivateKey
 	KeyID              string
+	Profile            string
+	MissionRef         any
+	ApprovalRefs       []string
+	ReceiptSignerJWK   jose.JSONWebKey
 }
 
 // DeriveOpts captures the local holder inputs for AAT §6 derivation.
@@ -41,6 +45,9 @@ type DeriveOpts struct {
 	Authorization      []AuthorizationDetail
 	Signer             ed25519.PrivateKey
 	KeyID              string
+	Profile            string
+	ApprovalRefs       []string
+	ReceiptSignerJWK   jose.JSONWebKey
 }
 
 // IssueRoot constructs the root AAT issued by the authorization server.
@@ -58,8 +65,13 @@ func IssueRoot(opts IssueRootOpts) (*Token, error) {
 	if opts.ExpiresAt.IsZero() {
 		return nil, fmt.Errorf("IssueRoot: missing ExpiresAt")
 	}
-	if opts.TokenType != AATTypeDelegation && opts.TokenType != AATTypeExecution {
-		return nil, fmt.Errorf("IssueRoot: invalid aat_type %q", opts.TokenType)
+	if err := validateIssueProfile(opts.Profile, opts.TokenType); err != nil {
+		return nil, fmt.Errorf("IssueRoot: %w", err)
+	}
+	if err := validateProfileOnlyInputs(
+		opts.Profile, opts.MissionRef, opts.ApprovalRefs, opts.ReceiptSignerJWK,
+	); err != nil {
+		return nil, fmt.Errorf("IssueRoot: %w", err)
 	}
 	if !isEd25519PublicJWK(opts.HolderJWK) {
 		return nil, fmt.Errorf("IssueRoot: holder public key must be a valid public Ed25519 JWK")
@@ -70,12 +82,27 @@ func IssueRoot(opts IssueRootOpts) (*Token, error) {
 	if len(opts.Authorization) == 0 {
 		return nil, fmt.Errorf("IssueRoot: authorization_details required")
 	}
-	profiledAuthorization, err := profiledAuthorization(opts.Authorization)
+	profiledAuthorization, err := profiledAuthorization(opts.Authorization, opts.Profile)
 	if err != nil {
 		return nil, fmt.Errorf("IssueRoot: %w", err)
 	}
 	if len(opts.Signer) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("IssueRoot: valid Ed25519 signer required")
+	}
+	approvalRefs, err := normalizeApprovalRefs(opts.ApprovalRefs)
+	if err != nil {
+		return nil, fmt.Errorf("IssueRoot: %w", err)
+	}
+	if opts.Profile == DGProfileV02 {
+		if err := validateMissionRef(opts.MissionRef); err != nil {
+			return nil, fmt.Errorf("IssueRoot: %w", err)
+		}
+		if err := validateReceiptSignerSeparation(
+			[]*Token{{Confirmation: &ConfirmationKey{JWK: opts.HolderJWK}}},
+			opts.ReceiptSignerJWK,
+		); err != nil {
+			return nil, fmt.Errorf("IssueRoot: %w", err)
+		}
 	}
 
 	issuedAt := opts.Now.Unix()
@@ -93,11 +120,17 @@ func IssueRoot(opts IssueRootOpts) (*Token, error) {
 		"iss":                   opts.Issuer,
 		"iat":                   issuedAt,
 		"exp":                   expiresAt,
-		"aat_type":              string(opts.TokenType),
 		"del_depth":             0,
 		"del_max_depth":         opts.MaxDelegationDepth,
 		"cnf":                   map[string]any{"jwk": opts.HolderJWK},
 		"authorization_details": opts.Authorization,
+	}
+	if opts.Profile == DGProfileV02 {
+		payload["ardur_dg_profile"] = opts.Profile
+		payload["mission_ref"] = opts.MissionRef
+		payload["ardur_approval_refs"] = approvalRefs
+	} else {
+		payload["aat_type"] = string(opts.TokenType)
 	}
 
 	signerOpts := &jose.SignerOptions{}
@@ -145,6 +178,9 @@ func IssueRoot(opts IssueRootOpts) (*Token, error) {
 		DelegationMaxDepth: opts.MaxDelegationDepth,
 		Authorization:      profiledAuthorization,
 		Confirmation:       &ConfirmationKey{JWK: opts.HolderJWK},
+		Profile:            opts.Profile,
+		MissionRef:         opts.MissionRef,
+		ApprovalRefs:       approvalRefs,
 	}
 
 	return token, nil
@@ -167,13 +203,21 @@ func DeriveChild(parent *Token, opts DeriveOpts) (*Token, error) {
 	if len(opts.Signer) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("DeriveChild: valid Ed25519 signer required")
 	}
-	if opts.TokenType != AATTypeDelegation && opts.TokenType != AATTypeExecution {
-		return nil, fmt.Errorf("DeriveChild: invalid aat_type %q", opts.TokenType)
+	if err := validateIssueProfile(opts.Profile, opts.TokenType); err != nil {
+		return nil, fmt.Errorf("DeriveChild: %w", err)
+	}
+	if err := validateProfileOnlyInputs(
+		opts.Profile, nil, opts.ApprovalRefs, opts.ReceiptSignerJWK,
+	); err != nil {
+		return nil, fmt.Errorf("DeriveChild: %w", err)
+	}
+	if parent.Profile != opts.Profile {
+		return nil, fmt.Errorf("DeriveChild: %w", ErrProfileMismatch)
 	}
 	if !isEd25519PublicJWK(opts.HolderJWK) {
 		return nil, fmt.Errorf("DeriveChild: holder public key must be a valid public Ed25519 JWK")
 	}
-	profiledAuthorization, err := profiledAuthorization(opts.Authorization)
+	profiledAuthorization, err := profiledAuthorization(opts.Authorization, opts.Profile)
 	if err != nil {
 		return nil, fmt.Errorf("DeriveChild: %w", err)
 	}
@@ -191,7 +235,20 @@ func DeriveChild(parent *Token, opts DeriveOpts) (*Token, error) {
 	if !signerMatchesJWK(opts.Signer, parent.Confirmation.JWK) {
 		return nil, fmt.Errorf("DeriveChild: signer does not match parent confirmation key")
 	}
-	if parent.TokenType != opts.TokenType {
+	if opts.Profile == DGProfileV02 {
+		if jwkThumbprintsEqual(parent.Confirmation.JWK, opts.HolderJWK) {
+			return nil, fmt.Errorf("DeriveChild: %w", ErrDraft01HolderKeyReuse)
+		}
+		if err := validateMissionRef(parent.MissionRef); err != nil {
+			return nil, fmt.Errorf("DeriveChild: %w", err)
+		}
+		if err := validateReceiptSignerSeparation(
+			[]*Token{parent, {Confirmation: &ConfirmationKey{JWK: opts.HolderJWK}}},
+			opts.ReceiptSignerJWK,
+		); err != nil {
+			return nil, fmt.Errorf("DeriveChild: %w", err)
+		}
+	} else if parent.TokenType != opts.TokenType {
 		childThumbprint, err := opts.HolderJWK.Thumbprint(crypto.SHA256)
 		if err != nil {
 			return nil, fmt.Errorf("DeriveChild: child confirmation thumbprint: %w", err)
@@ -199,6 +256,13 @@ func DeriveChild(parent *Token, opts DeriveOpts) (*Token, error) {
 		if bytes.Equal(parentThumbprint, childThumbprint) {
 			return nil, fmt.Errorf("DeriveChild: %w", ErrDenyStep4STypeTransitionKeyReuse)
 		}
+	}
+	approvalRefs, err := normalizeApprovalRefs(opts.ApprovalRefs)
+	if err != nil {
+		return nil, fmt.Errorf("DeriveChild: %w", err)
+	}
+	if !approvalRefsPreserved(parent.ApprovalRefs, approvalRefs) {
+		return nil, fmt.Errorf("DeriveChild: %w", ErrApprovalRefDropped)
 	}
 
 	issuedAt := opts.Now.Unix()
@@ -252,12 +316,18 @@ func DeriveChild(parent *Token, opts DeriveOpts) (*Token, error) {
 		"iss":                   opts.Issuer, // will be overwritten by caller with JWK thumbprint URI
 		"iat":                   issuedAt,
 		"exp":                   expiresAt,
-		"aat_type":              string(opts.TokenType),
 		"del_depth":             childDepth,
 		"del_max_depth":         opts.MaxDelegationDepth,
 		"par_hash":              parHash,
 		"cnf":                   map[string]any{"jwk": opts.HolderJWK},
 		"authorization_details": wireAuthorization,
+	}
+	if opts.Profile == DGProfileV02 {
+		payload["ardur_dg_profile"] = opts.Profile
+		payload["mission_ref"] = parent.MissionRef
+		payload["ardur_approval_refs"] = approvalRefs
+	} else {
+		payload["aat_type"] = string(opts.TokenType)
 	}
 
 	signerOpts := &jose.SignerOptions{}
@@ -306,6 +376,9 @@ func DeriveChild(parent *Token, opts DeriveOpts) (*Token, error) {
 		ParentHash:         parHash,
 		Authorization:      profiledAuthorization,
 		Confirmation:       &ConfirmationKey{JWK: opts.HolderJWK},
+		Profile:            opts.Profile,
+		MissionRef:         parent.MissionRef,
+		ApprovalRefs:       approvalRefs,
 	}
 
 	return token, nil
@@ -320,7 +393,7 @@ func sha256Hash(data []byte) []byte {
 	return h[:]
 }
 
-func profiledAuthorization(details []AuthorizationDetail) ([]AuthorizationDetail, error) {
+func profiledAuthorization(details []AuthorizationDetail, profile string) ([]AuthorizationDetail, error) {
 	profiled := make([]AuthorizationDetail, 0, 1)
 	for _, detail := range details {
 		if detail.Type == "" {
@@ -332,6 +405,11 @@ func profiledAuthorization(details []AuthorizationDetail) ([]AuthorizationDetail
 		profiled = append(profiled, detail)
 		if len(profiled) > 1 {
 			return nil, fmt.Errorf("at most one %s authorization detail is allowed", AuthorizationDetailType)
+		}
+	}
+	if profile == DGProfileV02 {
+		if err := validateDraft01Authorization(profiled); err != nil {
+			return nil, err
 		}
 	}
 	return profiled, nil

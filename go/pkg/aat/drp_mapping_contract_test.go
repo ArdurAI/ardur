@@ -26,10 +26,12 @@ type drpMappingDocument struct {
 		FormalIETFStanding bool   `json:"formal_ietf_standing"`
 	} `json:"drp"`
 	AATSource struct {
-		ImplementationDocument string `json:"implementation_document"`
-		LiveDocumentObserved   string `json:"live_document_observed"`
-		FormalIETFStanding     bool   `json:"formal_ietf_standing"`
-		MigrationIssue         string `json:"migration_issue"`
+		ImplementationDocument    string `json:"implementation_document"`
+		AdditionalProfileDocument string `json:"additional_profile_document"`
+		AdditionalProfile         string `json:"additional_profile"`
+		LiveDocumentObserved      string `json:"live_document_observed"`
+		FormalIETFStanding        bool   `json:"formal_ietf_standing"`
+		MigrationIssue            string `json:"migration_issue"`
 	} `json:"aat_source"`
 	Classifications      []string          `json:"classifications"`
 	SecurityRequirements map[string]string `json:"security_requirements"`
@@ -94,7 +96,6 @@ func TestDRPMappingCoversDelegationGrantWireFields(t *testing.T) {
 		"authorization_details[].tools.*.*.",
 	)...)
 	expected = append(expected,
-		"mission_ref",
 		"mission_ref.uri",
 		"mission_ref.mission_digest",
 		"reserved_budget_share",
@@ -144,6 +145,13 @@ func TestDRPMappingContractIsCompleteAndFailClosed(t *testing.T) {
 		"draft-niyikiza-oauth-attenuating-agent-tokens-00" {
 		t.Fatalf("unexpected implemented AAT revision %q", document.AATSource.ImplementationDocument)
 	}
+	if document.AATSource.AdditionalProfileDocument !=
+		"draft-niyikiza-oauth-attenuating-agent-tokens-01" {
+		t.Fatalf("unexpected additional AAT profile revision %q", document.AATSource.AdditionalProfileDocument)
+	}
+	if document.AATSource.AdditionalProfile != DGProfileV02 {
+		t.Fatalf("unexpected additional AAT profile %q", document.AATSource.AdditionalProfile)
+	}
 	if document.AATSource.LiveDocumentObserved !=
 		"draft-niyikiza-oauth-attenuating-agent-tokens-01" {
 		t.Fatalf("unexpected observed AAT revision %q", document.AATSource.LiveDocumentObserved)
@@ -151,7 +159,7 @@ func TestDRPMappingContractIsCompleteAndFailClosed(t *testing.T) {
 	if document.AATSource.FormalIETFStanding {
 		t.Fatal("individual AAT draft must not be represented as having formal IETF standing")
 	}
-	if document.AATSource.MigrationIssue != "https://github.com/ArdurAI/ardur/issues/233" {
+	if document.AATSource.MigrationIssue != "https://github.com/ArdurAI/ardur/issues/246" {
 		t.Fatalf("unexpected AAT migration issue %q", document.AATSource.MigrationIssue)
 	}
 

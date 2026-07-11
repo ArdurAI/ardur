@@ -42,10 +42,9 @@ go test -race ./...
 
 ## AAT Package
 
-The `pkg/aat` package implements the JWT path of Ardur's
-`draft-niyikiza-oauth-attenuating-agent-tokens-00` profile. Draft-01 removes
-the required `aat_type` role claim and is rejected explicitly pending a
-versioned migration decision:
+The `pkg/aat` package implements two explicitly dispatched JWT paths: Ardur's
+existing draft-00 DG v0.1 contract and
+`ardur.dg.aat-draft-01.v0.2`. Unprofiled or mixed draft wire forms fail closed.
 
 - **Constraint engine** — 13 draft-00 constraint types (Exact, Pattern, Range, OneOf,
   NotOneOf, Contains, Subset, Regex, Wildcard, All, Any, Not, CEL) with
@@ -65,6 +64,13 @@ versioned migration decision:
   verification → verdict.
 - **Tests** covering constraint checks, subsumption cross-types, issuance,
   derivation, PoP round-trips, and full chain verification scenarios.
+- **DG v0.2 safeguards** — chain-position roles, the nine draft-01 core
+  constraints, a fresh holder key at every derivation, mandatory
+  audience-bound PoP, append-only independently satisfied approval
+  requirements, mission-reference preservation, and holder/receipt signer key
+  separation.
+- **Deterministic fixture** — `cmd/aat-draft01-fixture` produces the committed
+  public root/child/grandchild self-test and verifies it before output.
 
 JWT/JWS is the only supported encoding. The draft-00 appendix defers CWT
 integer claim keys, COSE rules, and interoperable serialization to a companion
@@ -72,7 +78,7 @@ document, so this package does not claim CWT or independent interoperability.
 See the [revision decision](../docs/specs/aat-draft-01-migration-decision.md).
 
 ```bash
-cd go && go test ./pkg/aat/... -v   # full AAT test suite
+cd go && go test ./pkg/aat ./cmd/aat-draft01-fixture -v
 ```
 
 ## Relationship to Python

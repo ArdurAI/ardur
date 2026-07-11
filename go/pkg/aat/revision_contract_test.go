@@ -376,9 +376,11 @@ func TestAATRevisionLedgerMatchesImplementationContract(t *testing.T) {
 			} `json:"draft_01"`
 		} `json:"sources"`
 		Decision struct {
-			SelectedRevision string `json:"selected_revision"`
-			ReviewDeadline   string `json:"review_deadline"`
-			FollowUpIssue    string `json:"follow_up_issue"`
+			SelectedRevision   string `json:"selected_revision"`
+			AdditionalRevision string `json:"additional_revision"`
+			AdditionalProfile  string `json:"additional_profile"`
+			ReviewDeadline     string `json:"review_deadline"`
+			FollowUpIssue      string `json:"follow_up_issue"`
 		} `json:"decision"`
 		RequiredCategories []string `json:"required_categories"`
 		Changes            []struct {
@@ -397,6 +399,10 @@ func TestAATRevisionLedgerMatchesImplementationContract(t *testing.T) {
 	}
 	if ledger.Sources.Draft01.Name != UnsupportedDraftRevision {
 		t.Fatalf("ledger unsupported revision = %q, want %q", ledger.Sources.Draft01.Name, UnsupportedDraftRevision)
+	}
+	if ledger.Decision.AdditionalRevision != Draft01Revision ||
+		ledger.Decision.AdditionalProfile != DGProfileV02 {
+		t.Fatalf("ledger additional profile = %q/%q", ledger.Decision.AdditionalRevision, ledger.Decision.AdditionalProfile)
 	}
 	if ledger.Decision.FollowUpIssue != "https://github.com/ArdurAI/ardur/issues/246" {
 		t.Fatalf("ledger follow-up issue = %q", ledger.Decision.FollowUpIssue)

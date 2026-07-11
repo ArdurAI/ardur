@@ -5,9 +5,9 @@ chain verifier. It accepts the repo's minimal AAT-shaped JWT profile, resolves
 ``mission_ref`` to an authoritative Mission Declaration, and maps the grant to
 the internal mission-passport claim shape used by the governance proxy.
 
-Draft-01 removes the draft-00 ``aat_type`` claim. This adapter rejects that
-wire explicitly so a future chain-position implementation cannot be enabled by
-accident.
+DG v0.2 draft-01 chains are implemented by the Go verifier. This single-token
+adapter recognizes their positive profile discriminator and rejects them with
+an explicit routing error rather than silently applying draft-00 semantics.
 """
 
 from __future__ import annotations
@@ -36,7 +36,9 @@ from .passport import ALGORITHM, MissionPassport, assert_iat_in_window, verify_p
 AAT_AUTHORIZATION_DETAIL_TYPE = "attenuating_agent_token"
 AAT_CREDENTIAL_FORMAT = "aat-compatible-jwt"
 AAT_SUPPORTED_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
-AAT_UNSUPPORTED_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
+AAT_DRAFT01_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
+AAT_UNSUPPORTED_REVISION = AAT_DRAFT01_REVISION
+AAT_DG_PROFILE_V02 = "ardur.dg.aat-draft-01.v0.2"
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,7 @@ def decode_aat_claims(
         public_key,
         algorithms=[ALGORITHM],
         options={
-            "require": ["jti", "iss", "sub", "iat", "exp"],
+            "require": ["jti", "iss", "iat", "exp"],
             "verify_aud": False,
             # Bounded-iat check below; PyJWT's default check uses zero
             # leeway and would clash with cross-node clock drift.
@@ -65,7 +67,20 @@ def decode_aat_claims(
         },
     )
     assert_iat_in_window(claims.get("iat"), field_name="AAT iat")
-    if "aat_type" not in claims:
+    profile = claims.get("ardur_dg_profile")
+    has_token_type = "aat_type" in claims
+    if profile is not None:
+        if profile != AAT_DG_PROFILE_V02:
+            raise PermissionError("unsupported Ardur DG profile")
+        if has_token_type:
+            raise PermissionError(
+                "mixed AAT wire: DG v0.2 draft-01 tokens must omit aat_type"
+            )
+        raise PermissionError(
+            f"{AAT_DG_PROFILE_V02} requires the Go full-chain verifier; "
+            "the Python session adapter remains draft-00-only"
+        )
+    if not has_token_type:
         raise PermissionError(
             "unsupported AAT revision: "
             f"{AAT_UNSUPPORTED_REVISION} removes aat_type; this adapter is "
@@ -75,6 +90,8 @@ def decode_aat_claims(
         raise PermissionError(
             "unsupported AAT token shape: aat_type must be delegation"
         )
+    if not isinstance(claims.get("sub"), str) or not claims["sub"]:
+        raise PermissionError("draft-00 AAT grant missing sub")
     if "mission_ref" not in claims:
         raise PermissionError("AAT grant missing mission_ref")
     if "authorization_details" not in claims:

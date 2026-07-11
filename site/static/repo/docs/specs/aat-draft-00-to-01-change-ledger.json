@@ -19,7 +19,10 @@
   "decision": {
     "selected_revision": "draft-niyikiza-oauth-attenuating-agent-tokens-00",
     "profile": "ardur.mcep.dg.v0.1",
-    "disposition": "time-bounded-pin",
+    "additional_revision": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+    "additional_profile": "ardur.dg.aat-draft-01.v0.2",
+    "disposition": "versioned-parallel-profile",
+    "review_completed": "2026-07-11",
     "review_deadline": "2026-09-15",
     "follow_up_issue": "https://github.com/ArdurAI/ardur/issues/246",
     "review_triggers": [
@@ -27,7 +30,8 @@
       "a new AAT revision is published",
       "an independent draft-01 implementation fixture becomes available"
     ],
-    "draft_01_handling": "reject with an explicit unsupported-revision result"
+    "draft_01_handling": "accept only with the exact Ardur DG v0.2 profile identifier; reject unprofiled, mixed, unknown, and cross-version wire forms",
+    "independent_interoperability": "not-demonstrated"
   },
   "required_categories": [
     "claims",
