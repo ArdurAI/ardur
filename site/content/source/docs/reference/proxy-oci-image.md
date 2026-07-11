@@ -2,7 +2,7 @@
 title: "Ardur Proxy OCI Image Contract"
 description: "The first supported OCI surface is the governance proxy:"
 source_path: "docs/reference/proxy-oci-image.md"
-source_sha256: "7c3566f760be6cb7d70c58507c169ec8a2f6579285449e74795e938897264b13"
+source_sha256: "9d046acc8ac2809d9b2a20a067f9d3a228c86a1ef8c06923a3bfe8c17f6c42ac"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,8 +30,8 @@ The first supported OCI surface is the governance proxy:
 ghcr.io/ardurai/ardur-proxy
 ```
 
-Release automation creates only immutable version tags, such as `v0.1.0` and
-`0.1.0`. It does not create `latest`, branch, or moving major/minor tags. The
+Release automation creates only immutable version tags, such as `v0.2.0` and
+`0.2.0`. It does not create `latest`, branch, or moving major/minor tags. The
 digest is the deployment identity and should be recorded in GitOps manifests:
 
 ```bash

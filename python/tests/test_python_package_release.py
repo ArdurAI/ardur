@@ -19,6 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 CI path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_ROOT = REPO_ROOT / "python"
 PYPROJECT = PYTHON_ROOT / "pyproject.toml"
+PROXY_SOURCE = PYTHON_ROOT / "vibap" / "proxy.py"
 SOURCE_PLUGIN = REPO_ROOT / "plugins" / "claude-code"
 PACKAGED_PLUGIN = PYTHON_ROOT / "vibap" / "_plugins" / "claude-code"
 PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "python-package.yml"
@@ -66,6 +67,11 @@ def test_python_distribution_metadata_is_release_ready() -> None:
     match = re.search(r'^__version__ = "([^"]+)"$', init_text, flags=re.MULTILINE)
     assert match is not None
     assert project["version"] == match.group(1)
+
+    proxy_text = PROXY_SOURCE.read_text(encoding="utf-8")
+    proxy_match = re.search(r'^API_VERSION = "([^"]+)"$', proxy_text, flags=re.MULTILINE)
+    assert proxy_match is not None
+    assert project["version"] == proxy_match.group(1)
 
 
 def test_packaged_claude_code_plugin_matches_canonical_source() -> None:
