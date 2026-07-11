@@ -3551,7 +3551,15 @@ def _protect_policy_input_placeholder(option: str) -> str:
 def _protect_policy_input_next_steps(option: str, condition: str) -> list[dict[str, str]]:
     placeholder = _protect_policy_input_placeholder(option)
     steps: list[dict[str, str]] = []
-    if option in {"--forbid-rules", "--cedar-entities"}:
+    is_empty = condition.endswith("_empty")
+    if is_empty:
+        steps.append({
+            "condition": condition,
+            "action": "provide_policy_path",
+            "command": f"ardur protect claude-code {option} {placeholder}",
+            "detail": f"Replace {placeholder} with an explicit, non-empty path to a local policy input file.",
+        })
+    elif option in {"--forbid-rules", "--cedar-entities"}:
         steps.append({
             "condition": condition,
             "action": "validate_policy_json",
@@ -3838,14 +3846,28 @@ def _resolve_protect_policies(
     """Build additional_policies from CLI flags + profile."""
     policies: list[dict[str, object]] = []
 
-    # ``--cedar-entities`` is conditionally-guarded: it is only read inside the
-    # ``if cedar_policy is not None:`` block below. When passed standalone
-    # (without ``--cedar-policy``) the old code silently ignored an empty or
-    # whitespace-only path (exit 0, "protection configured"). Validate it up
-    # front so the empty/whitespace defect surfaces as a structured error in
-    # both the standalone and paired cases. ``--cedar-entities`` is ``type=str``
-    # so the raw value survives here; ``None`` means the flag was omitted.
+    # Reject empty/whitespace-only policy path arguments before Path()
+    # normalises them to the current working directory. ``type=str`` on the
+    # parser keeps the raw value so an empty/whitespace input can be detected
+    # here instead of silently resolving to ``PosixPath('.')`` and producing a
+    # confusing downstream file-read error (or, for ``--cedar-entities``,
+    # silently succeeding because the handler only reads it inside the
+    # ``--cedar-policy`` block).
+    forbid_rules_raw = getattr(args, "forbid_rules", None)
+    cedar_policy_raw = getattr(args, "cedar_policy", None)
     cedar_entities_raw = getattr(args, "cedar_entities", None)
+    if forbid_rules_raw is not None and not str(forbid_rules_raw).strip():
+        raise _ProtectPolicyInputError(
+            "--forbid-rules",
+            "protect_forbid_rules_empty",
+            "The --forbid-rules argument is empty or whitespace-only.",
+        )
+    if cedar_policy_raw is not None and not str(cedar_policy_raw).strip():
+        raise _ProtectPolicyInputError(
+            "--cedar-policy",
+            "protect_cedar_policy_empty",
+            "The --cedar-policy argument is empty or whitespace-only.",
+        )
     if cedar_entities_raw is not None and not str(cedar_entities_raw).strip():
         raise _ProtectPolicyInputError(
             "--cedar-entities",
@@ -3854,8 +3876,8 @@ def _resolve_protect_policies(
         )
 
     # CLI flags (highest priority)
-    if getattr(args, "forbid_rules", None) is not None:
-        rules = _read_protect_policy_json(Path(args.forbid_rules), "--forbid-rules")
+    if forbid_rules_raw is not None:
+        rules = _read_protect_policy_json(Path(forbid_rules_raw), "--forbid-rules")
         if not isinstance(rules, list):
             rules = [rules]
         policies.append({
@@ -3867,12 +3889,12 @@ def _resolve_protect_policies(
             ).hexdigest(),
             "data_inline": rules,
         })
-    if getattr(args, "cedar_policy", None) is not None:
-        policy_src = _read_protect_policy_text(Path(args.cedar_policy), "--cedar-policy")
+    if cedar_policy_raw is not None:
+        policy_src = _read_protect_policy_text(Path(cedar_policy_raw), "--cedar-policy")
         _validate_protect_cedar_policy_syntax(policy_src)
         entities: object = []
-        if getattr(args, "cedar_entities", None) is not None:
-            entities = _read_protect_policy_json(Path(args.cedar_entities), "--cedar-entities")
+        if cedar_entities_raw is not None:
+            entities = _read_protect_policy_json(Path(cedar_entities_raw), "--cedar-entities")
             _validate_protect_cedar_entities(entities)
         policies.append({
             "backend": "cedar",
@@ -5305,11 +5327,19 @@ def build_parser() -> argparse.ArgumentParser:
     protect_cc.add_argument("--max-duration-s", type=int, default=86400, help="mission duration budget in seconds")
     protect_cc.add_argument("--ttl-s", type=int, help="override token TTL in seconds")
     protect_cc.add_argument(
-        "--forbid-rules", type=Path,
+        # ``type=str`` (not ``Path``) so an empty or whitespace-only value
+        # survives parsing and can be rejected explicitly below. ``type=Path``
+        # normalises ``""`` to ``PosixPath(".")`` which silently resolves to the
+        # CWD and masks the empty-argument defect.
+        "--forbid-rules", type=str,
         help="JSON file containing forbid_rules policy specifications",
     )
     protect_cc.add_argument(
-        "--cedar-policy", type=Path,
+        # ``type=str`` (not ``Path``) so an empty or whitespace-only value
+        # survives parsing and can be rejected explicitly below. ``type=Path``
+        # normalises ``""`` to ``PosixPath(".")`` which silently resolves to the
+        # CWD and masks the empty-argument defect.
+        "--cedar-policy", type=str,
         help="Cedar policy file (.cedar)",
     )
     protect_cc.add_argument(
