@@ -2166,6 +2166,19 @@ def cmd_claude_code_hook(args: argparse.Namespace) -> int:
 
 
 def cmd_claude_code_report(args: argparse.Namespace) -> int:
+    path_failure = _coerce_report_path_args(
+        args,
+        command_name="claude-code-report",
+        command_title="Claude Code report",
+        specs=(
+            ("home", "--home", "home", "claude_code_report_home_empty", False),
+            ("chain_dir", "--chain-dir", "chain dir", "claude_code_report_chain_dir_empty", False),
+            ("keys_dir", "--keys-dir", "keys dir", "claude_code_report_keys_dir_empty", False),
+        ),
+    )
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         report = build_claude_code_report(
             home=args.home,
@@ -2468,7 +2481,93 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_path_empty_failure_response(
+    *,
+    command_name: str,
+    command_title: str,
+    arg_name: str,
+    label: str,
+    condition: str,
+    required: bool = False,
+) -> dict[str, object]:
+    placeholder = label.replace(" ", "-")
+    action_command = command_name.replace(" ", "_").replace("-", "_")
+    action_label = label.replace(" ", "_").replace("-", "_")
+    if required:
+        detail = f"The {arg_name} argument is empty or whitespace-only. Provide a {label} path."
+    else:
+        detail = (
+            f"The {arg_name} argument is empty or whitespace-only. Provide a {label} path, "
+            "or omit the option to use the default local Ardur location."
+        )
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": f"{command_title} {label} is empty.",
+        "detail": detail,
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": f"rerun_{action_command}_with_{action_label}",
+                "command": f"ardur {command_name} {arg_name} <{placeholder}>",
+                "detail": f"Replace <{placeholder}> with an explicit non-empty path.",
+            }
+        ],
+    }
+
+
+def _coerce_report_path_args(
+    args: argparse.Namespace,
+    *,
+    command_name: str,
+    command_title: str,
+    specs: Sequence[tuple[str, str, str, str, bool]],
+) -> dict[str, object] | None:
+    """Reject empty/whitespace report path args, then coerce strings to Path.
+
+    Argparse ``type=Path`` normalizes ``""`` to ``PosixPath('.')`` before the
+    command handler can distinguish an omitted value from an empty path. The
+    report commands stay read-only, but an empty value can silently fall back to
+    defaults or produce raw chain/input exceptions. Parse as ``str`` first and
+    fail closed before converting non-empty values to ``Path`` for downstream
+    report builders.
+    """
+    for attr, arg_name, label, condition, required in specs:
+        value = getattr(args, attr, None)
+        if value is None:
+            continue
+        if _path_arg_is_empty(value):
+            return _report_path_empty_failure_response(
+                command_name=command_name,
+                command_title=command_title,
+                arg_name=arg_name,
+                label=label,
+                condition=condition,
+                required=required,
+            )
+    for attr, *_rest in specs:
+        value = getattr(args, attr, None)
+        if isinstance(value, str):
+            setattr(args, attr, Path(value))
+    return None
+
+
 def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
+    path_failure = _coerce_report_path_args(
+        args,
+        command_name="gemini-cli-report",
+        command_title="Gemini CLI report",
+        specs=(
+            ("home", "--home", "home", "gemini_cli_report_home_empty", False),
+            ("chain_dir", "--chain-dir", "chain dir", "gemini_cli_report_chain_dir_empty", False),
+            ("keys_dir", "--keys-dir", "keys dir", "gemini_cli_report_keys_dir_empty", False),
+        ),
+    )
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         report = build_gemini_shareable_report(
             home=args.home,
@@ -2589,6 +2688,19 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
 
 
 def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
+    path_failure = _coerce_report_path_args(
+        args,
+        command_name="codex-app-server-report",
+        command_title="Codex app-server report",
+        specs=(
+            ("home", "--home", "home", "codex_app_server_report_home_empty", False),
+            ("chain_dir", "--chain-dir", "chain dir", "codex_app_server_report_chain_dir_empty", False),
+            ("keys_dir", "--keys-dir", "keys dir", "codex_app_server_report_keys_dir_empty", False),
+        ),
+    )
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         report = build_codex_shareable_report(
             home=args.home,
@@ -2680,6 +2792,17 @@ def _posture_report_input_failure_response(exc: Exception) -> dict:
 
 
 def cmd_posture_report(args: argparse.Namespace) -> int:
+    path_failure = _coerce_report_path_args(
+        args,
+        command_name="posture report",
+        command_title="Posture report",
+        specs=(
+            ("input", "--input", "posture json", "posture_report_input_empty", True),
+        ),
+    )
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         posture = json.loads(args.input.read_text(encoding="utf-8"))
         if not isinstance(posture, dict):
@@ -4808,9 +4931,9 @@ def build_parser() -> argparse.ArgumentParser:
         "claude-code-report",
         help="verify Claude Code hook receipt chains and summarize observability",
     )
-    cc_report.add_argument("--home", type=Path, help="Ardur home containing claude-code-hook receipts")
-    cc_report.add_argument("--chain-dir", type=Path, help="explicit Claude Code receipt chain directory")
-    cc_report.add_argument("--keys-dir", type=Path, help="signing public-key directory")
+    cc_report.add_argument("--home", type=str, help="Ardur home containing claude-code-hook receipts")
+    cc_report.add_argument("--chain-dir", type=str, help="explicit Claude Code receipt chain directory")
+    cc_report.add_argument("--keys-dir", type=str, help="signing public-key directory")
     cc_report.add_argument(
         "--verify-expiry",
         action="store_true",
@@ -4846,9 +4969,9 @@ def build_parser() -> argparse.ArgumentParser:
         "gemini-cli-report",
         help="verify Gemini CLI hook receipt chains and summarize local-only observability",
     )
-    gemini_report.add_argument("--home", type=Path, help="Gemini/Ardur home used for redaction context")
-    gemini_report.add_argument("--chain-dir", type=Path, help="explicit Gemini CLI receipt chain directory")
-    gemini_report.add_argument("--keys-dir", type=Path, help="signing public-key directory")
+    gemini_report.add_argument("--home", type=str, help="Gemini/Ardur home used for redaction context")
+    gemini_report.add_argument("--chain-dir", type=str, help="explicit Gemini CLI receipt chain directory")
+    gemini_report.add_argument("--keys-dir", type=str, help="signing public-key directory")
     gemini_report.add_argument(
         "--verify-expiry",
         action="store_true",
@@ -4882,9 +5005,9 @@ def build_parser() -> argparse.ArgumentParser:
         "codex-app-server-report",
         help="verify Codex app-server receipt chains and summarize local-only observability",
     )
-    codex_report.add_argument("--home", type=Path, help="Codex/Ardur home used for redaction context")
-    codex_report.add_argument("--chain-dir", type=Path, help="explicit Codex app-server receipt chain directory")
-    codex_report.add_argument("--keys-dir", type=Path, help="signing public-key directory")
+    codex_report.add_argument("--home", type=str, help="Codex/Ardur home used for redaction context")
+    codex_report.add_argument("--chain-dir", type=str, help="explicit Codex app-server receipt chain directory")
+    codex_report.add_argument("--keys-dir", type=str, help="signing public-key directory")
     codex_report.add_argument(
         "--verify-expiry",
         action="store_true",
@@ -4923,7 +5046,7 @@ def build_parser() -> argparse.ArgumentParser:
         "report",
         help="render a posture JSON document as a concise report",
     )
-    posture_report.add_argument("--input", type=Path, required=True, help="posture JSON produced by ardur posture scan")
+    posture_report.add_argument("--input", type=str, required=True, help="posture JSON produced by ardur posture scan")
     posture_report.add_argument(
         "--format",
         choices=["markdown", "json"],

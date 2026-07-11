@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "543cdd221a86dff8266ca85f622ff003c30d0e80d5bed93d00bcfb9eb54f40e6"
+source_sha256: "8217d7a9d1f61db951bdb3e2b06f80515e1ac70731d74fcde767336ced2421b0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1118,6 +1118,15 @@ hints use placeholders such as `<your-project>`, `<ardur-home>`, and
 `<claude-code-plugin>`; they do not call Claude, contact a provider, or imply
 visibility into provider-hidden actions.
 
+If `--home`, `--chain-dir`, or `--keys-dir` is empty or whitespace-only, the
+command fails closed with exit code `1` and prints a JSON response with
+`ok: false`, matching `error`, `error_code`, and `condition` fields, a concise
+`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
+of `claude_code_report_home_empty`, `claude_code_report_chain_dir_empty`, or
+`claude_code_report_keys_dir_empty` depending on which argument failed. Omit the
+optional argument to use the default local Ardur location; pass `.` explicitly
+when the current working directory is intended.
+
 If `--home` or `--keys-dir` points at an existing regular file, the command
 fails closed with exit code `1` and prints a JSON response with `ok: false`,
 matching `error` and `condition` fields set to `keys_dir_not_directory`, a
@@ -1218,6 +1227,15 @@ These hints use placeholders such as `<your-project>`, `<ardur-home>`, and
 `<chain-dir>`; they do not call Gemini, contact a provider, or imply visibility
 into provider-hidden actions.
 
+If `--home`, `--chain-dir`, or `--keys-dir` is empty or whitespace-only, the
+command fails closed with exit code `1` and prints a JSON response with
+`ok: false`, matching `error`, `error_code`, and `condition` fields, a concise
+`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
+of `gemini_cli_report_home_empty`, `gemini_cli_report_chain_dir_empty`, or
+`gemini_cli_report_keys_dir_empty` depending on which argument failed. Omit the
+optional argument to use the default local Ardur location; pass `.` explicitly
+when the current working directory is intended.
+
 ### `ardur codex-app-server-fixture`
 
 Write a local-only Codex app-server config/schema/context fixture and print a
@@ -1305,6 +1323,16 @@ rerun `ardur codex-app-server-report`. These hints use placeholders such as
 not call Codex, contact a provider, prove live Codex cloud behavior, or imply
 visibility into provider-hidden actions.
 
+If `--home`, `--chain-dir`, or `--keys-dir` is empty or whitespace-only, the
+command fails closed with exit code `1` and prints a JSON response with
+`ok: false`, matching `error`, `error_code`, and `condition` fields, a concise
+`message`, a `detail`, and placeholder-only `next_steps`. The `condition` is one
+of `codex_app_server_report_home_empty`,
+`codex_app_server_report_chain_dir_empty`, or
+`codex_app_server_report_keys_dir_empty` depending on which argument failed.
+Omit the optional argument to use the default local Ardur location; pass `.`
+explicitly when the current working directory is intended.
+
 ### `ardur posture scan`
 
 Derive a local posture-index document from receipt chains, an optional
@@ -1366,6 +1394,13 @@ concise Markdown report, or re-emit it as formatted JSON.
 ```text
 ardur posture report --input posture.json [--format markdown|json]
 ```
+
+If `--input` is empty or whitespace-only, the command fails closed before path
+conversion with exit code `1` and prints a JSON response with `ok: false`,
+matching `error`, `error_code`, and `condition` fields
+(`posture_report_input_empty`), a human-readable `message` and `detail`, and
+placeholder-only `next_steps`. This prevents an accidental blank input from
+being normalized to the current working directory.
 
 If `--input` is missing, unreadable, a directory, malformed JSON, or JSON that
 is not an object, the command fails closed with exit code `1`. JSON output
