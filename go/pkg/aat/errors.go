@@ -26,10 +26,15 @@ var (
 	ErrInvariantI6NotImplemented = fmt.Errorf("%w: I6 proof of possession", ErrNotImplemented)
 
 	// Constraint registry errors.
-	ErrUnknownConstraintType   = errors.New("aat: unknown constraint type")
-	ErrDuplicateConstraintType = errors.New("aat: duplicate constraint type registration")
-	ErrNilConstraintHandler    = errors.New("aat: nil constraint handler")
-	ErrNilConstraint           = errors.New("aat: nil constraint")
+	ErrUnknownConstraintType    = errors.New("aat: unknown constraint type")
+	ErrDuplicateConstraintType  = errors.New("aat: duplicate constraint type registration")
+	ErrNilConstraintHandler     = errors.New("aat: nil constraint handler")
+	ErrNilConstraint            = errors.New("aat: nil constraint")
+	ErrUnsupportedDraftRevision = fmt.Errorf(
+		"aat: unsupported revision: %s requires chain-position semantics; this verifier is pinned to %s",
+		UnsupportedDraftRevision,
+		SupportedDraftRevision,
+	)
 
 	// Chain verification DENY points (AAT §7).
 	ErrDenyStep1EmptyChain = errors.New("aat: deny step 1 empty chain")
@@ -92,6 +97,8 @@ var (
 	ErrDenyStep6CDelegationLeaf          = errors.New("aat: deny step 6c delegation token cannot authorize direct invocation")
 
 	ErrDenyStep7APoPSignature = errors.New("aat: deny step 7a pop signature verification failed")
+	ErrDenyStep7AMissingJTI   = errors.New("aat: deny step 7a pop jti is required")
+	ErrDenyStep7ANonCanonical = errors.New("aat: deny step 7a pop payload is not RFC 8785 canonical JSON")
 	ErrDenyStep7BAATID        = errors.New("aat: deny step 7b pop aat_id does not match leaf jti")
 	ErrDenyStep7CPoPTool      = errors.New("aat: deny step 7c pop aat_tool does not match requested tool")
 	ErrDenyStep7DHTAMismatch  = errors.New("aat: deny step 7d pop hta does not match canonicalized args")

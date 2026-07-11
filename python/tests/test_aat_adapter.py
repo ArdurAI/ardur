@@ -9,6 +9,7 @@ from typing import Any
 import jwt
 import pytest
 
+import vibap.aat_adapter as aat_adapter_module
 import vibap.mission as mission_module
 from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import Decision
@@ -101,9 +102,10 @@ def _issue_aat(
     tools: list[str],
     max_tool_calls: int = 2,
     grant_id: str | None = None,
-    aat_type: str = "delegation",
+    aat_type: str | None = "delegation",
     del_depth: int = 0,
     del_max_depth: int = 2,
+    par_hash: str | None = None,
 ) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
@@ -112,7 +114,6 @@ def _issue_aat(
         "iat": now,
         "exp": now + 300,
         "jti": grant_id or str(uuid.uuid4()),
-        "aat_type": aat_type,
         "del_depth": del_depth,
         "del_max_depth": del_max_depth,
         "authorization_details": [
@@ -124,6 +125,10 @@ def _issue_aat(
         ],
         "cnf": {"jwk": {"kid": "holder-key"}},
     }
+    if aat_type is not None:
+        claims["aat_type"] = aat_type
+    if par_hash is not None:
+        claims["par_hash"] = par_hash
     if mission_ref is not None:
         claims["mission_ref"] = mission_ref
     return jwt.encode(claims, private_key, algorithm=ALGORITHM)
@@ -244,6 +249,251 @@ def test_aat_unsupported_token_shape_fails_closed(proxy, private_key):
 
     with pytest.raises(PermissionError, match="aat_type"):
         proxy.start_session_from_aat(aat_token, signing_key=private_key)
+
+
+def test_aat_draft_01_wire_fails_with_explicit_revision_error(
+    private_key,
+    public_key,
+):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        aat_type=None,
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match=aat_adapter_module.AAT_UNSUPPORTED_REVISION,
+    ):
+        aat_adapter_module.decode_aat_claims(aat_token, public_key)
+
+
+def test_aat_draft_00_root_child_grandchild_narrowing(private_key):
+    mission_ref = {
+        "uri": "https://issuer.example/md/organic.jwt",
+        "mission_id": "urn:ardur:mission:aat:organic",
+        "mission_digest": "sha-256:" + ("1" * 64),
+    }
+    root_token = _issue_aat(
+        private_key,
+        mission_ref=mission_ref,
+        tools=["read", "write"],
+        max_tool_calls=3,
+        del_depth=0,
+        del_max_depth=2,
+    )
+    root = jwt.decode(
+        root_token,
+        options={"verify_signature": False},
+    )
+    child_token = _issue_aat(
+        private_key,
+        mission_ref=mission_ref,
+        tools=["read"],
+        max_tool_calls=2,
+        del_depth=1,
+        del_max_depth=2,
+        par_hash=aat_adapter_module._aat_parent_hash(root_token),
+    )
+    child = jwt.decode(
+        child_token,
+        options={"verify_signature": False},
+    )
+    grandchild_token = _issue_aat(
+        private_key,
+        mission_ref=mission_ref,
+        tools=["read"],
+        max_tool_calls=1,
+        del_depth=2,
+        del_max_depth=2,
+        par_hash=aat_adapter_module._aat_parent_hash(child_token),
+    )
+    grandchild = jwt.decode(
+        grandchild_token,
+        options={"verify_signature": False},
+    )
+
+    aat_adapter_module._assert_child_grant_narrows_parent(child, root)
+    aat_adapter_module._assert_child_parent_binding(child, root_token)
+    aat_adapter_module._assert_child_grant_narrows_parent(grandchild, child)
+    aat_adapter_module._assert_child_parent_binding(grandchild, child_token)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda child, parent: child["authorization_details"][0]["tools"].update(
+                {"write": {}}
+            ),
+            "widens parent tools",
+        ),
+        (
+            lambda child, parent: child["authorization_details"][0].update(
+                {"max_tool_calls": 4}
+            ),
+            "widens parent budget",
+        ),
+        (lambda child, parent: child.update({"del_depth": 2}), "exactly one"),
+        (lambda child, parent: child.update({"del_max_depth": 3}), "depth window"),
+        (
+            lambda child, parent: child.update({"iat": int(parent["iat"]) - 1}),
+            "iat precedes",
+        ),
+        (
+            lambda child, parent: child.update({"exp": int(parent["exp"]) + 1}),
+            "exp exceeds",
+        ),
+        (
+            lambda child, parent: child.update(
+                {"mission_ref": {"uri": "https://evil.example/md.jwt"}}
+            ),
+            "changes mission_ref",
+        ),
+    ],
+)
+def test_aat_child_narrowing_rejects_mutations(private_key, mutation, message):
+    mission_ref = {"uri": "https://issuer.example/md/narrowing.jwt"}
+    parent = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref=mission_ref,
+            tools=["read"],
+            max_tool_calls=3,
+            del_depth=0,
+            del_max_depth=2,
+        ),
+        options={"verify_signature": False},
+    )
+    child = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref=mission_ref,
+            tools=["read"],
+            max_tool_calls=2,
+            del_depth=1,
+            del_max_depth=2,
+        ),
+        options={"verify_signature": False},
+    )
+    mutation(child, parent)
+
+    with pytest.raises(PermissionError, match=message):
+        aat_adapter_module._assert_child_grant_narrows_parent(child, parent)
+
+
+def test_aat_requires_exactly_one_supported_authorization_detail(private_key):
+    claims = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref={"uri": "https://issuer.example/md/details.jwt"},
+            tools=["read"],
+        ),
+        options={"verify_signature": False},
+    )
+    claims["authorization_details"].append(dict(claims["authorization_details"][0]))
+
+    with pytest.raises(PermissionError, match="exactly one"):
+        aat_adapter_module._extract_tools(claims)
+
+
+def test_aat_adapter_rejects_unenforced_argument_constraints(private_key):
+    claims = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref={"uri": "https://issuer.example/md/constraints.jwt"},
+            tools=["read"],
+        ),
+        options={"verify_signature": False},
+    )
+    claims["authorization_details"][0]["tools"]["read"] = {
+        "path": {"constraint_type": "critical-unrecognized"}
+    }
+
+    with pytest.raises(PermissionError, match="does not support argument constraints"):
+        aat_adapter_module._extract_tools(claims)
+
+
+def test_aat_parent_binding_rejects_a_different_parent_token(private_key):
+    parent = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/parent.jwt"},
+        tools=["read"],
+    )
+    other_parent = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/other-parent.jwt"},
+        tools=["read"],
+    )
+    child = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref={"uri": "https://issuer.example/md/parent.jwt"},
+            tools=["read"],
+            del_depth=1,
+            par_hash=aat_adapter_module._aat_parent_hash(parent),
+        ),
+        options={"verify_signature": False},
+    )
+
+    with pytest.raises(PermissionError, match="does not bind"):
+        aat_adapter_module._assert_child_parent_binding(child, other_parent)
+
+
+@pytest.mark.parametrize("invalid_depth", [1.5, "1", True])
+def test_aat_adapter_rejects_non_integer_depth_claims(private_key, invalid_depth):
+    claims = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref={"uri": "https://issuer.example/md/depth.jwt"},
+            tools=["read"],
+        ),
+        options={"verify_signature": False},
+    )
+    claims["del_depth"] = invalid_depth
+
+    with pytest.raises(PermissionError, match="must be an integer"):
+        aat_adapter_module._int_claim(
+            claims,
+            "del_depth",
+            fallback="delegation_depth",
+            default=0,
+        )
+
+
+@pytest.mark.parametrize("invalid_budget", [1.5, "2", True, 0, -1])
+def test_aat_adapter_rejects_non_integer_or_non_positive_budgets(
+    private_key,
+    invalid_budget,
+):
+    claims = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref={"uri": "https://issuer.example/md/budget.jwt"},
+            tools=["read"],
+        ),
+        options={"verify_signature": False},
+    )
+    claims["authorization_details"][0]["max_tool_calls"] = invalid_budget
+
+    with pytest.raises(PermissionError, match="positive integer"):
+        aat_adapter_module._extract_max_tool_calls(claims, default=3)
+
+
+def test_aat_adapter_rejects_malformed_unrelated_authorization_detail(private_key):
+    claims = jwt.decode(
+        _issue_aat(
+            private_key,
+            mission_ref={"uri": "https://issuer.example/md/auth-detail.jwt"},
+            tools=["read"],
+        ),
+        options={"verify_signature": False},
+    )
+    claims["authorization_details"].insert(0, "not-an-object")
+
+    with pytest.raises(PermissionError, match="entries must be objects"):
+        aat_adapter_module._authorization_details(claims)
 
 
 def test_aat_child_tool_widening_fails_closed(
@@ -378,13 +628,13 @@ class TestAATProofOfPossession:
     @pytest.mark.parametrize(
         "malformed_cnf",
         [
-            "",                       # empty string
-            42,                       # int
-            False,                    # bool (also a non-dict shape)
-            [],                       # empty list
-            ["jkt", "thumb"],         # list with content
-            0,                        # zero
-            "thumbprint-as-string",   # well-formed-looking string
+            "",  # empty string
+            42,  # int
+            False,  # bool (also a non-dict shape)
+            [],  # empty list
+            ["jkt", "thumb"],  # list with content
+            0,  # zero
+            "thumbprint-as-string",  # well-formed-looking string
         ],
     )
     def test_cnf_non_dict_does_not_silently_route_to_bearer(
@@ -520,11 +770,11 @@ class TestAATProofOfPossession:
 # default doesn't bound future skew. assert_iat_in_window now closes that gap
 # at every JWT decode call site.
 
+
 class TestAATIatSkewGuard:
-    def test_aat_with_iat_in_far_future_fails_closed(
-        self, private_key, public_key
-    ):
+    def test_aat_with_iat_in_far_future_fails_closed(self, private_key, public_key):
         import jwt as _jwt
+
         far_future = int(time.time()) + 365 * 86400
         aat_token = _jwt.encode(
             {
@@ -553,6 +803,7 @@ class TestAATIatSkewGuard:
             algorithm=ALGORITHM,
         )
         from vibap.aat_adapter import decode_aat_claims
+
         with pytest.raises(_jwt.InvalidTokenError, match="AAT iat"):
             decode_aat_claims(aat_token, public_key)
 
@@ -564,6 +815,7 @@ class TestAATIatSkewGuard:
 # holder key for a cnf-bearing AAT succeeds. If verify_pop were silently
 # bypassed (e.g., a refactor commenting out aat_adapter.py:114), nothing
 # would catch it. This test is that catch.
+
 
 class TestAATPoPHappyPath:
     def test_valid_kb_jwt_with_matching_holder_key_succeeds(
@@ -734,13 +986,17 @@ class TestAATAdapterEndToEnd:
             max_delegation_depth=2,
         )
         md_token = issue_passport(
-            mission, private_key, ttl_s=600,
+            mission,
+            private_key,
+            ttl_s=600,
             extra_claims=v01_required_md_extras(mission_id=mission_id),
         )
         md = mission_module.load_mission_declaration(md_token, public_key)
         _install_fetch_map(
-            monkeypatch, {md_url: md_token},
-            private_key=private_key, mission_ids=[mission_id],
+            monkeypatch,
+            {md_url: md_token},
+            private_key=private_key,
+            mission_ids=[mission_id],
         )
 
         # Build forbid_rules policy and PolicyStore
@@ -748,8 +1004,10 @@ class TestAATAdapterEndToEnd:
         data_json = json.dumps(rules, sort_keys=True, separators=(",", ":"))
         sha = hashlib.sha256(data_json.encode("utf-8")).hexdigest()
         forbid_spec = {
-            "backend": "forbid_rules", "label": "compliance",
-            "policy_sha256": sha, "data_inline": copy.deepcopy(rules),
+            "backend": "forbid_rules",
+            "label": "compliance",
+            "policy_sha256": sha,
+            "data_inline": copy.deepcopy(rules),
         }
         store = InMemoryPolicyStore()
         store.put_policies(mission_id=mission_id, policies=[forbid_spec])
@@ -768,17 +1026,22 @@ class TestAATAdapterEndToEnd:
         aat_claims = {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-e2e-agent",
-            "iat": now, "exp": now + 300,
+            "iat": now,
+            "exp": now + 300,
             "jti": aat_jti,
             "aat_type": "delegation",
-            "del_depth": 0, "del_max_depth": 2,
-            "authorization_details": [{
-                "type": "attenuating_agent_token",
-                "tools": {"read_file": {}, "write_file": {}},
-                "max_tool_calls": 5,
-            }],
+            "del_depth": 0,
+            "del_max_depth": 2,
+            "authorization_details": [
+                {
+                    "type": "attenuating_agent_token",
+                    "tools": {"read_file": {}, "write_file": {}},
+                    "max_tool_calls": 5,
+                }
+            ],
             "mission_ref": {
-                "uri": md_url, "mission_id": mission_id,
+                "uri": md_url,
+                "mission_id": mission_id,
                 "mission_digest": md.payload_digest,
             },
         }
@@ -786,18 +1049,24 @@ class TestAATAdapterEndToEnd:
 
         # Start session — require_pop=False since we're not testing PoP here
         session = proxy.start_session_from_aat(
-            aat_token, signing_key=private_key, require_pop=False,
+            aat_token,
+            signing_key=private_key,
+            require_pop=False,
         )
 
         # Allowed: no forbid_rules match
         decision, reason = proxy.evaluate_tool_call(
-            session, "read_file", {"path": "/tmp/ok.txt"},
+            session,
+            "read_file",
+            {"path": "/tmp/ok.txt"},
         )
         assert decision == Decision.PERMIT, f"Expected PERMIT, got {decision}: {reason}"
 
         # Denied by forbid_rules: /etc/ path
         decision, reason = proxy.evaluate_tool_call(
-            session, "read_file", {"path": "/etc/passwd"},
+            session,
+            "read_file",
+            {"path": "/etc/passwd"},
         )
         assert decision == Decision.DENY, f"Expected DENY, got {decision}: {reason}"
         assert "no_system" in reason
@@ -806,7 +1075,8 @@ class TestAATAdapterEndToEnd:
         entries = _receipt_entries(proxy.receipts_log_path)
         assert len(entries) >= 2
         claims_list = verify_chain(
-            [e["jwt"] for e in entries], proxy.receipt_public_key,
+            [e["jwt"] for e in entries],
+            proxy.receipt_public_key,
         )
         trace_ids = {c["trace_id"] for c in claims_list}
         assert len(trace_ids) == 1
@@ -833,13 +1103,17 @@ class TestAATAdapterEndToEnd:
             max_duration_s=600,
         )
         md_token = issue_passport(
-            mission, private_key, ttl_s=600,
+            mission,
+            private_key,
+            ttl_s=600,
             extra_claims=v01_required_md_extras(mission_id=mission_id),
         )
         md = mission_module.load_mission_declaration(md_token, public_key)
         _install_fetch_map(
-            monkeypatch, {md_url: md_token},
-            private_key=private_key, mission_ids=[mission_id],
+            monkeypatch,
+            {md_url: md_token},
+            private_key=private_key,
+            mission_ids=[mission_id],
         )
 
         proxy = GovernanceProxy(
@@ -849,45 +1123,66 @@ class TestAATAdapterEndToEnd:
         )
 
         now = int(time.time())
-        aat_token = jwt.encode({
-            "iss": "https://tenuo.example/issuer",
-            "sub": "aat-multi-agent",
-            "iat": now, "exp": now + 300,
-            "jti": str(uuid.uuid4()),
-            "aat_type": "delegation",
-            "del_depth": 0, "del_max_depth": 2,
-            "authorization_details": [{
-                "type": "attenuating_agent_token",
-                "tools": {"read_file": {}, "write_file": {}, "search_files": {}},
-                "max_tool_calls": 10,
-            }],
-            "mission_ref": {
-                "uri": md_url, "mission_id": mission_id,
-                "mission_digest": md.payload_digest,
+        aat_token = jwt.encode(
+            {
+                "iss": "https://tenuo.example/issuer",
+                "sub": "aat-multi-agent",
+                "iat": now,
+                "exp": now + 300,
+                "jti": str(uuid.uuid4()),
+                "aat_type": "delegation",
+                "del_depth": 0,
+                "del_max_depth": 2,
+                "authorization_details": [
+                    {
+                        "type": "attenuating_agent_token",
+                        "tools": {
+                            "read_file": {},
+                            "write_file": {},
+                            "search_files": {},
+                        },
+                        "max_tool_calls": 10,
+                    }
+                ],
+                "mission_ref": {
+                    "uri": md_url,
+                    "mission_id": mission_id,
+                    "mission_digest": md.payload_digest,
+                },
             },
-        }, private_key, algorithm=ALGORITHM)
+            private_key,
+            algorithm=ALGORITHM,
+        )
 
         session = proxy.start_session_from_aat(
-            aat_token, signing_key=private_key, require_pop=False,
+            aat_token,
+            signing_key=private_key,
+            require_pop=False,
         )
 
         # All three tools permitted
         for tool in ["read_file", "write_file", "search_files"]:
             decision, reason = proxy.evaluate_tool_call(
-                session, tool, {"path": "/workspace/data.csv"},
+                session,
+                tool,
+                {"path": "/workspace/data.csv"},
             )
             assert decision == Decision.PERMIT, f"{tool} should be PERMIT: {reason}"
 
         # Tool not in AAT denied
         decision, reason = proxy.evaluate_tool_call(
-            session, "delete_file", {"path": "/workspace/data.csv"},
+            session,
+            "delete_file",
+            {"path": "/workspace/data.csv"},
         )
         assert decision == Decision.DENY
 
         # Multiple additional permitted calls — budget is NOT exhausted
         for i in range(5):
             decision, _ = proxy.evaluate_tool_call(
-                session, "read_file", {"path": f"/tmp/file{i}.txt"},
+                session,
+                "read_file",
+                {"path": f"/tmp/file{i}.txt"},
             )
             assert decision == Decision.PERMIT
 
@@ -895,6 +1190,7 @@ class TestAATAdapterEndToEnd:
         entries = _receipt_entries(proxy.receipts_log_path)
         assert len(entries) >= 9
         claims_list = verify_chain(
-            [e["jwt"] for e in entries], proxy.receipt_public_key,
+            [e["jwt"] for e in entries],
+            proxy.receipt_public_key,
         )
         assert all(c["verdict"] in ("compliant", "violation") for c in claims_list)

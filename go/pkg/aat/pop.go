@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	jose "github.com/go-jose/go-jose/v4"
 )
 
@@ -35,21 +36,22 @@ func BuildPoPJWT(opts BuildPoPOpts) (string, error) {
 	if opts.Tool == "" {
 		return "", fmt.Errorf("BuildPoPJWT: missing tool")
 	}
-	if len(opts.Signer) == 0 {
-		return "", fmt.Errorf("BuildPoPJWT: signer required")
+	if opts.JWTID == "" {
+		return "", fmt.Errorf("BuildPoPJWT: missing JWTID")
+	}
+	if opts.Leaf.JWTID == "" {
+		return "", fmt.Errorf("BuildPoPJWT: leaf JWTID is required")
+	}
+	if opts.Leaf.Confirmation == nil || !signerMatchesJWK(opts.Signer, opts.Leaf.Confirmation.JWK) {
+		return "", fmt.Errorf("BuildPoPJWT: signer does not match leaf confirmation key")
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
 	}
 
-	hta := map[string]interface{}{
-		"tool": opts.Tool,
-		"args": opts.Args,
-	}
-
-	canonicalHTA, err := CanonicalizeHTA(hta)
-	if err != nil {
-		return "", fmt.Errorf("BuildPoPJWT: canonicalizing HTA: %w", err)
+	hta := opts.Args
+	if hta == nil {
+		hta = map[string]interface{}{}
 	}
 
 	issuedAt := opts.Now.Unix()
@@ -59,7 +61,7 @@ func BuildPoPJWT(opts BuildPoPOpts) (string, error) {
 		"iat":      issuedAt,
 		"aat_id":   opts.Leaf.JWTID,
 		"aat_tool": opts.Tool,
-		"hta":      json.RawMessage(canonicalHTA),
+		"hta":      hta,
 	}
 
 	signerOpts := &jose.SignerOptions{}
@@ -76,9 +78,9 @@ func BuildPoPJWT(opts BuildPoPOpts) (string, error) {
 		return "", fmt.Errorf("BuildPoPJWT: creating signer: %w", err)
 	}
 
-	payloadBytes, err := json.Marshal(payload)
+	payloadBytes, err := canonicalizeJSON(payload)
 	if err != nil {
-		return "", fmt.Errorf("BuildPoPJWT: marshaling payload: %w", err)
+		return "", fmt.Errorf("BuildPoPJWT: canonicalizing payload: %w", err)
 	}
 
 	jws, err := signer.Sign(payloadBytes)
@@ -114,6 +116,11 @@ func VerifyPoPJWT(leaf *Token, tool string, args map[string]interface{}, popJWT 
 		return nil, fmt.Errorf("%w: %v", ErrDenyStep7APoPSignature, err)
 	}
 
+	canonicalPayload, err := jsoncanonicalizer.Transform(verifiedPayload)
+	if err != nil || !bytes.Equal(canonicalPayload, verifiedPayload) {
+		return nil, ErrDenyStep7ANonCanonical
+	}
+
 	// Parse the verified payload into PoPJWT struct
 	var verified map[string]interface{}
 	if err := json.Unmarshal(verifiedPayload, &verified); err != nil {
@@ -124,6 +131,9 @@ func VerifyPoPJWT(leaf *Token, tool string, args map[string]interface{}, popJWT 
 
 	if jti, ok := verified["jti"].(string); ok {
 		pop.JWTID = jti
+	}
+	if pop.JWTID == "" {
+		return nil, ErrDenyStep7AMissingJTI
 	}
 	if iat, ok := verified["iat"].(float64); ok {
 		pop.IssuedAt = int64(iat)
@@ -146,9 +156,9 @@ func VerifyPoPJWT(leaf *Token, tool string, args map[string]interface{}, popJWT 
 	}
 
 	// Step 7d: compare JCS-canonicalized HTA
-	expectedHTA := map[string]interface{}{
-		"tool": tool,
-		"args": args,
+	expectedHTA := args
+	if expectedHTA == nil {
+		expectedHTA = map[string]interface{}{}
 	}
 	expectedCanon, err := CanonicalizeHTA(expectedHTA)
 	if err != nil {
@@ -196,18 +206,17 @@ func VerifyPoP(leaf *Token, tool string, args map[string]interface{}, popJWT str
 	return VerifyPoPJWT(leaf, tool, args, popJWT, opts)
 }
 
-// CanonicalizeHTA returns the deterministic JSON byte representation needed by
-// AAT §5.2 and §7 step 7d. Go's encoding/json produces sorted-key output with
-// compact formatting; both builder and verifier use the same serializer, so
-// byte comparison is sound for HTA equality checks.
+// CanonicalizeHTA returns the RFC 8785 representation used for PoP argument
+// equality. The complete PoP payload is canonicalized separately before JWS
+// signing, as required by AAT draft-00 Section 5.2.
 func CanonicalizeHTA(hta map[string]interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(hta); err != nil {
-		return nil, fmt.Errorf("CanonicalizeHTA: encode: %w", err)
+	return canonicalizeJSON(hta)
+}
+
+func canonicalizeJSON(value interface{}) ([]byte, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
 	}
-	// json.Encoder.Encode appends a newline; trim it.
-	result := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
-	return result, nil
+	return jsoncanonicalizer.Transform(raw)
 }

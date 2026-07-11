@@ -2,7 +2,7 @@
 title: "Ardur DRP Mapping Profile v0.1"
 description: "This document maps the current Ardur delegation and action-receipt surfaces to"
 source_path: "docs/specs/ardur-drp-mapping-v0.1.md"
-source_sha256: "64cae722c0d066bb3d239d553be9365dbf6d6bb861c09da502e89022076e36b5"
+source_sha256: "89dfef46b416ef4588caef4b6736f50dbfedeaabca4f025bd06437e0e6d1d096"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -55,8 +55,9 @@ draft-00. The live Datatracker advanced to draft-01 on 2026-06-15; draft-01 is
 an individual Internet-Draft with no formal IETF standing and removes the
 draft-00 `aat_type` token-role field in favor of chain-position semantics.
 This document maps the code that exists. It does not silently reinterpret that
-code as draft-01. The versioned migration audit is tracked in
-[#233](https://github.com/ArdurAI/ardur/issues/233).
+code as draft-01. The selected compatibility contract and time-bounded review
+are recorded in
+[`aat-draft-01-migration-decision.md`](/__ardur_internal__/source/docs/specs/aat-draft-01-migration-decision/).
 
 Arbitrary caller-supplied `extra_claims` are not a versioned schema. An
 emitter MUST reject an unregistered extra claim instead of silently placing it

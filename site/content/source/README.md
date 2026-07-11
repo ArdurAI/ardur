@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "7d43c87f81e7c84943300efdd8b3bb95dc25d72ac61543e7bdfe438bdc67d9f7"
+source_sha256: "b896ea707c316bf9afe5f74ee31f570db036b7df111a0df848a660e9a2a515dc"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -207,7 +207,7 @@ This repo currently includes:
 - a short research-informed positioning summary
 - current status and what is still being resolved
 - public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus a draft-10-pinned DRP mapping and executable profile with RFC 8785/P-256 emit, external-trust full-chain and critical-bound verification, and a portable seven-scenario implementation self-test bundle/report (not an IETF or independent interoperability claim), the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, a receiver-attestation profile with a two-key offline verifier and MCP shim fixture, and a full offline-verification bundle/profile with redacted CLI/JSON/static HTML explorer reports
-- Python governance runtime under `python/`; Go eBPF/K8s packages and a JWT AAT credential-attenuation implementation under `go/` (CWT integer-key mapping remains incomplete)
+- Python governance runtime under `python/`; Go eBPF/K8s packages and a draft-00 JWT AAT credential-attenuation implementation under `go/` (draft-01 is explicitly rejected pending versioned migration; CWT interoperability is not claimed)
 - a Linux governance-overhead harness with a closed report schema, PR smoke workflow, manual stress profile, owner-only artifacts, and an opt-in shell-free paired-sensor mode
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, receiver-envelope verification, detached normalized/Tetragon/Falco runtime-evidence correlation, and no-key DRP/receiver/offline-verification fixtures), plus the deterministic `ardur-drp-fixtures` runner
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
@@ -242,7 +242,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 |----------------------|-------------|---------------------------------|
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixture examples | live-provider wrappers and more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
-| **Policy engine**    | native checks, forbid-rules, Cedar bridge, JWT AAT constraint engine (13 types) | AAT CWT integer-key mapping, OPA, and broader Biscuit datalog examples |
+| **Policy engine**    | native checks, forbid-rules, Cedar bridge, draft-00 JWT AAT constraint engine (13 types) | versioned AAT draft-01 migration, OPA, and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for operator telemetry; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
 | **Receipts sink**    | local JSON / stdout receipts; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | OTel emitters, checkpoint witnessing/consistency monitoring, broader durable storage examples, and integrated multi-artifact chain verification |
 
