@@ -3838,6 +3838,21 @@ def _resolve_protect_policies(
     """Build additional_policies from CLI flags + profile."""
     policies: list[dict[str, object]] = []
 
+    # ``--cedar-entities`` is conditionally-guarded: it is only read inside the
+    # ``if cedar_policy is not None:`` block below. When passed standalone
+    # (without ``--cedar-policy``) the old code silently ignored an empty or
+    # whitespace-only path (exit 0, "protection configured"). Validate it up
+    # front so the empty/whitespace defect surfaces as a structured error in
+    # both the standalone and paired cases. ``--cedar-entities`` is ``type=str``
+    # so the raw value survives here; ``None`` means the flag was omitted.
+    cedar_entities_raw = getattr(args, "cedar_entities", None)
+    if cedar_entities_raw is not None and not str(cedar_entities_raw).strip():
+        raise _ProtectPolicyInputError(
+            "--cedar-entities",
+            "protect_cedar_entities_empty",
+            "Could not load --cedar-entities: path must not be empty or whitespace-only.",
+        )
+
     # CLI flags (highest priority)
     if getattr(args, "forbid_rules", None) is not None:
         rules = _read_protect_policy_json(Path(args.forbid_rules), "--forbid-rules")
@@ -5298,7 +5313,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cedar policy file (.cedar)",
     )
     protect_cc.add_argument(
-        "--cedar-entities", type=Path,
+        # ``type=str`` (not ``Path``) so an empty or whitespace-only value
+        # survives parsing and can be rejected explicitly below. ``type=Path``
+        # normalises ``""`` to ``PosixPath(".")`` which silently resolves to the
+        # CWD and masks the empty-argument defect.
+        "--cedar-entities", type=str,
         help="Cedar entities JSON file (used with --cedar-policy)",
     )
     protect_cc.set_defaults(func=cmd_protect_claude_code)
