@@ -33,6 +33,18 @@ relevant pull requests and offers manual Linux stress dispatch; it is not
 scheduled. See the
 [benchmark guide](benchmarks/linux-governance-overhead.md) for interpretation.
 
+When changing the independent AuditBench artifact pipeline, run:
+
+```bash
+make bench-independent-test
+```
+
+This exercises strict and duplicate-name JSON parsing, raw-capture replay,
+oracle/evidence separation, blind annotator roles, bundle provenance,
+disagreement adjudication, protocol and corpus sealing, symlink/path/drift
+rejection, held-out coverage, and tri-state score metrics. The test fixtures are
+pipeline fixtures, not independently labeled benchmark evidence.
+
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.
 

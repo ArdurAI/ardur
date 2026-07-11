@@ -1,5 +1,5 @@
 .PHONY: help demo demo-down test test-python test-go lint lint-python lint-go \
-        build build-proxy build-hub clean cert bench
+        build build-proxy build-hub clean cert bench bench-independent-test
 
 ARDUROOT := $(shell pwd)
 PYDIR   := python
@@ -59,6 +59,9 @@ cert: ## Generate self-signed TLS certs for local dev
 
 bench: ## Run the AuditBench evaluation harness and write results to bench-results/
 	cd $(GODIR) && go run ./cmd/benchcheck -- ./benchmark/testdata
+
+bench-independent-test: ## Test the sealed independent-evaluation pipeline (no headline corpus)
+	cd $(GODIR) && go test -race -count=1 ./benchmark/independent ./cmd/auditbench-oracle ./cmd/auditbench-label ./cmd/auditbench-score
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 

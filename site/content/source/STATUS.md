@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "441e58baaa1cb2871e193fa9f8ebdd17a0444e6f49285f20568f902e732caea0"
+source_sha256: "14c04fb218e85c9cc85bc8b9c2abd8f06e95c8f46523b816c916106e41bff20e"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -91,6 +91,7 @@ complete sensor coverage.
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
+- independent AuditBench annotation collection and headline scoring; the strict capture/blind-label/seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 
 ## What We Still Need To Resolve
 
@@ -105,6 +106,7 @@ complete sensor coverage.
 - full deployment material for cluster, identity, and receipt storage paths
 - the full public docs spine (the current set is the public-safe subset)
 - benchmark corpora and independently reproduced cross-host performance claims beyond the public local harness
+- independent AuditBench human annotations, privacy-approved real-agent traces, external preregistration, and held-out headline results
 - internal planning, lane, and session artifacts
 - Trusted Execution Environment (TEE) attestation as a general hardware-rooted production claim — see `docs/known-limitations.md`
 

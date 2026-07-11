@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "b896ea707c316bf9afe5f74ee31f570db036b7df111a0df848a660e9a2a515dc"
+source_sha256: "2f1786a642150816d741f5bd92fc6678565c2060cab084a17e62736a635d861a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -70,6 +70,11 @@ latency, imported-evidence processing, sustained resource use, and optional
 paired sensor overhead separate. Pull requests run a small shape-only smoke;
 host-specific stress results are manual evidence, not a universal overhead
 claim.
+
+The [AuditBench independent evaluation profile](/__ardur_internal__/source/docs/specs/auditbench-independent-evaluation-v0.1/)
+adds strict raw-capture replay, blind two-view annotations, content sealing, and
+held-out tri-state scoring. The pipeline is implemented; no independently
+labeled headline corpus or comparative result is claimed yet.
 
 [Research](/__ardur_internal__/source/research/) · [Status](/__ardur_internal__/source/status/) · [Coverage Map](/__ardur_internal__/source/docs/coverage-map/) · [Roadmap](/__ardur_internal__/source/roadmap/) · [Media](/__ardur_internal__/source/media-notes/) · [Articles](/__ardur_internal__/source/docs/articles/readme/) · [Docs](/__ardur_internal__/source/docs/readme/) · [Reference](/__ardur_internal__/source/docs/reference/readme/) · [Phase 1 Demo Packet](/__ardur_internal__/source/docs/guides/phase1-demo-packet/) · [Read the Phase 1 Evidence Bundle](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) · [Evidence Site Source](/__ardur_internal__/source/site/readme/)
 

@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "be9916c93eae53d98ccad47aab494615e1e97fb6bfa7fcb7483c4e10c6ae591f"
+source_sha256: "89fe8bbb5965ad14c7e90c65df4aad5baf99baf170f5f67182108f5f9fd3aa7e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -59,6 +59,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Runtime evidence event schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
 | [Runtime evidence correlation report schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-correlation-report-v0.1.schema.json) | **implemented** | Closed deterministic redacted association report; source assurance remains separate from match confidence |
 | [Linux governance benchmark report schema](/__ardur_internal__/repo/docs/specs/linux-governance-benchmark-report-v0.1.schema.json) | **implemented** | Closed smoke/stress report separating governance-only, imported evidence, sustained resources, and optional paired sensor measurements |
+| [AuditBench independent evaluation profile v0.1](/__ardur_internal__/source/docs/specs/auditbench-independent-evaluation-v0.1/) | **pipeline implemented; corpus pending** | Strict raw capture, blind two-view annotation, adjudication, content sealing, held-out scoring, and explicit external-human proof boundary |
 | [Runtime evidence portable fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/) | **implementation self-test** | Ephemeral-key signed journal plus normalized/Tetragon/Falco inputs and reports; no private keys, sensor deployment, network dependency, or source-authenticity claim |
 | [Transparency Anchor v0.1 schema](/__ardur_internal__/repo/docs/specs/transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
 | [Transparency Anchor v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
