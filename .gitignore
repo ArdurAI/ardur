@@ -49,3 +49,14 @@ go/bench-results/
 site/public/
 site/resources/_gen/
 site/.hugo_build.lock
+
+# Runtime-generated security artifacts produced by ardur commands (passport
+# keys, mission JWTs, compiled native hooks). These are never safe to commit
+# — they contain private keys or session-bound credentials. Listed explicitly
+# as defense-in-depth so an accidental `git add .` does not stage them even
+# if the gitleaks PEM rule were to miss a format variant.
+keys/
+active_mission.jwt
+claude-code-pre_tool_use
+claude-code-pre_tool_use.sha256
+claude-code-hook-python
