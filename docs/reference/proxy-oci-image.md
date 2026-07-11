@@ -13,8 +13,8 @@ The first supported OCI surface is the governance proxy:
 ghcr.io/ardurai/ardur-proxy
 ```
 
-Release automation creates only immutable version tags, such as `v0.1.0` and
-`0.1.0`. It does not create `latest`, branch, or moving major/minor tags. The
+Release automation creates only immutable version tags, such as `v0.2.0` and
+`0.2.0`. It does not create `latest`, branch, or moving major/minor tags. The
 digest is the deployment identity and should be recorded in GitOps manifests:
 
 ```bash
