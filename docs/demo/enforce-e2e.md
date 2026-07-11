@@ -1,19 +1,15 @@
 # `ardur run` — BPF-LSM enforcement and observability demo
 
 This demo exercises the BPF-LSM enforcement and process-observability stack on
-a real kernel. The current verified proof is deliberately split:
+a real kernel. The strict path is now one full-flow proof:
 
-- `ardur-guard-smoke` proves that an installed BPF-LSM deny policy returns
-  `EPERM` and emits enforcement evidence.
-- `run.sh permissive` proves the real `ardur run` bridge, signed receipt
-  registration, process exec/exit capture, correlation, and attestation metric.
-- Full `ardur run --enforce` launch bootstrap is not currently a verified
-  end-to-end proof: the initial governed agent exec can be denied by its own
-  policy. That defect is tracked in [#241](https://github.com/ArdurAI/ardur/issues/241).
-
-Do not combine the first two results into a claim that the current full
-enforce-mode launch succeeds. They prove distinct boundaries without weakening
-the kernel policy or reopening the target-policy race.
+- `ardur-guard-smoke` retains focused exec, file-allowlist, and pinned-restart
+  enforcement scenarios.
+- `run.sh enforce` proves the real `ardur run --enforce` bridge, kernel-stopped
+  launch handoff, root-only runtime reads, exact governance endpoint, signed
+  receipt registration, denied child exec, lifecycle correlation, and offline
+  attestation verification.
+- `run.sh permissive` remains the paired log-only control.
 
 | Stage | Component | PR |
 | --- | --- | --- |
@@ -23,18 +19,16 @@ the kernel policy or reopening the target-policy race.
 | **attest** | hash-chained receipts + `kernel_enforcement` folded into the session attestation | #100 |
 | **measure** | receipt-to-process-lifecycle observability gap in the signed attestation | #39 |
 
-What the two verified paths demonstrate, concretely:
+What the strict verified path demonstrates, concretely:
 
 1. **(a) detect + attest** — the daemon registers the run's cgroup and issues a signed attestation.
 2. **(b) apply reaches the kernel** — the lowered `BpfPolicyPlan` is written to the BPF maps (`kernel policy installed`).
-3. **(c) a forbidden syscall actually fails `EPERM`** — the direct guard smoke proves the kernel refusal.
-4. **(d) tamper-evident session evidence** — the permissive run's `enforce_events.jsonl` hash chain is committed into its attestation and verifies offline with no kernel, daemon, or root. The separate guard smoke verifies the denied raw event.
+3. **(c) a forbidden syscall actually fails `EPERM`** — the governed agent's child exec is refused by BPF-LSM.
+4. **(d) tamper-evident session evidence** — the strict run's `enforce_events.jsonl` hash chain is committed into its attestation and verifies offline with no kernel, daemon, or root.
 5. **(e) measured process-lifecycle gap** — the agent obtains a signed governance receipt before its attempted effect, and the attestation reports a non-empty daemon-captured sample with at least one correlated effect.
 
 A **permissive metric run** (same mission, no `--enforce`) shows the operation
-logged but allowed while exercising receipt-to-lifecycle correlation. It is
-not a control paired with a successful full enforce-mode launch until #241 is
-resolved.
+logged but allowed while exercising the same receipt-to-lifecycle correlation.
 
 ---
 
@@ -61,6 +55,11 @@ runtime (Docker Desktop works) or boot the VM kernel with `lsm=...,bpf`.
 
 The container runs `--privileged --pid=host` (CAP_BPF/CAP_SYS_ADMIN to load LSM
 programs; `--pid=host` so the daemon's exec/exit correlation sees host PIDs).
+The strict launch also requires the target to allow a `PTRACE_TRACEME` exec
+handoff. If the container seccomp profile, Yama policy, or another ptrace
+restriction blocks that handoff, launch fails closed before the target runs.
+This mechanism governs ordinary agent images; it is not a set-ID privilege
+transition facility.
 
 ---
 
@@ -117,11 +116,12 @@ $ docker run --rm --privileged --pid=host \
 
 ---
 
-## Run — enforce (known bootstrap failure)
+## Run — enforce
 
-This command is retained as a fail-fast reproducer for #241. On the current
-tree it is expected to stop when the launch gate cannot exec the initial agent;
-it must not be treated as a passing end-to-end demonstration.
+This is the strict BPF-LSM full-flow demonstration. Every assertion is
+fail-fast: one governance call and receipt, agent exit 0, child exec denied
+with `EPERM`, a measured lifecycle sample, an intact evidence chain, and an
+attestation digest match.
 
 ```console
 $ mkdir -p /tmp/ardur-demo-out
@@ -131,21 +131,23 @@ $ docker run --rm --privileged --pid=host \
     bash /opt/ardur/demo/run.sh enforce
 ```
 
-Current fail-fast output (session ids and hashes vary per run):
+Representative output (session ids, counts, and hashes vary per run):
 
 ```text
 ================ ardur run BPF-LSM demo — mode=enforce ================
 lsm=capability,bpf,landlock  btf=yes  cgroup=cgroup2fs
 daemon: BPF-LSM guard loaded ✓
-  attestation   sha-256:58951f5a...
+AGENT: governance decision=DENY before exec
+AGENT: exec(/bin/echo) BLOCKED — errno=1 (EPERM)
+AGENT: RESULT=DENIED_EPERM
   kernel link   cgroup registered with eBPF daemon; detect→session link active
   kernel policy kernel BPF policy installed
-  agent exit    126
+  agent exit    0
+observability gap status = measured
+chain intact    = true
+attestation digest match = true
+== demo (enforce) done ==
 ```
-
-The script exits 126 at this point and does not print `done`; that nonzero exit
-is the expected #241 reproducer. The initial agent never starts, so this mode
-does not produce a governed call or a #39 receipt-to-effect measurement.
 
 If the global kernel kill switch changes while a session is active, the daemon
 first appends an attributed transition to `_tamper/tamper_audit.jsonl`. The
@@ -160,10 +162,10 @@ receipt cannot be persisted, even when the daemon successfully rolls the kernel
 map back. A caller receives `OK:false` for that operation rather than success
 without evidence.
 
-## Run — permissive (current observability proof)
+## Run — permissive (paired control)
 
-Same mission, **no** `--enforce`. This is the mode used by KVM CI to verify the
-#39 metric against a real BPF process-lifecycle stream:
+Same mission, **no** `--enforce`. This keeps the policy and evidence path but
+allows the child exec after logging its decision:
 
 ```console
 $ docker run --rm --privileged --pid=host \
@@ -188,9 +190,8 @@ attestation digest match = true
 
 `/bin/echo` runs to completion (hence 14 logged file-reads as it loads
 `libc`/`ld.so`/locale), every event `verdict=blocked` (logged, not enforced).
-The permissive run does not prove denial. The separate `ardur-guard-smoke`
-test proves BPF-LSM denial directly; combining those results is intentionally
-deferred until #241 provides a kernel-verifiable bootstrap boundary.
+The permissive run does not prove denial; `run.sh enforce` and the focused
+`ardur-guard-smoke` scenarios provide that evidence.
 
 Counts vary with the kernel and process startup sequence. The verifier requires
 a non-empty captured sample and at least one correlated effect, but the ratio
@@ -202,20 +203,40 @@ capture-loss window reports `degraded` instead of `measured`.
 
 ## What actually happened (mechanism)
 
-`--enforce` does two things to the run's cgroup:
+Before policy application, the launch gate calls `PTRACE_TRACEME` and stops.
+The parent enables `PTRACE_O_TRACEEXEC|PTRACE_O_EXITKILL`, resumes only through
+`execve`, and receives `PTRACE_EVENT_EXEC` before target user space runs. While
+the new image is kernel-stopped, the parent migrates it into the run cgroup,
+registers the session, applies policy, and detaches. Any transition failure
+kills the stopped target.
+
+`--enforce` then does two things to the run's cgroup:
 
 1. Lowers `--forbidden-tools Bash` → **`OP_EXEC = DENY` (enforce)**.
 2. Sets the cgroup's **`STRICT`** flag → any op with *no explicit rule*
    fails **closed** (`-EPERM`). `OP_FILE_READ` has no rule, so it fail-closes.
+
+The root target may read only daemon-approved runtime categories (`/usr`,
+`/lib`, `/lib64`, loader cache, CA certificates, entropy, and `/proc`) through
+a generation- and root-PID-bound bitmask. While the target is stopped, the
+daemon also resolves and stats its executable and regular-file arguments (up
+to four) from `/proc/<pid>`. For each file it arms a daemon-TGID-bound
+observation request and opens the file; the LSM records the kernel-native
+superblock device and inode and acknowledges registration before policy
+activation. This remains exact when a bind-mounted file has different path,
+device, or mount-ID views in userspace. Neither set is accepted from the client
+wire request. Writes and descendants receive no exception. The target's exact
+ephemeral governance IP-and-port is stored separately; unrelated network
+destinations remain denied.
+On daemon restart, applied policy remains pinned while all incomplete one-shot
+observation requests are cleared before the guard reports ready.
 
 When the agent's child calls `execv("/bin/echo")`, the kernel's `open_exec()`
 opens the binary first — that fires the `lsm.s/file_open` hook with
 `OP_FILE_READ` on `/usr/bin/echo`, which STRICT denies with `-EPERM`. So the
 `execve` is refused *at the binary-open step*, before `bprm_check_security` is
 even reached; the explicit `OP_EXEC` deny is the belt-and-suspenders second
-line. The direct guard smoke proves that this installed policy denies external
-exec with `EPERM`; the current full `ardur run --enforce` path fails earlier at
-its own bootstrap exec, as documented above.
+line. The full strict run and direct guard smoke both prove that denial.
 
 In **permissive** mode there is no STRICT flag and `OP_EXEC`'s mode is
 PERMISSIVE, so the binary open passes and `bprm_check_security` fires with

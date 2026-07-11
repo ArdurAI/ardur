@@ -68,12 +68,16 @@ func TestHandleAuthorizedRequest_HealthReportsBPFLSMWhenGuardLoaded(t *testing.T
 	t.Parallel()
 	d := newTestDaemon(t)
 	d.policyMaps = kernelcapture.PolicyMaps{
-		CgroupOpPolicy:  &fakeHealthPolicyMap{},
-		CgroupPathAllow: &fakeHealthPolicyMap{},
-		CgroupFileAllow: &fakeHealthPolicyMap{},
-		CgroupNetAllow:  &fakeHealthPolicyMap{},
-		CgroupManaged:   &fakeHealthPolicyMap{},
-		KillSwitch:      &fakeHealthPolicyMap{},
+		CgroupOpPolicy:           &fakeHealthPolicyMap{},
+		CgroupPathAllow:          &fakeHealthPolicyMap{},
+		CgroupFileAllow:          &fakeHealthPolicyMap{},
+		CgroupBootstrapFileAllow: &fakeHealthPolicyMap{},
+		BootstrapFileObservation: &fakeHealthPolicyMap{},
+		CgroupControlPlaneAllow:  &fakeHealthPolicyMap{},
+		CgroupTrustedRoot:        &fakeHealthPolicyMap{},
+		CgroupNetAllow:           &fakeHealthPolicyMap{},
+		CgroupManaged:            &fakeHealthPolicyMap{},
+		KillSwitch:               &fakeHealthPolicyMap{},
 	}
 
 	resp := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())

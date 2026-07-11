@@ -124,12 +124,16 @@ func TestHealthReflectsTrueTier_AfterGuardConsumerDeath(t *testing.T) {
 
 	// Simulate a successful guard load: policyMaps populated, tier live.
 	d.policyMaps = kernelcapture.PolicyMaps{
-		CgroupOpPolicy:  &fakeHealthPolicyMap{},
-		CgroupPathAllow: &fakeHealthPolicyMap{},
-		CgroupFileAllow: &fakeHealthPolicyMap{},
-		CgroupNetAllow:  &fakeHealthPolicyMap{},
-		CgroupManaged:   &fakeHealthPolicyMap{},
-		KillSwitch:      &fakeHealthPolicyMap{},
+		CgroupOpPolicy:           &fakeHealthPolicyMap{},
+		CgroupPathAllow:          &fakeHealthPolicyMap{},
+		CgroupFileAllow:          &fakeHealthPolicyMap{},
+		CgroupBootstrapFileAllow: &fakeHealthPolicyMap{},
+		BootstrapFileObservation: &fakeHealthPolicyMap{},
+		CgroupControlPlaneAllow:  &fakeHealthPolicyMap{},
+		CgroupTrustedRoot:        &fakeHealthPolicyMap{},
+		CgroupNetAllow:           &fakeHealthPolicyMap{},
+		CgroupManaged:            &fakeHealthPolicyMap{},
+		KillSwitch:               &fakeHealthPolicyMap{},
 	}
 	d.setActiveTier(daemonTierBPFLSM)
 

@@ -260,6 +260,32 @@ func TestDaemonApplyPolicyControlPlaneEndpointValidation(t *testing.T) {
 	}
 }
 
+func TestDaemonApplyPolicyBootstrapReadAllowIsFixed(t *testing.T) {
+	t.Parallel()
+	req := DaemonApplyPolicyRequest{
+		SessionID: "session-1", Generation: 1, EnforceMode: BpfEnforceModeEnforce,
+		BootstrapReadAllow: []string{"/usr", "/lib", "/lib64", "/etc/ld.so.cache", "/etc/ssl/certs", "/dev/urandom"},
+	}
+	if err := validateDaemonApplyPolicy(req); err != nil {
+		t.Fatalf("fixed runtime roots rejected: %v", err)
+	}
+	for _, paths := range [][]string{{"/home/user"}, {"/usr", "/usr"}, {"relative"}} {
+		bad := req
+		bad.BootstrapReadAllow = paths
+		if err := validateDaemonApplyPolicy(bad); err == nil || !errors.Is(err, ErrDaemonProtocol) {
+			t.Fatalf("bootstrap_read_allow %v error = %v, want ErrDaemonProtocol", paths, err)
+		}
+	}
+}
+
+func TestDaemonProtocolRejectsClientSuppliedRootPIDInApplyPolicy(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"protocol_version":"kernelcapture.daemon.v1","method":"apply_policy","apply_policy":{"session_id":"session-1","op_policies":[],"generation":1,"enforce_mode":1,"root_pid":42}}` + "\n")
+	if _, err := DecodeDaemonProtocolRequest(raw); err == nil || !errors.Is(err, ErrDaemonProtocol) {
+		t.Fatalf("client-supplied apply_policy root_pid error = %v, want ErrDaemonProtocol", err)
+	}
+}
+
 func TestDaemonProtocolValidationRejectsForbiddenHandoffMetadata(t *testing.T) {
 	t.Parallel()
 

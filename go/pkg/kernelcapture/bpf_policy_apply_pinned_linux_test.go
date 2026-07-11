@@ -13,16 +13,32 @@ package kernelcapture
 // (see that scenario's doc comment for what only a real kernel can prove).
 
 import (
+	"os"
+	"strings"
 	"testing"
+
+	"github.com/cilium/ebpf"
 )
 
-func TestDefaultPinnedGuardPaths_AllElevenPathsDistinctAndNonEmpty(t *testing.T) {
+func TestMapSchemaMatchesRejectsPinnedABIDrift(t *testing.T) {
+	info := &ebpf.MapInfo{Type: ebpf.Hash, KeySize: 24, ValueSize: 4, MaxEntries: 16384, Flags: 0}
+	spec := &ebpf.MapSpec{Type: ebpf.Hash, KeySize: 24, ValueSize: 4, MaxEntries: 16384, Flags: 0}
+	if !mapSchemaMatches(info, spec) {
+		t.Fatal("identical pinned and embedded map schemas did not match")
+	}
+	drifted := *info
+	drifted.KeySize = 264
+	if mapSchemaMatches(&drifted, spec) {
+		t.Fatal("old path-key bootstrap map schema was accepted")
+	}
+}
+
+func TestDefaultPinnedGuardPaths_AllFifteenPathsDistinctAndNonEmpty(t *testing.T) {
 	paths := DefaultPinnedGuardPaths()
 	all := paths.allPaths()
-	// 3 LSM links + 6 policy maps + enforce_events ringbuf + its #122 drop
-	// counter = 11.
-	if len(all) != 11 {
-		t.Fatalf("allPaths() returned %d paths, want 11", len(all))
+	// 3 LSM links + 10 policy maps + enforce_events ringbuf + drop counter = 15.
+	if len(all) != 15 {
+		t.Fatalf("allPaths() returned %d paths, want 15", len(all))
 	}
 	seen := make(map[string]bool, len(all))
 	for _, p := range all {
@@ -36,6 +52,31 @@ func TestDefaultPinnedGuardPaths_AllElevenPathsDistinctAndNonEmpty(t *testing.T)
 	}
 }
 
+func TestCompleteUnreadablePinnedGuardStateIsPreserved(t *testing.T) {
+	base := t.TempDir() + "/"
+	paths := PinnedGuardPaths{
+		BprmLinkPath: base + "bprm", FileOpenLinkPath: base + "file", SocketConnLinkPath: base + "socket",
+		CgroupOpPolicyPath: base + "op", CgroupPathAllowPath: base + "path", CgroupFileAllowPath: base + "file_allow",
+		CgroupBootstrapFileAllowPath: base + "bootstrap", CgroupControlPlaneAllowPath: base + "control", CgroupTrustedRootPath: base + "root",
+		BootstrapFileObservationPath: base + "bootstrap_observation",
+		CgroupNetAllowPath:           base + "net", CgroupManagedPath: base + "managed", KillSwitchPath: base + "kill",
+		EnforceEventsPath: base + "events", EnforceEventsDroppedPath: base + "drops",
+	}
+	for _, path := range paths.allPaths() {
+		if err := os.WriteFile(path, []byte("not a bpffs object"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := LoadAndAttachProcessGuardEBPFPinned(paths); err == nil || !strings.Contains(err.Error(), "preserving pins") {
+		t.Fatalf("complete invalid pin set error = %v, want preservation failure", err)
+	}
+	for _, path := range paths.allPaths() {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("pin %q was removed after complete-set load failure: %v", path, err)
+		}
+	}
+}
+
 func TestDefaultPinnedGuardPaths_UnderArdurBpffsNamespace(t *testing.T) {
 	paths := DefaultPinnedGuardPaths()
 	const prefix = "/sys/fs/bpf/ardur/"
@@ -43,6 +84,39 @@ func TestDefaultPinnedGuardPaths_UnderArdurBpffsNamespace(t *testing.T) {
 		if len(p) <= len(prefix) || p[:len(prefix)] != prefix {
 			t.Errorf("pin path %q is not under the ardur-owned bpffs namespace %q", p, prefix)
 		}
+	}
+}
+
+func TestLoadPinnedGuardStateRejectsEmptyAndDuplicatePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*PinnedGuardPaths)
+		wantErr string
+	}{
+		{
+			name: "empty",
+			mutate: func(paths *PinnedGuardPaths) {
+				paths.CgroupTrustedRootPath = ""
+			},
+			wantErr: "CgroupTrustedRootPath is empty",
+		},
+		{
+			name: "duplicate",
+			mutate: func(paths *PinnedGuardPaths) {
+				paths.CgroupTrustedRootPath = paths.CgroupControlPlaneAllowPath
+			},
+			wantErr: "CgroupControlPlaneAllowPath and CgroupTrustedRootPath",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := DefaultPinnedGuardPaths()
+			tt.mutate(&paths)
+			if _, err := LoadAndAttachProcessGuardEBPFPinned(paths); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadAndAttachProcessGuardEBPFPinned() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -54,16 +128,20 @@ func TestDefaultPinnedGuardPaths_UnderArdurBpffsNamespace(t *testing.T) {
 func TestTryLoadPinnedGuardState_FalseWhenNoPinsExist(t *testing.T) {
 	base := t.TempDir() + "/does-not-exist/"
 	paths := PinnedGuardPaths{
-		BprmLinkPath:        base + "bprm_link",
-		FileOpenLinkPath:    base + "file_open_link",
-		SocketConnLinkPath:  base + "socket_connect_link",
-		CgroupOpPolicyPath:  base + "cgroup_op_policy",
-		CgroupPathAllowPath: base + "cgroup_path_allow",
-		CgroupFileAllowPath: base + "cgroup_file_allow",
-		CgroupNetAllowPath:  base + "cgroup_net_allow",
-		CgroupManagedPath:   base + "cgroup_managed",
-		KillSwitchPath:      base + "kill_switch",
-		EnforceEventsPath:   base + "enforce_events",
+		BprmLinkPath:                 base + "bprm_link",
+		FileOpenLinkPath:             base + "file_open_link",
+		SocketConnLinkPath:           base + "socket_connect_link",
+		CgroupOpPolicyPath:           base + "cgroup_op_policy",
+		CgroupPathAllowPath:          base + "cgroup_path_allow",
+		CgroupFileAllowPath:          base + "cgroup_file_allow",
+		CgroupBootstrapFileAllowPath: base + "cgroup_bootstrap_file_allow",
+		BootstrapFileObservationPath: base + "bootstrap_file_observation",
+		CgroupControlPlaneAllowPath:  base + "cgroup_control_plane_allow",
+		CgroupTrustedRootPath:        base + "cgroup_trusted_root",
+		CgroupNetAllowPath:           base + "cgroup_net_allow",
+		CgroupManagedPath:            base + "cgroup_managed",
+		KillSwitchPath:               base + "kill_switch",
+		EnforceEventsPath:            base + "enforce_events",
 
 		EnforceEventsDroppedPath: base + "enforce_events_dropped",
 	}
@@ -83,16 +161,20 @@ func TestTryLoadPinnedGuardState_FalseWhenNoPinsExist(t *testing.T) {
 func TestRemovePinnedGuardState_NeverErrorsOnMissingPins(t *testing.T) {
 	base := t.TempDir() + "/never-pinned/"
 	paths := PinnedGuardPaths{
-		BprmLinkPath:        base + "bprm_link",
-		FileOpenLinkPath:    base + "file_open_link",
-		SocketConnLinkPath:  base + "socket_connect_link",
-		CgroupOpPolicyPath:  base + "cgroup_op_policy",
-		CgroupPathAllowPath: base + "cgroup_path_allow",
-		CgroupFileAllowPath: base + "cgroup_file_allow",
-		CgroupNetAllowPath:  base + "cgroup_net_allow",
-		CgroupManagedPath:   base + "cgroup_managed",
-		KillSwitchPath:      base + "kill_switch",
-		EnforceEventsPath:   base + "enforce_events",
+		BprmLinkPath:                 base + "bprm_link",
+		FileOpenLinkPath:             base + "file_open_link",
+		SocketConnLinkPath:           base + "socket_connect_link",
+		CgroupOpPolicyPath:           base + "cgroup_op_policy",
+		CgroupPathAllowPath:          base + "cgroup_path_allow",
+		CgroupFileAllowPath:          base + "cgroup_file_allow",
+		CgroupBootstrapFileAllowPath: base + "cgroup_bootstrap_file_allow",
+		BootstrapFileObservationPath: base + "bootstrap_file_observation",
+		CgroupControlPlaneAllowPath:  base + "cgroup_control_plane_allow",
+		CgroupTrustedRootPath:        base + "cgroup_trusted_root",
+		CgroupNetAllowPath:           base + "cgroup_net_allow",
+		CgroupManagedPath:            base + "cgroup_managed",
+		KillSwitchPath:               base + "kill_switch",
+		EnforceEventsPath:            base + "enforce_events",
 
 		EnforceEventsDroppedPath: base + "enforce_events_dropped",
 	}

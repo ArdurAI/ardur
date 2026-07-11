@@ -37,17 +37,25 @@ func countingPolicyMaps() (kernelcapture.PolicyMaps, map[string]*countingPolicyM
 	op := &countingPolicyMap{}
 	path := &countingPolicyMap{}
 	file := &countingPolicyMap{}
+	bootstrapFile := &countingPolicyMap{}
+	bootstrapObservation := &countingPolicyMap{}
+	control := &countingPolicyMap{}
+	trustedRoot := &countingPolicyMap{}
 	net := &countingPolicyMap{}
 	managed := &countingPolicyMap{}
 	kill := &countingPolicyMap{}
 	return kernelcapture.PolicyMaps{
-		CgroupOpPolicy:  op,
-		CgroupPathAllow: path,
-		CgroupFileAllow: file,
-		CgroupNetAllow:  net,
-		CgroupManaged:   managed,
-		KillSwitch:      kill,
-	}, map[string]*countingPolicyMap{"op": op, "path": path, "file": file, "net": net, "managed": managed, "kill": kill}
+		CgroupOpPolicy:           op,
+		CgroupPathAllow:          path,
+		CgroupFileAllow:          file,
+		CgroupBootstrapFileAllow: bootstrapFile,
+		BootstrapFileObservation: bootstrapObservation,
+		CgroupControlPlaneAllow:  control,
+		CgroupTrustedRoot:        trustedRoot,
+		CgroupNetAllow:           net,
+		CgroupManaged:            managed,
+		KillSwitch:               kill,
+	}, map[string]*countingPolicyMap{"op": op, "path": path, "file": file, "bootstrap_file": bootstrapFile, "bootstrap_observation": bootstrapObservation, "control": control, "trusted_root": trustedRoot, "net": net, "managed": managed, "kill": kill}
 }
 
 // --- #108: apply_policy ownership --------------------------------------------

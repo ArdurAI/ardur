@@ -20,13 +20,14 @@ import (
 // bytes at the unsafe.Pointer key/value ApplyPolicyMaps passes in. It records
 // call order so tests can assert write sequencing.
 type fakeBPFMap struct {
-	name     string
-	keySize  uintptr
-	valSize  uintptr
-	data     map[string][]byte
-	calls    *[]string // shared across a PolicyMaps set to assert cross-map ordering
-	putErr   error
-	failName string // if non-empty, Put/Delete on this name returns putErr
+	name      string
+	keySize   uintptr
+	valSize   uintptr
+	data      map[string][]byte
+	calls     *[]string // shared across a PolicyMaps set to assert cross-map ordering
+	putErr    error
+	deleteErr error
+	failName  string // if non-empty, Put on this name returns putErr
 }
 
 func newFakeMap(name string, keySize, valSize uintptr, calls *[]string) *fakeBPFMap {
@@ -73,6 +74,9 @@ func (m *fakeBPFMap) Delete(key interface{}) error {
 	if m.calls != nil {
 		*m.calls = append(*m.calls, "delete:"+m.name)
 	}
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	kb := bytesFromAny(key, m.keySize)
 	if _, ok := m.data[string(kb)]; !ok {
 		return errors.New("key does not exist")
@@ -93,14 +97,20 @@ func (m *fakeBPFMap) Lookup(key, valueOut interface{}) error {
 }
 
 const (
-	cgroupOpKeySize     = unsafe.Sizeof(cgroupOpKeyLayout{})
-	cgroupOpValueSize   = unsafe.Sizeof(cgroupOpValueLayout{})
-	managedKeySize      = unsafe.Sizeof(managedKeyLayout{})
-	managedValueSize    = unsafe.Sizeof(managedValueLayout{})
-	pathLpmKeySize      = unsafe.Sizeof(pathLpmKeyLayout{})
-	fileAllowKeySize    = unsafe.Sizeof(fileAllowKeyLayout{})
-	netLpmKeySize       = unsafe.Sizeof(netLpmKeyLayout{})
-	lpmAllowedValueSize = unsafe.Sizeof(uint64(0))
+	cgroupOpKeySize               = unsafe.Sizeof(cgroupOpKeyLayout{})
+	cgroupOpValueSize             = unsafe.Sizeof(cgroupOpValueLayout{})
+	managedKeySize                = unsafe.Sizeof(managedKeyLayout{})
+	managedValueSize              = unsafe.Sizeof(managedValueLayout{})
+	pathLpmKeySize                = unsafe.Sizeof(pathLpmKeyLayout{})
+	fileAllowKeySize              = unsafe.Sizeof(fileAllowKeyLayout{})
+	bootstrapFileKeySize          = unsafe.Sizeof(bootstrapFileKeyLayout{})
+	bootstrapObservationKeySize   = unsafe.Sizeof(bootstrapObservationKeyLayout{})
+	bootstrapObservationValueSize = unsafe.Sizeof(bootstrapObservationValueLayout{})
+	controlPlaneAllowKeySize      = unsafe.Sizeof(controlPlaneAllowKeyLayout{})
+	trustedRootValueSize          = unsafe.Sizeof(trustedRootValueLayout{})
+	bootstrapFileValueSize        = unsafe.Sizeof(bootstrapFileValueLayout{})
+	netLpmKeySize                 = unsafe.Sizeof(netLpmKeyLayout{})
+	lpmAllowedValueSize           = unsafe.Sizeof(uint64(0))
 )
 
 // fakePolicyMaps returns a fully-populated PolicyMaps backed by fakeBPFMap,
@@ -110,25 +120,37 @@ func fakePolicyMaps() (PolicyMaps, *[]string, map[string]*fakeBPFMap) {
 	opPolicy := newFakeMap("cgroup_op_policy", cgroupOpKeySize, cgroupOpValueSize, calls)
 	pathAllow := newFakeMap("cgroup_path_allow", pathLpmKeySize, lpmAllowedValueSize, calls)
 	fileAllow := newFakeMap("cgroup_file_allow", fileAllowKeySize, lpmAllowedValueSize, calls)
+	bootstrapFileAllow := newFakeMap("cgroup_bootstrap_file_allow", bootstrapFileKeySize, bootstrapFileValueSize, calls)
+	bootstrapObservation := newFakeMap("bootstrap_file_observation", bootstrapObservationKeySize, bootstrapObservationValueSize, calls)
+	controlPlaneAllow := newFakeMap("cgroup_control_plane_allow", controlPlaneAllowKeySize, unsafe.Sizeof(uint32(0)), calls)
+	trustedRoot := newFakeMap("cgroup_trusted_root", managedKeySize, trustedRootValueSize, calls)
 	netAllow := newFakeMap("cgroup_net_allow", netLpmKeySize, lpmAllowedValueSize, calls)
 	managed := newFakeMap("cgroup_managed", managedKeySize, managedValueSize, calls)
 	killSwitch := newFakeMap("kill_switch", unsafe.Sizeof(uint32(0)), unsafe.Sizeof(uint32(0)), calls)
 
 	maps := PolicyMaps{
-		CgroupOpPolicy:  opPolicy,
-		CgroupPathAllow: pathAllow,
-		CgroupFileAllow: fileAllow,
-		CgroupNetAllow:  netAllow,
-		CgroupManaged:   managed,
-		KillSwitch:      killSwitch,
+		CgroupOpPolicy:           opPolicy,
+		CgroupPathAllow:          pathAllow,
+		CgroupFileAllow:          fileAllow,
+		CgroupBootstrapFileAllow: bootstrapFileAllow,
+		BootstrapFileObservation: bootstrapObservation,
+		CgroupControlPlaneAllow:  controlPlaneAllow,
+		CgroupTrustedRoot:        trustedRoot,
+		CgroupNetAllow:           netAllow,
+		CgroupManaged:            managed,
+		KillSwitch:               killSwitch,
 	}
 	handles := map[string]*fakeBPFMap{
-		"cgroup_op_policy":  opPolicy,
-		"cgroup_path_allow": pathAllow,
-		"cgroup_file_allow": fileAllow,
-		"cgroup_net_allow":  netAllow,
-		"cgroup_managed":    managed,
-		"kill_switch":       killSwitch,
+		"cgroup_op_policy":            opPolicy,
+		"cgroup_path_allow":           pathAllow,
+		"cgroup_file_allow":           fileAllow,
+		"cgroup_bootstrap_file_allow": bootstrapFileAllow,
+		"bootstrap_file_observation":  bootstrapObservation,
+		"cgroup_control_plane_allow":  controlPlaneAllow,
+		"cgroup_trusted_root":         trustedRoot,
+		"cgroup_net_allow":            netAllow,
+		"cgroup_managed":              managed,
+		"kill_switch":                 killSwitch,
 	}
 	return maps, calls, handles
 }
@@ -267,6 +289,160 @@ func TestApplyPolicyMaps_PathAllowWritesToFileAllowMapNotLPM(t *testing.T) {
 
 	if len(handles["cgroup_path_allow"].data) != 0 {
 		t.Errorf("cgroup_path_allow got %d entries, want 0 — path_allow must not also write the LPM trie no sleepable hook can read", len(handles["cgroup_path_allow"].data))
+	}
+}
+
+func TestApplyPolicyMaps_TrustedRuntimeEntriesBindRootAndGeneration(t *testing.T) {
+	t.Parallel()
+	maps, calls, handles := fakePolicyMaps()
+	req := samplePolicyReq(7, BpfEnforceModeEnforce)
+	req.RootPID = 4242
+	req.BootstrapReadAllow = []string{"/usr"}
+	req.BootstrapFiles = []BootstrapFile{{Path: "/workspace/agent.py", KernelDevice: 17, Inode: 29}}
+	req.ControlPlaneEndpoint = &DaemonControlPlaneEndpoint{IP: "127.0.0.1", Port: 43210}
+
+	if err := ApplyPolicyMaps(maps, 99, req); err != nil {
+		t.Fatalf("ApplyPolicyMaps: %v", err)
+	}
+	var generation uint32
+	var trusted trustedRootValueLayout
+	if err := handles["cgroup_trusted_root"].Lookup(managedKey(99), &trusted); err != nil {
+		t.Fatalf("trusted-root lookup: %v", err)
+	}
+	if trusted.RootTGID != 4242 || trusted.Generation != 7 || trusted.AllowMask != bootstrapAllowUsr {
+		t.Fatalf("trusted root = %+v, want root=4242 generation=7 mask=%d", trusted, bootstrapAllowUsr)
+	}
+	bootstrapKey, err := bootstrapFileKey(99, req.BootstrapFiles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bootstrap bootstrapFileValueLayout
+	if err := handles["cgroup_bootstrap_file_allow"].Lookup(bootstrapKey, &bootstrap); err != nil {
+		t.Fatalf("bootstrap-file lookup: %v", err)
+	}
+	if bootstrap.Generation != 7 {
+		t.Fatalf("bootstrap file = %+v, want generation=7", bootstrap)
+	}
+	controlKey, err := controlPlaneAllowKey(99, 4242, *req.ControlPlaneEndpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handles["cgroup_control_plane_allow"].Lookup(controlKey, &generation); err != nil {
+		t.Fatalf("control-plane lookup: %v", err)
+	}
+	if generation != 7 {
+		t.Fatalf("control-plane generation = %d, want 7", generation)
+	}
+	if got := (*calls)[len(*calls)-1]; got != "put:cgroup_managed" {
+		t.Fatalf("last write = %q, want managed generation gate", got)
+	}
+
+}
+
+func TestApplyPolicyMaps_RejectsInvalidBootstrapFileIdentities(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		files []BootstrapFile
+	}{
+		{name: "relative", files: []BootstrapFile{{Path: "agent.py", KernelDevice: 1, Inode: 1}}},
+		{name: "zero inode", files: []BootstrapFile{{Path: "/agent.py", KernelDevice: 1}}},
+		{name: "zero device", files: []BootstrapFile{{Path: "/agent.py", Inode: 1}}},
+		{name: "duplicate", files: []BootstrapFile{{Path: "/agent.py", KernelDevice: 1, Inode: 1}, {Path: "/agent-link.py", KernelDevice: 1, Inode: 1}}},
+		{name: "too many", files: []BootstrapFile{{Path: "/1", KernelDevice: 1, Inode: 1}, {Path: "/2", KernelDevice: 1, Inode: 2}, {Path: "/3", KernelDevice: 1, Inode: 3}, {Path: "/4", KernelDevice: 1, Inode: 4}, {Path: "/5", KernelDevice: 1, Inode: 5}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			maps, _, _ := fakePolicyMaps()
+			req := samplePolicyReq(1, BpfEnforceModeEnforce)
+			req.RootPID = 42
+			req.BootstrapFiles = tt.files
+			if err := ApplyPolicyMaps(maps, 99, req); err == nil {
+				t.Fatal("invalid bootstrap file identities were accepted")
+			}
+		})
+	}
+}
+
+func TestApplyPolicyMaps_TrustedRuntimeEntriesRequireDaemonRoot(t *testing.T) {
+	t.Parallel()
+	maps, _, _ := fakePolicyMaps()
+	req := samplePolicyReq(1, BpfEnforceModeEnforce)
+	req.BootstrapReadAllow = []string{"/usr"}
+	if err := ApplyPolicyMaps(maps, 99, req); err == nil {
+		t.Fatal("trusted runtime exception without daemon root PID was accepted")
+	}
+}
+
+func TestBootstrapReadAllowMaskIncludesDistroLibraryRoots(t *testing.T) {
+	t.Parallel()
+	want := bootstrapAllowUsr | bootstrapAllowLib | bootstrapAllowLib64
+	if got := bootstrapReadAllowMask([]string{"/usr", "/lib", "/lib64"}); got != want {
+		t.Fatalf("bootstrapReadAllowMask = %#x, want %#x", got, want)
+	}
+}
+
+func TestRegisterBootstrapFileEntries_RequiresLSMAcknowledgement(t *testing.T) {
+	t.Parallel()
+	maps, _, handles := fakePolicyMaps()
+	files := []BootstrapFile{{Path: "/workspace/agent.py", Inode: 29}}
+
+	registered, err := RegisterBootstrapFileEntries(
+		maps, 99, 7, 4242, files,
+		func(path string) error {
+			if path != files[0].Path {
+				t.Fatalf("trigger path = %q, want %q", path, files[0].Path)
+			}
+			key := bootstrapObservationKeyLayout{ObserverTGID: 4242, Inode: 29}
+			var value bootstrapObservationValueLayout
+			if err := handles["bootstrap_file_observation"].Lookup(&key, &value); err != nil {
+				t.Fatalf("lookup armed observation: %v", err)
+			}
+			value.Registered = 1
+			value.Device = 48
+			return handles["bootstrap_file_observation"].Put(&key, &value)
+		},
+	)
+	if err != nil {
+		t.Fatalf("RegisterBootstrapFileEntries: %v", err)
+	}
+	if len(registered) != 1 || registered[0].KernelDevice != 48 || registered[0].Inode != 29 {
+		t.Fatalf("registered = %+v, want device=48 inode=29", registered)
+	}
+	if len(handles["bootstrap_file_observation"].data) != 0 {
+		t.Fatal("one-shot observation request remains after acknowledgement")
+	}
+
+	if _, err := RegisterBootstrapFileEntries(maps, 99, 8, 4242, files, func(string) error { return nil }); err == nil {
+		t.Fatal("registration without LSM acknowledgement succeeded")
+	}
+}
+
+func TestRegisterBootstrapFileEntries_ReportsObservationCleanupFailure(t *testing.T) {
+	t.Parallel()
+	maps, _, handles := fakePolicyMaps()
+	files := []BootstrapFile{{Path: "/workspace/agent.py", Inode: 29}}
+	wantErr := errors.New("synthetic observation delete failure")
+
+	_, err := RegisterBootstrapFileEntries(
+		maps, 99, 7, 4242, files,
+		func(string) error {
+			key := bootstrapObservationKeyLayout{ObserverTGID: 4242, Inode: 29}
+			var value bootstrapObservationValueLayout
+			if err := handles["bootstrap_file_observation"].Lookup(&key, &value); err != nil {
+				t.Fatalf("lookup armed observation: %v", err)
+			}
+			value.Registered = 1
+			value.Device = 48
+			if err := handles["bootstrap_file_observation"].Put(&key, &value); err != nil {
+				t.Fatalf("acknowledge observation: %v", err)
+			}
+			handles["bootstrap_file_observation"].deleteErr = wantErr
+			return nil
+		},
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("RegisterBootstrapFileEntries error = %v, want cleanup failure", err)
 	}
 }
 
@@ -438,6 +614,31 @@ func TestRemovePolicyMaps_MissingEntriesAreNotErrors(t *testing.T) {
 	// Nothing seeded — every Delete call hits a missing key.
 	if err := RemovePolicyMaps(maps, 12345); err != nil {
 		t.Fatalf("RemovePolicyMaps on empty maps: unexpected error: %v", err)
+	}
+}
+
+func TestDeleteBootstrapFileEntries_RemovesExactPathIdentity(t *testing.T) {
+	t.Parallel()
+	maps, _, handles := fakePolicyMaps()
+	const cgroupID = uint64(91)
+	file := BootstrapFile{Path: "/workspace/agent.py", KernelDevice: 17, Inode: 29}
+	req := samplePolicyReq(7, BpfEnforceModeEnforce)
+	req.RootPID = 4242
+	req.BootstrapFiles = []BootstrapFile{file}
+	if err := ApplyPolicyMaps(maps, cgroupID, req); err != nil {
+		t.Fatalf("ApplyPolicyMaps: %v", err)
+	}
+
+	key, err := bootstrapFileKey(cgroupID, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteBootstrapFileEntries(maps, cgroupID, []BootstrapFile{file}); err != nil {
+		t.Fatalf("DeleteBootstrapFileEntries: %v", err)
+	}
+	var value bootstrapFileValueLayout
+	if err := handles["cgroup_bootstrap_file_allow"].Lookup(key, &value); err == nil {
+		t.Fatal("bootstrap file entry remains after deletion")
 	}
 }
 

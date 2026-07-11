@@ -37,13 +37,17 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import kernel_correlation as kc
-from .launch_gate import RELEASE_BYTE as LAUNCH_GATE_RELEASE_BYTE
+from .launch_gate import (
+    RELEASE_BYTE as LAUNCH_GATE_RELEASE_BYTE,
+    release_exec_stop,
+    wait_for_exec_stop,
+)
 from .package_assets import claude_code_plugin_dir
 
 if TYPE_CHECKING:
@@ -61,6 +65,19 @@ ENV_TRACE_ID = "ARDUR_TRACE_ID"
 DEFAULT_AGENT_ID = "local-user:ardur-run"
 DEFAULT_MAX_TOOL_CALLS = 250
 DEFAULT_MAX_DURATION_S = 86400
+
+# Daemon-owned, root-PID-only read exceptions needed after the kernel has
+# completed exec but before a dynamic target runtime has finished starting.
+# Mission data never extends this list. The BPF hook permits reads only; writes
+# continue through the ordinary mission policy.
+BPF_BOOTSTRAP_READ_ALLOW = (
+    "/usr",
+    "/lib",
+    "/lib64",
+    "/etc/ld.so.cache",
+    "/etc/ssl/certs",
+    "/dev/urandom",
+)
 
 VALID_VIA_MODES = ("auto", "env", "claude-code", "intercept")
 
@@ -641,19 +658,23 @@ def _wrap_command_with_seccomp_shim(
     ]
 
 
-def _wrap_command_with_launch_gate(command: list[str], *, ready_fd: int) -> list[str]:
+def _wrap_command_with_launch_gate(
+    command: list[str], *, ready_fd: int | None = None, trace_exec: bool = False
+) -> list[str]:
     """Block the target exec until cgroup adoption and registration finish.
 
     The gate process is the child returned by ``Popen``. It retains that PID
     when it eventually execs ``command``, so the cgroup and daemon registration
     continue to identify the governed root process after release.
     """
+    if (ready_fd is None) == (not trace_exec):
+        raise ValueError("launch gate requires exactly one of ready_fd or trace_exec")
+    gate_args = ["--trace-exec"] if trace_exec else ["--ready-fd", str(ready_fd)]
     return [
         sys.executable,
         "-I",
         str(Path(__file__).with_name("launch_gate.py")),
-        "--ready-fd",
-        str(ready_fd),
+        *gate_args,
         "--",
         *command,
     ]
@@ -712,6 +733,7 @@ def _apply_kernel_policy(
     enforce: bool,
     seccomp_plan: SeccompShimPlan,
     control_plane_endpoint: tuple[str, int] | None = None,
+    bootstrap_read_allow: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Lower the passport's policy and push it to the daemon's BPF maps.
 
@@ -743,8 +765,8 @@ def _apply_kernel_policy(
             raise KernelPolicyEnforcementError(reason)
         return {"applied": False, "reason": reason, "tier2_ops": []}
 
-    from .bpf_lower import lower_to_bpf_policy_plan
-    from .bpf_types import ENFORCE_MODE_ENFORCE, ENFORCE_MODE_PERMISSIVE
+    from .bpf_lower import OpPolicyEntry, lower_to_bpf_policy_plan
+    from .bpf_types import ACT_DENY, ENFORCE_MODE_ENFORCE, ENFORCE_MODE_PERMISSIVE, OP_NET_CONNECT
 
     plan = lower_to_bpf_policy_plan(
         allowed_side_effect_classes=passport.allowed_side_effect_classes,
@@ -754,6 +776,18 @@ def _apply_kernel_policy(
         enforce_mode=ENFORCE_MODE_ENFORCE if enforce else ENFORCE_MODE_PERMISSIVE,
     )
     tier2_ops = list(plan.tier2_ops)
+
+    # The exact bridge endpoint is a trusted side channel, not mission network
+    # authority. Keep OP_NET_CONNECT explicit on the wire (the daemon rejects
+    # endpoint exceptions without it), while the dedicated root-PID/port BPF
+    # map makes only this tuple reachable. Every unrelated connect remains
+    # denied in strict mode.
+    if control_plane_endpoint is not None and not any(entry.op == OP_NET_CONNECT for entry in plan.op_policies):
+        plan = replace(
+            plan,
+            op_policies=plan.op_policies
+            + (OpPolicyEntry(OP_NET_CONNECT, ACT_DENY, plan.enforce_mode),),
+        )
 
     if not plan.op_policies and not plan.path_allow and not plan.net_allow:
         return {
@@ -774,6 +808,7 @@ def _apply_kernel_policy(
             plan=plan,
             generation=generation,
             control_plane_endpoint=control_plane_endpoint,
+            bootstrap_read_allow=bootstrap_read_allow,
         )
     except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError) as exc:
         reason = f"kernel policy apply rejected: {exc}"
@@ -982,6 +1017,7 @@ def run_governed(
     seccomp_ready_file: Path | None = None
     launch_gate_read_fd: int | None = None
     launch_gate_write_fd: int | None = None
+    bpf_exec_stopped = False
     try:
         _wait_for_health(proxy_url, api_token)
 
@@ -1031,7 +1067,14 @@ def run_governed(
         # with the daemon. Launch a tiny inherited-FD gate as the child whenever
         # a cgroup exists; exec preserves its PID after the parent releases it.
         popen_extra: dict[str, Any] = {}
-        if cgroup_handle is not None:
+        bpf_trace_handoff = (
+            enforce
+            and cgroup_handle is not None
+            and seccomp_plan.tier == kc.ENFORCEMENT_TIER_BPF_LSM
+        )
+        if bpf_trace_handoff:
+            run_command = _wrap_command_with_launch_gate(run_command, trace_exec=True)
+        elif cgroup_handle is not None:
             launch_gate_read_fd, launch_gate_write_fd = os.pipe()
             run_command = _wrap_command_with_launch_gate(run_command, ready_fd=launch_gate_read_fd)
             popen_extra["pass_fds"] = (launch_gate_read_fd,)
@@ -1052,12 +1095,28 @@ def run_governed(
                     os.close(launch_gate_read_fd)
                 launch_gate_read_fd = None
 
+        if bpf_trace_handoff:
+            try:
+                wait_for_exec_stop(proc.pid)
+                bpf_exec_stopped = True
+            except (OSError, RuntimeError, TimeoutError) as exc:
+                with suppress(OSError):
+                    proc.kill()
+                with suppress(Exception):
+                    proc.wait(timeout=5)
+                raise KernelPolicyEnforcementError(f"BPF exec handoff failed closed: {exc}") from exc
+
         if cgroup_handle is not None:
             try:
                 cgroup_handle.adopt_pid(proc.pid)
-            except OSError:
+            except OSError as exc:
                 cgroup_handle.cleanup()
                 cgroup_handle = None
+                if bpf_exec_stopped:
+                    proc.kill()
+                    proc.wait()
+                    bpf_exec_stopped = False
+                    raise KernelPolicyEnforcementError(f"BPF cgroup adoption failed closed: {exc}") from exc
 
         correlation = _correlate_launch(
             session_id=session_id,
@@ -1099,8 +1158,9 @@ def run_governed(
                 enforce=enforce,
                 seccomp_plan=seccomp_plan,
                 control_plane_endpoint=(proxy_host, port)
-                if seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP
+                if seccomp_plan.tier in {kc.ENFORCEMENT_TIER_BPF_LSM, kc.ENFORCEMENT_TIER_SECCOMP}
                 else None,
+                bootstrap_read_allow=BPF_BOOTSTRAP_READ_ALLOW if bpf_trace_handoff else (),
             )
         except KernelPolicyEnforcementError as exc:
             notes.append(f"ENFORCE abort: {exc}")
@@ -1113,6 +1173,15 @@ def run_governed(
         if launch_gate_write_fd is not None:
             _release_launch_gate(launch_gate_write_fd)
             launch_gate_write_fd = None
+        if bpf_exec_stopped:
+            try:
+                release_exec_stop(proc.pid)
+            except OSError as exc:
+                proc.kill()
+                proc.wait()
+                bpf_exec_stopped = False
+                raise KernelPolicyEnforcementError(f"BPF exec release failed closed: {exc}") from exc
+            bpf_exec_stopped = False
 
         # 6. Wait for the agent to exit (bounded by the mission duration budget).
         try:
@@ -1126,6 +1195,11 @@ def run_governed(
                 exit_code = proc.wait()
             notes.append(f"agent exceeded max-duration {max_duration_s}s and was terminated")
     finally:
+        if bpf_exec_stopped and proc is not None:
+            with suppress(OSError):
+                proc.kill()
+            with suppress(Exception):
+                proc.wait(timeout=5)
         # 7. Finalize the governance session: attestation + receipt chain.
         # Kernel enforcement must be fetched before the kernel daemon's
         # end_session call below, which retires the session's summary.

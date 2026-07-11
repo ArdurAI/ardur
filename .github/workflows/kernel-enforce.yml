@@ -32,11 +32,10 @@ name: kernel-enforce
 #     re-apply), assert execve is still denied. This is the one thing
 #     bpf-generate cannot prove: that the compiled program actually enforces
 #     — and keeps enforcing across a restart — on a live kernel, not just
-#     that it loads. In the same VM boot, a permissive `ardur run` workload
-#     exercises the signed-receipt-to-process-lifecycle observability metric
-#     on the real BPF stream. Full enforce-mode launch bootstrap remains open
-#     in issue #241; these two checks must not be presented as one full-flow
-#     proof.
+#     that it loads. In the same VM boot, a strict `ardur run --enforce`
+#     workload proves the post-exec ptrace stop, root-only runtime reads,
+#     exact governance endpoint, denied child exec, signed receipt, lifecycle
+#     metric, and offline attestation-chain match on the real BPF stream.
 #
 #   seccomp-smoke — the seccomp user-notify tier's equivalent proof (plan
 #     E4, the common-case fallback for hosts where BPF-LSM never loads).
@@ -231,8 +230,8 @@ jobs:
 # Also build + install what the real-BPF observability workload
 # (docs/demo/enforce-e2e/run.sh) needs, so the vng boot below can exercise
 # the `ardur run` bridge in addition to the piecewise ardur-guard-smoke.
-# This proves issue #39's metric path; it does not close the BPF-LSM
-# enforce-mode bootstrap tracked in #241. virtme-ng's guest shares the runner's own
+# This proves issue #39's metric path and #241's BPF-LSM enforce bootstrap.
+# virtme-ng's guest shares the runner's own
       # root filesystem (a different kernel over the same userspace, not a
       # separate image) — confirmed by ardur-guard-smoke above already being
       # visible to vng's --exec without copying it into any guest-specific
@@ -301,12 +300,10 @@ jobs:
             --append "lsm=bpf" \
             --exec /tmp/ardur-guard-smoke
 
-      # Issue #39's metric proof uses the real `ardur run` bridge, signed
-      # receipt registration, BPF process-lifecycle stream, and attestation
-      # verifier. It runs permissively because the direct guard smoke above
-      # already proves BPF-LSM enforcement while the full enforce-mode launch
-      # bootstrap remains tracked separately in #241.
-      - name: Boot with BPF-LSM active and verify the observability-gap metric
+      # Issues #39 and #241 share one strict full-flow proof: the target is
+      # held at PTRACE_EVENT_EXEC until cgroup registration and policy apply,
+      # then performs one governed call before its child exec is denied EPERM.
+      - name: Boot with BPF-LSM active and verify strict ardur-run E2E
         run: |
           VNG="$(command -v vng)"
           test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }

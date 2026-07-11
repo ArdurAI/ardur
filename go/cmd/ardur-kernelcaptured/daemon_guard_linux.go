@@ -92,6 +92,11 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 		d.policyMaps = kernelcapture.PolicyMaps{}
 		handles.Close()
 	}()
+	if err := kernelcapture.ClearBootstrapFileObservations(handles); err != nil {
+		err = fmt.Errorf("clear stale bootstrap registration requests: %w", err)
+		ready <- err
+		return err
+	}
 
 	// Expose maps to the daemon for apply_policy calls.
 	d.policyMaps = kernelcapture.PolicyMapsFromHandles(handles)

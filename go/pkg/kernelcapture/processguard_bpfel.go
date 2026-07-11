@@ -13,6 +13,33 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type processGuardArdurBootstrapFileKey struct {
+	_         structs.HostLayout
+	CgroupRaw [8]uint8
+	Device    uint64
+	Inode     uint64
+}
+
+type processGuardArdurBootstrapFileValue struct {
+	_          structs.HostLayout
+	Generation uint32
+}
+
+type processGuardArdurBootstrapObservationKey struct {
+	_            structs.HostLayout
+	ObserverTgid uint32
+	Padding      uint32
+	Inode        uint64
+}
+
+type processGuardArdurBootstrapObservationValue struct {
+	_          structs.HostLayout
+	CgroupRaw  [8]uint8
+	Generation uint32
+	Registered uint32
+	Device     uint64
+}
+
 type processGuardArdurCgroupOpKey struct {
 	_        structs.HostLayout
 	CgroupId uint64
@@ -27,6 +54,14 @@ type processGuardArdurCgroupOpValue struct {
 	Generation  uint32
 }
 
+type processGuardArdurControlPlaneKey struct {
+	_         structs.HostLayout
+	CgroupRaw [8]uint8
+	Family    uint16
+	Port      [2]uint8
+	Addr      [16]uint8
+}
+
 type processGuardArdurFileAllowKey struct {
 	_         structs.HostLayout
 	CgroupRaw [8]uint8
@@ -34,9 +69,9 @@ type processGuardArdurFileAllowKey struct {
 }
 
 type processGuardArdurFileAllowScratch struct {
-	_        structs.HostLayout
-	Key      processGuardArdurFileAllowKey
-	PathCopy [256]int8
+	_         structs.HostLayout
+	PolicyKey processGuardArdurFileAllowKey
+	PathCopy  [256]int8
 }
 
 type processGuardArdurManagedKey struct {
@@ -65,24 +100,35 @@ type processGuardArdurPathLpmKey struct {
 	Path      [248]int8
 }
 
+type processGuardArdurTrustedRootValue struct {
+	_          structs.HostLayout
+	RootTgid   uint32
+	Generation uint32
+	AllowMask  uint32
+}
+
 // Names of all BPF objects in the ELF.
 //
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
-	processGuardMapCgroupFileAllow      = "cgroup_file_allow"
-	processGuardMapCgroupManaged        = "cgroup_managed"
-	processGuardMapCgroupNetAllow       = "cgroup_net_allow"
-	processGuardMapCgroupOpPolicy       = "cgroup_op_policy"
-	processGuardMapCgroupPathAllow      = "cgroup_path_allow"
-	processGuardMapEnforceEvents        = "enforce_events"
-	processGuardMapEnforceEventsDropped = "enforce_events_dropped"
-	processGuardMapFileAllowScratch     = "file_allow_scratch"
-	processGuardMapKillSwitch           = "kill_switch"
-	processGuardMapNetLpmScratch        = "net_lpm_scratch"
-	processGuardMapPathLpmScratch       = "path_lpm_scratch"
-	processGuardProgGuardBprmCheck      = "guard_bprm_check"
-	processGuardProgGuardFileOpen       = "guard_file_open"
-	processGuardProgGuardSocketConnect  = "guard_socket_connect"
+	processGuardMapBootstrapFileObservation = "bootstrap_file_observation"
+	processGuardMapCgroupBootstrapFileAllow = "cgroup_bootstrap_file_allow"
+	processGuardMapCgroupControlPlaneAllow  = "cgroup_control_plane_allow"
+	processGuardMapCgroupFileAllow          = "cgroup_file_allow"
+	processGuardMapCgroupManaged            = "cgroup_managed"
+	processGuardMapCgroupNetAllow           = "cgroup_net_allow"
+	processGuardMapCgroupOpPolicy           = "cgroup_op_policy"
+	processGuardMapCgroupPathAllow          = "cgroup_path_allow"
+	processGuardMapCgroupTrustedRoot        = "cgroup_trusted_root"
+	processGuardMapEnforceEvents            = "enforce_events"
+	processGuardMapEnforceEventsDropped     = "enforce_events_dropped"
+	processGuardMapFileAllowScratch         = "file_allow_scratch"
+	processGuardMapKillSwitch               = "kill_switch"
+	processGuardMapNetLpmScratch            = "net_lpm_scratch"
+	processGuardMapPathLpmScratch           = "path_lpm_scratch"
+	processGuardProgGuardBprmCheck          = "guard_bprm_check"
+	processGuardProgGuardFileOpen           = "guard_file_open"
+	processGuardProgGuardSocketConnect      = "guard_socket_connect"
 )
 
 // loadProcessGuard returns the embedded CollectionSpec for processGuard.
@@ -136,17 +182,21 @@ type processGuardProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type processGuardMapSpecs struct {
-	CgroupFileAllow      *ebpf.MapSpec `ebpf:"cgroup_file_allow"`
-	CgroupManaged        *ebpf.MapSpec `ebpf:"cgroup_managed"`
-	CgroupNetAllow       *ebpf.MapSpec `ebpf:"cgroup_net_allow"`
-	CgroupOpPolicy       *ebpf.MapSpec `ebpf:"cgroup_op_policy"`
-	CgroupPathAllow      *ebpf.MapSpec `ebpf:"cgroup_path_allow"`
-	EnforceEvents        *ebpf.MapSpec `ebpf:"enforce_events"`
-	EnforceEventsDropped *ebpf.MapSpec `ebpf:"enforce_events_dropped"`
-	FileAllowScratch     *ebpf.MapSpec `ebpf:"file_allow_scratch"`
-	KillSwitch           *ebpf.MapSpec `ebpf:"kill_switch"`
-	NetLpmScratch        *ebpf.MapSpec `ebpf:"net_lpm_scratch"`
-	PathLpmScratch       *ebpf.MapSpec `ebpf:"path_lpm_scratch"`
+	BootstrapFileObservation *ebpf.MapSpec `ebpf:"bootstrap_file_observation"`
+	CgroupBootstrapFileAllow *ebpf.MapSpec `ebpf:"cgroup_bootstrap_file_allow"`
+	CgroupControlPlaneAllow  *ebpf.MapSpec `ebpf:"cgroup_control_plane_allow"`
+	CgroupFileAllow          *ebpf.MapSpec `ebpf:"cgroup_file_allow"`
+	CgroupManaged            *ebpf.MapSpec `ebpf:"cgroup_managed"`
+	CgroupNetAllow           *ebpf.MapSpec `ebpf:"cgroup_net_allow"`
+	CgroupOpPolicy           *ebpf.MapSpec `ebpf:"cgroup_op_policy"`
+	CgroupPathAllow          *ebpf.MapSpec `ebpf:"cgroup_path_allow"`
+	CgroupTrustedRoot        *ebpf.MapSpec `ebpf:"cgroup_trusted_root"`
+	EnforceEvents            *ebpf.MapSpec `ebpf:"enforce_events"`
+	EnforceEventsDropped     *ebpf.MapSpec `ebpf:"enforce_events_dropped"`
+	FileAllowScratch         *ebpf.MapSpec `ebpf:"file_allow_scratch"`
+	KillSwitch               *ebpf.MapSpec `ebpf:"kill_switch"`
+	NetLpmScratch            *ebpf.MapSpec `ebpf:"net_lpm_scratch"`
+	PathLpmScratch           *ebpf.MapSpec `ebpf:"path_lpm_scratch"`
 }
 
 // processGuardVariableSpecs contains global variables before they are loaded into the kernel.
@@ -175,26 +225,34 @@ func (o *processGuardObjects) Close() error {
 //
 // It can be passed to loadProcessGuardObjects or ebpf.CollectionSpec.LoadAndAssign.
 type processGuardMaps struct {
-	CgroupFileAllow      *ebpf.Map `ebpf:"cgroup_file_allow"`
-	CgroupManaged        *ebpf.Map `ebpf:"cgroup_managed"`
-	CgroupNetAllow       *ebpf.Map `ebpf:"cgroup_net_allow"`
-	CgroupOpPolicy       *ebpf.Map `ebpf:"cgroup_op_policy"`
-	CgroupPathAllow      *ebpf.Map `ebpf:"cgroup_path_allow"`
-	EnforceEvents        *ebpf.Map `ebpf:"enforce_events"`
-	EnforceEventsDropped *ebpf.Map `ebpf:"enforce_events_dropped"`
-	FileAllowScratch     *ebpf.Map `ebpf:"file_allow_scratch"`
-	KillSwitch           *ebpf.Map `ebpf:"kill_switch"`
-	NetLpmScratch        *ebpf.Map `ebpf:"net_lpm_scratch"`
-	PathLpmScratch       *ebpf.Map `ebpf:"path_lpm_scratch"`
+	BootstrapFileObservation *ebpf.Map `ebpf:"bootstrap_file_observation"`
+	CgroupBootstrapFileAllow *ebpf.Map `ebpf:"cgroup_bootstrap_file_allow"`
+	CgroupControlPlaneAllow  *ebpf.Map `ebpf:"cgroup_control_plane_allow"`
+	CgroupFileAllow          *ebpf.Map `ebpf:"cgroup_file_allow"`
+	CgroupManaged            *ebpf.Map `ebpf:"cgroup_managed"`
+	CgroupNetAllow           *ebpf.Map `ebpf:"cgroup_net_allow"`
+	CgroupOpPolicy           *ebpf.Map `ebpf:"cgroup_op_policy"`
+	CgroupPathAllow          *ebpf.Map `ebpf:"cgroup_path_allow"`
+	CgroupTrustedRoot        *ebpf.Map `ebpf:"cgroup_trusted_root"`
+	EnforceEvents            *ebpf.Map `ebpf:"enforce_events"`
+	EnforceEventsDropped     *ebpf.Map `ebpf:"enforce_events_dropped"`
+	FileAllowScratch         *ebpf.Map `ebpf:"file_allow_scratch"`
+	KillSwitch               *ebpf.Map `ebpf:"kill_switch"`
+	NetLpmScratch            *ebpf.Map `ebpf:"net_lpm_scratch"`
+	PathLpmScratch           *ebpf.Map `ebpf:"path_lpm_scratch"`
 }
 
 func (m *processGuardMaps) Close() error {
 	return _ProcessGuardClose(
+		m.BootstrapFileObservation,
+		m.CgroupBootstrapFileAllow,
+		m.CgroupControlPlaneAllow,
 		m.CgroupFileAllow,
 		m.CgroupManaged,
 		m.CgroupNetAllow,
 		m.CgroupOpPolicy,
 		m.CgroupPathAllow,
+		m.CgroupTrustedRoot,
 		m.EnforceEvents,
 		m.EnforceEventsDropped,
 		m.FileAllowScratch,
