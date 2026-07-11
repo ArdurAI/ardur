@@ -50,7 +50,6 @@ _INSTRUCTION_PATTERNS = {
         r"\b(?:hidden\s+instruction|override\s+instruction|before\s+responding|always\s+send)\b",
         re.IGNORECASE,
     ),
-    "markup_concealment": re.compile(r"<!--|-->|<script\b", re.IGNORECASE),
     "zero_width": re.compile("[\u200b-\u200f\u2060\ufeff]"),
 }
 _SHELL_COMMANDS = {
@@ -400,7 +399,8 @@ def _tool_entries(
         )
         if name in seen:
             raise ToolPreflightError(
-                "tool_name_duplicate", "server definition contains a duplicate tool name"
+                "tool_name_duplicate",
+                "server definition contains a duplicate tool name",
             )
         seen.add(name)
         entries.append((name, definition, tool_path))
@@ -604,6 +604,18 @@ def _finding(
     if tool is not None:
         result["tool"] = tool
     return result
+
+
+def _instruction_indicators(description: str) -> list[str]:
+    indicators = [
+        name
+        for name, pattern in _INSTRUCTION_PATTERNS.items()
+        if pattern.search(description)
+    ]
+    lowered = description.lower()
+    if any(marker in lowered for marker in ("<!--", "-->", "--!>", "<script")):
+        indicators.append("markup_concealment")
+    return indicators
 
 
 def _scan_server(
@@ -863,11 +875,7 @@ def _scan_server(
                 "tool_description_invalid", f"{tool_path}.description must be a string"
             )
         description = description or ""
-        instruction_indicators = [
-            name
-            for name, pattern in _INSTRUCTION_PATTERNS.items()
-            if pattern.search(description)
-        ]
+        instruction_indicators = _instruction_indicators(description)
         if instruction_indicators:
             findings.append(
                 _finding(
@@ -1009,7 +1017,8 @@ def scan_tool_server_config(path: str | Path) -> dict[str, Any]:
             )
             if not isinstance(raw_server, Mapping):
                 raise ToolPreflightError(
-                    "server_invalid", f"{collection} server definition must be an object"
+                    "server_invalid",
+                    f"{collection} server definition must be an object",
                 )
             if server_name in server_names:
                 raise ToolPreflightError(
