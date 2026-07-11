@@ -16,6 +16,20 @@ ambiguity, parser bounds, redaction, symlink handling, CLI behavior, public
 fixture generation, and owner-only report output without network access or
 private credentials.
 
+When changing verified receipt telemetry or OTLP export, run:
+
+```bash
+PYTHONPATH=python python -m pytest python/tests/test_receipt_telemetry.py -q
+```
+
+This suite verifies signed PERMIT/DENY chain projection, parent linkage,
+stable policy rule IDs, conservative no-content export, the canonical golden
+event, deterministic OTLP IDs and nanosecond timestamps, partial rejection,
+HTTPS/loopback endpoint policy, environment-header injection resistance,
+owner-only output, symlink rejection, and CLI behavior. The generated trace and
+log requests are also checked manually against the official
+`opentelemetry-proto` protobuf JSON parser during release evidence review.
+
 When changing governance performance paths or the Linux benchmark report, run:
 
 ```bash

@@ -2,7 +2,7 @@
 title: "Roadmap"
 description: "Already present:"
 source_path: "ROADMAP.md"
-source_sha256: "6fee2c0838cb649e91f45a5bcb49ae30a34ef03dcb59868fa8aa78c63e3e3515"
+source_sha256: "eba67a99bef8e5adcdc258eb9d3eba47e8020ee28b754e54bca2b0631075ffd9"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["roadmap"]
@@ -31,6 +31,7 @@ Already present:
 - optional receipt transparency anchors with Rekor v1 and separately keyed self-hosted proof profiles
 - optional receiver-attested receipt envelopes with a separately keyed MCP shim, public golden fixture, and offline two-signature verification
 - a packaged offline verifier that composes receipt chains, transparency proofs, and conditional receiver evidence into redacted CLI/JSON/static HTML reports without a running service
+- a verified-receipt telemetry exporter with a stable redacted JSONL event schema and standards-shaped OTLP/HTTP JSON trace/log requests; production collector operations and vendor-specific connectors remain pending
 - curated Python and Go runtime imports
 - the Ardur Personal Hub service plus its CLI surface
 - the Claude Code plugin and hook with signed receipts

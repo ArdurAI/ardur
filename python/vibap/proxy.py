@@ -2080,6 +2080,7 @@ class GovernanceProxy:
                 "backend": "native",
                 "decision": "Allow" if decision == Decision.PERMIT else "Deny",
                 "reason": audit_reason or None,
+                "rule_id": "ardur_builtin",
             }]
         compact: list[dict[str, Any]] = []
         for item in event.policy_decisions:
@@ -2087,13 +2088,15 @@ class GovernanceProxy:
             if backend == "native_claims":
                 backend = "native"
             reasons = tuple(str(entry) for entry in item.get("reasons", []) or [])
-            compact.append(
-                {
-                    "backend": backend,
-                    "decision": str(item.get("decision", "Abstain")),
-                    "reason": "; ".join(reasons) if reasons else None,
-                }
-            )
+            signed_item = {
+                "backend": backend,
+                "decision": str(item.get("decision", "Abstain")),
+                "reason": "; ".join(reasons) if reasons else None,
+            }
+            rule_id = str(item.get("label", "")).strip()
+            if rule_id:
+                signed_item["rule_id"] = rule_id
+            compact.append(signed_item)
         return compact
 
     @staticmethod

@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.dev/vibap/spec/governance-telemetry-v0.1.schema.json",
+  "title": "Ardur Governance Telemetry Event v0.1",
+  "description": "Redacted projection of one verified Ardur Execution Receipt for local JSONL or OTLP export.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_name",
+    "timestamp",
+    "receipt_id",
+    "parent_receipt_hash",
+    "trace_id",
+    "actor",
+    "verifier_id",
+    "grant_id",
+    "decision",
+    "verdict",
+    "reason_code",
+    "policy_decisions",
+    "budget",
+    "risk",
+    "invocation",
+    "verification"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.governance_telemetry_event.v0.1"
+    },
+    "event_name": {
+      "const": "ardur.governance.decision"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "receipt_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "parent_receipt_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "trace_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "actor": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "verifier_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "grant_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "PERMIT",
+        "DENY",
+        "ERROR"
+      ]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "compliant",
+        "violation",
+        "insufficient_evidence"
+      ]
+    },
+    "reason_code": {
+      "$ref": "#/$defs/auditToken"
+    },
+    "policy_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backend",
+          "decision",
+          "rule_id"
+        ],
+        "properties": {
+          "backend": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "decision": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "rule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "remaining",
+        "delta"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allowed",
+            "denied",
+            "not_applicable"
+          ]
+        },
+        "remaining": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "delta": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "action_class",
+        "resource_family",
+        "side_effect_class",
+        "sensitivity",
+        "instruction_bearing"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "action_class": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "resource_family": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "side_effect_class": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sensitivity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "instruction_bearing": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "arguments_sha256",
+        "raw_content_exported"
+      ],
+      "properties": {
+        "digest": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "arguments_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "raw_content_exported": {
+          "const": false
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_signature_valid",
+        "chain_link_valid",
+        "mode",
+        "source_sha256"
+      ],
+      "properties": {
+        "receipt_signature_valid": {
+          "const": true
+        },
+        "chain_link_valid": {
+          "const": true
+        },
+        "mode": {
+          "const": "verified_chain_only"
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "auditToken": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._:-]{0,127}$"
+    }
+  }
+}

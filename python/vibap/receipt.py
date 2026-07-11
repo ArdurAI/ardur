@@ -343,12 +343,18 @@ def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:
     for item in policy_decisions:
         if not isinstance(item, dict):
             _schema_violation("policy_decisions items must be objects")
-        if set(item) - {"backend", "decision", "reason", "eval_ms"}:
+        if set(item) - {"backend", "decision", "reason", "rule_id", "eval_ms"}:
             _schema_violation("policy_decisions item contains unknown fields")
         _require_string(item, "backend")
         _require_string(item, "decision")
         if "reason" in item and item["reason"] is not None and not isinstance(item["reason"], str):
             _schema_violation("policy_decisions.reason must be string or null")
+        if "rule_id" in item:
+            rule_id = _require_string(item, "rule_id")
+            if len(rule_id) > 256 or not rule_id.isprintable():
+                _schema_violation(
+                    "policy_decisions.rule_id must be a printable string of at most 256 characters"
+                )
         if "eval_ms" in item and (
             not isinstance(item["eval_ms"], (int, float)) or item["eval_ms"] < 0
         ):

@@ -131,3 +131,14 @@ def linux_governance_benchmark_report_v01_schema() -> dict:
         .read_text(encoding="utf-8")
     )
     return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def governance_telemetry_v01_schema() -> dict:
+    """Return the parsed Governance Telemetry Event v0.1 schema."""
+    raw = (
+        files(__package__)
+        .joinpath("governance_telemetry_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)

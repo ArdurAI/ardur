@@ -369,6 +369,7 @@ def _timeline_item(
             "backend": item.get("backend"),
             "decision": item.get("decision"),
             "reason": item.get("reason"),
+            "rule_id": item.get("rule_id"),
         }
         for item in claims.get("policy_decisions", [])
         if isinstance(item, dict)
@@ -380,16 +381,29 @@ def _timeline_item(
         "index": index,
         "timestamp": claims["timestamp"],
         "receipt_id": claims["receipt_id"],
+        "parent_receipt_hash": claims["parent_receipt_hash"],
         "step_id": claims["step_id"],
         "verdict": claims["verdict"],
         "decision": _verdict_label(str(claims["verdict"])),
+        "reason_code": claims.get("internal_denial_code") or (
+            "policy_permit"
+            if claims["verdict"] == "compliant"
+            else "insufficient_evidence"
+        ),
         "actor": claims["actor"],
+        "verifier_id": claims["verifier_id"],
         "grant_id": claims["grant_id"],
         "tool": claims["tool"],
         "action_class": claims["action_class"],
         "target": claims["target"],
         "resource_family": claims["resource_family"],
         "side_effect_class": claims["side_effect_class"],
+        "sensitivity": claims.get("sensitivity"),
+        "instruction_bearing": claims.get("instruction_bearing"),
+        "content_class": claims.get("content_class"),
+        "content_provenance": claims.get("content_provenance"),
+        "invocation_digest": copy.deepcopy(claims["invocation_digest"]),
+        "evidence_level": claims["evidence_level"],
         "reason": claims["reason"],
         "policy_outcomes": policy_outcomes,
         "cost_outcomes": _cost_projection(claims),

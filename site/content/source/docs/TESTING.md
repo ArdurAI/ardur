@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "f1ab864cdfa1434e9003c0942b26fcf30d2b6ca07cc9489c39a0eb84d89bd1bf"
+source_sha256: "532bc6fb680d86584c00be5dedc51f147414b244760af3d619fc44cc4f72e036"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -32,6 +32,20 @@ Tetragon, and Falco JSONL adapters, and proves deterministic matching,
 ambiguity, parser bounds, redaction, symlink handling, CLI behavior, public
 fixture generation, and owner-only report output without network access or
 private credentials.
+
+When changing verified receipt telemetry or OTLP export, run:
+
+```bash
+PYTHONPATH=python python -m pytest python/tests/test_receipt_telemetry.py -q
+```
+
+This suite verifies signed PERMIT/DENY chain projection, parent linkage,
+stable policy rule IDs, conservative no-content export, the canonical golden
+event, deterministic OTLP IDs and nanosecond timestamps, partial rejection,
+HTTPS/loopback endpoint policy, environment-header injection resistance,
+owner-only output, symlink rejection, and CLI behavior. The generated trace and
+log requests are also checked manually against the official
+`opentelemetry-proto` protobuf JSON parser during release evidence review.
 
 When changing governance performance paths or the Linux benchmark report, run:
 

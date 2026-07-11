@@ -2,7 +2,7 @@
 title: "Execution Receipt v0.2"
 description: "This document defines the v0.2 action-receipt changes over"
 source_path: "docs/specs/execution-receipt-v0.2.md"
-source_sha256: "a5bed49214eeb0759dd3d64b5c34606d927320c4aefa92e9f25e8910797c1b29"
+source_sha256: "02b8609d9d45094b32873afb9d404a4ae1448c359bc4cc4218ef689b9690596d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -76,7 +76,15 @@ and MUST fail verification. JWS still protects the exact encoded payload bytes;
 JCS adds a portable representation for cross-implementation digests, fixtures,
 and re-issuance checks.
 
-## 4. Receipt Chain
+## 4. Policy Provenance
+
+Each `policy_decisions` item MAY include a non-empty `rule_id` of at most
+256 printable characters. The value is the stable policy label selected by the
+mission or policy configuration; it is signed with the receipt and can be
+projected into telemetry without exporting policy-reason prose. Producers MUST
+NOT invent a rule identifier when the evaluated policy has no stable label.
+
+## 5. Receipt Chain
 
 `parent_receipt_hash` remains the lowercase hexadecimal SHA-256 digest of the
 previous complete signed receipt JWT. `parent_receipt_id` remains the first 16
@@ -90,7 +98,7 @@ The lineage root MUST set both parent claims to `null`. Verifiers MUST reject:
   `parent_receipt_hash[:16]`; and
 - a v0.2 receipt whose payload bytes are not RFC 8785 canonical JSON.
 
-## 5. Session-Final Enforcement Integrity
+## 6. Session-Final Enforcement Integrity
 
 Kernel ring-buffer loss and global kill-switch impact are only complete when a
 session ends. A producer MUST NOT rewrite earlier action receipts to add this
@@ -134,7 +142,7 @@ If kernel correlation was never established, the attestation MUST omit
 `kernel_enforcement` rather than claim zero loss. The receipt-chain head remains
 signed whenever the session emitted action receipts.
 
-## 6. Compatibility
+## 7. Compatibility
 
 The verifier dispatch rules are:
 
@@ -148,7 +156,7 @@ Existing signed v0.1 chains are not rewritten. Their signatures and parent JWT
 hashes remain valid because the verifier uses the legacy claim allowlist and
 does not impose v0.2 canonical-payload checks retroactively.
 
-## 7. Golden Fixture
+## 8. Golden Fixture
 
 [`fixtures/execution-receipt-v0.2-action.json`](/__ardur_internal__/repo/docs/specs/fixtures/execution-receipt-v0.2-action.json)
 is the public claim-set fixture. Tests validate it against the v0.2 JSON Schema,
@@ -160,7 +168,7 @@ golden bytes because ECDSA signature generation need not produce an identical
 signature for identical payload bytes. Verification fixtures for transparency
 and receiver co-signatures belong to issues #174-#176 and #180.
 
-## 8. References
+## 9. References
 
 - [RFC 8785: JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html)
 - [RFC 7515: JSON Web Signature](https://www.rfc-editor.org/rfc/rfc7515.html)

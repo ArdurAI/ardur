@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "08a98315875e080053e8042c48c3f73ca1c3d89559193234305960c5b804be87"
+source_sha256: "db4e3aec28cfa4d6b03475a4d4c920385cd32aed2f2c057707ba06311b8695a9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -93,6 +93,15 @@ independently labeled headline corpus. It cannot authenticate human annotator
 independence, verify an external registration service, or replace the gated
 privacy and consent review for real-agent traces. Current in-repo benchmark
 scenarios remain deterministic harness fixtures.
+
+Governance telemetry export is a detached, verified projection of the receipt
+journal. It does not prove the journal is complete, re-check revocation by
+default, guarantee end-to-end delivery, authenticate or operate a collector,
+configure retention/access control, or make a telemetry backend part of the
+signed evidence chain. OTLP retry is deliberately left to operator-controlled
+collection; reruns can duplicate records, so sinks should deduplicate on
+`ardur.receipt.id`. Vendor-specific SIEM, LLM-observability, and EDR
+connectors remain separate work.
 
 ## Product limits
 
