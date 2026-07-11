@@ -164,5 +164,6 @@ is claimed.
 ## Methodology references
 
 - [OSF registrations and preregistrations](https://help.osf.io/article/330-welcome-to-registrations)
-- [ACM Artifact Review and Badging, current policy](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
+- ACM, "Artifact Review and Badging - Current" (primary policy reviewed
+  2026-07-11; ACM returns 403 to automated link checkers)
 - [NIST AI Risk Management Framework 1.0](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf)

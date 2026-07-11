@@ -2,7 +2,7 @@
 title: "AuditBench Independent Evaluation Profile v0.1"
 description: "Status: **pipeline implemented; independent corpus not yet collected**"
 source_path: "docs/specs/auditbench-independent-evaluation-v0.1.md"
-source_sha256: "1de8ac7f11b55e254b63e946afea53a5dbbc65ffcfedc3bf05ef16c16515b552"
+source_sha256: "a90be808a58b6279070a9e9cc88acb27c6bede4ca043a79f158b692844966859"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -181,5 +181,6 @@ is claimed.
 ## Methodology references
 
 - [OSF registrations and preregistrations](https://help.osf.io/article/330-welcome-to-registrations)
-- [ACM Artifact Review and Badging, current policy](https://www.acm.org/publications/policies/artifact-review-and-badging-current)
+- ACM, "Artifact Review and Badging - Current" (primary policy reviewed
+  2026-07-11; ACM returns 403 to automated link checkers)
 - [NIST AI Risk Management Framework 1.0](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf)
