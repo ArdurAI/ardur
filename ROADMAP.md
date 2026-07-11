@@ -28,7 +28,7 @@ Already present:
 - technical reference pages for the CLI, Personal Hub HTTP API, and `ARDUR.md`
 - selected archival walkthrough recordings as starter media
 - `Ardur` as the public-facing product name with explicit naming boundaries for `VIBAP`, `MCEP`, and related protocol surfaces (see `docs/protocol-roots.md`)
-- Go AAT draft-00 package — 13 constraint types, issuance, derivation, RFC 8785 PoP binding, full §7 chain verification, and explicit draft-01 rejection pending a versioned migration
+- version-dispatched Go AAT package: the draft-00 DG v0.1 contract plus explicit draft-01 DG v0.2 chain-position semantics, nine core constraints, mandatory audience-bound PoP, fresh per-hop holder keys, append-only approval requirements, receipt-key separation, and a deterministic implementation fixture; independent interoperability remains pending
 - cloud model governance tests proving real-world proxy enforcement with live LLMs
 
 ## Runtime Verification

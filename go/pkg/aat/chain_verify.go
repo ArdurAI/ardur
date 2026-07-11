@@ -23,7 +23,16 @@ import (
 //   - trustAnchors holds root public keys (raw Ed25519 32-byte keys)
 //   - tool/args/popJWT are the invocation-time presentation inputs
 func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[string]interface{}, popJWT string) (*VerifyResult, error) {
-	now := time.Now()
+	return VerifyChainWithOpts(chain, trustAnchors, tool, args, popJWT, VerifyChainOpts{})
+}
+
+// VerifyChainWithOpts verifies either the legacy DG v0.1/draft-00 profile or
+// the explicitly discriminated DG v0.2/draft-01 profile.
+func VerifyChainWithOpts(chain []*Token, trustAnchors [][]byte, tool string, args map[string]interface{}, popJWT string, opts VerifyChainOpts) (*VerifyResult, error) {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	result := &VerifyResult{
 		Verdict: VerdictDeny,
@@ -79,6 +88,18 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		links = append(links, ChainLink{Index: i - 1, Parent: parent, Child: child})
 	}
 	result.Links = links
+	if root.Profile == DGProfileV02 {
+		if opts.Audience == "" {
+			result.FailedStep = "profile-v0.2"
+			result.Cause = ErrPoPAudienceRequired
+			return result, ErrPoPAudienceRequired
+		}
+		if err := validateReceiptSignerSeparation(parsed, opts.ReceiptSignerJWK); err != nil {
+			result.FailedStep = "profile-v0.2"
+			result.Cause = err
+			return result, err
+		}
+	}
 
 	leaf := parsed[len(parsed)-1]
 	result.Leaf = leaf
@@ -96,6 +117,13 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		result.Cause = err
 		return result, err
 	}
+	if leaf.Profile == DGProfileV02 {
+		if err := validateSatisfiedApprovals(leaf.ApprovalRefs, opts.SatisfiedApprovalRefs); err != nil {
+			result.FailedStep = "profile-v0.2-approvals"
+			result.Cause = err
+			return result, err
+		}
+	}
 
 	// Step 7: PoP verification
 	if popJWT == "" {
@@ -103,7 +131,11 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		result.Cause = fmt.Errorf("PoP JWT is required")
 		return result, fmt.Errorf("PoP JWT is required")
 	}
-	popResult, err := VerifyPoPJWT(leaf, tool, args, popJWT, VerifyPoPOpts{Now: now})
+	popResult, err := VerifyPoPJWT(leaf, tool, args, popJWT, VerifyPoPOpts{
+		Now:              now,
+		ExpectedAudience: opts.Audience,
+		RequireAudience:  leaf.Profile == DGProfileV02,
+	})
 	if err != nil {
 		result.FailedStep = "step-7"
 		result.Cause = err
@@ -293,15 +325,16 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 		return err
 	}
 
-	// 3c: draft-00 requires aat_type. Draft-01 deliberately removes it, so
-	// absence is a revision boundary rather than a malformed draft-00 value.
-	aatType, err := draft00TokenType(claims)
+	// 3c/profile dispatch: draft-00 uses aat_type; DG v0.2 uses a positive,
+	// exact profile claim and forbids aat_type.
+	profile, aatType, err := detectTokenProfile(claims)
 	if err != nil {
 		if err == ErrDenyStep4DInvalidChildType {
 			return ErrDenyStep3CInvalidRootType
 		}
 		return err
 	}
+	root.Profile = profile
 	root.TokenType = aatType
 
 	// 3d: del_depth == 0
@@ -395,6 +428,22 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrDenyStep3NRootAuthorization, err)
 	}
+	if root.Profile == DGProfileV02 {
+		if len(root.Authorization) != 1 {
+			return fmt.Errorf("%w: DG v0.2 root requires one AAT authorization entry", ErrDenyStep3NRootAuthorization)
+		}
+		if err := validateDraft01Authorization(root.Authorization); err != nil {
+			return fmt.Errorf("%w: %v", ErrDenyStep3NRootAuthorization, err)
+		}
+		root.MissionRef = claims["mission_ref"]
+		if err := validateMissionRef(root.MissionRef); err != nil {
+			return err
+		}
+		root.ApprovalRefs, err = approvalRefsFromClaims(claims)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -418,6 +467,15 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("link %d %w", linkIdx, err)
 	}
+	childProfile, childType, err := detectTokenProfile(claims)
+	if err != nil {
+		return fmt.Errorf("link %d %w", linkIdx, err)
+	}
+	if childProfile != parent.Profile {
+		return fmt.Errorf("link %d %w", linkIdx, ErrProfileMismatch)
+	}
+	child.Profile = childProfile
+	child.TokenType = childType
 
 	// 4b1: child jti
 	jti, _ := claims["jti"].(string)
@@ -449,6 +507,25 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	child.Authorization, err = extractAuthorization(claims)
 	if err != nil {
 		return fmt.Errorf("link %d %w: %v", linkIdx, ErrDenyStep4B3ChildAuthorization, err)
+	}
+	if child.Profile == DGProfileV02 {
+		if err := validateDraft01Authorization(child.Authorization); err != nil {
+			return fmt.Errorf("link %d %w: %v", linkIdx, ErrDenyStep4B3ChildAuthorization, err)
+		}
+		child.MissionRef = claims["mission_ref"]
+		if err := validateMissionRef(child.MissionRef); err != nil {
+			return fmt.Errorf("link %d %w", linkIdx, err)
+		}
+		if !missionRefsEqual(parent.MissionRef, child.MissionRef) {
+			return fmt.Errorf("link %d %w", linkIdx, ErrMissionRefChanged)
+		}
+		child.ApprovalRefs, err = approvalRefsFromClaims(claims)
+		if err != nil {
+			return fmt.Errorf("link %d %w", linkIdx, err)
+		}
+		if !approvalRefsPreserved(parent.ApprovalRefs, child.ApprovalRefs) {
+			return fmt.Errorf("link %d %w", linkIdx, ErrApprovalRefDropped)
+		}
 	}
 
 	// 4b4: child depth claims
@@ -491,13 +568,6 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	if child.Issuer != expectedIssuer {
 		return fmt.Errorf("link %d %w: child.iss=%q expected=%q", linkIdx, ErrDenyStep4CIssuerMismatch, child.Issuer, expectedIssuer)
 	}
-
-	// 4d: child aat_type and the explicit draft-00/draft-01 boundary.
-	childType, err := draft00TokenType(claims)
-	if err != nil {
-		return fmt.Errorf("link %d %w", linkIdx, err)
-	}
-	child.TokenType = childType
 
 	// 4e: I2 del_depth = parent.del_depth + 1
 	if child.DelegationDepth != parent.DelegationDepth+1 {
@@ -578,8 +648,13 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 		return fmt.Errorf("link %d %w: got=%q expected=%q", linkIdx, ErrDenyStep4RParentHash, child.ParentHash, expectedHash)
 	}
 
-	// 4s: type-transition key separation
-	if parent.TokenType != child.TokenType {
+	// 4s/profile: draft-00 rotates on type transitions. DG v0.2 has no token
+	// types and therefore requires a fresh holder key at every derivation.
+	if child.Profile == DGProfileV02 {
+		if jwkThumbprintsEqual(parent.Confirmation.JWK, child.Confirmation.JWK) {
+			return fmt.Errorf("link %d %w", linkIdx, ErrDraft01HolderKeyReuse)
+		}
+	} else if parent.TokenType != child.TokenType {
 		childThumbprint, err := child.Confirmation.JWK.Thumbprint(crypto.SHA256)
 		if err != nil {
 			return fmt.Errorf("link %d %w: computing child thumbprint: %v", linkIdx, ErrDenyStep4STypeTransitionKeyReuse, err)
@@ -598,8 +673,9 @@ func verifyLeafInvocation(leaf *Token, tool string, args map[string]interface{})
 		return ErrDenyStep6ALeafAuthorization
 	}
 
-	// 6c: leaf must be execution type
-	if leaf.TokenType != AATTypeExecution {
+	// 6c: draft-00 needs an execution token. Draft-01 determines invocation
+	// authority from the leaf's position in the verified chain.
+	if leaf.Profile == "" && leaf.TokenType != AATTypeExecution {
 		return ErrDenyStep6CDelegationLeaf
 	}
 

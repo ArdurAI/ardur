@@ -31,10 +31,24 @@ var (
 	ErrNilConstraintHandler     = errors.New("aat: nil constraint handler")
 	ErrNilConstraint            = errors.New("aat: nil constraint")
 	ErrUnsupportedDraftRevision = fmt.Errorf(
-		"aat: unsupported revision: %s requires chain-position semantics; this verifier is pinned to %s",
-		UnsupportedDraftRevision,
+		"aat: unprofiled %s wire is unsupported; use the explicit %s profile or the %s wire contract",
+		Draft01Revision,
+		DGProfileV02,
 		SupportedDraftRevision,
 	)
+	ErrUnknownDGProfile      = errors.New("aat: unknown or missing Ardur DG profile")
+	ErrMixedDraftWire        = errors.New("aat: mixed draft-00 and draft-01 wire claims")
+	ErrProfileMismatch       = errors.New("aat: delegation chain changes DG profile")
+	ErrDraft01Constraint     = errors.New("aat: constraint is not in the draft-01 core vocabulary")
+	ErrDraft01HolderKeyReuse = errors.New("aat: DG v0.2 requires a fresh holder key at every derivation")
+	ErrReceiptSignerKeyReuse = errors.New("aat: AAT holder key must differ from the DRP receipt signer key")
+	ErrApprovalRefInvalid    = errors.New("aat: invalid DG approval requirement reference")
+	ErrApprovalRefDropped    = errors.New("aat: derived token drops a DG approval requirement")
+	ErrApprovalUnsatisfied   = errors.New("aat: required DG approval was not independently satisfied")
+	ErrMissionRefInvalid     = errors.New("aat: DG v0.2 mission_ref is missing or invalid")
+	ErrMissionRefChanged     = errors.New("aat: derived token changes DG mission_ref")
+	ErrPoPAudienceRequired   = errors.New("aat: DG v0.2 PoP audience is required")
+	ErrPoPAudienceMismatch   = errors.New("aat: PoP audience does not match the enforcement point")
 
 	// Chain verification DENY points (AAT §7).
 	ErrDenyStep1EmptyChain = errors.New("aat: deny step 1 empty chain")

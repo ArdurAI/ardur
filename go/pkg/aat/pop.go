@@ -13,19 +13,22 @@ import (
 
 // BuildPoPOpts captures the inputs needed to construct a PoP JWT per AAT §5.2.
 type BuildPoPOpts struct {
-	JWTID  string
-	Now    time.Time
-	Leaf   *Token
-	Tool   string
-	Args   map[string]interface{}
-	Signer ed25519.PrivateKey
-	KeyID  string
+	JWTID    string
+	Now      time.Time
+	Leaf     *Token
+	Tool     string
+	Args     map[string]interface{}
+	Signer   ed25519.PrivateKey
+	KeyID    string
+	Audience string
 }
 
 // VerifyPoPOpts captures verifier-local knobs for AAT §5.3 / §7 step 7.
 type VerifyPoPOpts struct {
-	Now       time.Time
-	ClockSkew time.Duration
+	Now              time.Time
+	ClockSkew        time.Duration
+	ExpectedAudience string
+	RequireAudience  bool
 }
 
 // BuildPoPJWT constructs the compact PoP JWT bound to the leaf token holder.
@@ -62,6 +65,14 @@ func BuildPoPJWT(opts BuildPoPOpts) (string, error) {
 		"aat_id":   opts.Leaf.JWTID,
 		"aat_tool": opts.Tool,
 		"hta":      hta,
+	}
+	if opts.Leaf.Profile == DGProfileV02 {
+		if opts.Audience == "" {
+			return "", fmt.Errorf("BuildPoPJWT: %w", ErrPoPAudienceRequired)
+		}
+		payload["aat_aud"] = opts.Audience
+	} else if opts.Audience != "" {
+		return "", fmt.Errorf("BuildPoPJWT: %w", ErrMixedDraftWire)
 	}
 
 	signerOpts := &jose.SignerOptions{}
@@ -144,10 +155,23 @@ func VerifyPoPJWT(leaf *Token, tool string, args map[string]interface{}, popJWT 
 	if aatTool, ok := verified["aat_tool"].(string); ok {
 		pop.AATTool = aatTool
 	}
+	if audience, ok := verified["aat_aud"].(string); ok {
+		pop.AATAudience = audience
+	}
 
 	// Step 7b: pop.aat_id must match leaf.jti
 	if pop.AATID != leaf.JWTID {
 		return nil, ErrDenyStep7BAATID
+	}
+	if opts.RequireAudience {
+		if opts.ExpectedAudience == "" || pop.AATAudience == "" {
+			return nil, ErrPoPAudienceRequired
+		}
+		if pop.AATAudience != opts.ExpectedAudience {
+			return nil, ErrPoPAudienceMismatch
+		}
+	} else if pop.AATAudience != "" {
+		return nil, ErrMixedDraftWire
 	}
 
 	// Step 7c: pop.aat_tool must match the requested tool

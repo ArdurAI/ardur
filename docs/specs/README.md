@@ -14,7 +14,8 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 |------|--------|-------|
 | [Conformance Profiles](./conformance-profiles-v0.1.md) | **migrated** | Public-import annotated |
 | [Delegation Grant (DG) Profile of AAT](./delegation-grant-profile-v0.1.md) | **migrated** | Public-import annotated |
-| [AAT draft-01 migration decision](./aat-draft-01-migration-decision.md) | **time-bounded draft-00 pin** | Explicit draft-01 rejection; review by 2026-09-15 |
+| [Delegation Grant v0.2 Profile of AAT draft-01](./delegation-grant-profile-v0.2.md) | **implemented self-test** | Explicit revision dispatch, profile safeguards, and deterministic fixture; independent interoperability not demonstrated |
+| [AAT draft-01 migration decision](./aat-draft-01-migration-decision.md) | **review completed** | Versioned DG v0.2 selected on 2026-07-11; draft-00 remains supported |
 | [AAT draft-00 to draft-01 change ledger](./aat-draft-00-to-01-change-ledger.json) | **audited** | Primary-source claims, roles, constraints, derivation, verification, algorithms, and security delta |
 | [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) | **mapping published** | Draft-10-pinned field ledger and B2 target shape; not an IETF conformance or interoperability claim |
 | [Ardur DRP Profile v0.1](./ardur-drp-profile-v0.1.md) | **implemented** | RFC 8785/P-256 emit, external-trust verifier, full transitive attenuation, and bounded DENY reasons |
@@ -40,6 +41,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [DRP implementation fixture bundle schema](./drp-conformance-bundle-v0.1.schema.json) | **implemented** | Closed portable scenario, trust, expectation, and external-status contract |
 | [DRP implementation fixture report schema](./drp-implementation-fixture-report-v0.1.schema.json) | **implemented** | Closed deterministic scenario result, verifier status, and bundle-digest contract |
 | [DRP portable implementation fixtures](./conformance/drp-v0.1/README.md) | **implementation self-test** | Seven signed deterministic scenarios and report; no private keys, network dependency, IETF claim, or independent pass |
+| [AAT draft-01 DG v0.2 fixture](./conformance/aat-draft01-v0.2/README.md) | **implementation self-test** | Deterministic organic chain and audience-bound PoP; no private keys, IETF claim, or independent pass |
 | [Runtime evidence event schema](./runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
 | [Runtime evidence correlation report schema](./runtime-evidence-correlation-report-v0.1.schema.json) | **implemented** | Closed deterministic redacted association report; source assurance remains separate from match confidence |
 | [Governance telemetry event schema](./governance-telemetry-v0.1.schema.json) | **implemented** | Closed redacted event contract linking each export to a verified receipt, parent hash, signed decision, budget, and source-journal digest |
@@ -89,7 +91,7 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 ## Relationship to adjacent standards
 
-- **AAT (Attenuating Authorization Tokens)** — individual Internet-Draft with no formal IETF standing; MCEP's current Delegation Grant profile is pinned to draft-00, rejects draft-01 explicitly, and records a time-bounded migration decision plus field ledger for [review in #246](https://github.com/ArdurAI/ardur/issues/246) by 2026-09-15.
+- **AAT (Attenuating Authorization Tokens)** — individual Internet-Drafts with no formal IETF standing; MCEP preserves its draft-00 DG v0.1 wire contract and adds the explicitly discriminated draft-01 DG v0.2 profile. The 2026-07-11 review and field ledger are recorded in [issue #246](https://github.com/ArdurAI/ardur/issues/246); independent interoperability remains not demonstrated.
 - **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur implements its draft-10-pinned profile and publishes portable implementation self-test fixtures, while raw RFC 3161 proof integration and independent interoperability remain not demonstrated.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
 - **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.

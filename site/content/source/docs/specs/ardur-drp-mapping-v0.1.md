@@ -2,7 +2,7 @@
 title: "Ardur DRP Mapping Profile v0.1"
 description: "This document maps the current Ardur delegation and action-receipt surfaces to"
 source_path: "docs/specs/ardur-drp-mapping-v0.1.md"
-source_sha256: "89dfef46b416ef4588caef4b6736f50dbfedeaabca4f025bd06437e0e6d1d096"
+source_sha256: "c675c0dfef6f10af6f2b0ed2a435fe5f92ae03b8e1bbfdf3b0b091ff0cecae26"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -50,13 +50,13 @@ members:
 3. every top-level property in
    `docs/specs/execution-receipt-v0.2.schema.json`.
 
-The formal DG and Go AAT implementation are intentionally pinned to AAT
-draft-00. The live Datatracker advanced to draft-01 on 2026-06-15; draft-01 is
-an individual Internet-Draft with no formal IETF standing and removes the
-draft-00 `aat_type` token-role field in favor of chain-position semantics.
-This document maps the code that exists. It does not silently reinterpret that
-code as draft-01. The selected compatibility contract and time-bounded review
-are recorded in
+The formal DG and Go AAT implementation preserve the AAT draft-00 DG v0.1
+contract and separately dispatch the explicit `ardur.dg.aat-draft-01.v0.2`
+profile. Draft-01 is an individual Internet-Draft with no formal IETF standing
+and removes the draft-00 `aat_type` token-role field in favor of chain-position
+semantics. The two wire contracts are never inferred from claim absence or
+mixed in one chain. The compatibility contract and completed review are
+recorded in
 [`aat-draft-01-migration-decision.md`](/__ardur_internal__/source/docs/specs/aat-draft-01-migration-decision/).
 
 Arbitrary caller-supplied `extra_claims` are not a versioned schema. An

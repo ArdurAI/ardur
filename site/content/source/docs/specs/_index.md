@@ -24,6 +24,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`auditbench-pilot-protocol-v0.1.md`](/__ardur_internal__/source/docs/specs/auditbench-pilot-protocol-v0.1/)
 - [`conformance-profiles-v0.1.md`](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/)
 - [`delegation-grant-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/)
+- [`delegation-grant-profile-v0.2.md`](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.2/)
 - [`execution-receipt-eat-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/)
 - [`execution-receipt-v0.1.md`](/__ardur_internal__/source/docs/specs/execution-receipt-v0.1/)
 - [`execution-receipt-v0.2.md`](/__ardur_internal__/source/docs/specs/execution-receipt-v0.2/)

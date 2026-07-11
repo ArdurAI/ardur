@@ -59,7 +59,7 @@ jobs:
 
       - name: Run golangci-lint on hardening packages
         working-directory: go
-        run: $(go env GOPATH)/bin/golangci-lint run ./pkg/credential ./pkg/policy
+        run: '"$(go env GOPATH)/bin/golangci-lint" run ./pkg/credential ./pkg/policy'
 
   python:
     name: Python
