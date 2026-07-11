@@ -34,6 +34,7 @@ from vibap.drp_fixture import (
     PUBLIC_KEY_FILES,
     run_drp_profile_fixture,
     verify_drp_profile_fixture,
+    DrpFixtureOutputError,
 )
 
 
@@ -893,3 +894,148 @@ def test_fixture_io_rejects_ambiguous_json_and_unexpected_output(
     with pytest.raises(ValueError, match="unexpected entries"):
         run_drp_profile_fixture(dirty_output, now=int(DECISION_TIME.timestamp()))
     assert dirty_output.stat().st_mode & 0o777 == 0o755
+
+
+# --- --output validation (empty / whitespace / existing-file / symlink) ---
+
+
+def test_drp_fixture_output_existing_regular_file_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    existing_file = tmp_path / "existing-file.txt"
+    existing_file.write_text("not a directory", encoding="utf-8")
+
+    code = cli_main(["drp-profile-fixture", "--output", str(existing_file)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_output_not_directory"
+    assert report["condition"] == "drp_profile_fixture_output_not_directory"
+    assert "[Errno" not in captured.out
+    assert str(existing_file) not in captured.out
+    assert str(existing_file) not in json.dumps(report)
+    assert report["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in report["next_steps"])
+
+
+def test_drp_fixture_output_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    code = cli_main(["drp-profile-fixture", "--output", ""])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_output_empty"
+    assert report["condition"] == "drp_profile_fixture_output_empty"
+    assert report["next_steps"]
+    assert not any(tmp_path.iterdir()), "no fixtures written to CWD on empty --output"
+
+
+def test_drp_fixture_output_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    code = cli_main(["drp-profile-fixture", "--output", "   "])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_output_empty"
+    assert report["condition"] == "drp_profile_fixture_output_empty"
+    assert report["next_steps"]
+    assert not any(tmp_path.iterdir()), "no fixtures written on whitespace-only --output"
+
+
+def test_drp_fixture_output_validation_raises_specialized_error(tmp_path: Path) -> None:
+    existing_file = tmp_path / "blocking-file"
+    existing_file.write_text("x", encoding="utf-8")
+
+    with pytest.raises(DrpFixtureOutputError) as exc_info:
+        run_drp_profile_fixture(existing_file)
+    assert exc_info.value.condition == "drp_profile_fixture_output_not_directory"
+    assert str(existing_file) not in exc_info.value.detail
+
+    with pytest.raises(DrpFixtureOutputError) as empty_info:
+        run_drp_profile_fixture("")
+    assert empty_info.value.condition == "drp_profile_fixture_output_empty"
+
+
+def test_drp_fixture_output_directory_symlink_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    real_dir = tmp_path / "real-dir"
+    real_dir.mkdir()
+    symlink_dir = tmp_path / "symlink-dir"
+    symlink_dir.symlink_to(real_dir)
+
+    code = cli_main(["drp-profile-fixture", "--output", str(symlink_dir)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_output_symlink"
+    assert report["condition"] == "drp_profile_fixture_output_symlink"
+    assert str(symlink_dir) not in json.dumps(report)
+
+
+def test_drp_fixture_output_dangling_symlink_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dangling = tmp_path / "dangling-dir"
+    dangling.symlink_to(tmp_path / "nonexistent-target")
+
+    code = cli_main(["drp-profile-fixture", "--output", str(dangling)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_output_symlink"
+    assert report["condition"] == "drp_profile_fixture_output_symlink"
+
+
+def test_drp_fixture_output_valid_new_dir_behavior_preserved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    new_dir = tmp_path / "fresh-output-dir"
+
+    code = cli_main(
+        ["drp-profile-fixture", "--output", str(new_dir)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 0
+    assert captured.err == ""
+    assert report["ok"] is True
+    assert (new_dir / "ardur-drp-profile-v0.1-report.json").is_file()
+
+
+def test_drp_fixture_output_existing_empty_dir_behavior_preserved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    existing_dir = tmp_path / "existing-dir"
+    existing_dir.mkdir()
+
+    code = cli_main(
+        ["drp-profile-fixture", "--output", str(existing_dir)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 0
+    assert captured.err == ""
+    assert report["ok"] is True
+    assert (existing_dir / "ardur-drp-profile-v0.1-report.json").is_file()

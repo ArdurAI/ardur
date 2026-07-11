@@ -2254,6 +2254,108 @@ def _receiver_attestation_fixture_output_invalid_response(condition: str) -> dic
     }
 
 
+def _drp_profile_fixture_output_invalid_response(condition: str) -> dict:
+    """Structured failure for an invalid ``--output`` argument.
+
+    Mirrors the receiver-attestation-fixture convention: a stable
+    ``condition``/``error`` pair, a human-readable ``message`` with no raw
+    exception text or local paths, a ``detail`` explaining how to choose a
+    valid directory, and placeholder-only ``next_steps``.
+    """
+
+    messages = {
+        "drp_profile_fixture_output_empty": (
+            "DRP profile fixture output path is empty."
+        ),
+        "drp_profile_fixture_output_symlink": (
+            "DRP profile fixture output path must not be a symlink."
+        ),
+        "drp_profile_fixture_output_not_directory": (
+            "DRP profile fixture output path is not a directory."
+        ),
+    }
+    details = {
+        "drp_profile_fixture_output_empty": (
+            "The --output argument is empty or whitespace-only. "
+            "Provide a directory path where Ardur can write the public fixture artifacts."
+        ),
+        "drp_profile_fixture_output_symlink": (
+            "The --output argument points at a symlink. "
+            "Provide a real directory path, not a symbolic link."
+        ),
+        "drp_profile_fixture_output_not_directory": (
+            "The --output argument points at an existing regular file. "
+            "Use an existing directory or a new directory path that Ardur can create."
+        ),
+    }
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": messages.get(condition, "DRP profile fixture output path is invalid."),
+        "detail": details.get(condition, "Provide a directory path for the --output argument."),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_drp_profile_fixture_with_output_directory",
+                "command": "ardur drp-profile-fixture --output <fixture-dir>",
+                "detail": "Replace <fixture-dir> with a directory path (new or existing, not a file or symlink).",
+            }
+        ],
+    }
+
+
+def _offline_verification_fixture_output_invalid_response(condition: str) -> dict:
+    """Structured failure for an invalid ``--output`` argument.
+
+    Mirrors the receiver-attestation-fixture convention: a stable
+    ``condition``/``error`` pair, a human-readable ``message`` with no raw
+    exception text or local paths, a ``detail`` explaining how to choose a
+    valid directory, and placeholder-only ``next_steps``.
+    """
+
+    messages = {
+        "offline_verification_fixture_output_empty": (
+            "Offline verification fixture output path is empty."
+        ),
+        "offline_verification_fixture_output_symlink": (
+            "Offline verification fixture output path must not be a symlink."
+        ),
+        "offline_verification_fixture_output_not_directory": (
+            "Offline verification fixture output path is not a directory."
+        ),
+    }
+    details = {
+        "offline_verification_fixture_output_empty": (
+            "The --output argument is empty or whitespace-only. "
+            "Provide a directory path where Ardur can write the public fixture artifacts."
+        ),
+        "offline_verification_fixture_output_symlink": (
+            "The --output argument points at a symlink. "
+            "Provide a real directory path, not a symbolic link."
+        ),
+        "offline_verification_fixture_output_not_directory": (
+            "The --output argument points at an existing regular file. "
+            "Use an existing directory or a new directory path that Ardur can create."
+        ),
+    }
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": messages.get(condition, "Offline verification fixture output path is invalid."),
+        "detail": details.get(condition, "Provide a directory path for the --output argument."),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_offline_verification_fixture_with_output_directory",
+                "command": "ardur offline-verification-fixture --output <fixture-dir>",
+                "detail": "Replace <fixture-dir> with a directory path (new or existing, not a file or symlink).",
+            }
+        ],
+    }
+
+
 def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
     from .receiver_attestation_fixture import (
         ReceiverAttestationFixtureOutputError,
@@ -2281,10 +2383,15 @@ def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
 
 
 def cmd_drp_profile_fixture(args: argparse.Namespace) -> int:
-    from .drp_fixture import run_drp_profile_fixture
+    from .drp_fixture import DrpFixtureOutputError, run_drp_profile_fixture
 
     try:
         report = run_drp_profile_fixture(args.output)
+    except DrpFixtureOutputError as exc:
+        _print_json(
+            _drp_profile_fixture_output_invalid_response(exc.condition)
+        )
+        return 1
     except (OSError, TypeError, ValueError) as exc:
         _print_json(
             {
@@ -2299,10 +2406,18 @@ def cmd_drp_profile_fixture(args: argparse.Namespace) -> int:
 
 
 def cmd_offline_verification_fixture(args: argparse.Namespace) -> int:
-    from .offline_verification_fixture import run_offline_verification_fixture
+    from .offline_verification_fixture import (
+        OfflineVerificationFixtureOutputError,
+        run_offline_verification_fixture,
+    )
 
     try:
         report = run_offline_verification_fixture(args.output)
+    except OfflineVerificationFixtureOutputError as exc:
+        _print_json(
+            _offline_verification_fixture_output_invalid_response(exc.condition)
+        )
+        return 1
     except (OSError, TypeError, ValueError) as exc:
         _print_json(
             {
@@ -4641,7 +4756,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     drp_fixture.add_argument(
         "--output",
-        type=Path,
+        type=str,
         required=True,
         help="directory for public fixture artifacts; no private keys are persisted",
     )
@@ -4653,7 +4768,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     offline_fixture.add_argument(
         "--output",
-        type=Path,
+        type=str,
         required=True,
         help="directory for public fixture artifacts; no private keys are persisted",
     )

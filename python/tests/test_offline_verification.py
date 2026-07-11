@@ -24,7 +24,10 @@ from vibap.offline_verification import (
     verify_offline_input,
     write_html_report,
 )
-from vibap.offline_verification_fixture import run_offline_verification_fixture
+from vibap.offline_verification_fixture import (
+    OfflineVerificationFixtureOutputError,
+    run_offline_verification_fixture,
+)
 from vibap.proxy import Decision, PolicyEvent
 from vibap.receipt import build_receipt, sign_receipt
 from vibap.receiver_attestation import (
@@ -763,3 +766,144 @@ def test_public_and_embedded_schemas_are_identical() -> None:
         ).read_text(encoding="utf-8")
     )
     assert public == embedded
+
+
+# --- --output validation (empty / whitespace / existing-file / symlink) ---
+
+
+def test_offline_fixture_output_existing_regular_file_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    existing_file = tmp_path / "existing-file.txt"
+    existing_file.write_text("not a directory", encoding="utf-8")
+
+    code = cli_main(["offline-verification-fixture", "--output", str(existing_file)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "offline_verification_fixture_output_not_directory"
+    assert report["condition"] == "offline_verification_fixture_output_not_directory"
+    assert "[Errno" not in captured.out
+    assert str(existing_file) not in captured.out
+    assert str(existing_file) not in json.dumps(report)
+    assert report["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in report["next_steps"])
+
+
+def test_offline_fixture_output_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    code = cli_main(["offline-verification-fixture", "--output", ""])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "offline_verification_fixture_output_empty"
+    assert report["condition"] == "offline_verification_fixture_output_empty"
+    assert report["next_steps"]
+    assert not any(tmp_path.iterdir()), "no fixtures written to CWD on empty --output"
+
+
+def test_offline_fixture_output_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    code = cli_main(["offline-verification-fixture", "--output", "   "])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "offline_verification_fixture_output_empty"
+    assert report["condition"] == "offline_verification_fixture_output_empty"
+    assert report["next_steps"]
+    assert not any(tmp_path.iterdir()), "no fixtures written on whitespace-only --output"
+
+
+def test_offline_fixture_output_validation_raises_specialized_error(tmp_path: Path) -> None:
+    existing_file = tmp_path / "blocking-file"
+    existing_file.write_text("x", encoding="utf-8")
+
+    with pytest.raises(OfflineVerificationFixtureOutputError) as exc_info:
+        run_offline_verification_fixture(existing_file)
+    assert exc_info.value.condition == "offline_verification_fixture_output_not_directory"
+    assert str(existing_file) not in exc_info.value.detail
+
+    with pytest.raises(OfflineVerificationFixtureOutputError) as empty_info:
+        run_offline_verification_fixture("")
+    assert empty_info.value.condition == "offline_verification_fixture_output_empty"
+
+
+def test_offline_fixture_output_directory_symlink_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    real_dir = tmp_path / "real-dir"
+    real_dir.mkdir()
+    symlink_dir = tmp_path / "symlink-dir"
+    symlink_dir.symlink_to(real_dir)
+
+    code = cli_main(["offline-verification-fixture", "--output", str(symlink_dir)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "offline_verification_fixture_output_symlink"
+    assert report["condition"] == "offline_verification_fixture_output_symlink"
+    assert str(symlink_dir) not in json.dumps(report)
+
+
+def test_offline_fixture_output_dangling_symlink_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dangling = tmp_path / "dangling-dir"
+    dangling.symlink_to(tmp_path / "nonexistent-target")
+
+    code = cli_main(["offline-verification-fixture", "--output", str(dangling)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "offline_verification_fixture_output_symlink"
+    assert report["condition"] == "offline_verification_fixture_output_symlink"
+
+
+def test_offline_fixture_output_valid_new_dir_behavior_preserved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    new_dir = tmp_path / "fresh-output-dir"
+
+    code = cli_main(["offline-verification-fixture", "--output", str(new_dir)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 0
+    assert captured.err == ""
+    assert report["ok"] is True
+    assert (new_dir / "offline-verification-v0.1-report.json").is_file()
+
+
+def test_offline_fixture_output_existing_empty_dir_behavior_preserved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    existing_dir = tmp_path / "existing-dir"
+    existing_dir.mkdir()
+
+    code = cli_main(["offline-verification-fixture", "--output", str(existing_dir)])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 0
+    assert captured.err == ""
+    assert report["ok"] is True
+    assert (existing_dir / "offline-verification-v0.1-report.json").is_file()

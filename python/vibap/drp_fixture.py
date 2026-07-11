@@ -406,12 +406,42 @@ def verify_drp_profile_fixture(directory: str | Path) -> dict[str, Any]:
     ).as_dict()
 
 
+class DrpFixtureOutputError(ValueError):
+    """Raised when the ``--output`` argument fails pre-validation.
+
+    A ``ValueError`` subclass so it is still caught by the generic handler in
+    ``main()`` / ``cmd_drp_profile_fixture()``, but distinct enough for the CLI
+    to emit a structured, sanitized failure response instead of the raw
+    exception text.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
+
+
 def run_drp_profile_fixture(
     output: str | Path, *, now: int | None = None
 ) -> dict[str, Any]:
-    output_path = Path(output).expanduser()
+    output_raw = str(output)
+    output_str = output_raw.strip()
+    if not output_str:
+        raise DrpFixtureOutputError(
+            "fixture output path must not be empty or whitespace-only",
+            condition="drp_profile_fixture_output_empty",
+        )
+    output_path = Path(output_str).expanduser()
     if output_path.is_symlink():
-        raise ValueError("fixture output directory must not be a symlink")
+        raise DrpFixtureOutputError(
+            "fixture output directory must not be a symlink",
+            condition="drp_profile_fixture_output_symlink",
+        )
+    if output_path.exists() and not output_path.is_dir():
+        raise DrpFixtureOutputError(
+            "fixture output path must be a directory, not a regular file",
+            condition="drp_profile_fixture_output_not_directory",
+        )
     output_path.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not output_path.is_dir():
         raise ValueError("fixture output path must be a directory")
@@ -464,10 +494,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a synthetic Ardur DRP profile implementation fixture."
     )
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args(argv)
     try:
         report = run_drp_profile_fixture(args.output)
+    except DrpFixtureOutputError as exc:
+        print(
+            json.dumps(
+                {"ok": False, "error": exc.condition, "condition": exc.condition},
+                sort_keys=True,
+            )
+        )
+        return 1
     except (OSError, TypeError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         return 1
