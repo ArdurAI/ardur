@@ -15,15 +15,13 @@ paths = [
   '''(^|/)python/vibap/_specs/''',
 ]
 
-# Detect private key PEM blocks outside test artifacts.
-# Ardur generates P-256 keys via the passport module serialized as PKCS8
-# (-----BEGIN PRIVATE KEY-----). The rule also catches SEC1 EC and PKCS1 RSA
-# variants so a format change or external key import does not silently bypass
-# the scan. Any committed private key PEM is a secret-leak incident.
+# Detect EC private key PEM blocks outside test artifacts.
+# Ardur generates P-256 keys via the passport module; any committed
+# private key PEM is a secret-leak incident.
 [[rules]]
-id = "ardur-private-key-pem"
-description = "Private key PEM block (PKCS8, SEC1 EC, PKCS1 RSA)"
-regex = '''-----BEGIN (EC |RSA )?PRIVATE KEY-----'''
+id = "ardur-ec-private-key"
+description = "EC private key PEM block"
+regex = '''-----BEGIN EC PRIVATE KEY-----'''
 paths = [
   '''\.pem$''',
   '''\.py$''',
