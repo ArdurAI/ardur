@@ -166,6 +166,53 @@ func TestApplySeccompPolicy_InvalidNetAllowEntryErrorsAndLeavesPriorPolicyIntact
 	}
 }
 
+func TestSeccompControlPlaneEndpointMatchesExactTupleOnly(t *testing.T) {
+	store := NewSeccompPolicyStore()
+	req := netConnectRequest("s1", BpfActionDeny, BpfEnforceModeEnforce)
+	req.ControlPlaneEndpoint = &DaemonControlPlaneEndpoint{IP: "127.0.0.1", Port: 43210}
+	if err := ApplySeccompPolicy(store, "s1", req); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	ip, port, ok := MatchSeccompControlPlaneEndpoint(store, "s1", net.ParseIP("127.0.0.1"), 43210)
+	if !ok || !ip.Equal(net.ParseIP("127.0.0.1")) || port != 43210 {
+		t.Fatalf("exact endpoint match = (%v, %d, %v), want (127.0.0.1, 43210, true)", ip, port, ok)
+	}
+	for _, target := range []struct {
+		ip   string
+		port uint16
+	}{
+		{ip: "127.0.0.1", port: 43211},
+		{ip: "127.0.0.2", port: 43210},
+		{ip: "::1", port: 43210},
+	} {
+		if _, _, matched := MatchSeccompControlPlaneEndpoint(store, "s1", net.ParseIP(target.ip), target.port); matched {
+			t.Errorf("unrelated loopback tuple %s:%d matched the control-plane endpoint", target.ip, target.port)
+		}
+	}
+}
+
+func TestApplySeccompPolicy_InvalidControlEndpointLeavesPriorPolicyIntact(t *testing.T) {
+	store := NewSeccompPolicyStore()
+	good := netConnectRequest("s1", BpfActionDeny, BpfEnforceModeEnforce)
+	good.ControlPlaneEndpoint = &DaemonControlPlaneEndpoint{IP: "127.0.0.1", Port: 43210}
+	if err := ApplySeccompPolicy(store, "s1", good); err != nil {
+		t.Fatalf("apply good policy: %v", err)
+	}
+
+	bad := netConnectRequest("s1", BpfActionAllow, BpfEnforceModeEnforce)
+	bad.ControlPlaneEndpoint = &DaemonControlPlaneEndpoint{IP: "192.0.2.10", Port: 443}
+	if err := ApplySeccompPolicy(store, "s1", bad); err == nil {
+		t.Fatal("expected non-loopback control endpoint to be rejected")
+	}
+	if _, _, ok := MatchSeccompControlPlaneEndpoint(store, "s1", net.ParseIP("127.0.0.1"), 43210); !ok {
+		t.Fatal("rejected apply replaced the prior control-plane endpoint")
+	}
+	if d := EvaluateSeccompConnect(store, "s1", net.ParseIP("203.0.113.9")); d.Allowed {
+		t.Fatalf("rejected apply replaced the prior deny policy: %+v", d)
+	}
+}
+
 func TestApplySeccompPolicy_NoNetConnectOpClearsPriorPolicy(t *testing.T) {
 	store := NewSeccompPolicyStore()
 	if err := ApplySeccompPolicy(store, "s1", netConnectRequest("s1", BpfActionAllow, BpfEnforceModeEnforce)); err != nil {

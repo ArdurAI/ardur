@@ -406,6 +406,7 @@ def test_ardur_run_applies_kernel_policy_when_daemon_available(
     assert apply_req["session_id"] == result.session_id
     assert apply_req["generation"] == 1
     assert apply_req["enforce_mode"] == 1  # ENFORCE_MODE_ENFORCE
+    assert "control_plane_endpoint" not in apply_req
 
     from vibap.bpf_types import ACT_DENY, OP_EXEC
 
@@ -870,6 +871,9 @@ def test_no_resource_scope_omits_file_ops_from_lowered_plan(
     assert result.kernel_policy["applied"] is True
     apply_req = next(req["apply_policy"] for req in daemon.received if req.get("method") == "apply_policy")
     assert "path_allow" not in apply_req
+    endpoint = apply_req["control_plane_endpoint"]
+    assert endpoint["ip"] == "127.0.0.1"
+    assert 0 < endpoint["port"] <= 65535
     ops = {entry["op"] for entry in apply_req["op_policies"]}
     from vibap.bpf_types import OP_FILE_READ, OP_FILE_WRITE, OP_NET_CONNECT
 

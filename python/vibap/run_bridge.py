@@ -40,11 +40,14 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import kernel_correlation as kc
 from .launch_gate import RELEASE_BYTE as LAUNCH_GATE_RELEASE_BYTE
 from .package_assets import claude_code_plugin_dir
+
+if TYPE_CHECKING:
+    from .passport import MissionPassport
 
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
@@ -708,6 +711,7 @@ def _apply_kernel_policy(
     correlation: kc.CorrelationResult,
     enforce: bool,
     seccomp_plan: SeccompShimPlan,
+    control_plane_endpoint: tuple[str, int] | None = None,
 ) -> dict[str, Any]:
     """Lower the passport's policy and push it to the daemon's BPF maps.
 
@@ -759,9 +763,17 @@ def _apply_kernel_policy(
         }
 
     generation = 1  # first (and only) apply for this fresh session/cgroup pair.
+    if seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP and control_plane_endpoint is None:
+        reason = "seccomp tier requires an exact governance control-plane endpoint"
+        if enforce:
+            raise KernelPolicyEnforcementError(reason)
+        return {"applied": False, "reason": reason, "tier2_ops": tier2_ops}
     try:
         kc.KernelCaptureClient(kc.daemon_socket_path()).apply_policy(
-            session_id=session_id, plan=plan, generation=generation
+            session_id=session_id,
+            plan=plan,
+            generation=generation,
+            control_plane_endpoint=control_plane_endpoint,
         )
     except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError) as exc:
         reason = f"kernel policy apply rejected: {exc}"
@@ -954,8 +966,9 @@ def run_governed(
         proxy.receipt_private_key,
         receipt_registrar=receipt_registrar,
     )
+    proxy_host = str(server.server_address[0])
     port = server.server_address[1]
-    proxy_url = f"http://127.0.0.1:{port}"
+    proxy_url = f"http://{proxy_host}:{port}"
     server_thread = threading.Thread(target=server.serve_forever, name="ardur-run-proxy", daemon=True)
     server_thread.start()
 
@@ -1085,6 +1098,9 @@ def run_governed(
                 correlation=correlation,
                 enforce=enforce,
                 seccomp_plan=seccomp_plan,
+                control_plane_endpoint=(proxy_host, port)
+                if seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP
+                else None,
             )
         except KernelPolicyEnforcementError as exc:
             notes.append(f"ENFORCE abort: {exc}")

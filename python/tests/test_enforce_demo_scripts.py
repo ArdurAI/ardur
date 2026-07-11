@@ -7,6 +7,7 @@ VNG_METRIC_SCRIPT = (
     REPO_ROOT / "docs" / "demo" / "enforce-e2e" / "ci-vng-observability-gap.sh"
 )
 KERNEL_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "kernel-enforce.yml"
+SYSTEMD_UNIT = REPO_ROOT / "packaging" / "systemd" / "ardur-kernelcaptured.service"
 
 
 def test_bpf_demo_uses_writable_run_home_and_propagates_failures() -> None:
@@ -28,3 +29,16 @@ def test_kvm_metric_proof_uses_permissive_data_plane() -> None:
     assert 'run.sh" permissive' in wrapper
     assert "ci-vng-observability-gap.sh" in workflow
     assert "ci-vng-enforce.sh" not in workflow
+
+
+def test_systemd_profile_allows_seccomp_control_plane_socket_emulation() -> None:
+    unit = SYSTEMD_UNIT.read_text(encoding="utf-8")
+
+    ambient = next(line for line in unit.splitlines() if line.startswith("AmbientCapabilities="))
+    bounding = next(line for line in unit.splitlines() if line.startswith("CapabilityBoundingSet="))
+    syscall_filter = next(line for line in unit.splitlines() if line.startswith("SystemCallFilter="))
+
+    assert "CAP_SYS_PTRACE" in ambient.split("=", 1)[1].split()
+    assert "CAP_SYS_PTRACE" in bounding.split("=", 1)[1].split()
+    assert "pidfd_open" in syscall_filter.split("=", 1)[1].split()
+    assert "pidfd_getfd" in syscall_filter.split("=", 1)[1].split()

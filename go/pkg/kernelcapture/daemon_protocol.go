@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 )
 
@@ -77,12 +78,22 @@ type DaemonSetKillSwitchRequest struct {
 // apply for this session.  The BPF program uses the generation to detect stale
 // map entries left over from a prior policy cycle.
 type DaemonApplyPolicyRequest struct {
-	SessionID   string              `json:"session_id"`
-	OpPolicies  []DaemonOpPolicy    `json:"op_policies"`
-	PathAllow   []string            `json:"path_allow,omitempty"`
-	NetAllow    []string            `json:"net_allow,omitempty"` // CIDR strings (IPv4 or IPv6)
-	Generation  BpfPolicyGeneration `json:"generation"`
-	EnforceMode BpfEnforceMode      `json:"enforce_mode"` // default mode for no-rule ops
+	SessionID            string                      `json:"session_id"`
+	OpPolicies           []DaemonOpPolicy            `json:"op_policies"`
+	PathAllow            []string                    `json:"path_allow,omitempty"`
+	NetAllow             []string                    `json:"net_allow,omitempty"` // CIDR strings (IPv4 or IPv6)
+	Generation           BpfPolicyGeneration         `json:"generation"`
+	EnforceMode          BpfEnforceMode              `json:"enforce_mode"` // default mode for no-rule ops
+	ControlPlaneEndpoint *DaemonControlPlaneEndpoint `json:"control_plane_endpoint,omitempty"`
+}
+
+// DaemonControlPlaneEndpoint is the exact loopback listener owned by the
+// authenticated ardur-run bridge. It is deliberately separate from NetAllow:
+// the seccomp supervisor may emulate a connect to this one tuple, but it must
+// never turn into a mission-controlled CIDR or wildcard exception.
+type DaemonControlPlaneEndpoint struct {
+	IP   string `json:"ip"`
+	Port uint16 `json:"port"`
 }
 
 // DaemonOpPolicy is one (op, action, enforce_mode) triple in an apply_policy
@@ -365,12 +376,41 @@ func validateDaemonApplyPolicy(req DaemonApplyPolicyRequest) error {
 			return fmt.Errorf("%w: apply_policy path_allow[%d]: path %q must be absolute", ErrDaemonProtocol, i, p)
 		}
 	}
+	if req.ControlPlaneEndpoint != nil {
+		if _, ok := seenOps[BpfOpNetConnect]; !ok {
+			return fmt.Errorf("%w: apply_policy control_plane_endpoint requires OP_NET_CONNECT", ErrDaemonProtocol)
+		}
+		if _, err := parseDaemonControlPlaneEndpoint(*req.ControlPlaneEndpoint); err != nil {
+			return fmt.Errorf("%w: apply_policy control_plane_endpoint: %v", ErrDaemonProtocol, err)
+		}
+	}
 	switch req.EnforceMode {
 	case BpfEnforceModePermissive, BpfEnforceModeEnforce:
 	default:
 		return fmt.Errorf("%w: apply_policy unknown enforce_mode %d", ErrDaemonProtocol, req.EnforceMode)
 	}
 	return nil
+}
+
+func parseDaemonControlPlaneEndpoint(endpoint DaemonControlPlaneEndpoint) (net.IP, error) {
+	if endpoint.Port == 0 {
+		return nil, fmt.Errorf("port must be non-zero")
+	}
+	ipText := strings.TrimSpace(endpoint.IP)
+	if ipText != endpoint.IP || ipText == "" {
+		return nil, fmt.Errorf("ip must be a non-empty literal without surrounding whitespace")
+	}
+	ip := net.ParseIP(ipText)
+	if ip == nil {
+		return nil, fmt.Errorf("ip %q must be a literal address", endpoint.IP)
+	}
+	if !ip.IsLoopback() {
+		return nil, fmt.Errorf("ip %q must be loopback", endpoint.IP)
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		return append(net.IP(nil), ip4...), nil
+	}
+	return append(net.IP(nil), ip.To16()...), nil
 }
 
 func validateDaemonRegisterSession(req DaemonRegisterSessionRequest) error {

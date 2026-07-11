@@ -335,13 +335,18 @@ def test_apply_policy_encodes_and_sends_lowered_plan(sockdir: Path) -> None:
     )
     daemon.start()
     plan = lower_to_bpf_policy_plan(
-        forbidden_tools=["bash"],
+        forbidden_tools=["bash", "fetch"],
         resource_scope=["/data"],
         enforce_mode=ENFORCE_MODE_ENFORCE,
     )
     try:
         client = kc.KernelCaptureClient(sock)
-        resp = client.apply_policy(session_id="sess-apply-1", plan=plan, generation=1)
+        resp = client.apply_policy(
+            session_id="sess-apply-1",
+            plan=plan,
+            generation=1,
+            control_plane_endpoint=("127.0.0.1", 43210),
+        )
     finally:
         daemon.close()
 
@@ -354,6 +359,7 @@ def test_apply_policy_encodes_and_sends_lowered_plan(sockdir: Path) -> None:
     assert payload["enforce_mode"] == ENFORCE_MODE_ENFORCE
     assert payload["path_allow"] == ["/data"]
     assert "net_allow" not in payload  # omitted (empty) rather than sent as []
+    assert payload["control_plane_endpoint"] == {"ip": "127.0.0.1", "port": 43210}
 
     op_by_code = {entry["op"]: entry for entry in payload["op_policies"]}
     assert op_by_code[OP_EXEC]["action"] == ACT_DENY  # forbidden_tools:bash -> OP_EXEC deny
@@ -403,3 +409,11 @@ def test_apply_policy_validates_inputs(tmp_path: Path) -> None:
         client.apply_policy(session_id="s", plan=plan, generation=0)
     with pytest.raises(ValueError, match="generation"):
         client.apply_policy(session_id="s", plan=plan, generation=-1)
+    with pytest.raises(ValueError, match="loopback"):
+        client.apply_policy(
+            session_id="s", plan=plan, generation=1, control_plane_endpoint=("192.0.2.10", 443)
+        )
+    with pytest.raises(ValueError, match="port"):
+        client.apply_policy(
+            session_id="s", plan=plan, generation=1, control_plane_endpoint=("127.0.0.1", 0)
+        )

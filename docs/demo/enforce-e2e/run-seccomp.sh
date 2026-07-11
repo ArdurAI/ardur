@@ -7,10 +7,24 @@
 # even on a host (like this image's kernel) where BPF-LSM would otherwise win
 # tier selection.
 #   Usage: run-seccomp.sh <enforce|permissive>
-set -u
+set -euo pipefail
 MODE="${1:-enforce}"
 OUT="/out/seccomp-${MODE}"; mkdir -p "$OUT"
 DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
+DPID=""
+
+cleanup() {
+  if [ -n "$DPID" ]; then
+    kill "$DPID" 2>/dev/null || true
+    wait "$DPID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+case "$MODE" in
+  enforce|permissive) ;;
+  *) echo "usage: $0 <enforce|permissive>" >&2; exit 2 ;;
+esac
 
 echo "============ ardur run seccomp-tier demo — mode=${MODE} ============"
 
@@ -32,11 +46,20 @@ for _ in $(seq 1 40); do
   kill -0 $DPID 2>/dev/null || { echo "daemon died:"; cat "$OUT/daemon.log"; exit 1; }
   sleep 0.25
 done
-grep -q "seccomp handoff socket listening" "$OUT/daemon.log" \
-  && echo "daemon: seccomp tier active, handoff socket listening ✓" \
-  || { echo "daemon: seccomp handoff socket never came up"; tail -5 "$OUT/daemon.log"; kill $DPID; exit 1; }
-grep -q "\"tier\":\"seccomp\"" "$OUT/daemon.log" \
-  && echo "daemon: enforcement_tier=seccomp confirmed (BPF-LSM was disabled, not just unavailable) ✓"
+if grep -q "seccomp handoff socket listening" "$OUT/daemon.log"; then
+  echo "daemon: seccomp tier active, handoff socket listening ✓"
+else
+  echo "daemon: seccomp handoff socket never came up"
+  tail -5 "$OUT/daemon.log"
+  exit 1
+fi
+if grep -q "\"tier\":\"seccomp\"" "$OUT/daemon.log"; then
+  echo "daemon: enforcement_tier=seccomp confirmed (BPF-LSM was disabled, not just unavailable) ✓"
+else
+  echo "daemon: expected seccomp tier was not selected"
+  tail -10 "$OUT/daemon.log"
+  exit 1
+fi
 
 # 2. ardur run a benign agent under a mission that forbids network access.
 #    --no-resource-scope: skip the default cwd file allowlist, which the
@@ -55,12 +78,38 @@ ardur run \
   $ENF \
   -- python3 "$DEMO_DIR/agent_seccomp.py" 2>&1 | tee "$OUT/ardur-run.log" | grep -E "AGENT:|kernel policy|kernel link|attestation|agent exit|ardur-exec-shim|ardur run:"
 
+grep -q "AGENT: governance decision=DENY before connect" "$OUT/ardur-run.log"
+grep -Eq "tool calls[[:space:]]+[1-9][0-9]* evaluated" "$OUT/ardur-run.log"
+grep -Eq "receipts[[:space:]]+[1-9][0-9]* signed" "$OUT/ardur-run.log"
+grep -Eq "agent exit[[:space:]]+0$" "$OUT/ardur-run.log"
+if [ "$MODE" = "enforce" ]; then
+  grep -q "AGENT: RESULT=DENIED_EPERM" "$OUT/ardur-run.log"
+else
+  grep -q "AGENT: RESULT=DENIED_ECONNREFUSED" "$OUT/ardur-run.log"
+fi
+
 # 3. offline evidence verification: hash-chain integrity + attestation linkage.
 #    Same enforce_events.jsonl format and same enforce-verify tool as the
 #    BPF-LSM demo — the E3 evidence pipeline is shared across both tiers.
-EVID=$(find /var/lib/ardur/kernelcapture/evidence -name enforce_events.jsonl 2>/dev/null | head -1)
+EVID=$(find /var/lib/ardur/kernelcapture/evidence -name enforce_events.jsonl -print -quit 2>/dev/null)
 if [ -n "$EVID" ]; then
   cp "$EVID" "$OUT/enforce_events.jsonl"
+  python3 - "$OUT/enforce_events.jsonl" "$MODE" <<'PY'
+import json
+import sys
+
+path, mode = sys.argv[1:]
+entries = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+targets = [(entry.get("event") or {}).get("Path", "") for entry in entries]
+if "127.0.0.3:19999" not in targets:
+    raise SystemExit(f"FAIL: exact data-plane target missing from evidence: {targets}")
+if any(target.startswith("127.0.0.1:") for target in targets):
+    raise SystemExit(f"FAIL: control-plane exemption emitted as mission evidence: {targets}")
+denied = sum(entry.get("verdict") == "denied" for entry in entries)
+if mode == "enforce" and denied < 1:
+    raise SystemExit("FAIL: enforce mode produced no denied data-plane verdict")
+print(f"seccomp evidence exact data-plane target = 127.0.0.3:19999; denied verdicts = {denied}")
+PY
   DIGEST=$(python3 - "/out/home-seccomp-${MODE}" <<'PY'
 import base64, glob, json, os, sys
 home = sys.argv[1]
@@ -80,12 +129,14 @@ PY
 )
   echo "------ offline verification (no kernel, no daemon, no root) ------"
   echo "attestation kernel_enforcement.chain_digest = ${DIGEST:-<none>}"
-  enforce-verify "$OUT/enforce_events.jsonl" ${DIGEST:+$DIGEST}
-  echo "enforce-verify exit: $?"
+  [ -n "$DIGEST" ] || { echo "FAIL: attestation has no kernel-enforcement chain digest"; exit 1; }
+  enforce-verify "$OUT/enforce_events.jsonl" "$DIGEST"
+  echo "enforce-verify exit: 0"
 else
-  echo "no enforce_events.jsonl produced — nothing to verify"
-  [ "$MODE" = "enforce" ] && { echo "FAIL: enforce mode must produce evidence of the denial"; kill $DPID 2>/dev/null; exit 1; }
+  echo "FAIL: no enforce_events.jsonl produced for the data-plane probe"
+  exit 1
 fi
 
-kill $DPID 2>/dev/null; wait $DPID 2>/dev/null
+cleanup
+DPID=""
 echo "== seccomp demo (${MODE}) done =="

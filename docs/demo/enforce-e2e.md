@@ -76,6 +76,45 @@ The image builds `ardur-kernelcaptured` and the `enforce-verify` tool from
 source (the committed `processguard_bpfel.o` is used as-is — no clang needed)
 and installs the `ardur` CLI.
 
+## Run — seccomp fallback control-plane proof
+
+The seccomp path is an independent full `ardur run` E2E and does not require
+`bpf` in the active LSM list. The demo forces `-disable-bpf-lsm`, then runs a
+network-deny mission through the seccomp listener:
+
+```console
+$ docker run --rm --privileged --pid=host \
+    -v /tmp/ardur-demo-out:/out \
+    ardur-enforce-demo \
+    bash /opt/ardur/demo/run-seccomp.sh enforce
+```
+
+The agent first completes an authenticated `/evaluate` call and produces a
+signed governance receipt. It then deliberately attempts a separate
+`127.0.0.3:19999` connection so the kernel tier is tested independently of the
+proxy decision. The script requires the governance decision, a non-zero
+evaluated-call and receipt count, `DENIED_EPERM`, an exact denied data-plane
+event, no control-plane event, an intact evidence chain, and an attestation
+digest match. Every assertion is fail-fast.
+
+The governance exception is one daemon-stored IP-and-port tuple, not loopback
+or CIDR allowlisting. The supervisor connects a `pidfd_getfd(2)` duplicate of
+the target socket using trusted tuple bytes and returns success without
+`SECCOMP_USER_NOTIF_FLAG_CONTINUE`; see
+[Kernel Capture Daemon Operations](../reference/kernel-capture-daemon.md#seccomp-governance-endpoint)
+for the Linux 5.6 and ptrace-permission requirements and the remaining tier
+boundary.
+
+The paired permissive control uses the same governance call and data-plane
+target but expects `ECONNREFUSED` and zero denied verdicts:
+
+```console
+$ docker run --rm --privileged --pid=host \
+    -v /tmp/ardur-demo-out:/out \
+    ardur-enforce-demo \
+    bash /opt/ardur/demo/run-seccomp.sh permissive
+```
+
 ---
 
 ## Run — enforce (known bootstrap failure)

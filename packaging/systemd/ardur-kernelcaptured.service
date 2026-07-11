@@ -43,8 +43,10 @@ LogsDirectoryMode=0700
 # CAP_SYS_ADMIN: attach tracepoints and pin BPF objects on bpffs.
 # CAP_NET_ADMIN: manage network-related BPF hooks (future).
 # CAP_PERFMON: access perf_event_open for eBPF tracepoints (kernel ≥5.8).
-AmbientCapabilities=CAP_BPF CAP_SYS_ADMIN CAP_NET_ADMIN CAP_PERFMON
-CapabilityBoundingSet=CAP_BPF CAP_SYS_ADMIN CAP_NET_ADMIN CAP_PERFMON
+# CAP_SYS_PTRACE: duplicate a seccomp target socket with pidfd_getfd after
+#                 the session-owner and exact control-plane tuple checks.
+AmbientCapabilities=CAP_BPF CAP_SYS_ADMIN CAP_NET_ADMIN CAP_PERFMON CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_BPF CAP_SYS_ADMIN CAP_NET_ADMIN CAP_PERFMON CAP_SYS_PTRACE
 SecureBits=keep-caps
 
 # ── Filesystem hardening ──────────────────────────────────────────────────
@@ -54,7 +56,8 @@ SecureBits=keep-caps
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-PrivateDevices=false          # needs access to /dev/null etc.
+# Keep host devices visible for the kernel sensor (for example /dev/null).
+PrivateDevices=false
 
 # ReadWritePaths grants write access only to the daemon-owned paths.
 ReadWritePaths=/var/lib/ardur/kernelcapture /run/ardur/kernelcapture /sys/fs/bpf/ardur
@@ -81,10 +84,11 @@ ProtectClock=true
 # Block setuid/setgid bit execution from within the service.
 RestrictSUIDSGID=true
 # No new privileges after start.
-NoNewPrivileges=false         # must be false to retain AmbientCapabilities
+# This must remain false so the service retains AmbientCapabilities.
+NoNewPrivileges=false
 
 # Limit syscalls to those needed by eBPF and the socket control plane.
-SystemCallFilter=@system-service @network-io bpf perf_event_open perf_event_read
+SystemCallFilter=@system-service @network-io bpf perf_event_open pidfd_open pidfd_getfd
 SystemCallErrorNumber=EPERM
 SystemCallArchitectures=native
 

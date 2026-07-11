@@ -22,8 +22,10 @@ package kernelcapture
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -61,9 +63,9 @@ const (
 	// syscall proceed with whatever arguments are in the tracee's registers
 	// *at the moment the kernel resumes it* — not necessarily the ones the
 	// supervisor read via NOTIF_RECV. It is only ever set on a
-	// confirmed-safe ALLOW decision in seccomp_supervisor_linux.go, never as
-	// a default — see that file's decide function for the fail-closed
-	// contract.
+	// confirmed mission-policy ALLOW decision in
+	// daemon_seccomp_linux.go, never for the exact governance control-plane
+	// exemption and never as a default.
 	seccompUserNotifFlagContinue = 1 << 0
 
 	seccompRetAllow       = 0x7fff0000 // SECCOMP_RET_ALLOW
@@ -299,6 +301,138 @@ func buildSeccompNotifResp(id uint64, val int64, errno int32, continueSyscall bo
 func SeccompNotifIDValid(listenerFD int, id uint64) bool {
 	localID := id
 	return seccompIoctl(listenerFD, seccompIoctlNotifIDValid, unsafe.Pointer(&localID)) == nil
+}
+
+// EmulateSeccompControlPlaneConnect connects the tracee's socket to one
+// daemon-validated loopback tuple without resuming the original connect(2).
+// pidfd_getfd returns a duplicate that shares the socket's open file
+// description with the tracee, so connecting the duplicate connects the
+// socket on which the blocked target thread is waiting. The caller must then
+// answer the notification with synthetic success and continueSyscall=false.
+//
+// This path exists specifically to avoid SECCOMP_USER_NOTIF_FLAG_CONTINUE's
+// pointer-argument race: the destination passed to unix.Connect is built from
+// daemon-owned bytes, not from the tracee's mutable sockaddr memory.
+func EmulateSeccompControlPlaneConnect(listenerFD int, notif SeccompNotif, ip net.IP, port uint16) error {
+	if notif.PID == 0 {
+		return fmt.Errorf("kernelcapture: seccomp control-plane connect target pid is 0")
+	}
+	targetFD := notif.Args[0]
+	if targetFD > uint64(^uint(0)>>1) {
+		return fmt.Errorf("kernelcapture: seccomp control-plane connect target fd %d overflows int", targetFD)
+	}
+	destination, err := trustedSeccompControlPlaneSockaddr(ip, port)
+	if err != nil {
+		return err
+	}
+	if !SeccompNotifIDValid(listenerFD, notif.ID) {
+		return fmt.Errorf("kernelcapture: notification %d no longer valid before socket duplication", notif.ID)
+	}
+
+	pidfd, err := unix.PidfdOpen(int(notif.PID), 0)
+	if err != nil {
+		return fmt.Errorf("kernelcapture: pidfd_open(%d): %w", notif.PID, err)
+	}
+	defer unix.Close(pidfd)
+
+	dupFD, err := unix.PidfdGetfd(pidfd, int(targetFD), 0)
+	if err != nil {
+		return fmt.Errorf("kernelcapture: pidfd_getfd(pid=%d, fd=%d): %w", notif.PID, targetFD, err)
+	}
+	defer unix.Close(dupFD)
+
+	if err := connectTrustedSeccompSocket(dupFD, destination, ip, port); err != nil {
+		return err
+	}
+	if !SeccompNotifIDValid(listenerFD, notif.ID) {
+		return fmt.Errorf("kernelcapture: notification %d no longer valid after socket connect", notif.ID)
+	}
+	return nil
+}
+
+const seccompControlPlaneConnectTimeoutMS = 5000
+
+func connectTrustedSeccompSocket(fd int, destination unix.Sockaddr, trustedIP net.IP, trustedPort uint16) error {
+	err := unix.Connect(fd, destination)
+	switch err {
+	case nil, unix.EISCONN:
+		// Verify the peer below. EISCONN is safe only if the socket is already
+		// connected to the exact daemon-owned tuple.
+	case unix.EINPROGRESS, unix.EALREADY, unix.EINTR:
+		if fd > int(^uint32(0)>>1) {
+			return fmt.Errorf("kernelcapture: duplicated target fd %d overflows poll fd", fd)
+		}
+		pollFDs := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}
+		deadline := time.Now().Add(seccompControlPlaneConnectTimeoutMS * time.Millisecond)
+		for {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return fmt.Errorf("kernelcapture: duplicated control-plane socket connect timed out")
+			}
+			timeoutMS := int((remaining + time.Millisecond - 1) / time.Millisecond)
+			n, pollErr := unix.Poll(pollFDs, timeoutMS)
+			if pollErr == unix.EINTR {
+				continue
+			}
+			if pollErr != nil {
+				return fmt.Errorf("kernelcapture: poll duplicated control-plane socket: %w", pollErr)
+			}
+			if n == 0 {
+				return fmt.Errorf("kernelcapture: duplicated control-plane socket connect timed out")
+			}
+			break
+		}
+		socketErr, getErr := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ERROR)
+		if getErr != nil {
+			return fmt.Errorf("kernelcapture: read duplicated control-plane socket SO_ERROR: %w", getErr)
+		}
+		if socketErr != 0 {
+			return fmt.Errorf("kernelcapture: asynchronous duplicated control-plane socket connect: %w", unix.Errno(socketErr))
+		}
+	default:
+		return fmt.Errorf("kernelcapture: connect duplicated target socket to trusted control plane: %w", err)
+	}
+
+	peer, err := unix.Getpeername(fd)
+	if err != nil {
+		return fmt.Errorf("kernelcapture: getpeername duplicated control-plane socket: %w", err)
+	}
+	if !seccompSockaddrMatchesEndpoint(peer, trustedIP, trustedPort) {
+		return fmt.Errorf("kernelcapture: duplicated socket peer does not match trusted control-plane endpoint")
+	}
+	return nil
+}
+
+func seccompSockaddrMatchesEndpoint(sockaddr unix.Sockaddr, ip net.IP, port uint16) bool {
+	switch addr := sockaddr.(type) {
+	case *unix.SockaddrInet4:
+		return addr.Port == int(port) && ip.To4() != nil && net.IP(addr.Addr[:]).Equal(ip)
+	case *unix.SockaddrInet6:
+		return addr.Port == int(port) && ip.To4() == nil && net.IP(addr.Addr[:]).Equal(ip)
+	default:
+		return false
+	}
+}
+
+func trustedSeccompControlPlaneSockaddr(ip net.IP, port uint16) (unix.Sockaddr, error) {
+	if port == 0 {
+		return nil, fmt.Errorf("kernelcapture: seccomp control-plane port must be non-zero")
+	}
+	if ip == nil || !ip.IsLoopback() {
+		return nil, fmt.Errorf("kernelcapture: seccomp control-plane IP must be loopback")
+	}
+	if ip4 := ip.To4(); ip4 != nil {
+		addr := &unix.SockaddrInet4{Port: int(port)}
+		copy(addr.Addr[:], ip4)
+		return addr, nil
+	}
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return nil, fmt.Errorf("kernelcapture: invalid seccomp control-plane IP")
+	}
+	addr := &unix.SockaddrInet6{Port: int(port)}
+	copy(addr.Addr[:], ip16)
+	return addr, nil
 }
 
 // maxReadableSockaddrLen caps how many bytes ReadTargetSockaddr will read
