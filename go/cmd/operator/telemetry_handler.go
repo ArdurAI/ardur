@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -28,13 +29,28 @@ import (
 type TelemetryIngestor struct {
 	agg         trust.ScoreAggregator
 	applyPolicy func(ctx context.Context, namespace, tier string) error
+	authorize   telemetryRequestAuthorizer
 }
 
-// NewTelemetryIngestor creates a handler wired to the given aggregator.
-// applyPolicy may be nil; if supplied it is called when a signal causes a
-// tier change, so the reconciler can enforce the new NetworkPolicy.
-func NewTelemetryIngestor(agg trust.ScoreAggregator, applyPolicy func(ctx context.Context, namespace, tier string) error) *TelemetryIngestor {
-	return &TelemetryIngestor{agg: agg, applyPolicy: applyPolicy}
+type telemetryRequestAuthorizer func(r *http.Request, req telemetryRequest) error
+
+// newTelemetryIngestor creates a handler wired to an explicit request
+// authorizer. Production passes telemetrySourceBindings.authorize; tests may
+// use a test-only authorizer. There is deliberately no unauthenticated
+// constructor for this trust-changing endpoint.
+func newTelemetryIngestor(
+	agg trust.ScoreAggregator,
+	applyPolicy func(ctx context.Context, namespace, tier string) error,
+	authorize telemetryRequestAuthorizer,
+) *TelemetryIngestor {
+	if authorize == nil {
+		panic("telemetry request authorizer is required")
+	}
+	return &TelemetryIngestor{
+		agg:         agg,
+		applyPolicy: applyPolicy,
+		authorize:   authorize,
+	}
 }
 
 // telemetryRequest is the wire format for inbound signals.
@@ -64,6 +80,18 @@ func (h *TelemetryIngestor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if req.AgentID == "" {
 		http.Error(w, "agent_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.Source == "" {
+		http.Error(w, "source is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.authorize(r, req); err != nil {
+		status := http.StatusForbidden
+		if errors.Is(err, errTelemetryUnauthenticated) {
+			status = http.StatusUnauthorized
+		}
+		http.Error(w, http.StatusText(status), status)
 		return
 	}
 
@@ -115,20 +143,6 @@ func (h *TelemetryIngestor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func isNotFound(err error) bool {
 	return err != nil && (err == trust.ErrAgentNotFound ||
 		containsError(err, trust.ErrAgentNotFound))
-}
-
-// BearerAuthMiddleware rejects requests whose Authorization header does not
-// match "Bearer <token>". An empty token is treated as misconfigured — every
-// request is rejected (fail-closed). This prevents privilege escalation via
-// forged signals when no token has been provisioned.
-func BearerAuthMiddleware(token string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token == "" || r.Header.Get("Authorization") != "Bearer "+token {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func containsError(err, target error) bool {

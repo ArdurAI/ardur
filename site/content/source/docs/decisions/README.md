@@ -2,7 +2,7 @@
 title: "Architecture Decision Records"
 description: "ADRs document load-bearing design decisions behind Ardur's runtime, protocol, and deployment shape. Each record captures the context, the decision, and the trade-offs known at the "
 source_path: "docs/decisions/README.md"
-source_sha256: "e49525dcf6c3ae94a1d73198f4ef6825933158acc2978d843365d767bfd1d35f"
+source_sha256: "bcf3393aa5feccdd7722720751607a63417fa56c86f8f06befc63c3887b924b4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -34,6 +34,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 019 | [Parent-token anchors against trusted lineage](/__ardur_internal__/source/docs/decisions/adr-019-parent-token-anchors-against-trusted-lineage/) | Proposed | 2026-04-21 |
 | 020 | [Persisted-session reverification on load](/__ardur_internal__/source/docs/decisions/adr-020-persisted-session-reverification-on-load/) | Proposed | 2026-04-21 |
 | 021 | [KB-JWT server-challenged nonce](/__ardur_internal__/source/docs/decisions/adr-021-kb-jwt-server-challenged-nonce/) | Proposed | 2026-04-21 |
+| 022 | [SPIFFE mTLS identity for operator telemetry](/__ardur_internal__/source/docs/decisions/adr-022-operator-telemetry-spiffe-mtls/) | Accepted | 2026-07-11 |
 
 ## Conventions
 

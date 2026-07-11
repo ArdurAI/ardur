@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "1f29e3a1c1fbfef13ded2a665502a5800312d2f3672f13a2ccfd272c222937c9"
+source_sha256: "7d43c87f81e7c84943300efdd8b3bb95dc25d72ac61543e7bdfe438bdc67d9f7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -45,6 +45,13 @@ produces a detached redacted report with explicit match confidence, source
 assurance, and coverage limits. It does not deploy or authenticate a sensor,
 and a high-confidence association to imported JSON is corroboration rather
 than independent proof.
+
+The separate Kubernetes operator telemetry endpoint is disabled unless an
+operator configures explicit `source=spiffe://...` bindings. When enabled, it
+requires TLS 1.3 mutual authentication with rotating SPIFFE X.509-SVIDs and
+rejects an authenticated producer that claims another configured source. See
+the [operator telemetry identity guide](/__ardur_internal__/source/docs/guides/operator-telemetry-identity/)
+for the deployment contract and remaining collector trust boundary.
 
 For `ardur run` on Linux, when the launch bridge successfully registers the
 governed cgroup with `ardur-kernelcaptured`, each proxy receipt is reported to
@@ -236,7 +243,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixture examples | live-provider wrappers and more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, JWT AAT constraint engine (13 types) | AAT CWT integer-key mapping, OPA, and broader Biscuit datalog examples |
-| **Identity**         | SPIFFE / SPIRE-oriented code and docs | full cluster deployment walkthrough |
+| **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for operator telemetry; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
 | **Receipts sink**    | local JSON / stdout receipts; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | OTel emitters, checkpoint witnessing/consistency monitoring, broader durable storage examples, and integrated multi-artifact chain verification |
 
 If you'd use an integration that isn't listed, file an [integration request](https://github.com/ArdurAI/ardur/issues/new?template=integration_request.yml) — it's the strongest signal we have for prioritisation.
