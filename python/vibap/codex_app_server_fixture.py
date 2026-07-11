@@ -347,21 +347,33 @@ def _validate_fixture_path_not_file(path: Path, *, label: str, condition: str) -
 
 
 def _fixture_path_failure_response(*, condition: str, label: str, arg_name: str) -> dict[str, Any]:
+    is_empty = condition.endswith("_empty")
+    if is_empty:
+        message = f"Codex app-server fixture {label} is empty."
+        detail = (
+            f"The {arg_name} argument is empty or whitespace-only. "
+            f"Provide a directory path where Ardur can write fixture artifacts."
+        )
+        step_detail = f"Replace <{label}> with a directory path (not empty, whitespace, a file, or a symlink)."
+    else:
+        message = f"Codex app-server fixture {label} is not a directory."
+        detail = (
+            f"The {arg_name} argument points at an existing non-directory. "
+            f"Use an existing directory or a new directory path that Ardur can create."
+        )
+        step_detail = f"Replace <{label}> with a directory path, not a regular file."
     return {
         "ok": False,
         "error": condition,
         "condition": condition,
-        "message": f"Codex app-server fixture {label} is not a directory.",
-        "detail": (
-            f"The {arg_name} argument points at an existing non-directory. "
-            f"Use an existing directory or a new directory path that Ardur can create."
-        ),
+        "message": message,
+        "detail": detail,
         "next_steps": [
             {
                 "condition": condition,
                 "action": f"rerun_codex_fixture_with_{label.replace(' ', '_')}",
                 "command": f"ardur codex-app-server-fixture {arg_name} <{label}>",
-                "detail": f"Replace <{label}> with a directory path, not a regular file.",
+                "detail": step_detail,
             }
         ],
     }
@@ -413,10 +425,10 @@ def fixture_project_dir_failure_response(condition: str = "codex_app_server_fixt
 
 def build_local_fixture(
     *,
-    home: Path | None = None,
+    home: str | Path | None = None,
     project_dir: str | Path | None = None,
-    chain_dir: Path | None = None,
-    keys_dir: Path | None = None,
+    chain_dir: str | Path | None = None,
+    keys_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Write a private local Codex config/context fixture.
 
@@ -424,6 +436,24 @@ def build_local_fixture(
     user can wire into Codex app-server/host-event surfaces, but does not mutate
     a real Codex install unless the caller explicitly points ``home`` there.
     """
+    # Reject empty/whitespace-only path arguments before Path() normalises them
+    # to the current working directory. Path("") silently becomes Path(".") so
+    # the empty input would otherwise pollute CWD with fixture artifacts.
+    if home is not None and not str(home).strip():
+        raise FixturePathError(
+            "home is empty or whitespace-only",
+            condition="codex_app_server_fixture_home_empty",
+        )
+    if chain_dir is not None and not str(chain_dir).strip():
+        raise FixturePathError(
+            "chain dir is empty or whitespace-only",
+            condition="codex_app_server_fixture_chain_dir_empty",
+        )
+    if keys_dir is not None and not str(keys_dir).strip():
+        raise FixturePathError(
+            "keys dir is empty or whitespace-only",
+            condition="codex_app_server_fixture_keys_dir_empty",
+        )
     codex_home_raw = Path(home or _default_codex_fixture_home()).expanduser()
     project_raw_value = str(project_dir) if project_dir is not None else ""
     if not project_raw_value.strip():
@@ -1289,10 +1319,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run local Ardur Codex app-server fixture helpers")
     parser.add_argument("phase_pos", nargs="?", choices=["event", "fixture", "report"], help="helper phase")
     parser.add_argument("--phase", choices=["event", "fixture", "report"], help="helper phase")
-    parser.add_argument("--keys-dir", type=Path, help="Ardur signing keys directory")
-    parser.add_argument("--home", type=Path, help="explicit Codex home for fixture writes; defaults to isolated Ardur local state")
+    parser.add_argument("--keys-dir", type=str, help="Ardur signing keys directory")
+    parser.add_argument("--home", type=str, help="explicit Codex home for fixture writes; defaults to isolated Ardur local state")
     parser.add_argument("--project-dir", type=str, help="project directory for fixture generation")
-    parser.add_argument("--chain-dir", type=Path, help="Codex receipt chain directory")
+    parser.add_argument("--chain-dir", type=str, help="Codex receipt chain directory")
     parser.add_argument("--verify-expiry", action="store_true", help="enforce short receipt expiry while verifying reports")
     args = parser.parse_args(list(argv) if argv is not None else None)
     phase = args.phase or args.phase_pos or "event"

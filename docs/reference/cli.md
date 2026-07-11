@@ -1125,12 +1125,16 @@ server-side enforcement claim.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target
-does not exist), or `--project-dir` is empty or whitespace-only, the command
-fails closed with exit code `1` and prints a JSON response with `ok: false`,
-matching `error` and `condition` fields, a concise `message`, a `detail`, and
-placeholder-only `next_steps`. The `condition` is one of
+does not exist), or any of `--home`, `--chain-dir`, `--keys-dir`, or
+`--project-dir` is empty or whitespace-only, the command fails closed with
+exit code `1` and prints a JSON response with `ok: false`, matching `error`
+and `condition` fields, a concise `message`, a `detail`, and placeholder-only
+`next_steps`. The `condition` is one of
+`gemini_cli_fixture_home_empty`,
 `gemini_cli_fixture_home_not_directory`,
+`gemini_cli_fixture_chain_dir_empty`,
 `gemini_cli_fixture_chain_dir_not_directory`,
+`gemini_cli_fixture_keys_dir_empty`,
 `gemini_cli_fixture_keys_dir_not_directory`,
 `gemini_cli_fixture_project_dir_empty`, or
 `gemini_cli_fixture_project_dir_not_directory` depending on which argument
@@ -1214,12 +1218,16 @@ harness for visible local Codex app-server or host-event-style fields only.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target
-does not exist), or `--project-dir` is empty or whitespace-only, the command
-fails closed with exit code `1` and prints a JSON response with `ok: false`,
-matching `error` and `condition` fields, a concise `message`, a `detail`, and
-placeholder-only `next_steps`. The `condition` is one of
+does not exist), or any of `--home`, `--chain-dir`, `--keys-dir`, or
+`--project-dir` is empty or whitespace-only, the command fails closed with
+exit code `1` and prints a JSON response with `ok: false`, matching `error`
+and `condition` fields, a concise `message`, a `detail`, and placeholder-only
+`next_steps`. The `condition` is one of
+`codex_app_server_fixture_home_empty`,
 `codex_app_server_fixture_home_not_directory`,
+`codex_app_server_fixture_chain_dir_empty`,
 `codex_app_server_fixture_chain_dir_not_directory`,
+`codex_app_server_fixture_keys_dir_empty`,
 `codex_app_server_fixture_keys_dir_not_directory`,
 `codex_app_server_fixture_project_dir_empty`, or
 `codex_app_server_fixture_project_dir_not_directory` depending on which argument
@@ -1313,6 +1321,15 @@ and placeholder-only `next_steps`. This prevents a silent fallback to scanning
 the current working directory when the argument is accidentally left blank.
 Existing receipt-chain directories and `receipts.jsonl` files remain valid
 inputs; only the empty/whitespace case is rejected before scanning.
+
+If `--keys-dir`, `--profile`, or `--evidence-bundle` is empty or
+whitespace-only, the command fails closed with exit code `1` and prints a JSON
+response with `ok: false`, matching `error` and `condition` fields
+(`posture_keys_dir_empty`, `posture_profile_empty`, or
+`posture_evidence_bundle_empty`), a concise `message`, a `detail`, and
+placeholder-only `next_steps`. These optional arguments are read-only, so an
+existing regular file remains a valid input; only the empty/whitespace case is
+rejected to prevent silently scanning the current working directory.
 
 When receipt evidence is missing, unverified because public keys are unavailable,
 or broken by failed chain verification, the JSON output includes a `next_steps`

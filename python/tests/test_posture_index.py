@@ -437,3 +437,134 @@ def test_build_posture_index_rejects_whitespace_receipts():
         raised = True
         assert exc.condition == "posture_receipts_empty"
     assert raised, "expected PostureReceiptsError for whitespace receipts"
+
+
+def test_cli_scan_rejects_empty_keys_dir(tmp_path, capsys):
+    """Empty --keys-dir must fail closed instead of silently scanning CWD."""
+    from vibap.cli import main
+
+    receipts_dir = tmp_path / "receipts"
+    receipts_dir.mkdir()
+    rc = main(["posture", "scan", "--receipts", str(receipts_dir), "--keys-dir", "", "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_keys_dir_empty"
+    assert posture["condition"] == "posture_keys_dir_empty"
+    assert "empty" in posture["message"].lower()
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_cli_scan_rejects_whitespace_keys_dir(tmp_path, capsys):
+    """Whitespace-only --keys-dir must fail closed instead of silently scanning CWD."""
+    from vibap.cli import main
+
+    receipts_dir = tmp_path / "receipts"
+    receipts_dir.mkdir()
+    rc = main(["posture", "scan", "--receipts", str(receipts_dir), "--keys-dir", "   ", "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_keys_dir_empty"
+    assert posture["condition"] == "posture_keys_dir_empty"
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_cli_scan_rejects_empty_profile(tmp_path, capsys):
+    """Empty --profile must fail closed instead of silently resolving to CWD."""
+    from vibap.cli import main
+
+    receipts_dir = tmp_path / "receipts"
+    receipts_dir.mkdir()
+    rc = main(["posture", "scan", "--receipts", str(receipts_dir), "--profile", "", "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_profile_empty"
+    assert posture["condition"] == "posture_profile_empty"
+    assert "empty" in posture["message"].lower()
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_cli_scan_rejects_whitespace_profile(tmp_path, capsys):
+    """Whitespace-only --profile must fail closed."""
+    from vibap.cli import main
+
+    receipts_dir = tmp_path / "receipts"
+    receipts_dir.mkdir()
+    rc = main(["posture", "scan", "--receipts", str(receipts_dir), "--profile", "   ", "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_profile_empty"
+    assert posture["condition"] == "posture_profile_empty"
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_cli_scan_rejects_empty_evidence_bundle(tmp_path, capsys):
+    """Empty --evidence-bundle must fail closed instead of silently resolving to CWD."""
+    from vibap.cli import main
+
+    receipts_dir = tmp_path / "receipts"
+    receipts_dir.mkdir()
+    rc = main(["posture", "scan", "--receipts", str(receipts_dir), "--evidence-bundle", "", "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_evidence_bundle_empty"
+    assert posture["condition"] == "posture_evidence_bundle_empty"
+    assert "empty" in posture["message"].lower()
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_cli_scan_rejects_whitespace_evidence_bundle(tmp_path, capsys):
+    """Whitespace-only --evidence-bundle must fail closed."""
+    from vibap.cli import main
+
+    receipts_dir = tmp_path / "receipts"
+    receipts_dir.mkdir()
+    rc = main(["posture", "scan", "--receipts", str(receipts_dir), "--evidence-bundle", "   ", "--format", "json"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    posture = json.loads(captured.out)
+    assert posture["ok"] is False
+    assert posture["error"] == "posture_evidence_bundle_empty"
+    assert posture["condition"] == "posture_evidence_bundle_empty"
+    assert "Traceback" not in captured.out
+    assert str(tmp_path) not in captured.out
+
+
+def test_build_posture_index_rejects_empty_keys_dir():
+    """Module-level API must also reject empty keys-dir."""
+    from vibap.posture_index import PostureInputError, build_posture_index
+
+    raised = False
+    try:
+        build_posture_index(receipts="/tmp/nonempty", keys_dir="")
+    except PostureInputError as exc:
+        raised = True
+        assert exc.condition == "posture_keys_dir_empty"
+    assert raised, "expected PostureInputError for empty keys_dir"
+
+
+def test_build_posture_index_rejects_whitespace_profile():
+    """Module-level API must also reject whitespace-only profile."""
+    from vibap.posture_index import PostureInputError, build_posture_index
+
+    raised = False
+    try:
+        build_posture_index(receipts="/tmp/nonempty", profile="   ")
+    except PostureInputError as exc:
+        raised = True
+        assert exc.condition == "posture_profile_empty"
+    assert raised, "expected PostureInputError for whitespace profile"

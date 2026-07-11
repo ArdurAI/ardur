@@ -308,6 +308,243 @@ def test_gemini_fixture_rejects_project_dir_empty(tmp_path: Path) -> None:
     assert not keys_dir.exists()
 
 
+def test_gemini_fixture_rejects_home_empty(tmp_path: Path) -> None:
+    """Empty --home must fail closed before writing any fixture artifacts into CWD."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    project_dir = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    project_dir.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", "",
+        "--project-dir", str(project_dir),
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_home_empty"
+    assert output["condition"] == "gemini_cli_fixture_home_empty"
+    assert "empty" in output["message"].lower()
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not chain_dir.exists()
+    assert not keys_dir.exists()
+
+
+def test_gemini_fixture_rejects_home_whitespace(tmp_path: Path) -> None:
+    """Whitespace-only --home must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    project_dir = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    project_dir.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", "   ",
+        "--project-dir", str(project_dir),
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_home_empty"
+    assert output["condition"] == "gemini_cli_fixture_home_empty"
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not chain_dir.exists()
+    assert not keys_dir.exists()
+
+
+def test_gemini_fixture_rejects_chain_dir_empty(tmp_path: Path) -> None:
+    """Empty --chain-dir must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    project_dir = tmp_path / "project"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    project_dir.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        "--project-dir", str(project_dir),
+        "--chain-dir", "",
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_chain_dir_empty"
+    assert output["condition"] == "gemini_cli_fixture_chain_dir_empty"
+    assert "empty" in output["message"].lower()
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not keys_dir.exists()
+
+
+def test_gemini_fixture_rejects_chain_dir_whitespace(tmp_path: Path) -> None:
+    """Whitespace-only --chain-dir must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    project_dir = tmp_path / "project"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    project_dir.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        "--project-dir", str(project_dir),
+        "--chain-dir", "   ",
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_chain_dir_empty"
+    assert output["condition"] == "gemini_cli_fixture_chain_dir_empty"
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not keys_dir.exists()
+
+
+def test_gemini_fixture_rejects_keys_dir_empty(tmp_path: Path) -> None:
+    """Empty --keys-dir must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    project_dir = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    caller_home.mkdir()
+    project_dir.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        "--project-dir", str(project_dir),
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", "",
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_keys_dir_empty"
+    assert output["condition"] == "gemini_cli_fixture_keys_dir_empty"
+    assert "empty" in output["message"].lower()
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not chain_dir.exists()
+
+
+def test_gemini_fixture_rejects_keys_dir_whitespace(tmp_path: Path) -> None:
+    """Whitespace-only --keys-dir must fail closed before writing any fixture artifacts."""
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    project_dir = tmp_path / "project"
+    chain_dir = tmp_path / "chain"
+    caller_home.mkdir()
+    project_dir.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        "--project-dir", str(project_dir),
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", "   ",
+        env=env,
+        repo_root=repo_root,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    output_text = json.dumps(output, sort_keys=True)
+    assert output["ok"] is False
+    assert output["error"] == "gemini_cli_fixture_keys_dir_empty"
+    assert output["condition"] == "gemini_cli_fixture_keys_dir_empty"
+    assert "Traceback" not in output_text
+    assert str(tmp_path) not in output_text
+    assert not fixture_home.exists()
+    assert not chain_dir.exists()
+
+
 def test_gemini_fixture_rejects_project_dir_whitespace(tmp_path: Path) -> None:
     """Whitespace-only --project-dir must fail closed before writing any fixture artifacts."""
     repo_root = Path(__file__).resolve().parents[2]

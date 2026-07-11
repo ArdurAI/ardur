@@ -56,6 +56,22 @@ class PostureReceiptsError(ValueError):
         self.condition = condition
 
 
+class PostureInputError(ValueError):
+    """Raised when an optional ``--keys-dir``/``--profile``/``--evidence-bundle``
+    argument is empty or whitespace-only.
+
+    A ``ValueError`` subclass so it is still caught by the generic handler in
+    ``cmd_posture_scan()``, but distinct enough for the CLI to emit a structured,
+    sanitized failure response instead of silently resolving the path to CWD.
+    Carries a stable ``condition`` attribute.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
+
+
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -349,9 +365,9 @@ def _posture_next_steps(chain_verification: Mapping[str, Any], coverage_gaps: se
 def build_posture_index(
     *,
     receipts: str | Path,
-    keys_dir: Path | None = None,
-    profile: Path | None = None,
-    evidence_bundle: Path | None = None,
+    keys_dir: str | Path | None = None,
+    profile: str | Path | None = None,
+    evidence_bundle: str | Path | None = None,
     verify_expiry: bool = False,
 ) -> dict[str, Any]:
     """Build a shareable, read-only posture index from local evidence.
@@ -365,19 +381,41 @@ def build_posture_index(
             "receipts path must not be empty or whitespace-only",
             condition="posture_receipts_empty",
         )
+    # Reject empty/whitespace-only optional path arguments before Path()
+    # normalises them to the current working directory. These arguments are
+    # read-only (an existing regular file is valid input), but an empty string
+    # would silently resolve to CWD and scan the wrong location.
+    if keys_dir is not None and not str(keys_dir).strip():
+        raise PostureInputError(
+            "keys directory must not be empty or whitespace-only",
+            condition="posture_keys_dir_empty",
+        )
+    if profile is not None and not str(profile).strip():
+        raise PostureInputError(
+            "profile path must not be empty or whitespace-only",
+            condition="posture_profile_empty",
+        )
+    if evidence_bundle is not None and not str(evidence_bundle).strip():
+        raise PostureInputError(
+            "evidence bundle path must not be empty or whitespace-only",
+            condition="posture_evidence_bundle_empty",
+        )
     receipts_path = Path(receipts_raw_value).expanduser()
+    keys_dir_path = Path(keys_dir).expanduser() if keys_dir is not None else None
+    profile_path = Path(profile).expanduser() if profile is not None else None
+    evidence_bundle_path = Path(evidence_bundle).expanduser() if evidence_bundle is not None else None
     roots = [receipts_path]
-    if keys_dir is not None:
-        roots.append(keys_dir)
-    if profile is not None:
-        roots.append(profile)
-        roots.append(profile.parent)
-    if evidence_bundle is not None:
-        roots.append(evidence_bundle)
-        roots.append(evidence_bundle.parent)
+    if keys_dir_path is not None:
+        roots.append(keys_dir_path)
+    if profile_path is not None:
+        roots.append(profile_path)
+        roots.append(profile_path.parent)
+    if evidence_bundle_path is not None:
+        roots.append(evidence_bundle_path)
+        roots.append(evidence_bundle_path.parent)
     redactor = _Redactor(roots)
 
-    public_key, key_warning = _load_public_key_read_only(keys_dir)
+    public_key, key_warning = _load_public_key_read_only(keys_dir_path)
     chains: list[dict[str, Any]] = []
     all_claims: list[dict[str, Any]] = []
     coverage_gaps: set[str] = set()
@@ -449,8 +487,8 @@ def build_posture_index(
             }
         )
 
-    profile_info = _profile_summary(profile, redactor)
-    evidence_info, bundle_policy_digests = _evidence_bundle_summary(evidence_bundle, redactor)
+    profile_info = _profile_summary(profile_path, redactor)
+    evidence_info, bundle_policy_digests = _evidence_bundle_summary(evidence_bundle_path, redactor)
     policy_decisions = _policy_decisions(all_claims, redactor)
     policy_backends = Counter(str(item.get("backend", "unknown")) for item in policy_decisions)
     policy_digests = sorted(set(bundle_policy_digests))
@@ -622,6 +660,42 @@ def posture_receipts_failure_response(condition: str = "posture_receipts_empty")
                 "action": "rerun_posture_scan_with_receipts",
                 "command": "ardur posture scan --receipts <chain-dir> --keys-dir <keys-dir> --format json",
                 "detail": "Replace <chain-dir> with a local Ardur receipt chain directory or receipts.jsonl file path.",
+            }
+        ],
+    }
+
+
+def posture_input_failure_response(condition: str) -> dict[str, Any]:
+    """Structured failure response for an invalid optional path argument.
+
+    Covers ``--keys-dir``, ``--profile``, and ``--evidence-bundle`` when the
+    argument is empty or whitespace-only. Mirrors the structured JSON convention
+    used for ``--receipts`` failures: stable ``condition``/``error`` pair,
+    human-readable ``message`` with no raw exception text or local paths,
+    explanatory ``detail``, and placeholder-only ``next_steps``.
+    """
+
+    labels = {
+        "posture_keys_dir_empty": ("keys directory", "--keys-dir"),
+        "posture_profile_empty": ("profile path", "--profile"),
+        "posture_evidence_bundle_empty": ("evidence bundle path", "--evidence-bundle"),
+    }
+    label, arg_name = labels.get(condition, ("path", "--path"))
+    return {
+        "ok": False,
+        "error": condition,
+        "condition": condition,
+        "message": f"Posture scan {label} is empty.",
+        "detail": (
+            f"The {arg_name} argument is empty or whitespace-only. "
+            f"Provide a local path pointing at an existing file or directory."
+        ),
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": f"rerun_posture_scan_with_{arg_name.replace('--', '').replace('-', '_')}",
+                "command": f"ardur posture scan --receipts <chain-dir> {arg_name} <{label}>",
+                "detail": f"Replace <{label}> with a local file or directory path (not empty or whitespace).",
             }
         ],
     }
