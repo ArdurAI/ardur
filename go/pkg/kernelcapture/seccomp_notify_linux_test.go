@@ -18,13 +18,116 @@ package kernelcapture
 
 import (
 	"encoding/binary"
+	"net"
 	"reflect"
 	"runtime"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestTrustedSeccompControlPlaneSockaddr(t *testing.T) {
+	t.Parallel()
+
+	v4, err := trustedSeccompControlPlaneSockaddr(net.ParseIP("127.0.0.1"), 43210)
+	if err != nil {
+		t.Fatalf("IPv4 sockaddr: %v", err)
+	}
+	v4addr, ok := v4.(*unix.SockaddrInet4)
+	if !ok || v4addr.Port != 43210 || v4addr.Addr != [4]byte{127, 0, 0, 1} {
+		t.Fatalf("IPv4 sockaddr = %#v, want 127.0.0.1:43210", v4)
+	}
+
+	v6, err := trustedSeccompControlPlaneSockaddr(net.ParseIP("::1"), 43211)
+	if err != nil {
+		t.Fatalf("IPv6 sockaddr: %v", err)
+	}
+	v6addr, ok := v6.(*unix.SockaddrInet6)
+	wantV6 := [16]byte{}
+	wantV6[15] = 1
+	if !ok || v6addr.Port != 43211 || v6addr.Addr != wantV6 {
+		t.Fatalf("IPv6 sockaddr = %#v, want [::1]:43211", v6)
+	}
+}
+
+func TestTrustedSeccompControlPlaneSockaddrRejectsWidenedTargets(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		ip   net.IP
+		port uint16
+	}{
+		{name: "remote IPv4", ip: net.ParseIP("192.0.2.10"), port: 443},
+		{name: "unspecified IPv4", ip: net.ParseIP("0.0.0.0"), port: 443},
+		{name: "nil IP", ip: nil, port: 443},
+		{name: "zero port", ip: net.ParseIP("127.0.0.1"), port: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := trustedSeccompControlPlaneSockaddr(tc.ip, tc.port); err == nil {
+				t.Fatal("expected invalid control-plane tuple to be rejected")
+			}
+		})
+	}
+}
+
+func TestSeccompSockaddrMatchesEndpointRequiresExactIPAndPort(t *testing.T) {
+	t.Parallel()
+
+	v4 := &unix.SockaddrInet4{Port: 43210, Addr: [4]byte{127, 0, 0, 1}}
+	if !seccompSockaddrMatchesEndpoint(v4, net.ParseIP("127.0.0.1"), 43210) {
+		t.Fatal("exact IPv4 endpoint did not match")
+	}
+	if seccompSockaddrMatchesEndpoint(v4, net.ParseIP("127.0.0.1"), 43211) {
+		t.Fatal("adjacent IPv4 port matched")
+	}
+	if seccompSockaddrMatchesEndpoint(v4, net.ParseIP("127.0.0.2"), 43210) {
+		t.Fatal("adjacent IPv4 address matched")
+	}
+
+	v6 := &unix.SockaddrInet6{Port: 43211}
+	v6.Addr[15] = 1
+	if !seccompSockaddrMatchesEndpoint(v6, net.ParseIP("::1"), 43211) {
+		t.Fatal("exact IPv6 endpoint did not match")
+	}
+	if seccompSockaddrMatchesEndpoint(v6, net.ParseIP("127.0.0.1"), 43211) {
+		t.Fatal("IPv4 endpoint matched an IPv6 peer")
+	}
+}
+
+func TestConnectTrustedSeccompSocketCompletesNonblockingConnect(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	tcpAddr := listener.Addr().(*net.TCPAddr)
+
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatalf("create nonblocking socket: %v", err)
+	}
+	defer unix.Close(fd)
+	destination, err := trustedSeccompControlPlaneSockaddr(tcpAddr.IP, uint16(tcpAddr.Port))
+	if err != nil {
+		t.Fatalf("trusted sockaddr: %v", err)
+	}
+	if err := connectTrustedSeccompSocket(fd, destination, tcpAddr.IP, uint16(tcpAddr.Port)); err != nil {
+		t.Fatalf("connect nonblocking trusted socket: %v", err)
+	}
+
+	tcpListener := listener.(*net.TCPListener)
+	if err := tcpListener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set accept deadline: %v", err)
+	}
+	conn, err := tcpListener.Accept()
+	if err != nil {
+		t.Fatalf("accept emulated connection: %v", err)
+	}
+	conn.Close()
+}
 
 // TestSeccompIoctlNumbers pins the three ioctl request values this file
 // computes via iocEncode against the same numbers every other

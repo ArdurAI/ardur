@@ -8,6 +8,7 @@ package main
 
 import (
 	"errors"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -76,6 +77,43 @@ func TestHandleApplyPolicy_ForeignPeerRejected(t *testing.T) {
 	respOwner := d.handleApplyPolicy(applyPolicyReqFor("ses-owned", kernelcapture.BpfEnforceModePermissive), owner)
 	if strings.Contains(respOwner.Error, "owned by a different peer") {
 		t.Fatalf("owning peer apply_policy was wrongly rejected for ownership: %+v", respOwner)
+	}
+}
+
+func TestHandleApplyPolicy_ForeignPeerCannotInstallControlPlaneEndpoint(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.activeTier = daemonTierSeccomp
+	registerTestSession(t, d, "ses-control-owned", 4201)
+
+	req := applyNetConnectPolicyReqFor(
+		"ses-control-owned", kernelcapture.BpfActionDeny, kernelcapture.BpfEnforceModeEnforce,
+	)
+	req.ApplyPolicy.ControlPlaneEndpoint = &kernelcapture.DaemonControlPlaneEndpoint{
+		IP: "127.0.0.1", Port: 43210,
+	}
+
+	foreign := testPeerHandshakeUID("", kernelcapture.DaemonProtocolMethodApplyPolicy, 501)
+	foreign.Authorization.PID = 9999
+	foreign.ProcessStartTimeTicks = 123456
+	foreign.Authorization.ProcessStartTimeTicks = 123456
+	if resp := d.handleApplyPolicy(req, foreign); resp.OK {
+		t.Fatalf("foreign peer installed control-plane endpoint: %+v", resp)
+	}
+	if _, _, ok := kernelcapture.MatchSeccompControlPlaneEndpoint(
+		d.seccompPolicy, "ses-control-owned", net.ParseIP("127.0.0.1"), 43210,
+	); ok {
+		t.Fatal("foreign peer rejection still mutated the seccomp control-plane store")
+	}
+
+	owner := testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy)
+	if resp := d.handleApplyPolicy(req, owner); !resp.OK {
+		t.Fatalf("session-owning peer could not install control-plane endpoint: %+v", resp)
+	}
+	if _, _, ok := kernelcapture.MatchSeccompControlPlaneEndpoint(
+		d.seccompPolicy, "ses-control-owned", net.ParseIP("127.0.0.1"), 43210,
+	); !ok {
+		t.Fatal("session-owning peer did not install the exact control-plane endpoint")
 	}
 }
 

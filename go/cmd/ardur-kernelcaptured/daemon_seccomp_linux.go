@@ -274,6 +274,20 @@ func (d *daemon) handleSeccompConnectNotif(listenerFD int, notif kernelcapture.S
 		return
 	}
 
+	if trustedIP, trustedPort, controlPlane := kernelcapture.MatchSeccompControlPlaneEndpoint(
+		d.seccompPolicy, sessionID, ip, port,
+	); controlPlane {
+		if err := kernelcapture.EmulateSeccompControlPlaneConnect(listenerFD, notif, trustedIP, trustedPort); err != nil {
+			d.respondSeccompControlPlaneFailClosed(listenerFD, notif, sessionID, log, err)
+			return
+		}
+		if err := kernelcapture.SendSeccompNotifResp(listenerFD, notif.ID, 0, 0, false); err != nil {
+			log.Warn("seccomp notif send (control-plane emulated success)", "session_id", sessionID, "error", err)
+		}
+		log.Debug("seccomp control-plane connect emulated", "session_id", sessionID, "pid", notif.PID, "endpoint", fmt.Sprintf("%s:%d", trustedIP, trustedPort))
+		return
+	}
+
 	decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, sessionID, ip)
 	if !decision.HasPolicy {
 		// No OP_NET_CONNECT rule for this session: pass through untouched
@@ -304,6 +318,13 @@ func (d *daemon) handleSeccompConnectNotif(listenerFD int, notif kernelcapture.S
 		actionTaken = kernelcapture.BpfActionAllow
 	}
 	d.emitSeccompConnectEvent(cgroupID, notif.PID, actionTaken, decision.EnforceMode, ip, port, log)
+}
+
+func (d *daemon) respondSeccompControlPlaneFailClosed(listenerFD int, notif kernelcapture.SeccompNotif, sessionID string, log *slog.Logger, cause error) {
+	log.Warn("seccomp control-plane connect denied: emulation failed", "session_id", sessionID, "pid", notif.PID, "error", cause)
+	if err := kernelcapture.SendSeccompNotifResp(listenerFD, notif.ID, -1, int32(unix.EPERM), false); err != nil {
+		log.Warn("seccomp notif send (control-plane fail-closed deny)", "session_id", sessionID, "error", err)
+	}
 }
 
 // respondSeccompFailClosed answers a notification with EPERM and logs why,

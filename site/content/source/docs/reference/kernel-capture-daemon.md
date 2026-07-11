@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "22bc55554e92f61c4da02dc9d5f63f9a66191d7ade34ff52e1ac8be23264baf1"
+source_sha256: "0c26a5e208e7b2fd9fe3d2bab7fc3b1e8036eae459b89a28f7bd4eb78773ae3d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -44,6 +44,45 @@ Do not use `--no-ringbuf` as a production fallback for a failing event
 consumer. A healthy socket in this mode proves control-plane liveness only; it
 does not prove that a governed process is observed or constrained below the
 tool-call boundary.
+
+## Seccomp governance endpoint
+
+On a seccomp-tier `ardur run`, the network policy also traps the agent's TCP
+connection to the run's embedded governance proxy. The authenticated,
+session-owning parent includes that proxy's exact literal loopback IP and port
+in `apply_policy`. The daemon validates the tuple and stores it separately from
+the mission's `net_allow`; hostnames, non-loopback addresses, port zero, an
+endpoint without `OP_NET_CONNECT`, and broad `127/8` or `::1` CIDR exceptions
+are not accepted.
+
+For that exact tuple only, the daemon does not resume the tracee's original
+`connect(2)` with `SECCOMP_USER_NOTIF_FLAG_CONTINUE`. Another target thread
+could rewrite a pointer argument after inspection. Instead, the supervisor
+uses `pidfd_open(2)` and `pidfd_getfd(2)` to duplicate the target socket,
+connects the shared socket using the daemon-stored tuple, revalidates the
+notification, and returns synthetic success with no continue flag. Any lookup,
+permission, duplication, connect, or notification-validity failure returns
+`EPERM`. The control connection is transport plumbing and does not emit a
+mission enforcement event; unrelated loopback connections still follow the
+mission policy and remain visible in evidence.
+
+This emulation requires Linux 5.6 or newer and permission for the daemon to
+perform the kernel's `PTRACE_MODE_ATTACH_REALCREDS` check for the target. A
+production daemon normally satisfies that through its privileged service
+identity; restrictive capability, Yama, LSM, or container settings can still
+deny it, in which case the connection fails closed. See the Linux kernel
+[seccomp user-notification documentation](https://docs.kernel.org/userspace-api/seccomp_filter.html),
+[`seccomp_unotify(2)`](https://www.man7.org/linux/man-pages/man2/seccomp_unotify.2.html),
+and [`pidfd_getfd(2)`](https://www.man7.org/linux/man-pages/man2/pidfd_getfd.2.html).
+The shipped systemd unit includes `CAP_SYS_PTRACE` in both its ambient and
+bounding sets and explicitly permits `pidfd_open` and `pidfd_getfd`; custom
+units must preserve those three requirements for the seccomp endpoint path.
+
+Ordinary seccomp mission-policy allows still use `CONTINUE` and retain the
+documented weaker-than-BPF-LSM race boundary. The BPF-LSM tier does not use the
+endpoint field or this emulation path. Its full enforce-mode launch bootstrap
+remains tracked separately in
+[#241](https://github.com/ArdurAI/ardur/issues/241).
 
 ## Process lifecycle cgroup filter
 

@@ -51,6 +51,7 @@ client never sends them.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import shutil
@@ -260,6 +261,7 @@ class KernelCaptureClient:
         session_id: str,
         plan: BpfPolicyPlan,
         generation: int,
+        control_plane_endpoint: tuple[str, int] | None = None,
     ) -> dict[str, Any]:
         """Install a lowered BPF policy plan for ``session_id``'s cgroup.
 
@@ -270,6 +272,8 @@ class KernelCaptureClient:
         "uninitialized" and the daemon rejects it. Deep validation (op/action/
         enforce_mode enum values, duplicate ops, absolute paths) happens
         daemon-side; a rejection surfaces as :class:`DaemonProtocolError`.
+        ``control_plane_endpoint`` is reserved for the session-owning run
+        bridge and must be one exact literal loopback IP and non-zero port.
         """
         if not session_id:
             raise ValueError("session_id is required")
@@ -288,6 +292,17 @@ class KernelCaptureClient:
             apply_policy["path_allow"] = list(plan.path_allow)
         if plan.net_allow:
             apply_policy["net_allow"] = list(plan.net_allow)
+        if control_plane_endpoint is not None:
+            host, port = control_plane_endpoint
+            try:
+                ip = ipaddress.ip_address(host)
+            except ValueError as exc:
+                raise ValueError("control_plane_endpoint host must be a literal loopback IP") from exc
+            if not ip.is_loopback:
+                raise ValueError("control_plane_endpoint host must be a loopback IP")
+            if isinstance(port, bool) or not isinstance(port, int) or not 0 < port <= 65535:
+                raise ValueError("control_plane_endpoint port must be an integer from 1 to 65535")
+            apply_policy["control_plane_endpoint"] = {"ip": str(ip), "port": port}
         return self._roundtrip(
             {
                 "protocol_version": DAEMON_PROTOCOL_VERSION,

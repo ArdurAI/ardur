@@ -25,17 +25,14 @@ package kernelcapture
 //
 // Claim boundary (state up front, not just in the PR description): seccomp
 // user-notify is weaker than an in-kernel LSM against a racing multithreaded
-// adversary. The supervisor observes syscall arguments and reads target
-// memory across a window bounded by SECCOMP_IOCTL_NOTIF_ID_VALID checks (see
-// seccomp_notify_linux.go), but a sufficiently fast concurrent thread in the
-// target process can still rewrite the sockaddr bytes between the kernel
-// capturing the syscall arguments and this store's decision being enforced,
-// in ways a kernel-resident LSM hook (which runs synchronously in the
-// syscalling thread's own context, with no supervisor round-trip) is not
-// exposed to. This tier is a real, load-bearing enforcement mechanism for
-// single-threaded or cooperative targets — which describes the overwhelming
-// majority of AI-agent subprocess trees this project governs — not a
-// theoretically-airtight one against an adversarial multithreaded target.
+// adversary. Ordinary mission-policy ALLOW decisions resume connect(2) with
+// SECCOMP_USER_NOTIF_FLAG_CONTINUE, so a sufficiently fast concurrent thread
+// can still rewrite sockaddr bytes after inspection. The bridge-owned
+// control-plane endpoint is intentionally stronger: the supervisor duplicates
+// the target socket with pidfd_getfd, connects it using daemon-owned address
+// bytes, and returns synthetic success without CONTINUE. That closes argument
+// mutation for this one exact tuple; it does not upgrade the wider seccomp
+// tier into an in-kernel-LSM-equivalent claim.
 
 import (
 	"fmt"
@@ -51,9 +48,15 @@ type SeccompPolicyStore struct {
 }
 
 type seccompSessionPolicy struct {
-	action      BpfAction
-	enforceMode BpfEnforceMode
-	allow       []*net.IPNet
+	action       BpfAction
+	enforceMode  BpfEnforceMode
+	allow        []*net.IPNet
+	controlPlane *seccompControlPlaneEndpoint
+}
+
+type seccompControlPlaneEndpoint struct {
+	ip   net.IP
+	port uint16
 }
 
 // NewSeccompPolicyStore returns an empty store.
@@ -79,10 +82,22 @@ func ApplySeccompPolicy(store *SeccompPolicyStore, sessionID string, req DaemonA
 		}
 	}
 	if netPolicy == nil {
+		if req.ControlPlaneEndpoint != nil {
+			return fmt.Errorf("kernelcapture: seccomp control-plane endpoint requires OP_NET_CONNECT")
+		}
 		store.mu.Lock()
 		delete(store.sessions, sessionID)
 		store.mu.Unlock()
 		return nil
+	}
+
+	var controlPlane *seccompControlPlaneEndpoint
+	if req.ControlPlaneEndpoint != nil {
+		ip, err := parseDaemonControlPlaneEndpoint(*req.ControlPlaneEndpoint)
+		if err != nil {
+			return fmt.Errorf("kernelcapture: seccomp control-plane endpoint: %w", err)
+		}
+		controlPlane = &seccompControlPlaneEndpoint{ip: ip, port: req.ControlPlaneEndpoint.Port}
 	}
 
 	allow := make([]*net.IPNet, 0, len(req.NetAllow))
@@ -96,12 +111,33 @@ func ApplySeccompPolicy(store *SeccompPolicyStore, sessionID string, req DaemonA
 
 	store.mu.Lock()
 	store.sessions[sessionID] = seccompSessionPolicy{
-		action:      netPolicy.Action,
-		enforceMode: netPolicy.EnforceMode,
-		allow:       allow,
+		action:       netPolicy.Action,
+		enforceMode:  netPolicy.EnforceMode,
+		allow:        allow,
+		controlPlane: controlPlane,
 	}
 	store.mu.Unlock()
 	return nil
+}
+
+// MatchSeccompControlPlaneEndpoint returns a copy of the daemon-owned endpoint
+// only when the tracee requested that exact IP and port. The returned tuple,
+// not the tracee's mutable sockaddr bytes, is what the Linux supervisor uses
+// for socket-connect emulation.
+func MatchSeccompControlPlaneEndpoint(store *SeccompPolicyStore, sessionID string, ip net.IP, port uint16) (net.IP, uint16, bool) {
+	if store == nil || ip == nil {
+		return nil, 0, false
+	}
+	store.mu.RLock()
+	policy, ok := store.sessions[sessionID]
+	if !ok || policy.controlPlane == nil || port != policy.controlPlane.port || !policy.controlPlane.ip.Equal(ip) {
+		store.mu.RUnlock()
+		return nil, 0, false
+	}
+	trustedIP := append(net.IP(nil), policy.controlPlane.ip...)
+	trustedPort := policy.controlPlane.port
+	store.mu.RUnlock()
+	return trustedIP, trustedPort, true
 }
 
 // RemoveSeccompPolicy clears sessionID's policy, mirroring RemovePolicyMaps'

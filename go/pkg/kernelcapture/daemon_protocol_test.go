@@ -211,6 +211,55 @@ func TestDaemonProtocolDecodeRejectsRegisterSessionWithoutRootPID(t *testing.T) 
 	}
 }
 
+func TestDaemonApplyPolicyControlPlaneEndpointValidation(t *testing.T) {
+	t.Parallel()
+
+	valid := DaemonApplyPolicyRequest{
+		SessionID: "session-1",
+		OpPolicies: []DaemonOpPolicy{{
+			Op:          BpfOpNetConnect,
+			Action:      BpfActionDeny,
+			EnforceMode: BpfEnforceModeEnforce,
+		}},
+		Generation:  1,
+		EnforceMode: BpfEnforceModeEnforce,
+		ControlPlaneEndpoint: &DaemonControlPlaneEndpoint{
+			IP:   "127.0.0.1",
+			Port: 43210,
+		},
+	}
+	if err := validateDaemonApplyPolicy(valid); err != nil {
+		t.Fatalf("valid exact loopback endpoint rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		endpoint DaemonControlPlaneEndpoint
+	}{
+		{name: "remote IPv4", endpoint: DaemonControlPlaneEndpoint{IP: "192.0.2.10", Port: 43210}},
+		{name: "remote IPv6", endpoint: DaemonControlPlaneEndpoint{IP: "2001:db8::1", Port: 43210}},
+		{name: "hostname", endpoint: DaemonControlPlaneEndpoint{IP: "localhost", Port: 43210}},
+		{name: "unspecified IPv4", endpoint: DaemonControlPlaneEndpoint{IP: "0.0.0.0", Port: 43210}},
+		{name: "zero port", endpoint: DaemonControlPlaneEndpoint{IP: "127.0.0.1", Port: 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := valid
+			req.ControlPlaneEndpoint = &tc.endpoint
+			if err := validateDaemonApplyPolicy(req); err == nil || !errors.Is(err, ErrDaemonProtocol) {
+				t.Fatalf("validate endpoint %#v error = %v, want ErrDaemonProtocol", tc.endpoint, err)
+			}
+		})
+	}
+
+	withoutNetPolicy := valid
+	withoutNetPolicy.OpPolicies = []DaemonOpPolicy{{
+		Op: BpfOpExec, Action: BpfActionDeny, EnforceMode: BpfEnforceModeEnforce,
+	}}
+	if err := validateDaemonApplyPolicy(withoutNetPolicy); err == nil || !errors.Is(err, ErrDaemonProtocol) {
+		t.Fatalf("endpoint without OP_NET_CONNECT error = %v, want ErrDaemonProtocol", err)
+	}
+}
+
 func TestDaemonProtocolValidationRejectsForbiddenHandoffMetadata(t *testing.T) {
 	t.Parallel()
 
