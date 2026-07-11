@@ -12,8 +12,10 @@ package aat
 import jose "github.com/go-jose/go-jose/v4"
 
 const (
-	AuthorizationDetailType = "attenuating_agent_token"
-	SigningAlgorithmEdDSA   = "EdDSA"
+	AuthorizationDetailType  = "attenuating_agent_token"
+	SigningAlgorithmEdDSA    = "EdDSA"
+	SupportedDraftRevision   = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
+	UnsupportedDraftRevision = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
 
 	// TODO(B.5/Appendix-D.3): assign integer claim keys in the companion CWT
 	// profile document once Appendix D.3 is translated into repo-local

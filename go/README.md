@@ -42,19 +42,23 @@ go test -race ./...
 
 ## AAT Package
 
-The `pkg/aat` package implements the JWT path of the Attenuating Authorization
-Token profile:
+The `pkg/aat` package implements the JWT path of Ardur's
+`draft-niyikiza-oauth-attenuating-agent-tokens-00` profile. Draft-01 removes
+the required `aat_type` role claim and is rejected explicitly pending a
+versioned migration decision:
 
-- **Constraint engine** — 13 constraint types (Exact, Pattern, Range, OneOf,
+- **Constraint engine** — 13 draft-00 constraint types (Exact, Pattern, Range, OneOf,
   NotOneOf, Contains, Subset, Regex, Wildcard, All, Any, Not, CEL) with
-  full check and subsumption semantics per AAT §3.4-3.5.
+  fail-closed dispatch and conservative subsumption per AAT §3.4-3.5. CEL
+  runtime evaluation remains intentionally unimplemented and denies.
 - **Issuance + derivation** — `IssueRoot` creates root AATs with
   `del_depth=0` and `cnf.jwk` holder binding; `DeriveChild` increments
   depth, computes `par_hash` via SHA-256 of the parent signing input, and
   enforces invariants I1-I5 (signer linkage, depth monotonicity, TTL
   monotonicity, capability monotonicity, cryptographic linkage).
-- **Proof of Possession** — `BuildPoPJWT` and `VerifyPoPJWT` with JCS-style
-  HTA canonicalization per AAT §5.2-5.3.
+- **Proof of Possession** — `BuildPoPJWT` and `VerifyPoPJWT` with direct
+  argument-map `hta` and RFC 8785 whole-payload canonicalization per AAT
+  §5.2-5.3.
 - **Chain verification** — 8-step offline verification algorithm per AAT
   §7: structural validation → root verification (3a-3n) → link
   verification (4a-4s) → depth match → leaf constraint check → PoP
@@ -62,9 +66,10 @@ Token profile:
 - **Tests** covering constraint checks, subsumption cross-types, issuance,
   derivation, PoP round-trips, and full chain verification scenarios.
 
-The companion CWT integer claim-key mapping is still pending. This package is
-therefore substantial and runnable, but it is not a claim of complete support
-for every AAT serialization profile.
+JWT/JWS is the only supported encoding. The draft-00 appendix defers CWT
+integer claim keys, COSE rules, and interoperable serialization to a companion
+document, so this package does not claim CWT or independent interoperability.
+See the [revision decision](../docs/specs/aat-draft-01-migration-decision.md).
 
 ```bash
 cd go && go test ./pkg/aat/... -v   # full AAT test suite

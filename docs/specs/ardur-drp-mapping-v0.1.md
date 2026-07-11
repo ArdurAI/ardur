@@ -38,8 +38,9 @@ draft-00. The live Datatracker advanced to draft-01 on 2026-06-15; draft-01 is
 an individual Internet-Draft with no formal IETF standing and removes the
 draft-00 `aat_type` token-role field in favor of chain-position semantics.
 This document maps the code that exists. It does not silently reinterpret that
-code as draft-01. The versioned migration audit is tracked in
-[#233](https://github.com/ArdurAI/ardur/issues/233).
+code as draft-01. The selected compatibility contract and time-bounded review
+are recorded in
+[`aat-draft-01-migration-decision.md`](./aat-draft-01-migration-decision.md).
 
 Arbitrary caller-supplied `extra_claims` are not a versioned schema. An
 emitter MUST reject an unregistered extra claim instead of silently placing it

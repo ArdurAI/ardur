@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "77497f13788211f876102c4c1946dbd0203cf7a94d660f2faa175b34559f8094"
+source_sha256: "be9916c93eae53d98ccad47aab494615e1e97fb6bfa7fcb7483c4e10c6ae591f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -31,6 +31,8 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 |------|--------|-------|
 | [Conformance Profiles](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/) | **migrated** | Public-import annotated |
 | [Delegation Grant (DG) Profile of AAT](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/) | **migrated** | Public-import annotated |
+| [AAT draft-01 migration decision](/__ardur_internal__/source/docs/specs/aat-draft-01-migration-decision/) | **time-bounded draft-00 pin** | Explicit draft-01 rejection; review by 2026-09-15 |
+| [AAT draft-00 to draft-01 change ledger](/__ardur_internal__/repo/docs/specs/aat-draft-00-to-01-change-ledger.json) | **audited** | Primary-source claims, roles, constraints, derivation, verification, algorithms, and security delta |
 | [Ardur DRP Mapping Profile v0.1](/__ardur_internal__/source/docs/specs/ardur-drp-mapping-v0.1/) | **mapping published** | Draft-10-pinned field ledger and B2 target shape; not an IETF conformance or interoperability claim |
 | [Ardur DRP Profile v0.1](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/) | **implemented** | RFC 8785/P-256 emit, external-trust verifier, full transitive attenuation, and bounded DENY reasons |
 | [DRP implementation and interoperability note v0.1](/__ardur_internal__/source/docs/specs/ardur-drp-implementation-interop-v0.1/) | **implementation evidence published** | Draft-10 support ledger, portable signed scenarios, deterministic CI report, and explicit `not-demonstrated` independent status |
@@ -99,7 +101,7 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 ## Relationship to adjacent standards
 
-- **AAT (Attenuating Authorization Tokens)** — individual Internet-Draft with no formal IETF standing; MCEP's current Delegation Grant profile is pinned to draft-00 while draft-01 migration is tracked in [#233](https://github.com/ArdurAI/ardur/issues/233).
+- **AAT (Attenuating Authorization Tokens)** — individual Internet-Draft with no formal IETF standing; MCEP's current Delegation Grant profile is pinned to draft-00, rejects draft-01 explicitly, and records a time-bounded migration decision plus field ledger for [review in #246](https://github.com/ArdurAI/ardur/issues/246) by 2026-09-15.
 - **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur implements its draft-10-pinned profile and publishes portable implementation self-test fixtures, while raw RFC 3161 proof integration and independent interoperability remain not demonstrated.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
 - **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.

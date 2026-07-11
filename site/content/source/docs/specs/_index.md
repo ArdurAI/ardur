@@ -16,6 +16,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 ## Hosted Docs
 
 - [`README.md`](/__ardur_internal__/source/docs/specs/readme/)
+- [`aat-draft-01-migration-decision.md`](/__ardur_internal__/source/docs/specs/aat-draft-01-migration-decision/)
 - [`ardur-drp-implementation-interop-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-implementation-interop-v0.1/)
 - [`ardur-drp-mapping-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-mapping-v0.1/)
 - [`ardur-drp-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/)
@@ -35,6 +36,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 ## Hosted Artifacts
 
+- [`aat-draft-00-to-01-change-ledger.json`](/__ardur_internal__/repo/docs/specs/aat-draft-00-to-01-change-ledger.json)
 - [`ardur-drp-mapping-v0.1.json`](/__ardur_internal__/repo/docs/specs/ardur-drp-mapping-v0.1.json)
 - [`ardur-drp-profile-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/ardur-drp-profile-v0.1.schema.json)
 - [`drp-conformance-bundle-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/drp-conformance-bundle-v0.1.schema.json)

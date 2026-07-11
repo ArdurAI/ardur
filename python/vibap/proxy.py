@@ -2766,6 +2766,7 @@ class GovernanceProxy:
             self.public_key,
             self.mission_cache,
             parent_claims=parent_claims,
+            parent_token=parent_aat_token,
             holder_public_key=holder_public_key,
             kb_jwt=kb_jwt,
             require_pop=require_pop,

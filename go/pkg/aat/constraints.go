@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // ConstraintHandler defines the extension point required by AAT §3.5.
@@ -152,6 +153,12 @@ func SubsumesExact(parent, child *Constraint) (bool, error) {
 		return true, nil
 	case ConstraintTypeOneOf:
 		return sliceContains(parent.Values, child.Value), nil
+	case ConstraintTypePattern:
+		return CheckPattern(child.Value, parent) == nil, nil
+	case ConstraintTypeRange:
+		return CheckRange(child.Value, parent) == nil, nil
+	case ConstraintTypeRegex:
+		return CheckRegex(child.Value, parent) == nil, nil
 	default:
 		return false, nil
 	}
@@ -183,20 +190,20 @@ func SubsumesPattern(parent, child *Constraint) (bool, error) {
 	case ConstraintTypePattern:
 		// Parent pattern must match all strings child pattern matches.
 		// Conservative: only allow identical patterns or prefix narrowing.
-		pPat := parent.Value.(string)
-		cPat := child.Value.(string)
+		pPat, parentOK := parent.Value.(string)
+		cPat, childOK := child.Value.(string)
+		if !parentOK || !childOK || strings.Contains(pPat, "**") || strings.Contains(cPat, "**") {
+			return false, nil
+		}
 		if pPat == cPat {
 			return true, nil
 		}
-		if strings.HasSuffix(pPat, "*") && strings.HasPrefix(cPat, strings.TrimSuffix(pPat, "*")) {
+		if strings.HasSuffix(pPat, "*") && strings.HasSuffix(cPat, "*") &&
+			!strings.HasSuffix(pPat, "**") && !strings.HasSuffix(cPat, "**") &&
+			strings.HasPrefix(strings.TrimSuffix(cPat, "*"), strings.TrimSuffix(pPat, "*")) {
 			return true, nil
 		}
 		return false, nil
-	case ConstraintTypeExact:
-		pVal := parent.Value.(string)
-		cPat := child.Value.(string)
-		matched, _ := filepath.Match(cPat, pVal)
-		return matched, nil
 	default:
 		return false, nil
 	}
@@ -238,25 +245,12 @@ func SubsumesRange(parent, child *Constraint) (bool, error) {
 		return true, nil
 	case ConstraintTypeRange:
 		return rangeNarrowerOrEqual(parent, child), nil
-	case ConstraintTypeExact:
-		n, err := toFloat64(parent.Value)
-		if err != nil {
-			return false, nil
-		}
-		if child.Min != nil && n < *child.Min {
-			return false, nil
-		}
-		if child.Max != nil && n > *child.Max {
-			return false, nil
-		}
-		return true, nil
 	default:
 		return false, nil
 	}
 }
 
 func rangeNarrowerOrEqual(parent, child *Constraint) bool {
-	minOK := true
 	if parent.Min != nil {
 		if child.Min == nil {
 			return false
@@ -265,16 +259,13 @@ func rangeNarrowerOrEqual(parent, child *Constraint) bool {
 			return false
 		}
 		if *child.Min == *parent.Min {
-			if parent.MinInclusive != nil && *parent.MinInclusive {
-				if child.MinInclusive == nil || *child.MinInclusive {
-					// ok
-				} else {
-					minOK = false
-				}
+			parentInclusive := parent.MinInclusive == nil || *parent.MinInclusive
+			childInclusive := child.MinInclusive == nil || *child.MinInclusive
+			if !parentInclusive && childInclusive {
+				return false
 			}
 		}
 	}
-	maxOK := true
 	if parent.Max != nil {
 		if child.Max == nil {
 			return false
@@ -283,16 +274,14 @@ func rangeNarrowerOrEqual(parent, child *Constraint) bool {
 			return false
 		}
 		if *child.Max == *parent.Max {
-			if parent.MaxInclusive != nil && *parent.MaxInclusive {
-				if child.MaxInclusive == nil || *child.MaxInclusive {
-					// ok
-				} else {
-					maxOK = false
-				}
+			parentInclusive := parent.MaxInclusive == nil || *parent.MaxInclusive
+			childInclusive := child.MaxInclusive == nil || *child.MaxInclusive
+			if !parentInclusive && childInclusive {
+				return false
 			}
 		}
 	}
-	return minOK && maxOK
+	return true
 }
 
 func CheckOneOf(value any, constraint *Constraint) error {
@@ -308,8 +297,6 @@ func SubsumesOneOf(parent, child *Constraint) (bool, error) {
 		return true, nil
 	case ConstraintTypeOneOf:
 		return isSubsetAny(child.Values, parent.Values), nil
-	case ConstraintTypeExact:
-		return sliceContains(child.Values, parent.Value), nil
 	default:
 		return false, nil
 	}
@@ -323,7 +310,14 @@ func CheckNotOneOf(value any, constraint *Constraint) error {
 }
 
 func SubsumesNotOneOf(parent, child *Constraint) (bool, error) {
-	return isSupersetAny(child.Excluded, parent.Excluded), nil
+	switch parent.ConstraintType {
+	case ConstraintTypeWildcard:
+		return true, nil
+	case ConstraintTypeNotOneOf:
+		return isSupersetAny(child.Excluded, parent.Excluded), nil
+	default:
+		return false, nil
+	}
 }
 
 func CheckContains(value any, constraint *Constraint) error {
@@ -340,6 +334,12 @@ func CheckContains(value any, constraint *Constraint) error {
 }
 
 func SubsumesContains(parent, child *Constraint) (bool, error) {
+	if parent.ConstraintType == ConstraintTypeWildcard {
+		return true, nil
+	}
+	if parent.ConstraintType != ConstraintTypeContains {
+		return false, nil
+	}
 	return isSupersetAny(child.Required, parent.Required), nil
 }
 
@@ -357,21 +357,27 @@ func CheckSubset(value any, constraint *Constraint) error {
 }
 
 func SubsumesSubset(parent, child *Constraint) (bool, error) {
+	if parent.ConstraintType == ConstraintTypeWildcard {
+		return true, nil
+	}
+	if parent.ConstraintType != ConstraintTypeSubset {
+		return false, nil
+	}
 	return isSubsetAny(child.Allowed, parent.Allowed), nil
 }
 
-var _regexCache = make(map[string]*regexp.Regexp)
+var regexCache sync.Map
 
 func getCachedRegex(pattern string) (*regexp.Regexp, error) {
-	if re, ok := _regexCache[pattern]; ok {
-		return re, nil
+	if cached, ok := regexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
-	_regexCache[pattern] = re
-	return re, nil
+	actual, _ := regexCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
 }
 
 func CheckRegex(value any, constraint *Constraint) error {
@@ -395,16 +401,6 @@ func SubsumesRegex(parent, child *Constraint) (bool, error) {
 		return true, nil
 	case ConstraintTypeRegex:
 		return parent.Pattern == child.Pattern, nil
-	case ConstraintTypeExact:
-		actual, ok := parent.Value.(string)
-		if !ok {
-			return false, nil
-		}
-		re, err := getCachedRegex(child.Pattern)
-		if err != nil {
-			return false, nil
-		}
-		return re.MatchString(actual), nil
 	default:
 		return false, nil
 	}
@@ -441,24 +437,7 @@ func SubsumesAll(parent, child *Constraint) (bool, error) {
 	case ConstraintTypeWildcard:
 		return true, nil
 	case ConstraintTypeAll:
-		// Each child clause must be subsumed by some parent clause.
-		for _, cClause := range child.Children {
-			found := false
-			for _, pClause := range parent.Children {
-				ok, err := SubsumesConstraint(pClause, cClause)
-				if err != nil {
-					return false, err
-				}
-				if ok {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false, nil
-			}
-		}
-		return true, nil
+		return matchAllClauses(parent.Children, child.Children)
 	default:
 		return false, nil
 	}
@@ -518,7 +497,58 @@ func SubsumesNot(parent, child *Constraint) (bool, error) {
 	if parent.ConstraintType != ConstraintTypeNot || child.ConstraintType != ConstraintTypeNot {
 		return false, nil
 	}
-	return SubsumesConstraint(parent.Inner, child.Inner)
+	parentCanonical, err := canonicalizeJSON(parent)
+	if err != nil {
+		return false, err
+	}
+	childCanonical, err := canonicalizeJSON(child)
+	if err != nil {
+		return false, err
+	}
+	return string(parentCanonical) == string(childCanonical), nil
+}
+
+func matchAllClauses(parent, child []*Constraint) (bool, error) {
+	edges := make([][]int, len(parent))
+	for parentIndex, parentClause := range parent {
+		for childIndex, childClause := range child {
+			if parentClause == nil || childClause == nil || childClause.ConstraintType != parentClause.ConstraintType {
+				continue
+			}
+			ok, err := SubsumesConstraint(parentClause, childClause)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				edges[parentIndex] = append(edges[parentIndex], childIndex)
+			}
+		}
+	}
+
+	matchedParent := make([]int, len(child))
+	for index := range matchedParent {
+		matchedParent[index] = -1
+	}
+	var augment func(int, []bool) bool
+	augment = func(parentIndex int, seen []bool) bool {
+		for _, childIndex := range edges[parentIndex] {
+			if seen[childIndex] {
+				continue
+			}
+			seen[childIndex] = true
+			if matchedParent[childIndex] == -1 || augment(matchedParent[childIndex], seen) {
+				matchedParent[childIndex] = parentIndex
+				return true
+			}
+		}
+		return false
+	}
+	for parentIndex := range parent {
+		if !augment(parentIndex, make([]bool, len(child))) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -592,9 +622,9 @@ func isSupersetAny(child, parent []any) bool {
 	return true
 }
 
-func floatPtr(v float64) *float64       { return &v }
-func boolPtr(v bool) *bool              { return &v }
-func intPtr(v int) *int                 { return &v }
+func floatPtr(v float64) *float64 { return &v }
+func boolPtr(v bool) *bool        { return &v }
+func intPtr(v int) *int           { return &v }
 func maxInt(a, b int) int {
 	if a > b {
 		return a

@@ -1,15 +1,21 @@
 """Minimal AAT-compatible JWT adapter for MCEP sessions.
 
-This is intentionally a narrow interop shim, not a standards-complete AAT
-implementation. It accepts the repo's minimal AAT-shaped JWT profile, resolves
+This is intentionally a narrow draft-00 interop shim, not a complete AAT
+chain verifier. It accepts the repo's minimal AAT-shaped JWT profile, resolves
 ``mission_ref`` to an authoritative Mission Declaration, and maps the grant to
 the internal mission-passport claim shape used by the governance proxy.
+
+Draft-01 removes the draft-00 ``aat_type`` claim. This adapter rejects that
+wire explicitly so a future chain-position implementation cannot be enabled by
+accident.
 """
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
+import hmac
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -29,6 +35,8 @@ from .passport import ALGORITHM, MissionPassport, assert_iat_in_window, verify_p
 
 AAT_AUTHORIZATION_DETAIL_TYPE = "attenuating_agent_token"
 AAT_CREDENTIAL_FORMAT = "aat-compatible-jwt"
+AAT_SUPPORTED_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
+AAT_UNSUPPORTED_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
 
 
 @dataclass(frozen=True)
@@ -49,7 +57,7 @@ def decode_aat_claims(
         public_key,
         algorithms=[ALGORITHM],
         options={
-            "require": ["jti", "iss", "sub", "iat", "exp", "aat_type"],
+            "require": ["jti", "iss", "sub", "iat", "exp"],
             "verify_aud": False,
             # Bounded-iat check below; PyJWT's default check uses zero
             # leeway and would clash with cross-node clock drift.
@@ -57,8 +65,16 @@ def decode_aat_claims(
         },
     )
     assert_iat_in_window(claims.get("iat"), field_name="AAT iat")
+    if "aat_type" not in claims:
+        raise PermissionError(
+            "unsupported AAT revision: "
+            f"{AAT_UNSUPPORTED_REVISION} removes aat_type; this adapter is "
+            f"pinned to {AAT_SUPPORTED_REVISION}"
+        )
     if claims.get("aat_type") != "delegation":
-        raise PermissionError("unsupported AAT token shape: aat_type must be delegation")
+        raise PermissionError(
+            "unsupported AAT token shape: aat_type must be delegation"
+        )
     if "mission_ref" not in claims:
         raise PermissionError("AAT grant missing mission_ref")
     if "authorization_details" not in claims:
@@ -72,6 +88,7 @@ def material_from_aat_grant(
     mission_cache: MissionCache,
     *,
     parent_claims: dict[str, Any] | None = None,
+    parent_token: str | None = None,
     mission_loader: Callable[[Any], Any] | None = None,
     holder_public_key: ec.EllipticCurvePublicKey | None = None,
     kb_jwt: str | None = None,
@@ -125,6 +142,11 @@ def material_from_aat_grant(
         verify_pop(claims, token, holder_public_key, kb_jwt)
     if parent_claims is not None:
         _assert_child_grant_narrows_parent(claims, parent_claims)
+        if parent_token is None:
+            raise PermissionError("AAT child grant requires the exact parent token")
+        _assert_child_parent_binding(claims, parent_token)
+    elif parent_token is not None:
+        raise PermissionError("AAT parent token was supplied without verified parent claims")
 
     try:
         mission_ref = parse_mission_ref(claims["mission_ref"])
@@ -143,7 +165,9 @@ def material_from_aat_grant(
     if widened_tools:
         raise PermissionError(f"AAT grant widens mission tools: {widened_tools}")
 
-    max_tool_calls = _extract_max_tool_calls(claims, declaration.passport.max_tool_calls)
+    max_tool_calls = _extract_max_tool_calls(
+        claims, declaration.passport.max_tool_calls
+    )
     if max_tool_calls > declaration.passport.max_tool_calls:
         raise PermissionError("AAT grant widens mission max_tool_calls")
 
@@ -163,7 +187,9 @@ def material_from_aat_grant(
         mission=declaration.passport.mission,
         allowed_tools=sorted(granted_tools),
         forbidden_tools=sorted(mission_tools - granted_tools),
-        resource_scope=_extract_resource_scope(claims, declaration.passport.resource_scope),
+        resource_scope=_extract_resource_scope(
+            claims, declaration.passport.resource_scope
+        ),
         max_tool_calls=max_tool_calls,
         max_duration_s=ttl_s,
         delegation_allowed=remaining_depth > 0,
@@ -176,6 +202,7 @@ def material_from_aat_grant(
         "aat_grant_id": str(claims["jti"]),
         "aat_issuer": str(claims["iss"]),
         "aat_type": str(claims["aat_type"]),
+        "aat_revision": AAT_SUPPORTED_REVISION,
         "mission_ref": copy.deepcopy(claims["mission_ref"]),
         "mission_digest": declaration.payload_digest,
         "external_grant_token_hash": hashlib.sha256(token.encode("utf-8")).hexdigest(),
@@ -196,12 +223,25 @@ def _extract_tools(claims: dict[str, Any]) -> set[str]:
     for detail in _authorization_details(claims):
         raw_tools = detail.get("tools")
         if isinstance(raw_tools, dict):
-            tools.update(str(name) for name in raw_tools if str(name).strip())
+            for name, argument_constraints in raw_tools.items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                if argument_constraints != {}:
+                    raise PermissionError(
+                        "AAT adapter does not support argument constraints; "
+                        "use the Go chain verifier"
+                    )
+                tools.add(name)
         elif isinstance(raw_tools, list):
             for item in raw_tools:
                 if isinstance(item, str) and item.strip():
                     tools.add(item)
                 elif isinstance(item, dict) and isinstance(item.get("name"), str):
+                    if set(item) != {"name"}:
+                        raise PermissionError(
+                            "AAT adapter does not support list-form tool constraints; "
+                            "use the Go chain verifier"
+                        )
                     tools.add(item["name"])
     if not tools:
         raise PermissionError("AAT grant has no supported tool grants")
@@ -211,17 +251,16 @@ def _extract_tools(claims: dict[str, Any]) -> set[str]:
 def _extract_max_tool_calls(claims: dict[str, Any], default: int) -> int:
     candidates: list[int] = []
     if "max_tool_calls" in claims:
-        candidates.append(int(claims["max_tool_calls"]))
+        candidates.append(_positive_int(claims["max_tool_calls"], "max_tool_calls"))
     budget = claims.get("budget")
     if isinstance(budget, dict) and "tool_calls" in budget:
-        candidates.append(int(budget["tool_calls"]))
+        candidates.append(_positive_int(budget["tool_calls"], "budget.tool_calls"))
     for detail in _authorization_details(claims):
         if "max_tool_calls" in detail:
-            candidates.append(int(detail["max_tool_calls"]))
-    value = min(candidates) if candidates else int(default)
-    if value <= 0:
-        raise PermissionError("AAT grant max_tool_calls must be positive")
-    return value
+            candidates.append(
+                _positive_int(detail["max_tool_calls"], "authorization max_tool_calls")
+            )
+    return min(candidates) if candidates else _positive_int(default, "default budget")
 
 
 def _extract_resource_scope(
@@ -231,7 +270,9 @@ def _extract_resource_scope(
     raw_scope = claims.get("resource_scope")
     if raw_scope is None:
         return list(mission_scope)
-    if not isinstance(raw_scope, list) or not all(isinstance(item, str) for item in raw_scope):
+    if not isinstance(raw_scope, list) or not all(
+        isinstance(item, str) for item in raw_scope
+    ):
         raise PermissionError("AAT grant resource_scope must be a string array")
     requested = set(raw_scope)
     if mission_scope:
@@ -255,23 +296,79 @@ def _assert_child_grant_narrows_parent(
     if child_budget > parent_budget:
         raise PermissionError("AAT child grant widens parent budget")
     child_depth = _int_claim(child, "del_depth", fallback="delegation_depth", default=0)
-    parent_depth = _int_claim(parent, "del_depth", fallback="delegation_depth", default=0)
+    parent_depth = _int_claim(
+        parent, "del_depth", fallback="delegation_depth", default=0
+    )
     if child_depth <= parent_depth:
         raise PermissionError("AAT child grant must increase delegation depth")
+    if child_depth != parent_depth + 1:
+        raise PermissionError(
+            "AAT child grant must increase delegation depth by exactly one"
+        )
+    child_max_depth = _int_claim(
+        child,
+        "del_max_depth",
+        fallback="max_delegation_depth",
+        default=child_depth,
+    )
+    parent_max_depth = _int_claim(
+        parent,
+        "del_max_depth",
+        fallback="max_delegation_depth",
+        default=parent_depth,
+    )
+    if child_depth > child_max_depth or child_max_depth > parent_max_depth:
+        raise PermissionError(
+            "AAT child grant widens or exhausts an invalid depth window"
+        )
+    if int(child["iat"]) < int(parent["iat"]):
+        raise PermissionError("AAT child grant iat precedes parent iat")
+    if int(child["exp"]) > int(parent["exp"]):
+        raise PermissionError("AAT child grant exp exceeds parent exp")
+    if child.get("mission_ref") != parent.get("mission_ref"):
+        raise PermissionError("AAT child grant changes mission_ref")
+
+
+def _assert_child_parent_binding(child: dict[str, Any], parent_token: str) -> None:
+    actual = child.get("par_hash")
+    if not isinstance(actual, str) or not actual:
+        raise PermissionError("AAT child grant missing par_hash parent binding")
+    expected_text = _aat_parent_hash(parent_token)
+    if not hmac.compare_digest(actual, expected_text):
+        raise PermissionError("AAT child grant par_hash does not bind the parent token")
+
+
+def _aat_parent_hash(parent_token: str) -> str:
+    parts = parent_token.split(".")
+    if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2]:
+        raise PermissionError("AAT parent token is not compact JWS")
+    signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
+    expected = base64.urlsafe_b64encode(hashlib.sha256(signing_input).digest())
+    return expected.rstrip(b"=").decode("ascii")
 
 
 def _authorization_details(claims: dict[str, Any]) -> list[dict[str, Any]]:
     raw = claims.get("authorization_details")
     if not isinstance(raw, list):
         raise PermissionError("authorization_details must be an array")
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("type"), str)
+        or not item["type"]
+        for item in raw
+    ):
+        raise PermissionError(
+            "authorization_details entries must be objects with a string type"
+        )
     details = [
         item
         for item in raw
-        if isinstance(item, dict)
-        and item.get("type") == AAT_AUTHORIZATION_DETAIL_TYPE
+        if isinstance(item, dict) and item.get("type") == AAT_AUTHORIZATION_DETAIL_TYPE
     ]
-    if not details:
-        raise PermissionError("no supported AAT authorization detail found")
+    if len(details) != 1:
+        raise PermissionError(
+            "AAT grant must contain exactly one supported authorization detail"
+        )
     return details
 
 
@@ -283,4 +380,12 @@ def _int_claim(
     default: int,
 ) -> int:
     raw = claims.get(name, claims.get(fallback, default))
-    return int(raw)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise PermissionError(f"AAT claim {name} must be an integer")
+    return raw
+
+
+def _positive_int(raw: Any, field_name: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise PermissionError(f"AAT grant {field_name} must be a positive integer")
+    return raw

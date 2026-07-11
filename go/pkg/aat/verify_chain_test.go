@@ -326,15 +326,15 @@ func TestIssueRootSuccess(t *testing.T) {
 	pub, priv := newKeyPair()
 	now := time.Now()
 	token, err := IssueRoot(IssueRootOpts{
-		JWTID:         "root-jti-1",
-		Issuer:        "https://as.example.com",
-		Now:           now,
-		ExpiresAt:     now.Add(1 * time.Hour),
-		TokenType:     AATTypeDelegation,
+		JWTID:              "root-jti-1",
+		Issuer:             "https://as.example.com",
+		Now:                now,
+		ExpiresAt:          now.Add(1 * time.Hour),
+		TokenType:          AATTypeDelegation,
 		MaxDelegationDepth: 3,
-		HolderJWK:     publicKeyToJWK(pub),
-		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
-		Signer:        priv,
+		HolderJWK:          publicKeyToJWK(pub),
+		Authorization:      simpleAuthorization(wildcardToolMap("read_file")),
+		Signer:             priv,
 	})
 	if err != nil {
 		t.Fatalf("IssueRoot failed: %v", err)
@@ -382,19 +382,19 @@ func TestIssueRootValidationErrors(t *testing.T) {
 
 func TestDeriveChildSuccess(t *testing.T) {
 	rootPub, rootPriv := newKeyPair()
-	childPub, childPriv := newKeyPair()
+	childPub, _ := newKeyPair()
 	now := time.Now()
 
 	root, err := IssueRoot(IssueRootOpts{
-		JWTID:         "root-jti-2",
-		Issuer:        "https://as.example.com",
-		Now:           now,
-		ExpiresAt:     now.Add(2 * time.Hour),
-		TokenType:     AATTypeDelegation,
+		JWTID:              "root-jti-2",
+		Issuer:             "https://as.example.com",
+		Now:                now,
+		ExpiresAt:          now.Add(2 * time.Hour),
+		TokenType:          AATTypeDelegation,
 		MaxDelegationDepth: 3,
-		HolderJWK:     publicKeyToJWK(rootPub),
-		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
-		Signer:        rootPriv,
+		HolderJWK:          publicKeyToJWK(rootPub),
+		Authorization:      simpleAuthorization(wildcardToolMap("read_file")),
+		Signer:             rootPriv,
 	})
 	if err != nil {
 		t.Fatalf("IssueRoot failed: %v", err)
@@ -414,7 +414,7 @@ func TestDeriveChildSuccess(t *testing.T) {
 		MaxDelegationDepth: 2,
 		HolderJWK:          publicKeyToJWK(childPub),
 		Authorization:      simpleAuthorization(wildcardToolMap("read_file")),
-		Signer:             childPriv,
+		Signer:             rootPriv,
 	})
 	if err != nil {
 		t.Fatalf("DeriveChild failed: %v", err)
@@ -433,15 +433,15 @@ func TestDeriveChildDepthExceedsParentMax(t *testing.T) {
 	now := time.Now()
 
 	root, err := IssueRoot(IssueRootOpts{
-		JWTID:         "root-jti-3",
-		Issuer:        "https://as.example.com",
-		Now:           now,
-		ExpiresAt:     now.Add(2 * time.Hour),
-		TokenType:     AATTypeDelegation,
+		JWTID:              "root-jti-3",
+		Issuer:             "https://as.example.com",
+		Now:                now,
+		ExpiresAt:          now.Add(2 * time.Hour),
+		TokenType:          AATTypeDelegation,
 		MaxDelegationDepth: 0, // no further delegation allowed
-		HolderJWK:     publicKeyToJWK(rootPub),
-		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
-		Signer:        rootPriv,
+		HolderJWK:          publicKeyToJWK(rootPub),
+		Authorization:      simpleAuthorization(wildcardToolMap("read_file")),
+		Signer:             rootPriv,
 	})
 	if err != nil {
 		t.Fatalf("IssueRoot failed: %v", err)
@@ -471,9 +471,9 @@ func TestBuildAndVerifyPoPJWT(t *testing.T) {
 	now := time.Now()
 
 	leaf := &Token{
-		JWTID:        "leaf-jti-1",
-		TokenType:    AATTypeExecution,
-		Confirmation: &ConfirmationKey{JWK: publicKeyToJWK(leafPub)},
+		JWTID:         "leaf-jti-1",
+		TokenType:     AATTypeExecution,
+		Confirmation:  &ConfirmationKey{JWK: publicKeyToJWK(leafPub)},
 		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
 	}
 
@@ -510,13 +510,13 @@ func TestVerifyPoPJWTWrongKey(t *testing.T) {
 	now := time.Now()
 
 	leaf := &Token{
-		JWTID:        "leaf-jti-2",
-		Confirmation: &ConfirmationKey{JWK: publicKeyToJWK(leafPub)},
+		JWTID:         "leaf-jti-2",
+		Confirmation:  &ConfirmationKey{JWK: publicKeyToJWK(leafPub)},
 		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
 	}
 
 	// Sign with wrong key
-	popJWT, err := BuildPoPJWT(BuildPoPOpts{
+	_, err := BuildPoPJWT(BuildPoPOpts{
 		JWTID:  "pop-jti-2",
 		Now:    now,
 		Leaf:   leaf,
@@ -524,10 +524,21 @@ func TestVerifyPoPJWTWrongKey(t *testing.T) {
 		Args:   map[string]interface{}{"path": "/tmp/test.txt"},
 		Signer: otherPriv, // wrong key!
 	})
-	if err != nil {
-		t.Fatalf("BuildPoPJWT failed: %v", err)
+	if err == nil {
+		t.Fatal("BuildPoPJWT accepted a signer unrelated to leaf.cnf.jwk")
 	}
 
+	payload, err := canonicalizeJSON(map[string]interface{}{
+		"jti":      "pop-jti-2",
+		"iat":      now.Unix(),
+		"aat_id":   leaf.JWTID,
+		"aat_tool": "read_file",
+		"hta":      map[string]interface{}{"path": "/tmp/test.txt"},
+	})
+	if err != nil {
+		t.Fatalf("canonicalizing wrong-key fixture: %v", err)
+	}
+	popJWT := signTestPayload(t, payload, otherPriv)
 	_, err = VerifyPoPJWT(leaf, "read_file", map[string]interface{}{"path": "/tmp/test.txt"}, popJWT, VerifyPoPOpts{Now: now})
 	if err == nil {
 		t.Fatal("VerifyPoPJWT should fail when signed with wrong key")
@@ -542,8 +553,8 @@ func TestVerifyPoPJWTHTAMismatch(t *testing.T) {
 	now := time.Now()
 
 	leaf := &Token{
-		JWTID:        "leaf-jti-3",
-		Confirmation: &ConfirmationKey{JWK: publicKeyToJWK(leafPub)},
+		JWTID:         "leaf-jti-3",
+		Confirmation:  &ConfirmationKey{JWK: publicKeyToJWK(leafPub)},
 		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
 	}
 
@@ -578,7 +589,7 @@ func TestVerifyChainEmptyChain(t *testing.T) {
 }
 
 func TestVerifyChainDuplicateJTI(t *testing.T) {
-	tok := &Token{JWTID: "same-jti", Compact: "h.p.s"}
+	tok := &Token{JWTID: "same-jti"}
 	_, err := VerifyChain([]*Token{tok, tok}, nil, "tool", nil, "pop")
 	if !errors.Is(err, ErrDenyStep2CDuplicateJTI) {
 		t.Fatalf("error = %v, want ErrDenyStep2CDuplicateJTI", err)
@@ -599,15 +610,15 @@ func TestVerifyChainFullFlow(t *testing.T) {
 
 	// Step 1: AS issues root delegation token to H1
 	root, err := IssueRoot(IssueRootOpts{
-		JWTID:         "root-jti-chain",
-		Issuer:        "https://as.example.com",
-		Now:           now,
-		ExpiresAt:     now.Add(4 * time.Hour),
-		TokenType:     AATTypeDelegation,
+		JWTID:              "root-jti-chain",
+		Issuer:             "https://as.example.com",
+		Now:                now,
+		ExpiresAt:          now.Add(4 * time.Hour),
+		TokenType:          AATTypeDelegation,
 		MaxDelegationDepth: 2,
-		HolderJWK:     publicKeyToJWK(h1Pub),
-		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
-		Signer:        asPriv,
+		HolderJWK:          publicKeyToJWK(h1Pub),
+		Authorization:      simpleAuthorization(wildcardToolMap("read_file")),
+		Signer:             asPriv,
 	})
 	if err != nil {
 		t.Fatalf("IssueRoot failed: %v", err)
@@ -694,15 +705,15 @@ func TestVerifyChainUnauthorizedTool(t *testing.T) {
 	now := time.Now()
 
 	root, err := IssueRoot(IssueRootOpts{
-		JWTID:         "root-jti-unauth",
-		Issuer:        "https://as.example.com",
-		Now:           now,
-		ExpiresAt:     now.Add(1 * time.Hour),
-		TokenType:     AATTypeExecution,
+		JWTID:              "root-jti-unauth",
+		Issuer:             "https://as.example.com",
+		Now:                now,
+		ExpiresAt:          now.Add(1 * time.Hour),
+		TokenType:          AATTypeExecution,
 		MaxDelegationDepth: 0,
-		HolderJWK:     publicKeyToJWK(pub),
-		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
-		Signer:        priv,
+		HolderJWK:          publicKeyToJWK(pub),
+		Authorization:      simpleAuthorization(wildcardToolMap("read_file")),
+		Signer:             priv,
 	})
 	if err != nil {
 		t.Fatalf("IssueRoot failed: %v", err)
@@ -710,7 +721,7 @@ func TestVerifyChainUnauthorizedTool(t *testing.T) {
 
 	args := map[string]interface{}{"path": "/tmp/test.txt"}
 	popJWT, _ := BuildPoPJWT(BuildPoPOpts{
-		JWTID:  "pop-jti-unauth", Now: now,
+		JWTID: "pop-jti-unauth", Now: now,
 		Leaf: root, Tool: "delete_file", Args: args, Signer: priv,
 	})
 
@@ -734,9 +745,11 @@ type fakeConstraintHandler struct {
 	subsumesErr error
 }
 
-func (h *fakeConstraintHandler) Type() ConstraintType           { return h.typ }
-func (h *fakeConstraintHandler) Check(any, *Constraint) error          { return h.checkErr }
-func (h *fakeConstraintHandler) Subsumes(p, c *Constraint) (bool, error) { return h.subsumesOK, h.subsumesErr }
+func (h *fakeConstraintHandler) Type() ConstraintType         { return h.typ }
+func (h *fakeConstraintHandler) Check(any, *Constraint) error { return h.checkErr }
+func (h *fakeConstraintHandler) Subsumes(p, c *Constraint) (bool, error) {
+	return h.subsumesOK, h.subsumesErr
+}
 
 func TestRegistryRegisterAndLookup(t *testing.T) {
 	var nilReg *Registry
@@ -815,7 +828,10 @@ func TestCheckConstraintDispatches(t *testing.T) {
 
 func TestSubsumesConstraintNilInputs(t *testing.T) {
 	c := &Constraint{ConstraintType: ConstraintTypeExact, Value: "x"}
-	for _, tc := range []struct{ name string; p, c *Constraint }{
+	for _, tc := range []struct {
+		name string
+		p, c *Constraint
+	}{
 		{"nil parent", nil, c},
 		{"nil child", c, nil},
 	} {
@@ -864,12 +880,12 @@ func TestConstraintJSONRoundTrip(t *testing.T) {
 
 func TestTokenJSONRoundTrip(t *testing.T) {
 	original := &Token{
-		JWTID:         "jti-1",
-		Issuer:        "iss",
-		IssuedAt:      1000,
-		ExpiresAt:     2000,
-		TokenType:     AATTypeDelegation,
-		DelegationDepth: 0,
+		JWTID:              "jti-1",
+		Issuer:             "iss",
+		IssuedAt:           1000,
+		ExpiresAt:          2000,
+		TokenType:          AATTypeDelegation,
+		DelegationDepth:    0,
 		DelegationMaxDepth: 3,
 		Authorization: []AuthorizationDetail{
 			{Type: AuthorizationDetailType, Tools: ToolMap{

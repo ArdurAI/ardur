@@ -2,7 +2,7 @@
 title: "Ardur vs OAuth (and the managed-agent-auth direction)"
 description: "**Status:** Working comparison. Will gain links and quantitative numbers as Phase 7 benchmark data lands. The technical claims here should hold without those numbers; the numbers a"
 source_path: "docs/comparisons/oauth-and-managed-agent-auth.md"
-source_sha256: "7f5c62b35cc9da8aab92390217d0cecdf5c728e866427d226554e64caaf1668e"
+source_sha256: "9f448f0a1e5ee99eb6549ab069f42bf8b42a25c66e0dbad9dafa0562c39cbc91"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["comparison"]
@@ -38,7 +38,7 @@ Read the Cloudflare post and the surrounding direction. They're solving real pro
 - **Agent identity.** A capability for an agent to authenticate as itself, with first-class identity provider integration. Without this, every other agent-auth conversation is built on sand.
 - **Token issuance to autonomous code.** Replacing static API keys baked into agent configs with rotated, revocable tokens. Strict improvement over the status quo.
 - **Per-resource scope enforcement.** "This token can read GitHub Issues but not push to repos." Resource servers know how to enforce this; OAuth scopes carry it.
-- **Token attenuation in flight.** Newer drafts (AAT, transaction tokens) let intermediaries narrow a token before forwarding. This is genuinely cool work — Ardur uses [AAT](https://datatracker.ietf.org/doc/draft-niyikiza-oauth-attenuating-agent-tokens/) directly as the wire format for our Delegation Grant.
+- **Token attenuation in flight.** Newer drafts (AAT, transaction tokens) let intermediaries narrow a token before forwarding. Ardur's Delegation Grant v0.1 is pinned to [AAT draft-00](https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-00); draft-01 is an incompatible individual-draft revision and is rejected pending a versioned migration.
 
 If your agent only does one or two tool calls per session, OAuth + AAT is probably enough governance for you. The cost is low, the tooling is mature, and the existing enterprise IDP integration is real value you don't get for free anywhere else.
 
@@ -105,7 +105,7 @@ To be very clear about the composition story: **the OAuth-for-agents direction i
 
 - **Identity provider integration.** Cloudflare's managed OAuth makes it easier for Ardur to consume a stable agent identity. We don't have to ship our own IDP; we plug into the OAuth one.
 - **Token rotation and revocation.** OAuth's mature revocation infrastructure handles the "this agent has been compromised, kill all its credentials" path. Ardur's Mission Declaration revocation layers on top.
-- **AAT itself.** Ardur's Delegation Grant is an AAT profile with one extra claim (`mission_ref`). Improvements to AAT improve Ardur directly.
+- **AAT itself.** Ardur's Delegation Grant is a revision-pinned AAT profile with one extra claim (`mission_ref`). Improvements to AAT can improve Ardur after a field-level compatibility review; they are not adopted as silent wire changes.
 - **Resource-server policy reuse.** A team that has already invested in Cedar / OPA at the resource server keeps that investment. Ardur's Cedar backend reads the same policy syntax; the integration cost is low.
 
 The space where we have to be careful: **don't claim Ardur replaces OAuth for credential issuance.** It doesn't. We sign Mission Declarations with our own issuer key, but the agent's identity comes from somewhere else. Anyone shopping for "an OAuth replacement" is shopping for the wrong thing in this aisle.
@@ -128,6 +128,7 @@ Ardur is the **mission and evidence layer** that pairs with whatever **identity 
 
 - [`docs/specs/mission-declaration-v0.1.md`](/__ardur_internal__/source/docs/specs/mission-declaration-v0.1/) — what a Mission Declaration carries
 - [`docs/specs/delegation-grant-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/) — Ardur's AAT profile
+- [`docs/specs/aat-draft-01-migration-decision.md`](/__ardur_internal__/source/docs/specs/aat-draft-01-migration-decision/) — draft-00/draft-01 compatibility decision and review deadline
 - [`docs/specs/verifier-contract-v0.1.md`](/__ardur_internal__/source/docs/specs/verifier-contract-v0.1/) — the verifier obligations
 - IETF — [draft-niyikiza-oauth-attenuating-agent-tokens](https://datatracker.ietf.org/doc/draft-niyikiza-oauth-attenuating-agent-tokens/)
 - Cloudflare — [Managed OAuth for Access](https://blog.cloudflare.com/managed-oauth-for-access/)
