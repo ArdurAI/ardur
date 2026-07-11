@@ -12,6 +12,7 @@ package kernelcapture
 // clang and Linux kernel headers installed).
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,12 +77,40 @@ func (h *ProcessGuardHandles) Close() {
 // adapter/wrapper is needed here.
 func PolicyMapsFromHandles(h *ProcessGuardHandles) PolicyMaps {
 	return PolicyMaps{
-		CgroupOpPolicy:  h.objs.CgroupOpPolicy,
-		CgroupPathAllow: h.objs.CgroupPathAllow,
-		CgroupFileAllow: h.objs.CgroupFileAllow,
-		CgroupNetAllow:  h.objs.CgroupNetAllow,
-		CgroupManaged:   h.objs.CgroupManaged,
-		KillSwitch:      h.objs.KillSwitch,
+		CgroupOpPolicy:           h.objs.CgroupOpPolicy,
+		CgroupPathAllow:          h.objs.CgroupPathAllow,
+		CgroupFileAllow:          h.objs.CgroupFileAllow,
+		CgroupBootstrapFileAllow: h.objs.CgroupBootstrapFileAllow,
+		BootstrapFileObservation: h.objs.BootstrapFileObservation,
+		CgroupControlPlaneAllow:  h.objs.CgroupControlPlaneAllow,
+		CgroupTrustedRoot:        h.objs.CgroupTrustedRoot,
+		CgroupNetAllow:           h.objs.CgroupNetAllow,
+		CgroupManaged:            h.objs.CgroupManaged,
+		KillSwitch:               h.objs.KillSwitch,
+	}
+}
+
+// ClearBootstrapFileObservations removes transient registration requests from
+// a newly loaded or reused pinned guard. Unlike enforcement policy, these
+// one-shot requests must never survive a daemon restart: each request grants
+// only the current daemon TGID authority to ask the LSM to register one file.
+func ClearBootstrapFileObservations(h *ProcessGuardHandles) error {
+	if h == nil || h.objs.BootstrapFileObservation == nil {
+		return fmt.Errorf("kernelcapture: bootstrap observation map unavailable")
+	}
+
+	for {
+		var key bootstrapObservationKeyLayout
+		err := h.objs.BootstrapFileObservation.NextKey(nil, &key)
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("kernelcapture: enumerate stale bootstrap observations: %w", err)
+		}
+		if err := h.objs.BootstrapFileObservation.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+			return fmt.Errorf("kernelcapture: clear stale bootstrap observation: %w", err)
+		}
 	}
 }
 
@@ -95,6 +124,10 @@ func LoadAndAttachProcessGuardEBPF() (*ProcessGuardHandles, error) {
 	h := &ProcessGuardHandles{}
 
 	if err := loadProcessGuardObjects(&h.objs, nil); err != nil {
+		var verifierErr *ebpf.VerifierError
+		if errors.As(err, &verifierErr) {
+			return nil, fmt.Errorf("kernelcapture: load process_guard objects: %w; verifier detail: %-40v", err, verifierErr)
+		}
 		return nil, fmt.Errorf("kernelcapture: load process_guard objects: %w", err)
 	}
 
@@ -160,8 +193,8 @@ func LoadAndAttachProcessGuardEBPF() (*ProcessGuardHandles, error) {
 // BPF-LSM links and its policy-state maps (issue #124).
 //
 // Unlike the process-exec tracepoint (PinnedEBPFPaths: 2 links + ringbuf +
-// producer-drop counter), the durable guard state has three LSM links and eight
-// maps: six policy maps plus the enforce_events ringbuf and its drop counter
+// producer-drop counter), the durable guard state has three LSM links and twelve
+// maps: ten policy maps plus the enforce_events ringbuf and its drop counter
 // (enforce_events_dropped, issue #122). The three additional per-CPU scratch
 // maps (file_allow_scratch, net_lpm_scratch, path_lpm_scratch) are working
 // memory the BPF program repopulates on every invocation; they carry no state
@@ -172,13 +205,17 @@ type PinnedGuardPaths struct {
 	FileOpenLinkPath   string
 	SocketConnLinkPath string
 
-	CgroupOpPolicyPath  string
-	CgroupPathAllowPath string
-	CgroupFileAllowPath string
-	CgroupNetAllowPath  string
-	CgroupManagedPath   string
-	KillSwitchPath      string
-	EnforceEventsPath   string
+	CgroupOpPolicyPath           string
+	CgroupPathAllowPath          string
+	CgroupFileAllowPath          string
+	CgroupBootstrapFileAllowPath string
+	BootstrapFileObservationPath string
+	CgroupControlPlaneAllowPath  string
+	CgroupTrustedRootPath        string
+	CgroupNetAllowPath           string
+	CgroupManagedPath            string
+	KillSwitchPath               string
+	EnforceEventsPath            string
 	// EnforceEventsDroppedPath pins the enforce_events_dropped counter map
 	// (issue #122). The BPF program increments it whenever a ringbuf reserve
 	// fails, so a restarted daemon can keep reading a monotonic drop total the
@@ -187,15 +224,54 @@ type PinnedGuardPaths struct {
 	EnforceEventsDroppedPath string
 }
 
+type namedPinnedGuardPath struct {
+	name string
+	path string
+}
+
+func (p PinnedGuardPaths) namedPaths() []namedPinnedGuardPath {
+	return []namedPinnedGuardPath{
+		{"BprmLinkPath", p.BprmLinkPath},
+		{"FileOpenLinkPath", p.FileOpenLinkPath},
+		{"SocketConnLinkPath", p.SocketConnLinkPath},
+		{"CgroupOpPolicyPath", p.CgroupOpPolicyPath},
+		{"CgroupPathAllowPath", p.CgroupPathAllowPath},
+		{"CgroupFileAllowPath", p.CgroupFileAllowPath},
+		{"CgroupBootstrapFileAllowPath", p.CgroupBootstrapFileAllowPath},
+		{"BootstrapFileObservationPath", p.BootstrapFileObservationPath},
+		{"CgroupControlPlaneAllowPath", p.CgroupControlPlaneAllowPath},
+		{"CgroupTrustedRootPath", p.CgroupTrustedRootPath},
+		{"CgroupNetAllowPath", p.CgroupNetAllowPath},
+		{"CgroupManagedPath", p.CgroupManagedPath},
+		{"KillSwitchPath", p.KillSwitchPath},
+		{"EnforceEventsPath", p.EnforceEventsPath},
+		{"EnforceEventsDroppedPath", p.EnforceEventsDroppedPath},
+	}
+}
+
 // allPaths returns every pin path, for the "ensure directory, then pin"
 // and "load every pin, all-or-nothing" loops below.
 func (p PinnedGuardPaths) allPaths() []string {
-	return []string{
-		p.BprmLinkPath, p.FileOpenLinkPath, p.SocketConnLinkPath,
-		p.CgroupOpPolicyPath, p.CgroupPathAllowPath, p.CgroupFileAllowPath,
-		p.CgroupNetAllowPath, p.CgroupManagedPath, p.KillSwitchPath,
-		p.EnforceEventsPath, p.EnforceEventsDroppedPath,
+	named := p.namedPaths()
+	paths := make([]string, 0, len(named))
+	for _, item := range named {
+		paths = append(paths, item.path)
 	}
+	return paths
+}
+
+func validatePinnedGuardPaths(paths PinnedGuardPaths) error {
+	seen := make(map[string]string, len(paths.namedPaths()))
+	for _, item := range paths.namedPaths() {
+		if item.path == "" {
+			return fmt.Errorf("kernelcapture: pinned guard path %s is empty", item.name)
+		}
+		if previous, ok := seen[item.path]; ok {
+			return fmt.Errorf("kernelcapture: pinned guard paths %s and %s both use %q", previous, item.name, item.path)
+		}
+		seen[item.path] = item.name
+	}
+	return nil
 }
 
 // DefaultPinnedGuardPaths returns the standard bpffs pin paths under the
@@ -204,16 +280,20 @@ func (p PinnedGuardPaths) allPaths() []string {
 func DefaultPinnedGuardPaths() PinnedGuardPaths {
 	const base = "/sys/fs/bpf/ardur/"
 	return PinnedGuardPaths{
-		BprmLinkPath:        base + "guard_bprm_link",
-		FileOpenLinkPath:    base + "guard_file_open_link",
-		SocketConnLinkPath:  base + "guard_socket_connect_link",
-		CgroupOpPolicyPath:  base + "cgroup_op_policy",
-		CgroupPathAllowPath: base + "cgroup_path_allow",
-		CgroupFileAllowPath: base + "cgroup_file_allow",
-		CgroupNetAllowPath:  base + "cgroup_net_allow",
-		CgroupManagedPath:   base + "cgroup_managed",
-		KillSwitchPath:      base + "kill_switch",
-		EnforceEventsPath:   base + "enforce_events",
+		BprmLinkPath:                 base + "guard_bprm_link",
+		FileOpenLinkPath:             base + "guard_file_open_link",
+		SocketConnLinkPath:           base + "guard_socket_connect_link",
+		CgroupOpPolicyPath:           base + "cgroup_op_policy",
+		CgroupPathAllowPath:          base + "cgroup_path_allow",
+		CgroupFileAllowPath:          base + "cgroup_file_allow",
+		CgroupBootstrapFileAllowPath: base + "cgroup_bootstrap_file_allow",
+		BootstrapFileObservationPath: base + "bootstrap_file_observation",
+		CgroupControlPlaneAllowPath:  base + "cgroup_control_plane_allow",
+		CgroupTrustedRootPath:        base + "cgroup_trusted_root",
+		CgroupNetAllowPath:           base + "cgroup_net_allow",
+		CgroupManagedPath:            base + "cgroup_managed",
+		KillSwitchPath:               base + "kill_switch",
+		EnforceEventsPath:            base + "enforce_events",
 
 		EnforceEventsDroppedPath: base + "enforce_events_dropped",
 	}
@@ -228,7 +308,7 @@ func DefaultPinnedGuardPaths() PinnedGuardPaths {
 //
 // On first start (no pinned state at paths): loads and attaches the eBPF
 // program as usual (LoadAndAttachProcessGuardEBPF), then pins all three LSM
-// links and the six policy-state maps (+ the enforce_events ringbuf map and
+// links and the ten policy-state maps (+ the enforce_events ringbuf map and
 // its enforce_events_dropped drop counter) to bpffs. The pinned links keep the
 // LSM hooks — and thus enforcement — live in
 // the kernel even after this daemon process exits; the pinned maps keep every
@@ -236,7 +316,7 @@ func DefaultPinnedGuardPaths() PinnedGuardPaths {
 // restart that successfully reuses these pins: the kernel never stopped
 // enforcing what was already applied.
 //
-// On restart (all eleven pins present): loads them back without re-attaching or
+// On restart (all fifteen pins present): loads them back without re-attaching or
 // re-applying anything, matching the tracepoint's restart path. The three LSM
 // programs have been continuously attached and enforcing in the kernel since
 // the prior daemon start; this call just re-establishes this process's
@@ -257,9 +337,29 @@ func DefaultPinnedGuardPaths() PinnedGuardPaths {
 // Caller must call Close on the returned handles when done. Close does NOT
 // remove the bpffs pins; call RemovePinnedGuardState to do that explicitly.
 func LoadAndAttachProcessGuardEBPFPinned(paths PinnedGuardPaths) (*ProcessGuardHandles, error) {
+	if err := validatePinnedGuardPaths(paths); err != nil {
+		return nil, err
+	}
+
+	allPinsPresent := true
+	for _, path := range paths.allPaths() {
+		if _, err := os.Stat(path); err != nil {
+			allPinsPresent = false
+			break
+		}
+	}
 	if h, ok := tryLoadPinnedGuardState(paths); ok {
 		return h, nil
 	}
+	if allPinsPresent {
+		return nil, fmt.Errorf("kernelcapture: complete pinned guard state exists but could not be loaded; preserving pins to avoid detaching active enforcement")
+	}
+
+	// A partial or pre-schema pin set cannot be mixed with freshly loaded
+	// programs. Remove every old pin first so stale links detach and the new
+	// complete generation can claim the canonical paths atomically enough for
+	// the all-or-nothing loader above to reuse on the next restart.
+	RemovePinnedGuardState(paths)
 
 	h, err := LoadAndAttachProcessGuardEBPF()
 	if err != nil {
@@ -268,7 +368,7 @@ func LoadAndAttachProcessGuardEBPFPinned(paths PinnedGuardPaths) (*ProcessGuardH
 
 	// Each pin is independently non-fatal: a partial pin set (e.g. links
 	// pinned but a map pin fails) makes tryLoadPinnedGuardState fail on the
-	// next restart — by design, since it requires all eleven — falling back to
+	// next restart — by design, since it requires all fifteen — falling back to
 	// this fresh-load path again rather than reusing inconsistent state.
 	pins := []struct {
 		path string
@@ -280,6 +380,10 @@ func LoadAndAttachProcessGuardEBPFPinned(paths PinnedGuardPaths) (*ProcessGuardH
 		{paths.CgroupOpPolicyPath, h.objs.CgroupOpPolicy.Pin},
 		{paths.CgroupPathAllowPath, h.objs.CgroupPathAllow.Pin},
 		{paths.CgroupFileAllowPath, h.objs.CgroupFileAllow.Pin},
+		{paths.CgroupBootstrapFileAllowPath, h.objs.CgroupBootstrapFileAllow.Pin},
+		{paths.BootstrapFileObservationPath, h.objs.BootstrapFileObservation.Pin},
+		{paths.CgroupControlPlaneAllowPath, h.objs.CgroupControlPlaneAllow.Pin},
+		{paths.CgroupTrustedRootPath, h.objs.CgroupTrustedRoot.Pin},
 		{paths.CgroupNetAllowPath, h.objs.CgroupNetAllow.Pin},
 		{paths.CgroupManagedPath, h.objs.CgroupManaged.Pin},
 		{paths.KillSwitchPath, h.objs.KillSwitch.Pin},
@@ -304,9 +408,9 @@ func RemovePinnedGuardState(paths PinnedGuardPaths) {
 	}
 }
 
-// tryLoadPinnedGuardState attempts to load all three LSM links and all eight
-// (six policy + enforce_events + its drop counter) maps from bpffs. Returns
-// ok=true only if every one of the eleven succeeds; otherwise it closes any
+// tryLoadPinnedGuardState attempts to load all three LSM links and all twelve
+// (ten policy + enforce_events + its drop counter) maps from bpffs. Returns
+// ok=true only if every one of the fifteen succeeds; otherwise it closes any
 // partially-opened
 // handles and returns ok=false so the caller falls back to a fresh
 // load/attach/pin rather than binding a reader or policy maps to inconsistent
@@ -368,6 +472,26 @@ func tryLoadPinnedGuardState(paths PinnedGuardPaths) (*ProcessGuardHandles, bool
 		closeAll()
 		return nil, false
 	}
+	cgroupBootstrapFileAllow, ok := loadMap(paths.CgroupBootstrapFileAllowPath)
+	if !ok {
+		closeAll()
+		return nil, false
+	}
+	bootstrapFileObservation, ok := loadMap(paths.BootstrapFileObservationPath)
+	if !ok {
+		closeAll()
+		return nil, false
+	}
+	cgroupControlPlaneAllow, ok := loadMap(paths.CgroupControlPlaneAllowPath)
+	if !ok {
+		closeAll()
+		return nil, false
+	}
+	cgroupTrustedRoot, ok := loadMap(paths.CgroupTrustedRootPath)
+	if !ok {
+		closeAll()
+		return nil, false
+	}
 	cgroupNetAllow, ok := loadMap(paths.CgroupNetAllowPath)
 	if !ok {
 		closeAll()
@@ -392,6 +516,33 @@ func tryLoadPinnedGuardState(paths PinnedGuardPaths) (*ProcessGuardHandles, bool
 	if !ok {
 		closeAll()
 		return nil, false
+	}
+	currentSpec, err := loadProcessGuard()
+	if err != nil {
+		closeAll()
+		return nil, false
+	}
+	pinnedMaps := map[string]*ebpf.Map{
+		processGuardMapBootstrapFileObservation: bootstrapFileObservation,
+		processGuardMapCgroupBootstrapFileAllow: cgroupBootstrapFileAllow,
+		processGuardMapCgroupControlPlaneAllow:  cgroupControlPlaneAllow,
+		processGuardMapCgroupFileAllow:          cgroupFileAllow,
+		processGuardMapCgroupManaged:            cgroupManaged,
+		processGuardMapCgroupNetAllow:           cgroupNetAllow,
+		processGuardMapCgroupOpPolicy:           cgroupOpPolicy,
+		processGuardMapCgroupPathAllow:          cgroupPathAllow,
+		processGuardMapCgroupTrustedRoot:        cgroupTrustedRoot,
+		processGuardMapEnforceEvents:            enforceEvents,
+		processGuardMapEnforceEventsDropped:     enforceEventsDropped,
+		processGuardMapKillSwitch:               killSwitch,
+	}
+	for name, pinned := range pinnedMaps {
+		mapSpec := currentSpec.Maps[name]
+		info, infoErr := pinned.Info()
+		if infoErr != nil || mapSpec == nil || !mapSchemaMatches(info, mapSpec) {
+			closeAll()
+			return nil, false
+		}
 	}
 
 	bprmProgID, err := linkProgramID(bprmLink)
@@ -428,6 +579,10 @@ func tryLoadPinnedGuardState(paths PinnedGuardPaths) (*ProcessGuardHandles, bool
 	h.objs.CgroupOpPolicy = cgroupOpPolicy
 	h.objs.CgroupPathAllow = cgroupPathAllow
 	h.objs.CgroupFileAllow = cgroupFileAllow
+	h.objs.CgroupBootstrapFileAllow = cgroupBootstrapFileAllow
+	h.objs.BootstrapFileObservation = bootstrapFileObservation
+	h.objs.CgroupControlPlaneAllow = cgroupControlPlaneAllow
+	h.objs.CgroupTrustedRoot = cgroupTrustedRoot
 	h.objs.CgroupNetAllow = cgroupNetAllow
 	h.objs.CgroupManaged = cgroupManaged
 	h.objs.KillSwitch = killSwitch
@@ -440,6 +595,15 @@ func tryLoadPinnedGuardState(paths PinnedGuardPaths) (*ProcessGuardHandles, bool
 	// handles themselves, only the program IDs already captured above via
 	// each pinned link's own Info().
 	return h, true
+}
+
+func mapSchemaMatches(info *ebpf.MapInfo, spec *ebpf.MapSpec) bool {
+	return info != nil && spec != nil &&
+		info.Type == spec.Type &&
+		info.KeySize == spec.KeySize &&
+		info.ValueSize == spec.ValueSize &&
+		info.MaxEntries == spec.MaxEntries &&
+		info.Flags == spec.Flags
 }
 
 // linkProgramID reads back the program ID a pinned link currently reports

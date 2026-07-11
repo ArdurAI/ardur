@@ -106,6 +106,14 @@
 // equal to this constant).
 #define ARDUR_FILE_ALLOW_MAX_ANCESTORS 32
 
+#define ARDUR_BOOTSTRAP_USR          (1U << 0)
+#define ARDUR_BOOTSTRAP_LD_CACHE     (1U << 1)
+#define ARDUR_BOOTSTRAP_CA_CERTS     (1U << 2)
+#define ARDUR_BOOTSTRAP_URANDOM      (1U << 3)
+#define ARDUR_BOOTSTRAP_PROC         (1U << 4)
+#define ARDUR_BOOTSTRAP_LIB          (1U << 5)
+#define ARDUR_BOOTSTRAP_LIB64        (1U << 6)
+
 // Network constants
 #define AF_INET  2
 #define AF_INET6 10
@@ -121,14 +129,28 @@ struct linux_binprm {
 	const char *filename;
 } __attribute__((preserve_access_index));
 
+struct vfsmount {
+	int mnt_flags;
+} __attribute__((preserve_access_index));
+
 struct path {
-	void *mnt;
+	struct vfsmount *mnt;
 	void *dentry;
+} __attribute__((preserve_access_index));
+
+struct super_block {
+	__u32 s_dev;
+} __attribute__((preserve_access_index));
+
+struct inode {
+	unsigned long i_ino;
+	struct super_block *i_sb;
 } __attribute__((preserve_access_index));
 
 struct file {
 	struct path f_path;
 	unsigned int f_flags;
+	struct inode *f_inode;
 } __attribute__((preserve_access_index));
 
 struct socket {
@@ -228,6 +250,47 @@ struct ardur_file_allow_key {
 	char path[ARDUR_PATH_LEN];
 };
 
+// Trusted runtime reads are deliberately separate from mission file allows:
+// they are valid only for one daemon-observed root TGID and one live policy
+// generation, and guard_file_open consults them only for OP_FILE_READ.
+struct ardur_trusted_root_value {
+	__u32 root_tgid;
+	__u32 generation;
+	__u32 allow_mask;
+};
+
+struct ardur_bootstrap_file_key {
+	__u8 cgroup_raw[8];
+	__u64 device;
+	__u64 inode;
+};
+
+struct ardur_bootstrap_file_value {
+	__u32 generation;
+};
+
+struct ardur_bootstrap_observation_key {
+	__u32 observer_tgid;
+	__u32 padding;
+	__u64 inode;
+};
+
+struct ardur_bootstrap_observation_value {
+	__u8 cgroup_raw[8];
+	__u32 generation;
+	__u32 registered;
+	__u64 device;
+};
+
+// Exact embedded-governance endpoint. Port bytes stay in sockaddr network
+// order so userspace and BPF can compare the wire tuple without conversion.
+struct ardur_control_plane_key {
+	__u8 cgroup_raw[8];
+	__u16 family;
+	__u8 port[2];
+	__u8 addr[16];
+};
+
 // Ringbuf event emitted on each policy decision for a governed cgroup.
 struct ardur_enforce_event {
 	__u64 cgroup_id;
@@ -283,6 +346,41 @@ struct {
 	__type(value, __u64);
 } cgroup_file_allow SEC(".maps");
 
+// Exact executable/script objects registered by the daemon while the root
+// process is stopped at exec. The LSM itself records superblock device + inode,
+// avoiding userspace namespace translation. The trusted-root map separately
+// proves TGID and generation, so descendants cannot use these entries.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 16384); // 4 daemon-observed objects x 4,096 sessions
+	__type(key,   struct ardur_bootstrap_file_key);
+	__type(value, struct ardur_bootstrap_file_value);
+} cgroup_bootstrap_file_allow SEC(".maps");
+
+// One-shot daemon observation requests. Userspace supplies its own TGID, the
+// already-observed inode, target cgroup, and generation, then opens that file.
+// guard_file_open records the kernel-native device and acknowledges success.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 64);
+	__type(key, struct ardur_bootstrap_observation_key);
+	__type(value, struct ardur_bootstrap_observation_value);
+} bootstrap_file_observation SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key,   struct ardur_managed_key);
+	__type(value, struct ardur_trusted_root_value);
+} cgroup_trusted_root SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 4096);
+	__type(key,   struct ardur_control_plane_key);
+	__type(value, __u32);  // policy generation
+} cgroup_control_plane_allow SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 4096);
@@ -333,37 +431,21 @@ struct {
 	__type(value, struct ardur_net_lpm_key);
 } net_lpm_scratch SEC(".maps");
 
-// Per-CPU scratch value for file_allow_scratch: the current lookup
-// candidate key (key, reused once per candidate probed) plus a separate
-// resolved-path scan buffer (path_copy, filled once). These must be
-// DISTINCT fields, not the same buffer reused for both purposes:
-// file_allow_lookup zeroes `key` (including key.path) before reading its
-// path argument INTO key.path — if that argument pointer aliased key.path
-// itself, the zero would land before the read, silently corrupting every
-// lookup into an empty-string probe. Both fields live in this PERCPU_ARRAY
-// map, not on the BPF program's stack: `key` mirrors path_lpm_scratch's
-// existing "avoid a large stack alloc" pattern, and path_copy specifically
-// exists because file_path_is_allowed's ancestor walk needs a byte-indexable
-// local copy of the resolved path — see that function's doc comment for why
-// indexing the path_src pointer PARAMETER directly, instead of a local
-// copy, doesn't load, and why that copy can't be a plain stack array either
-// (single-function stack use is small, but BPF caps cumulative stack across
-// the whole guard_file_open → decide_file_open → file_path_is_allowed call
-// chain at 512 bytes, and path_buf in guard_file_open already spends 256 of
-// that on its own).
+// Task-local scratch value for file_allow_scratch: one canonical lookup key
+// plus the resolved path. The file-open program is sleepable, so mutable
+// per-CPU scratch may be reused by another task while a helper sleeps. Task
+// storage follows the current task across scheduling and is released at exit.
 struct ardur_file_allow_scratch {
-	struct ardur_file_allow_key key;
+	struct ardur_file_allow_key policy_key;
 	char path_copy[ARDUR_PATH_LEN];
 };
 
-// Per-CPU scratch map for the file allow key + path scan buffer.
-// BPF_MAP_TYPE_PERCPU_ARRAY is itself one of the map types sleepable
-// programs may use (it's an ARRAY), so this is safe to touch from
-// guard_file_open alongside cgroup_file_allow.
+// TASK_STORAGE arrived in Linux 5.11, below this program's existing Linux
+// 5.17 floor from bpf_loop.
 struct {
-	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-	__uint(max_entries, 1);
-	__type(key,   __u32);
+	__uint(type, BPF_MAP_TYPE_TASK_STORAGE);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key,   int);
 	__type(value, struct ardur_file_allow_scratch);
 } file_allow_scratch SEC(".maps");
 
@@ -378,12 +460,70 @@ static __always_inline int kill_switch_is_on(void)
 	return v && *v == ARDUR_KILL_SWITCH_ON;
 }
 
+static __always_inline struct ardur_file_allow_scratch *
+current_file_allow_scratch(void)
+{
+	void *task = bpf_get_current_task_btf();
+	return bpf_task_storage_get(
+		&file_allow_scratch, task, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+}
+
+static __always_inline __u64 file_device(struct file *file)
+{
+	return (__u64)BPF_CORE_READ(file, f_inode, i_sb, s_dev);
+}
+
+static __always_inline void observe_bootstrap_file(struct file *file)
+{
+	__u64 inode = BPF_CORE_READ(file, f_inode, i_ino);
+	if (inode == 0)
+		return;
+	struct ardur_bootstrap_observation_key request_key = {
+		.observer_tgid = (__u32)(bpf_get_current_pid_tgid() >> 32),
+		.inode = inode,
+	};
+	struct ardur_bootstrap_observation_value *request =
+		bpf_map_lookup_elem(&bootstrap_file_observation, &request_key);
+	if (!request)
+		return;
+	__u64 device = file_device(file);
+	if (device == 0)
+		return;
+	struct ardur_bootstrap_file_key allow_key = {
+		.device = device,
+		.inode = inode,
+	};
+	__builtin_memcpy(allow_key.cgroup_raw, request->cgroup_raw, 8);
+	struct ardur_bootstrap_file_value allow_value = {
+		.generation = request->generation,
+	};
+	if (bpf_map_update_elem(
+			&cgroup_bootstrap_file_allow, &allow_key, &allow_value, BPF_ANY) == 0) {
+		request->device = device;
+		request->registered = 1;
+	}
+}
+
 static __always_inline struct ardur_managed_value *
 lookup_managed(__u64 cgroup_id)
 {
 	struct ardur_managed_key k;
 	__builtin_memcpy(k.cgroup_raw, &cgroup_id, 8);
 	return bpf_map_lookup_elem(&cgroup_managed, &k);
+}
+
+static __always_inline struct ardur_trusted_root_value *
+lookup_trusted_root(__u64 cgroup_id, __u32 generation)
+{
+	struct ardur_managed_key k;
+	__builtin_memcpy(k.cgroup_raw, &cgroup_id, 8);
+	struct ardur_trusted_root_value *trusted =
+		bpf_map_lookup_elem(&cgroup_trusted_root, &k);
+	__u32 current_tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+	if (!trusted || trusted->root_tgid != current_tgid ||
+		trusted->generation != generation)
+		return 0;
+	return trusted;
 }
 
 static __always_inline struct ardur_cgroup_op_value *
@@ -423,6 +563,10 @@ static int path_is_allowed(__u64 cgroup_id, const char *path_src, int path_len)
 	// clamp here is a trap: masking by (N-1) wraps copy_len==N to 0, silently
 	// zeroing a full-length path read.)
 	__u32 copy_len = path_len < ARDUR_PATH_LPM_DATA_LEN ? (__u32)path_len : (__u32)ARDUR_PATH_LPM_DATA_LEN;
+	barrier_var(copy_len);
+	copy_len &= 0xff;
+	if (copy_len > ARDUR_PATH_LPM_DATA_LEN)
+		copy_len = ARDUR_PATH_LPM_DATA_LEN;
 	bpf_probe_read_kernel(lk->path, copy_len, path_src);
 
 	// prefixlen: 64 bits for cgroup_raw + path bytes (excluding null terminator)
@@ -451,6 +595,10 @@ static int net_is_allowed(__u64 cgroup_id, const __u8 *addr_bytes, int addr_len)
 	// Same clamp-not-mask reasoning as path_is_allowed: masking by 15 would
 	// wrap a full 16-byte IPv6 read (copy_len==16) to 0.
 	__u32 copy_len = addr_len < 16 ? (__u32)addr_len : (__u32)16;
+	barrier_var(copy_len);
+	copy_len &= 0x1f;
+	if (copy_len > 16)
+		copy_len = 16;
 	bpf_probe_read_kernel(lk->addr, copy_len, addr_bytes);
 
 	// prefixlen: 64 bits for cgroup scope + full address length for host lookup.
@@ -461,15 +609,38 @@ static int net_is_allowed(__u64 cgroup_id, const __u8 *addr_bytes, int addr_len)
 	return allowed && *allowed != 0;
 }
 
+static __always_inline int control_plane_is_allowed(
+	__u64 cgroup_id, __u32 generation, __u16 family,
+	const __u8 *port, const __u8 *addr, int addr_len)
+{
+	struct ardur_control_plane_key key;
+	__builtin_memset(&key, 0, sizeof(key));
+	__builtin_memcpy(key.cgroup_raw, &cgroup_id, 8);
+	if (!lookup_trusted_root(cgroup_id, generation))
+		return 0;
+	key.family = family;
+	bpf_probe_read_kernel(key.port, 2, port);
+	__u32 copy_len = addr_len < 16 ? (__u32)addr_len : (__u32)16;
+	barrier_var(copy_len);
+	copy_len &= 0x1f;
+	if (copy_len > 16)
+		copy_len = 16;
+	bpf_probe_read_kernel(key.addr, copy_len, addr);
+	__u32 *allowed_generation =
+		bpf_map_lookup_elem(&cgroup_control_plane_allow, &key);
+	return allowed_generation && *allowed_generation == generation;
+}
+
 // file_allow_lookup probes cgroup_file_allow for the exact string
 // path_src[0:len). Shared by every candidate check in file_path_is_allowed
 // so the scratch-key fill logic (zero, stamp cgroup, copy) lives in one
 // place. len must be <= ARDUR_PATH_LEN (the scratch key's path field size);
 // callers are responsible for that bound.
 static __always_inline int file_allow_lookup(
-	struct ardur_file_allow_key *fk, __u64 cgroup_id,
+	struct ardur_file_allow_scratch *scratch, __u64 cgroup_id,
 	const char *path_src, __u32 len)
 {
+	struct ardur_file_allow_key *fk = &scratch->policy_key;
 	__builtin_memset(fk, 0, sizeof(*fk));
 	__builtin_memcpy(fk->cgroup_raw, &cgroup_id, 8);
 	bpf_probe_read_kernel(fk->path, len, path_src);
@@ -482,7 +653,7 @@ static __always_inline int file_allow_lookup(
 // doc comment for why this indirection (a kfunc callback) exists instead of
 // a plain `for` loop.
 struct file_allow_walk_ctx {
-	struct ardur_file_allow_key *fk;
+	struct ardur_file_allow_scratch *scratch;
 	__u64 cgroup_id;
 	char *local;
 	int full_len;
@@ -565,7 +736,7 @@ static long file_allow_walk_cb(__u32 idx, void *ctx_)
 	blen &= (ARDUR_PATH_LEN - 1);
 	if (blen == 0)
 		return 1;
-	if (file_allow_lookup(ctx->fk, ctx->cgroup_id, ctx->local, blen)) {
+	if (file_allow_lookup(ctx->scratch, ctx->cgroup_id, ctx->local, blen)) {
 		ctx->found = 1;
 		return 1;
 	}
@@ -576,7 +747,8 @@ static long file_allow_walk_cb(__u32 idx, void *ctx_)
 // of path_len bytes, as produced by bpf_d_path in guard_file_open) falls
 // under any directory registered in cgroup_file_allow, or is itself exactly
 // registered. Safe to call from a sleepable program: cgroup_file_allow and
-// file_allow_scratch are both sleepable-compatible map types (HASH, ARRAY) —
+// file_allow_scratch are both sleepable-compatible map types (HASH,
+// TASK_STORAGE) —
 // see ardur_file_allow_key's doc comment for why this replaces LPM-trie
 // prefix matching instead of reusing path_is_allowed/cgroup_path_allow.
 //
@@ -631,14 +803,10 @@ static int file_path_is_allowed(__u64 cgroup_id, const char *path_src, int path_
 	if (path_len <= 0)
 		return 0;
 
-	__u32 scratch_idx = 0;
-	struct ardur_file_allow_scratch *scratch =
-		bpf_map_lookup_elem(&file_allow_scratch, &scratch_idx);
+	struct ardur_file_allow_scratch *scratch = current_file_allow_scratch();
 	if (!scratch)
 		return 0;
-	struct ardur_file_allow_key *fk = &scratch->key;
-
-	if (file_allow_lookup(fk, cgroup_id, "/", 1))
+	if (file_allow_lookup(scratch, cgroup_id, "/", 1))
 		return 1;
 
 	// barrier_var + mask: same fix, same reason, as file_allow_walk_cb's
@@ -659,22 +827,15 @@ static int file_path_is_allowed(__u64 cgroup_id, const char *path_src, int path_
 	__u32 full_len = path_len < ARDUR_PATH_LEN ? (__u32)path_len : (__u32)(ARDUR_PATH_LEN - 1);
 	barrier_var(full_len);
 	full_len &= (ARDUR_PATH_LEN - 1);
-	if (file_allow_lookup(fk, cgroup_id, path_src, full_len))
+	if (file_allow_lookup(scratch, cgroup_id, path_src, full_len))
 		return 1;
 
-	// Copy into scratch memory (file_allow_scratch, a PERCPU_ARRAY map, not
-	// the BPF stack — see ardur_file_allow_scratch's doc comment: adding a
-	// 256-byte stack array here pushed guard_file_open's cumulative stack
-	// usage, shared across its whole call chain, over BPF's 512-byte cap)
-	// so file_allow_walk_cb indexes memory this function fully owns, one
-	// bounded bpf_probe_read_kernel call, instead of path_src (a pointer
-	// parameter) directly.
+	// guard_file_open resolved the path directly into this task's storage, so
+	// the callback can reuse it without a second copy or shared scratch.
 	char *local = scratch->path_copy;
-	__builtin_memset(local, 0, ARDUR_PATH_LEN);
-	bpf_probe_read_kernel(local, full_len, path_src);
 
 	struct file_allow_walk_ctx wctx = {
-		.fk = fk,
+		.scratch = scratch,
 		.cgroup_id = cgroup_id,
 		.local = local,
 		.full_len = (int)full_len,
@@ -686,6 +847,74 @@ static int file_path_is_allowed(__u64 cgroup_id, const char *path_src, int path_
 	// underflows.
 	bpf_loop(full_len - 1, file_allow_walk_cb, &wctx, 0);
 	return wctx.found;
+}
+
+static __always_inline int path_boundary_matches(
+	const char *path_src, int path_len, __u32 offset, int allow_subtree)
+{
+	if (path_len <= (int)offset)
+		return 0;
+	char boundary = 1;
+	if (bpf_probe_read_kernel(&boundary, 1, path_src + offset) < 0)
+		return 0;
+	return boundary == '\0' || (allow_subtree && boundary == '/');
+}
+
+// bootstrap_runtime_path_allowed checks only daemon-defined runtime roots.
+// The caller has already proved the current TGID is the session root and the
+// trusted-root generation equals cgroup_managed.generation. No client path is
+// compared here and writes never call this helper.
+static __always_inline int bootstrap_runtime_path_allowed(
+	const char *path_src, int path_len, __u32 allow_mask)
+{
+	if ((allow_mask & ARDUR_BOOTSTRAP_USR) && path_len >= 4 &&
+		bpf_strncmp(path_src, 4, "/usr") == 0 &&
+		path_boundary_matches(path_src, path_len, 4, 1))
+		return 1;
+	if ((allow_mask & ARDUR_BOOTSTRAP_LIB) && path_len >= 4 &&
+		bpf_strncmp(path_src, 4, "/lib") == 0 &&
+		path_boundary_matches(path_src, path_len, 4, 1))
+		return 1;
+	if ((allow_mask & ARDUR_BOOTSTRAP_LIB64) && path_len >= 6 &&
+		bpf_strncmp(path_src, 6, "/lib64") == 0 &&
+		path_boundary_matches(path_src, path_len, 6, 1))
+		return 1;
+	if ((allow_mask & ARDUR_BOOTSTRAP_LD_CACHE) && path_len >= 16 &&
+		bpf_strncmp(path_src, 16, "/etc/ld.so.cache") == 0 &&
+		path_boundary_matches(path_src, path_len, 16, 0))
+		return 1;
+	if ((allow_mask & ARDUR_BOOTSTRAP_CA_CERTS) && path_len >= 14 &&
+		bpf_strncmp(path_src, 14, "/etc/ssl/certs") == 0 &&
+		path_boundary_matches(path_src, path_len, 14, 1))
+		return 1;
+	if ((allow_mask & ARDUR_BOOTSTRAP_URANDOM) && path_len >= 12 &&
+		bpf_strncmp(path_src, 12, "/dev/urandom") == 0 &&
+		path_boundary_matches(path_src, path_len, 12, 0))
+		return 1;
+	if ((allow_mask & ARDUR_BOOTSTRAP_PROC) && path_len >= 5 &&
+		bpf_strncmp(path_src, 5, "/proc") == 0 &&
+		path_boundary_matches(path_src, path_len, 5, 1))
+		return 1;
+	return 0;
+}
+
+// bootstrap_initial_file_allowed requires the kernel-native superblock device
+// and inode registered by observe_bootstrap_file for this cgroup/generation.
+static __always_inline int bootstrap_initial_file_allowed(
+	struct file *file, __u64 cgroup_id, __u32 generation)
+{
+	__u64 device = file_device(file);
+	__u64 inode = BPF_CORE_READ(file, f_inode, i_ino);
+	if (device == 0 || inode == 0)
+		return 0;
+	struct ardur_bootstrap_file_key key = {
+		.device = device,
+		.inode = inode,
+	};
+	__builtin_memcpy(key.cgroup_raw, &cgroup_id, 8);
+	struct ardur_bootstrap_file_value *allowed =
+		bpf_map_lookup_elem(&cgroup_bootstrap_file_allow, &key);
+	return allowed && allowed->generation == generation;
 }
 
 // emit_event writes one decision record to the enforce_events ringbuf.
@@ -914,11 +1143,30 @@ int BPF_PROG(guard_file_open, struct file *file, int ret)
 
 	unsigned int flags = BPF_CORE_READ(file, f_flags);
 	__u32 op = ((flags & O_ACCMODE) == 0) ? ARDUR_OP_FILE_READ : ARDUR_OP_FILE_WRITE;
+	observe_bootstrap_file(file);
 
-	char path_buf[ARDUR_PATH_LEN];
-	__builtin_memset(path_buf, 0, sizeof(path_buf));
-	long pret = bpf_d_path(&file->f_path, path_buf, sizeof(path_buf));
+	struct ardur_file_allow_scratch *scratch = current_file_allow_scratch();
+	char *path_buf = 0;
+	if (scratch) {
+		path_buf = scratch->path_copy;
+		__builtin_memset(path_buf, 0, ARDUR_PATH_LEN);
+	}
+	long pret = path_buf ? bpf_d_path(&file->f_path, path_buf, ARDUR_PATH_LEN) : 0;
 	int path_len = pret > 0 ? (int)pret : 0;
+	if (op == ARDUR_OP_FILE_READ) {
+		struct ardur_managed_value *mv = lookup_managed(cgroup_id);
+		if (mv) {
+			struct ardur_trusted_root_value *trusted =
+				lookup_trusted_root(cgroup_id, mv->generation);
+			if (trusted) {
+				if (bootstrap_initial_file_allowed(file, cgroup_id, mv->generation))
+					return 0;
+				if (path_len > 0 && bootstrap_runtime_path_allowed(
+						path_buf, path_len, trusted->allow_mask))
+					return 0;
+			}
+		}
+	}
 
 	struct decide_ctx dctx = {
 		.cgroup_id = cgroup_id,
@@ -959,6 +1207,11 @@ int BPF_PROG(guard_socket_connect, struct socket *sock,
 		// Non-IP socket (e.g. AF_UNIX): pass unconditionally.
 		return 0;
 	}
+
+	struct ardur_managed_value *mv = lookup_managed(cgroup_id);
+	if (mv && control_plane_is_allowed(cgroup_id, mv->generation, sa_family,
+					   (const __u8 *)address + 2, addr_buf, addr_len))
+		return 0;
 
 	struct decide_ctx dctx = {
 		.cgroup_id = cgroup_id,

@@ -16,9 +16,11 @@ package kernelcapture
 //  1. cgroup_op_policy  — written into the INACTIVE double-buffer slot only.
 //     The slot currently referenced by cgroup_managed.active_slot is never
 //     touched, so a reader never observes a half-written generation.
-//  2. cgroup_path_allow — path LPM trie entries.
-//  3. cgroup_net_allow  — network CIDR LPM trie entries.
-//  4. cgroup_managed    — governed flag + active_slot (LAST, atomic gate).
+//  2. cgroup_file_allow — mission path entries.
+//  3. cgroup_trusted_root / cgroup_control_plane_allow — daemon-bounded
+//     runtime reads and the exact embedded governance endpoint.
+//  4. cgroup_net_allow — mission network CIDR entries.
+//  5. cgroup_managed — governed flag + active_slot (LAST, atomic gate).
 //
 // A zero-value PolicyMaps{} (BPF-LSM unavailable: darwin, or a Linux host
 // without BPF-LSM where runGuardConsumer never populated d.policyMaps) is
@@ -76,10 +78,14 @@ type PolicyMaps struct {
 	// CgroupFileAllow is the cgroup_file_allow HASH map backing
 	// OP_FILE_READ/OP_FILE_WRITE ACT_ALLOWLIST — see fileAllowKey and
 	// process_guard.bpf.c's ardur_file_allow_key doc comment.
-	CgroupFileAllow policyMapWriter
-	CgroupNetAllow  policyMapWriter
-	CgroupManaged   policyMapReadWriter
-	KillSwitch      policyMapWriter
+	CgroupFileAllow          policyMapWriter
+	CgroupBootstrapFileAllow policyMapWriter
+	BootstrapFileObservation policyMapReadWriter
+	CgroupControlPlaneAllow  policyMapWriter
+	CgroupTrustedRoot        policyMapWriter
+	CgroupNetAllow           policyMapWriter
+	CgroupManaged            policyMapReadWriter
+	KillSwitch               policyMapWriter
 }
 
 // policyMapsReady reports whether every map handle needed for a full
@@ -93,6 +99,10 @@ type PolicyMaps struct {
 func policyMapsReady(maps PolicyMaps) bool {
 	return maps.CgroupOpPolicy != nil &&
 		maps.CgroupFileAllow != nil &&
+		maps.CgroupBootstrapFileAllow != nil &&
+		maps.BootstrapFileObservation != nil &&
+		maps.CgroupControlPlaneAllow != nil &&
+		maps.CgroupTrustedRoot != nil &&
 		maps.CgroupNetAllow != nil &&
 		maps.CgroupManaged != nil &&
 		maps.KillSwitch != nil
@@ -157,6 +167,61 @@ func ApplyPolicyMaps(maps PolicyMaps, cgroupID uint64, req DaemonApplyPolicyRequ
 		var v uint64 = 1
 		if err := maps.CgroupFileAllow.Put(k, &v); err != nil {
 			return fmt.Errorf("kernelcapture: apply_policy cgroup_file_allow put (%q): %w", path, err)
+		}
+	}
+
+	trustedRootRequested := len(req.BootstrapReadAllow) > 0 || len(req.BootstrapFiles) > 0 || req.ControlPlaneEndpoint != nil
+	if req.RootPID == 0 && trustedRootRequested {
+		return fmt.Errorf("kernelcapture: apply_policy trusted runtime exceptions require daemon-observed root_pid")
+	}
+	if len(req.BootstrapFiles) > MaxBootstrapFileIdentities {
+		return fmt.Errorf("kernelcapture: apply_policy has %d bootstrap file identities, maximum is %d", len(req.BootstrapFiles), MaxBootstrapFileIdentities)
+	}
+	if req.RootPID != 0 && trustedRootRequested {
+		rootValue := trustedRootValueLayout{
+			RootTGID: req.RootPID, Generation: uint32(req.Generation),
+			AllowMask: bootstrapReadAllowMask(req.BootstrapReadAllow),
+		}
+		type bootstrapObject struct{ device, inode uint64 }
+		seenFiles := make(map[bootstrapObject]struct{}, len(req.BootstrapFiles))
+		for i, identity := range req.BootstrapFiles {
+			if !strings.HasPrefix(identity.Path, "/") {
+				return fmt.Errorf("kernelcapture: apply_policy bootstrap file identity %d path %q is not absolute", i, identity.Path)
+			}
+			if identity.Inode == 0 {
+				return fmt.Errorf("kernelcapture: apply_policy bootstrap file identity %d has zero inode", i)
+			}
+			if identity.KernelDevice == 0 {
+				return fmt.Errorf("kernelcapture: apply_policy bootstrap file identity %d has no kernel device registration", i)
+			}
+			object := bootstrapObject{device: identity.KernelDevice, inode: identity.Inode}
+			if _, duplicate := seenFiles[object]; duplicate {
+				return fmt.Errorf("kernelcapture: apply_policy bootstrap file identity %d duplicates device %d inode %d", i, identity.KernelDevice, identity.Inode)
+			}
+			seenFiles[object] = struct{}{}
+		}
+		if err := maps.CgroupTrustedRoot.Put(managedKey(cgroupID), &rootValue); err != nil {
+			return fmt.Errorf("kernelcapture: apply_policy cgroup_trusted_root put: %w", err)
+		}
+		for _, identity := range req.BootstrapFiles {
+			key, err := bootstrapFileKey(cgroupID, identity)
+			if err != nil {
+				return fmt.Errorf("kernelcapture: apply_policy bootstrap file key (%q): %w", identity.Path, err)
+			}
+			value := bootstrapFileValueLayout{Generation: uint32(req.Generation)}
+			if err := maps.CgroupBootstrapFileAllow.Put(key, &value); err != nil {
+				return fmt.Errorf("kernelcapture: apply_policy cgroup_bootstrap_file_allow put (%q): %w", identity.Path, err)
+			}
+		}
+	}
+	if req.ControlPlaneEndpoint != nil {
+		k, err := controlPlaneAllowKey(cgroupID, req.RootPID, *req.ControlPlaneEndpoint)
+		if err != nil {
+			return fmt.Errorf("kernelcapture: apply_policy control_plane_allow put: %w", err)
+		}
+		v := uint32(req.Generation)
+		if err := maps.CgroupControlPlaneAllow.Put(k, &v); err != nil {
+			return fmt.Errorf("kernelcapture: apply_policy cgroup_control_plane_allow put: %w", err)
 		}
 	}
 
@@ -257,6 +322,55 @@ func DeleteAllowlistEntries(maps PolicyMaps, cgroupID uint64, paths []string, ci
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("kernelcapture: delete_allowlist_entries for cgroup %d: %s", cgroupID, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// DeleteBootstrapFileEntries removes daemon-observed initial file exceptions.
+// Missing keys are already clean.
+func DeleteBootstrapFileEntries(maps PolicyMaps, cgroupID uint64, files []BootstrapFile) error {
+	if maps.CgroupBootstrapFileAllow == nil {
+		return ErrPolicyMapsUnavailable
+	}
+	var errs []string
+	for _, file := range files {
+		key, err := bootstrapFileKey(cgroupID, file)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("bootstrap file key (%q): %v", file.Path, err))
+			continue
+		}
+		if err := maps.CgroupBootstrapFileAllow.Delete(key); err != nil && !isNotFound(err) {
+			errs = append(errs, fmt.Sprintf("cgroup_bootstrap_file_allow (%q): %v", file.Path, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("kernelcapture: delete bootstrap file entries for cgroup %d: %s", cgroupID, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// DeleteTrustedRuntimeEntries revokes root-PID-only bootstrap reads and the
+// exact embedded governance endpoint. Missing keys are already clean.
+func DeleteTrustedRuntimeEntries(maps PolicyMaps, cgroupID uint64, rootPID uint32, endpoint *DaemonControlPlaneEndpoint, deleteRoot bool) error {
+	if maps.CgroupControlPlaneAllow == nil || maps.CgroupTrustedRoot == nil {
+		return ErrPolicyMapsUnavailable
+	}
+	var errs []string
+	if endpoint != nil {
+		k, err := controlPlaneAllowKey(cgroupID, rootPID, *endpoint)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("control plane key: %v", err))
+		} else if err := maps.CgroupControlPlaneAllow.Delete(k); err != nil && !isNotFound(err) {
+			errs = append(errs, fmt.Sprintf("control plane: %v", err))
+		}
+	}
+	if deleteRoot {
+		if err := maps.CgroupTrustedRoot.Delete(managedKey(cgroupID)); err != nil && !isNotFound(err) {
+			errs = append(errs, fmt.Sprintf("trusted root: %v", err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("kernelcapture: delete trusted runtime entries for cgroup %d: %s", cgroupID, strings.Join(errs, "; "))
 	}
 	return nil
 }
@@ -367,6 +481,175 @@ const bpfPathLen = 256
 type fileAllowKeyLayout struct {
 	CgroupRaw [8]byte
 	Path      [bpfPathLen]byte
+}
+
+type controlPlaneAllowKeyLayout struct {
+	CgroupRaw [8]byte
+	Family    uint16
+	Port      [2]byte
+	Addr      [16]byte
+}
+
+func controlPlaneAllowKey(cgroupID uint64, rootPID uint32, endpoint DaemonControlPlaneEndpoint) (unsafe.Pointer, error) {
+	if rootPID == 0 {
+		return nil, errors.New("root pid must be non-zero")
+	}
+	ip, err := parseDaemonControlPlaneEndpoint(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	var k controlPlaneAllowKeyLayout
+	binary.NativeEndian.PutUint64(k.CgroupRaw[:], cgroupID)
+	binary.BigEndian.PutUint16(k.Port[:], endpoint.Port)
+	if ip4 := ip.To4(); ip4 != nil {
+		k.Family = 2
+		copy(k.Addr[:4], ip4)
+	} else {
+		k.Family = 10
+		copy(k.Addr[:], ip.To16())
+	}
+	return unsafe.Pointer(&k), nil
+}
+
+type trustedRootValueLayout struct {
+	RootTGID   uint32
+	Generation uint32
+	AllowMask  uint32
+}
+
+type bootstrapFileValueLayout struct {
+	Generation uint32
+}
+
+type bootstrapFileKeyLayout struct {
+	CgroupRaw [8]byte
+	Device    uint64
+	Inode     uint64
+}
+
+func bootstrapFileKey(cgroupID uint64, file BootstrapFile) (unsafe.Pointer, error) {
+	if file.KernelDevice == 0 || file.Inode == 0 {
+		return nil, fmt.Errorf("kernel device and inode must be non-zero")
+	}
+	var key bootstrapFileKeyLayout
+	binary.NativeEndian.PutUint64(key.CgroupRaw[:], cgroupID)
+	key.Device = file.KernelDevice
+	key.Inode = file.Inode
+	return unsafe.Pointer(&key), nil
+}
+
+type bootstrapObservationKeyLayout struct {
+	ObserverTGID uint32
+	Padding      uint32
+	Inode        uint64
+}
+
+type bootstrapObservationValueLayout struct {
+	CgroupRaw  [8]byte
+	Generation uint32
+	Registered uint32
+	Device     uint64
+}
+
+// RegisterBootstrapFileEntries asks the loaded LSM to observe each exact file
+// opened by observerTGID and return its kernel-native superblock device. The
+// caller must keep the target root stopped until this and ApplyPolicyMaps both
+// succeed. trigger must synchronously open and close the supplied path.
+func RegisterBootstrapFileEntries(
+	maps PolicyMaps,
+	cgroupID uint64,
+	generation BpfPolicyGeneration,
+	observerTGID uint32,
+	files []BootstrapFile,
+	trigger func(string) error,
+) ([]BootstrapFile, error) {
+	if !policyMapsReady(maps) {
+		return nil, ErrPolicyMapsUnavailable
+	}
+	if observerTGID == 0 || generation == 0 || trigger == nil {
+		return nil, fmt.Errorf("kernelcapture: bootstrap registration requires observer TGID, generation, and trigger")
+	}
+	registered := make([]BootstrapFile, 0, len(files))
+	cleanup := func() {
+		_ = DeleteBootstrapFileEntries(maps, cgroupID, registered)
+	}
+	for _, file := range files {
+		if file.Inode == 0 || !strings.HasPrefix(file.Path, "/") {
+			cleanup()
+			return nil, fmt.Errorf("kernelcapture: invalid bootstrap observation path=%q inode=%d", file.Path, file.Inode)
+		}
+		key := bootstrapObservationKeyLayout{ObserverTGID: observerTGID, Inode: file.Inode}
+		value := bootstrapObservationValueLayout{Generation: uint32(generation)}
+		binary.NativeEndian.PutUint64(value.CgroupRaw[:], cgroupID)
+		if err := maps.BootstrapFileObservation.Put(&key, &value); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("kernelcapture: arm bootstrap observation for %q: %w", file.Path, err)
+		}
+		triggerErr := trigger(file.Path)
+		lookupErr := maps.BootstrapFileObservation.Lookup(&key, &value)
+		deleteErr := maps.BootstrapFileObservation.Delete(&key)
+
+		acknowledged := lookupErr == nil && value.Registered == 1 && value.Device != 0
+		if acknowledged {
+			// Include the current entry in rollback before considering any
+			// userspace error: the LSM has already installed its allow entry.
+			file.KernelDevice = value.Device
+			registered = append(registered, file)
+		}
+
+		var registrationErr error
+		switch {
+		case triggerErr != nil:
+			registrationErr = fmt.Errorf("kernelcapture: trigger bootstrap observation for %q: %w", file.Path, triggerErr)
+		case lookupErr != nil:
+			registrationErr = fmt.Errorf("kernelcapture: read bootstrap observation for %q: %w", file.Path, lookupErr)
+		case !acknowledged:
+			registrationErr = fmt.Errorf("kernelcapture: LSM did not acknowledge bootstrap observation for %q", file.Path)
+		}
+
+		var clearErr error
+		if deleteErr != nil && !isNotFound(deleteErr) {
+			clearErr = fmt.Errorf("kernelcapture: clear bootstrap observation for %q: %w", file.Path, deleteErr)
+		}
+		if registrationErr != nil || clearErr != nil {
+			cleanup()
+			return nil, errors.Join(registrationErr, clearErr)
+		}
+	}
+	return registered, nil
+}
+
+const (
+	bootstrapAllowUsr uint32 = 1 << iota
+	bootstrapAllowLdCache
+	bootstrapAllowCACerts
+	bootstrapAllowUrandom
+	bootstrapAllowProc
+	bootstrapAllowLib
+	bootstrapAllowLib64
+)
+
+func bootstrapReadAllowMask(paths []string) uint32 {
+	var mask uint32
+	for _, path := range paths {
+		switch {
+		case path == "/usr":
+			mask |= bootstrapAllowUsr
+		case path == "/lib":
+			mask |= bootstrapAllowLib
+		case path == "/lib64":
+			mask |= bootstrapAllowLib64
+		case path == "/etc/ld.so.cache":
+			mask |= bootstrapAllowLdCache
+		case path == "/etc/ssl/certs":
+			mask |= bootstrapAllowCACerts
+		case path == "/dev/urandom":
+			mask |= bootstrapAllowUrandom
+		case strings.HasPrefix(path, "/proc/"):
+			mask |= bootstrapAllowProc
+		}
+	}
+	return mask
 }
 
 // fileAllowKey builds a cgroup_file_allow lookup/write key for one allowed

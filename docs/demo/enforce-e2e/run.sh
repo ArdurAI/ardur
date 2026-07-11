@@ -39,21 +39,40 @@ for _ in $(seq 1 40); do
   kill -0 $DPID 2>/dev/null || { echo "daemon died:"; cat "$OUT/daemon.log"; exit 1; }
   sleep 0.25
 done
-grep -q "process_guard loaded" "$OUT/daemon.log" \
-  && echo "daemon: BPF-LSM guard loaded ✓" \
-  || { echo "daemon: guard NOT loaded"; tail -5 "$OUT/daemon.log"; kill $DPID; exit 1; }
+if grep -q "process_guard loaded" "$OUT/daemon.log"; then
+  echo "daemon: BPF-LSM guard loaded ✓"
+else
+  echo "daemon: guard NOT loaded"
+  tail -5 "$OUT/daemon.log"
+  kill "$DPID"
+  exit 1
+fi
 
 # 2. ardur run a benign agent under a mission that forbids executing programs.
 #    --max-tool-calls is passed explicitly to support dev before fix #111.
 ENF=""; [ "$MODE" = "enforce" ] && ENF="--enforce"
-ardur run \
+if ! ardur run \
   --home "$RUN_HOME" \
   --mission "Kernel demo: executing external programs is forbidden." \
   --forbidden-tools Bash \
   --max-tool-calls 50 \
   --via env \
   $ENF \
-  -- python3 "$DEMO_DIR/agent.py" 2>&1 | tee "$OUT/ardur-run.log" | grep -E "AGENT:|kernel policy|kernel link|attestation|agent exit"
+  -- python3 "$DEMO_DIR/agent.py" 2>&1 | tee "$OUT/ardur-run.log" | grep -E "AGENT:|kernel policy|kernel link|attestation|agent exit"; then
+  echo "ardur run pipeline failed; full captured output follows:"
+  cat "$OUT/ardur-run.log"
+  exit 1
+fi
+
+grep -q "AGENT: governance decision=DENY before exec" "$OUT/ardur-run.log"
+grep -Eq "tool calls[[:space:]]+1 evaluated" "$OUT/ardur-run.log"
+grep -Eq "receipts[[:space:]]+1 signed" "$OUT/ardur-run.log"
+grep -Eq "agent exit[[:space:]]+0" "$OUT/ardur-run.log"
+if [ "$MODE" = "enforce" ]; then
+  grep -q "AGENT: RESULT=DENIED_EPERM" "$OUT/ardur-run.log"
+else
+  grep -q "AGENT: RESULT=ALLOWED" "$OUT/ardur-run.log"
+fi
 
 python3 "$DEMO_DIR/verify-observability-gap.py" "$RUN_HOME"
 
@@ -85,6 +104,7 @@ PY
   enforce-verify "$OUT/enforce_events.jsonl" ${DIGEST:+$DIGEST}
   echo "enforce-verify exit: $?"
 fi
+test -n "$EVID"
 
 kill "$DPID" 2>/dev/null || true
 wait "$DPID" 2>/dev/null || true

@@ -226,9 +226,18 @@ type daemon struct {
 
 // appliedAllowRecord is the last allowlist set written for a session.
 type appliedAllowRecord struct {
-	cgroupID uint64
-	paths    map[string]struct{}
-	nets     map[string]struct{}
+	cgroupID       uint64
+	rootPID        uint32
+	paths          map[string]struct{}
+	nets           map[string]struct{}
+	bootstrapFiles map[bootstrapFileObject]kernelcapture.BootstrapFile
+	trustedRoot    bool
+	controlPlane   *kernelcapture.DaemonControlPlaneEndpoint
+}
+
+type bootstrapFileObject struct {
+	device uint64
+	inode  uint64
 }
 
 type lifecycleCaptureLossKind uint8
@@ -627,6 +636,16 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 	if record.CgroupID == 0 {
 		return errResp("session has no cgroup_id; cannot apply BPF policy")
 	}
+	applied := *ap
+	applied.RootPID = record.RootPID
+	applied.BootstrapReadAllow = append([]string(nil), ap.BootstrapReadAllow...)
+	if len(applied.BootstrapReadAllow) > 0 {
+		applied.BootstrapReadAllow = append(applied.BootstrapReadAllow, fmt.Sprintf("/proc/%d", record.RootPID))
+		applied.BootstrapFiles, err = observeRootBootstrapFiles(record.RootPID)
+		if err != nil {
+			return errResp(fmt.Sprintf("observe stopped root bootstrap files: %v", err))
+		}
+	}
 
 	// Always keep the seccomp tier's in-memory policy in sync, regardless of
 	// which tier (if any) is actually active on this host: a session's
@@ -636,12 +655,34 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 	// entries (the same CIDR-or-bare-IP acceptance ApplyPolicyMaps' LPM key
 	// builder uses), so failing here before any BPF map write is strictly
 	// better than discovering the same bad input deeper in ApplyPolicyMaps.
-	if err := kernelcapture.ApplySeccompPolicy(d.seccompPolicy, ap.SessionID, *ap); err != nil {
+	if err := kernelcapture.ApplySeccompPolicy(d.seccompPolicy, ap.SessionID, applied); err != nil {
 		d.log.Error("apply_policy failed (seccomp tier policy)", "session_id", ap.SessionID, "error", err)
 		return errResp(fmt.Sprintf("apply seccomp policy: %v", err))
 	}
+	if d.getActiveTier() == daemonTierBPFLSM && len(applied.BootstrapFiles) > 0 {
+		applied.BootstrapFiles, err = kernelcapture.RegisterBootstrapFileEntries(
+			d.policyMaps,
+			record.CgroupID,
+			applied.Generation,
+			uint32(os.Getpid()),
+			applied.BootstrapFiles,
+			func(path string) error {
+				file, openErr := os.Open(path)
+				if openErr != nil {
+					return openErr
+				}
+				return file.Close()
+			},
+		)
+		if err != nil {
+			return errResp(fmt.Sprintf("register stopped root bootstrap files: %v", err))
+		}
+	}
 
-	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, *ap); err != nil {
+	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, applied); err != nil {
+		if len(applied.BootstrapFiles) > 0 {
+			_ = kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, record.CgroupID, applied.BootstrapFiles)
+		}
 		if errors.Is(err, kernelcapture.ErrPolicyMapsUnavailable) {
 			if d.getActiveTier() == daemonTierSeccomp && seccompFullyCoversPolicy(ap) {
 				// BPF-LSM being unavailable isn't a degradation here: the
@@ -687,7 +728,7 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 	// and record the new set. Runs only on the BPF-write success path (the
 	// degraded/seccomp returns above never reach the cgroup_file_allow /
 	// cgroup_net_allow maps). Under applyMu, so serialized with other applies.
-	d.pruneAndRecordAllowlists(ap.SessionID, record.CgroupID, ap.PathAllow, ap.NetAllow)
+	d.pruneAndRecordAllowlists(ap.SessionID, record.CgroupID, record.RootPID, ap.PathAllow, ap.NetAllow, applied.BootstrapFiles, len(applied.BootstrapReadAllow) > 0 || ap.ControlPlaneEndpoint != nil, ap.ControlPlaneEndpoint)
 
 	d.log.Info("policy applied",
 		"session_id", ap.SessionID,
@@ -696,6 +737,9 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 		"op_policies", len(ap.OpPolicies),
 		"path_allow", len(ap.PathAllow),
 		"net_allow", len(ap.NetAllow),
+		"bootstrap_read_allow", len(applied.BootstrapReadAllow),
+		"bootstrap_files", len(applied.BootstrapFiles),
+		"control_plane_endpoint", ap.ControlPlaneEndpoint != nil,
 	)
 	return kernelcapture.DaemonProtocolResponse{
 		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
@@ -710,15 +754,19 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 // maps, which — unlike op_policy — are not double-buffered and would otherwise
 // keep a dropped path/host allowed), then records the new set. Caller holds
 // applyMu; this briefly takes mu for the appliedAllow map.
-func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, newPaths, newNets []string) {
+func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, rootPID uint32, newPaths, newNets []string, bootstrapFiles []kernelcapture.BootstrapFile, trustedRoot bool, controlPlane *kernelcapture.DaemonControlPlaneEndpoint) {
 	newPathSet := stringSet(newPaths)
 	newNetSet := stringSet(newNets)
+	newBootstrapFiles := bootstrapFileMap(bootstrapFiles)
 
 	d.mu.Lock()
 	prev := d.appliedAllow[sessionID]
 	d.mu.Unlock()
 
 	var stalePaths, staleNets []string
+	var staleBootstrapFiles []kernelcapture.BootstrapFile
+	var staleControl *kernelcapture.DaemonControlPlaneEndpoint
+	deleteTrustedRoot := false
 	if prev != nil {
 		for p := range prev.paths {
 			if _, keep := newPathSet[p]; !keep {
@@ -730,6 +778,16 @@ func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, new
 				staleNets = append(staleNets, n)
 			}
 		}
+		for object, file := range prev.bootstrapFiles {
+			if _, keep := newBootstrapFiles[object]; !keep {
+				staleBootstrapFiles = append(staleBootstrapFiles, file)
+			}
+		}
+		if prev.controlPlane != nil && (controlPlane == nil || *prev.controlPlane != *controlPlane || prev.rootPID != rootPID) {
+			copy := *prev.controlPlane
+			staleControl = &copy
+		}
+		deleteTrustedRoot = prev.trustedRoot && (!trustedRoot || prev.rootPID != rootPID)
 	}
 	if len(stalePaths) > 0 || len(staleNets) > 0 {
 		if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, cgroupID, stalePaths, staleNets); err != nil {
@@ -737,9 +795,24 @@ func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, new
 				"session_id", sessionID, "cgroup_id", cgroupID, "error", err)
 		}
 	}
+	if len(staleBootstrapFiles) > 0 {
+		if err := kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, cgroupID, staleBootstrapFiles); err != nil {
+			d.log.Warn("prune stale bootstrap file entries on re-apply", "session_id", sessionID, "cgroup_id", cgroupID, "error", err)
+		}
+	}
+	if staleControl != nil || deleteTrustedRoot {
+		if err := kernelcapture.DeleteTrustedRuntimeEntries(d.policyMaps, cgroupID, prev.rootPID, staleControl, deleteTrustedRoot); err != nil {
+			d.log.Warn("prune stale trusted runtime entries on re-apply", "session_id", sessionID, "cgroup_id", cgroupID, "error", err)
+		}
+	}
 
 	d.mu.Lock()
-	d.appliedAllow[sessionID] = &appliedAllowRecord{cgroupID: cgroupID, paths: newPathSet, nets: newNetSet}
+	var controlCopy *kernelcapture.DaemonControlPlaneEndpoint
+	if controlPlane != nil {
+		copy := *controlPlane
+		controlCopy = &copy
+	}
+	d.appliedAllow[sessionID] = &appliedAllowRecord{cgroupID: cgroupID, rootPID: rootPID, paths: newPathSet, nets: newNetSet, bootstrapFiles: newBootstrapFiles, trustedRoot: trustedRoot, controlPlane: controlCopy}
 	d.mu.Unlock()
 }
 
@@ -752,6 +825,24 @@ func stringSet(items []string) map[string]struct{} {
 		}
 	}
 	return set
+}
+
+func bootstrapFileMap(files []kernelcapture.BootstrapFile) map[bootstrapFileObject]kernelcapture.BootstrapFile {
+	set := make(map[bootstrapFileObject]kernelcapture.BootstrapFile, len(files))
+	for _, file := range files {
+		if file.KernelDevice != 0 && file.Inode != 0 {
+			set[bootstrapFileObject{device: file.KernelDevice, inode: file.Inode}] = file
+		}
+	}
+	return set
+}
+
+func bootstrapFileValues(files map[bootstrapFileObject]kernelcapture.BootstrapFile) []kernelcapture.BootstrapFile {
+	values := make([]kernelcapture.BootstrapFile, 0, len(files))
+	for _, file := range files {
+		values = append(values, file)
+	}
+	return values
 }
 
 // setKeys returns a set's members as a slice.
@@ -1001,6 +1092,14 @@ func (d *daemon) onSessionEnded(sessionID string) {
 		if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, prevAllow.cgroupID, setKeys(prevAllow.paths), setKeys(prevAllow.nets)); err != nil {
 			d.log.Warn("remove allowlist entries on session end",
 				"session_id", sessionID, "cgroup_id", prevAllow.cgroupID, "error", err)
+		}
+		if err := kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, prevAllow.cgroupID, bootstrapFileValues(prevAllow.bootstrapFiles)); err != nil {
+			d.log.Warn("remove bootstrap file entries on session end", "session_id", sessionID, "cgroup_id", prevAllow.cgroupID, "error", err)
+		}
+		if prevAllow.trustedRoot {
+			if err := kernelcapture.DeleteTrustedRuntimeEntries(d.policyMaps, prevAllow.cgroupID, prevAllow.rootPID, prevAllow.controlPlane, true); err != nil {
+				d.log.Warn("remove trusted runtime entries on session end", "session_id", sessionID, "cgroup_id", prevAllow.cgroupID, "error", err)
+			}
 		}
 	}
 	delete(d.appliedAllow, sessionID)
@@ -1454,9 +1553,13 @@ func (d *daemon) observabilityGapSummaryForSession(sessionID string) (kernelcapt
 // cgroup index does not leak indefinitely.
 func (d *daemon) pruneExpiredSessions() {
 	type expiredPolicy struct {
-		cgroupID uint64
-		paths    []string
-		nets     []string
+		cgroupID       uint64
+		rootPID        uint32
+		paths          []string
+		nets           []string
+		bootstrapFiles []kernelcapture.BootstrapFile
+		trustedRoot    bool
+		controlPlane   *kernelcapture.DaemonControlPlaneEndpoint
 	}
 	d.mu.Lock()
 	var expiredSeccompCancels []context.CancelFunc
@@ -1471,6 +1574,10 @@ func (d *daemon) pruneExpiredSessions() {
 				if prev := d.appliedAllow[sid]; prev != nil {
 					ep.paths = setKeys(prev.paths)
 					ep.nets = setKeys(prev.nets)
+					ep.bootstrapFiles = bootstrapFileValues(prev.bootstrapFiles)
+					ep.rootPID = prev.rootPID
+					ep.trustedRoot = prev.trustedRoot
+					ep.controlPlane = prev.controlPlane
 				}
 				expiredPolicies = append(expiredPolicies, ep)
 			}
@@ -1510,6 +1617,16 @@ func (d *daemon) pruneExpiredSessions() {
 			if len(ep.paths) > 0 || len(ep.nets) > 0 {
 				if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, ep.cgroupID, ep.paths, ep.nets); err != nil {
 					d.log.Warn("remove allowlist entries on session expiry", "cgroup_id", ep.cgroupID, "error", err)
+				}
+			}
+			if len(ep.bootstrapFiles) > 0 {
+				if err := kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, ep.cgroupID, ep.bootstrapFiles); err != nil {
+					d.log.Warn("remove bootstrap file entries on session expiry", "cgroup_id", ep.cgroupID, "error", err)
+				}
+			}
+			if ep.trustedRoot {
+				if err := kernelcapture.DeleteTrustedRuntimeEntries(d.policyMaps, ep.cgroupID, ep.rootPID, ep.controlPlane, true); err != nil {
+					d.log.Warn("remove trusted runtime entries on session expiry", "cgroup_id", ep.cgroupID, "error", err)
 				}
 			}
 		}

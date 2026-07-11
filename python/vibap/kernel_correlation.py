@@ -262,6 +262,7 @@ class KernelCaptureClient:
         plan: BpfPolicyPlan,
         generation: int,
         control_plane_endpoint: tuple[str, int] | None = None,
+        bootstrap_read_allow: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         """Install a lowered BPF policy plan for ``session_id``'s cgroup.
 
@@ -292,6 +293,10 @@ class KernelCaptureClient:
             apply_policy["path_allow"] = list(plan.path_allow)
         if plan.net_allow:
             apply_policy["net_allow"] = list(plan.net_allow)
+        if bootstrap_read_allow:
+            if any(not isinstance(path, str) or not path.startswith("/") for path in bootstrap_read_allow):
+                raise ValueError("bootstrap_read_allow entries must be absolute paths")
+            apply_policy["bootstrap_read_allow"] = list(bootstrap_read_allow)
         if control_plane_endpoint is not None:
             host, port = control_plane_endpoint
             try:

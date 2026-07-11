@@ -83,6 +83,17 @@ sys.stdout.write(json.dumps(decisions))
 '''
 
 
+def test_bpf_bootstrap_read_roots_are_fixed_runtime_categories() -> None:
+    assert run_bridge.BPF_BOOTSTRAP_READ_ALLOW == (
+        "/usr",
+        "/lib",
+        "/lib64",
+        "/etc/ld.so.cache",
+        "/etc/ssl/certs",
+        "/dev/urandom",
+    )
+
+
 @pytest.fixture
 def standin_agent(tmp_path: Path) -> Path:
     path = tmp_path / "standin_agent.py"
@@ -613,6 +624,29 @@ def test_wrap_command_with_launch_gate_builds_expected_argv() -> None:
         "agent",
         "--flag",
     ]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="ptrace exec stops are Linux-only")
+def test_trace_exec_gate_stops_target_until_parent_releases(tmp_path: Path) -> None:
+    marker = tmp_path / "target-ran"
+    proc = subprocess.Popen(
+        run_bridge._wrap_command_with_launch_gate(
+            [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+            trace_exec=True,
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        run_bridge.wait_for_exec_stop(proc.pid)
+        assert not marker.exists(), "target user-space ran before policy release"
+        run_bridge.release_exec_stop(proc.pid)
+        assert proc.wait(timeout=5) == 0
+        assert marker.is_file()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 def test_launch_gate_fails_closed_when_parent_does_not_release(tmp_path: Path) -> None:

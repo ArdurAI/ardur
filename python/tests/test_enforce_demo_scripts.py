@@ -19,16 +19,23 @@ def test_bpf_demo_uses_writable_run_home_and_propagates_failures() -> None:
     assert 'verify-observability-gap.py" "$RUN_HOME"' in script
     assert 'python3 - "$RUN_HOME"' in script
     assert 'trap cleanup EXIT' in script
+    assert "if ! ardur run" in script
+    assert 'cat "$OUT/ardur-run.log"' in script
     assert '"/out/home-${MODE}"' not in script
+    assert 'AGENT: RESULT=DENIED_EPERM' in script
+    assert 'tool calls[[:space:]]+1 evaluated' in script
+    assert 'receipts[[:space:]]+1 signed' in script
+    assert 'agent exit[[:space:]]+0' in script
 
 
-def test_kvm_metric_proof_uses_permissive_data_plane() -> None:
+def test_kvm_metric_proof_uses_strict_bpf_launch_handoff() -> None:
     wrapper = VNG_METRIC_SCRIPT.read_text(encoding="utf-8")
     workflow = KERNEL_WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'run.sh" permissive' in wrapper
+    assert 'run.sh" enforce' in wrapper
     assert "ci-vng-observability-gap.sh" in workflow
-    assert "ci-vng-enforce.sh" not in workflow
+    assert "verify strict ardur-run E2E" in workflow
+    assert "PTRACE_EVENT_EXEC" in workflow
 
 
 def test_systemd_profile_allows_seccomp_control_plane_socket_emulation() -> None:

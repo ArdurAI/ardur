@@ -70,9 +70,9 @@ type DaemonSetKillSwitchRequest struct {
 
 // DaemonApplyPolicyRequest installs or replaces the BPF enforcement policy for
 // one session's cgroup. The daemon writes the supplied entries to the BPF
-// maps in the order: op_policies → path_allow (into cgroup_file_allow, see
-// PolicyMaps.CgroupFileAllow) → net_allow → cgroup_managed (generation-atomic,
-// managed flag written last per ValidateCgroupFilterSequence).
+// maps in the order: op_policies → path_allow → daemon-bounded trusted-root
+// runtime state and exact control-plane endpoint → net_allow → cgroup_managed
+// (generation-atomic, managed flag written last).
 //
 // Generation must be non-zero and strictly increasing relative to the previous
 // apply for this session.  The BPF program uses the generation to detect stale
@@ -85,6 +85,25 @@ type DaemonApplyPolicyRequest struct {
 	Generation           BpfPolicyGeneration         `json:"generation"`
 	EnforceMode          BpfEnforceMode              `json:"enforce_mode"` // default mode for no-rule ops
 	ControlPlaneEndpoint *DaemonControlPlaneEndpoint `json:"control_plane_endpoint,omitempty"`
+	BootstrapReadAllow   []string                    `json:"bootstrap_read_allow,omitempty"`
+	// RootPID is stamped from the daemon's active session registry after wire
+	// validation. It is never accepted from JSON or trusted from the client.
+	RootPID uint32 `json:"-"`
+	// BootstrapFiles are exact initial executable/argument file identities
+	// observed by the daemon while RootPID is stopped at exec. They are never
+	// accepted from JSON, so the governed client cannot widen this set.
+	BootstrapFiles []BootstrapFile `json:"-"`
+}
+
+const MaxBootstrapFileIdentities = 4
+
+// BootstrapFile identifies one daemon-observed initial regular file. The LSM
+// fills KernelDevice during a daemon-only observation handshake, avoiding
+// userspace namespace translation of the backing filesystem identity.
+type BootstrapFile struct {
+	Path         string
+	KernelDevice uint64
+	Inode        uint64
 }
 
 // DaemonControlPlaneEndpoint is the exact loopback listener owned by the
@@ -375,6 +394,19 @@ func validateDaemonApplyPolicy(req DaemonApplyPolicyRequest) error {
 		if !strings.HasPrefix(p, "/") {
 			return fmt.Errorf("%w: apply_policy path_allow[%d]: path %q must be absolute", ErrDaemonProtocol, i, p)
 		}
+	}
+	allowedBootstrap := map[string]struct{}{
+		"/usr": {}, "/lib": {}, "/lib64": {}, "/etc/ld.so.cache": {}, "/etc/ssl/certs": {}, "/dev/urandom": {},
+	}
+	seenBootstrap := make(map[string]struct{}, len(req.BootstrapReadAllow))
+	for i, p := range req.BootstrapReadAllow {
+		if _, ok := allowedBootstrap[p]; !ok {
+			return fmt.Errorf("%w: apply_policy bootstrap_read_allow[%d]: path %q is not a daemon-approved runtime root", ErrDaemonProtocol, i, p)
+		}
+		if _, duplicate := seenBootstrap[p]; duplicate {
+			return fmt.Errorf("%w: apply_policy bootstrap_read_allow[%d]: duplicate path %q", ErrDaemonProtocol, i, p)
+		}
+		seenBootstrap[p] = struct{}{}
 	}
 	if req.ControlPlaneEndpoint != nil {
 		if _, ok := seenOps[BpfOpNetConnect]; !ok {

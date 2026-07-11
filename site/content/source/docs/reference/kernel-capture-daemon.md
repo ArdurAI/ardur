@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "0c26a5e208e7b2fd9fe3d2bab7fc3b1e8036eae459b89a28f7bd4eb78773ae3d"
+source_sha256: "9f727e02f34895a370ed10be4321eaa01f8696a6c1ffa47855fbf59ef7061a9b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -79,10 +79,46 @@ bounding sets and explicitly permits `pidfd_open` and `pidfd_getfd`; custom
 units must preserve those three requirements for the seccomp endpoint path.
 
 Ordinary seccomp mission-policy allows still use `CONTINUE` and retain the
-documented weaker-than-BPF-LSM race boundary. The BPF-LSM tier does not use the
-endpoint field or this emulation path. Its full enforce-mode launch bootstrap
-remains tracked separately in
-[#241](https://github.com/ArdurAI/ardur/issues/241).
+documented weaker-than-BPF-LSM race boundary. The BPF-LSM tier does not use
+seccomp emulation: its root process receives an exact generation-bound
+loopback IP-and-port exception in BPF, and a `PTRACE_EVENT_EXEC` stop keeps the
+target from running until cgroup registration and policy application finish.
+
+## BPF-LSM stopped-exec bootstrap
+
+Strict BPF-LSM launch stops the new root image at `PTRACE_EVENT_EXEC`, before
+target user space runs. The daemon reads `/proc/<pid>/exe`, cwd, and cmdline,
+resolves symlinks, and records the executable plus at most four regular-file
+arguments. It then arms a one-shot observation keyed by its own TGID and the
+observed inode and opens each file synchronously. The LSM writes the
+kernel-native superblock device plus inode into the target cgroup's allow map
+and returns that device through an acknowledgement record. This avoids trusting
+namespace-translated path, `st_dev`, or mount-ID values from userspace.
+Fixed root-only runtime reads cover `/usr`, distro library roots `/lib` and
+`/lib64`, the loader cache, CA certificates, entropy, and the root's `/proc`
+subtree. The governed request cannot add another category.
+
+The file-open hook additionally requires the current TGID to equal the
+daemon-stamped session root and the allow-map generation to equal the active
+policy generation. A child, another generation, or a replaced file object
+cannot reuse the exception. Observation request setup, trigger open,
+acknowledgement, and cleanup are serialized with policy application; any
+failure aborts launch while the target remains stopped.
+
+The observation map is pinned only so its ABI participates in all-or-nothing
+guard-state reuse. Its requests are transient capabilities, not policy: every
+daemon start clears all stale requests before exposing the policy maps or
+reporting the BPF-LSM guard ready. Applied enforcement and exact-file allow
+entries remain pinned across restart.
+
+These file identities and the fixed runtime-category bitmask are daemon-private
+fields added after wire validation; a governed client cannot submit or widen
+them. They apply only to reads. Pinned-map reuse also validates map type, key
+size, value size, capacity, and flags against the embedded BPF specification,
+so an old complete pin generation cannot be paired with a new userspace ABI.
+Any observation, map update, cgroup migration, policy application, or ptrace
+transition failure kills the still-stopped target instead of releasing an
+ungoverned process.
 
 ## Process lifecycle cgroup filter
 

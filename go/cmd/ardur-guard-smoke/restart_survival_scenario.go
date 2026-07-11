@@ -11,12 +11,28 @@ package main
 // every policy map stay exactly as they were in the kernel throughout.
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
+	"github.com/cilium/ebpf"
 	"golang.org/x/sys/unix"
 )
+
+type smokeBootstrapObservationKey struct {
+	ObserverTGID uint32
+	Padding      uint32
+	Inode        uint64
+}
+
+type smokeBootstrapObservationValue struct {
+	CgroupRaw  [8]byte
+	Generation uint32
+	Registered uint32
+	Device     uint64
+}
 
 // runRestartSurvivalScenario applies an OP_EXEC:DENY policy against a fresh
 // cgroup through a pinned guard load, confirms EPERM, simulates a daemon
@@ -75,18 +91,22 @@ func runRestartSurvivalScenario() error {
 	}
 	defer os.RemoveAll(pinDir)
 	paths := kernelcapture.PinnedGuardPaths{
-		BprmLinkPath:        pinDir + "/bprm_link",
-		FileOpenLinkPath:    pinDir + "/file_open_link",
-		SocketConnLinkPath:  pinDir + "/socket_connect_link",
-		CgroupOpPolicyPath:  pinDir + "/cgroup_op_policy",
-		CgroupPathAllowPath: pinDir + "/cgroup_path_allow",
-		CgroupFileAllowPath: pinDir + "/cgroup_file_allow",
-		CgroupNetAllowPath:  pinDir + "/cgroup_net_allow",
-		CgroupManagedPath:   pinDir + "/cgroup_managed",
-		KillSwitchPath:      pinDir + "/kill_switch",
-		EnforceEventsPath:   pinDir + "/enforce_events",
+		BprmLinkPath:                 pinDir + "/bprm_link",
+		FileOpenLinkPath:             pinDir + "/file_open_link",
+		SocketConnLinkPath:           pinDir + "/socket_connect_link",
+		CgroupOpPolicyPath:           pinDir + "/cgroup_op_policy",
+		CgroupPathAllowPath:          pinDir + "/cgroup_path_allow",
+		CgroupFileAllowPath:          pinDir + "/cgroup_file_allow",
+		CgroupBootstrapFileAllowPath: pinDir + "/cgroup_bootstrap_file_allow",
+		BootstrapFileObservationPath: pinDir + "/bootstrap_file_observation",
+		CgroupControlPlaneAllowPath:  pinDir + "/cgroup_control_plane_allow",
+		CgroupTrustedRootPath:        pinDir + "/cgroup_trusted_root",
+		CgroupNetAllowPath:           pinDir + "/cgroup_net_allow",
+		CgroupManagedPath:            pinDir + "/cgroup_managed",
+		KillSwitchPath:               pinDir + "/kill_switch",
+		EnforceEventsPath:            pinDir + "/enforce_events",
 		// The #122 drop counter is part of the pinned set too — omitting it
-		// would leave tryLoadPinnedGuardState requiring an 11th pin that never
+		// would leave tryLoadPinnedGuardState requiring a 15th pin that never
 		// exists, so every "restart" would fall back to a fresh load and this
 		// scenario would silently stop proving restart survival at all.
 		EnforceEventsDroppedPath: pinDir + "/enforce_events_dropped",
@@ -131,6 +151,18 @@ func runRestartSurvivalScenario() error {
 	}
 	fmt.Println("pre-restart: execve denied as expected")
 
+	// Seed one incomplete one-shot request to model a daemon crash between
+	// arming bootstrap observation and clearing its acknowledgement record.
+	// This transient capability is pinned with the rest of the guard ABI, but
+	// unlike applied enforcement it must not survive daemon initialization.
+	staleKey := smokeBootstrapObservationKey{ObserverTGID: uint32(os.Getpid()), Inode: 0xA241}
+	staleValue := smokeBootstrapObservationValue{Generation: uint32(smokeGeneration)}
+	binary.NativeEndian.PutUint64(staleValue.CgroupRaw[:], cgroupID)
+	if err := maps.BootstrapFileObservation.Put(&staleKey, &staleValue); err != nil {
+		firstHandles.Close()
+		return fmt.Errorf("seed stale bootstrap observation before restart: %w", err)
+	}
+
 	// Simulate the daemon process exiting and restarting.
 	firstHandles.Close()
 
@@ -139,6 +171,15 @@ func runRestartSurvivalScenario() error {
 		return fmt.Errorf("second (post-restart) pinned load: %w", err)
 	}
 	defer secondHandles.Close()
+	if err := kernelcapture.ClearBootstrapFileObservations(secondHandles); err != nil {
+		return fmt.Errorf("clear stale bootstrap observations after restart: %w", err)
+	}
+	postRestartMaps := kernelcapture.PolicyMapsFromHandles(secondHandles)
+	var staleLookup smokeBootstrapObservationValue
+	if err := postRestartMaps.BootstrapFileObservation.Lookup(&staleKey, &staleLookup); !errors.Is(err, ebpf.ErrKeyNotExist) {
+		return fmt.Errorf("stale bootstrap observation survived restart cleanup: %v", err)
+	}
+	fmt.Println("post-restart: stale bootstrap observation cleared before policy exposure")
 
 	// Deliberately no ApplyPolicyMaps call here: the whole point is that the
 	// pre-restart policy is still enforced without re-applying anything.
