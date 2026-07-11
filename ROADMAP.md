@@ -15,6 +15,7 @@ Already present:
 - optional receiver-attested receipt envelopes with a separately keyed MCP shim, public golden fixture, and offline two-signature verification
 - a packaged offline verifier that composes receipt chains, transparency proofs, and conditional receiver evidence into redacted CLI/JSON/static HTML reports without a running service
 - a verified-receipt telemetry exporter with a stable redacted JSONL event schema and standards-shaped OTLP/HTTP JSON trace/log requests; production collector operations and vendor-specific connectors remain pending
+- a static non-executing MCP/tool-server preflight scanner with redacted JSON/Markdown reports, deterministic CI thresholds, public fixtures, and a deny-oriented capability/policy skeleton; runtime behavior and dependency provenance remain separate controls
 - curated Python and Go runtime imports
 - the Ardur Personal Hub service plus its CLI surface
 - the Claude Code plugin and hook with signed receipts

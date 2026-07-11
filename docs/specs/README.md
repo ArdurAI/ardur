@@ -29,12 +29,14 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
 | [Runtime Evidence Correlation Profile v0.1](./runtime-evidence-correlation-v0.1.md) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
 | [Governance Telemetry Profile v0.1](./governance-telemetry-v0.1.md) | **implemented verified export** | Signed-chain-first redacted JSONL plus OTLP/HTTP JSON traces/logs with deterministic correlation IDs; not a collector, SIEM, delivery guarantee, or vendor connector |
+| [Tool-Server Preflight v0.1](./tool-server-preflight-v0.1.md) | **implemented static analysis** | Strict JSON MCP/tool-server config scan, redacted deterministic report, CI threshold exits, and deny-oriented capability/policy skeleton; not runtime safety proof |
 | [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](./idm-extension-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](./mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](./execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt v0.2 schema](./execution-receipt-v0.2.schema.json) | **implemented** | Runtime-aligned action enums and required version/canonicalization claims |
+| [Tool-Server Preflight report schema](./tool-server-preflight-report-v0.1.schema.json) | **implemented** | Closed deterministic JSON contract for findings, discovered server metadata, and suggested controls |
 | [Execution Receipt v0.2 golden fixture](./fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
 | [Ardur DRP Profile v0.1 schema](./ardur-drp-profile-v0.1.schema.json) | **implemented** | Closed-world Authorization Object and critical extension contract |
 | [Ardur DRP Profile v0.1 fixture](./fixtures/ardur-drp-profile-v0.1-chain.json) | **implementation fixture** | Organic root/child/grandchild signatures, external public trust/context, and self-verification report; not independent conformance |

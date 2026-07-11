@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f553072cc5e96b58018c0a8514a0efb579f0f08ed385d7c350f62ef9ca77f91f"
+source_sha256: "dccfda4ce594c09a9875a9443b38b39de8848f73bb11e6f75c25165d462e9071"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,7 +30,8 @@ The CLI splits into two groups:
   `claude-code-hook`, `claude-code-report`, `gemini-cli-hook`,
   `gemini-cli-fixture`, `gemini-cli-report`, `codex-app-server-event`,
   `codex-app-server-fixture`, `codex-app-server-report`, `posture scan`,
-  `posture report`. Used by the local Ardur Personal product shape.
+  `posture report`, `preflight tool-server`. Used by the local Ardur Personal
+  product shape.
 
 Source: [`python/vibap/cli.py`](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/python/vibap/cli.py).
 
@@ -1369,6 +1370,58 @@ of `codex_app_server_report_home_empty`,
 `codex_app_server_report_keys_dir_empty` depending on which argument failed.
 Omit the optional argument to use the default local Ardur location; pass `.`
 explicitly when the current working directory is intended.
+
+### `ardur preflight tool-server`
+
+Inspect a strict JSON MCP/tool-server configuration before granting it
+authority. The scanner is static and non-executing: it does not start commands,
+import server code, resolve packages, read environment values or `envFile`
+contents, or contact configured endpoints.
+
+```text
+ardur preflight tool-server --config FILE
+    [--format json|markdown]
+    [--output FILE]
+    [--fail-on critical|high|medium|low|none]
+```
+
+The default JSON report is deterministic and conforms to
+[`tool-server-preflight-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/tool-server-preflight-report-v0.1.schema.json).
+It includes a verdict, severity counts, redacted evidence, remediation, and a
+deny-oriented capability-token/policy skeleton. Markdown contains the same
+operator-facing findings. Reports never include the input path, literal
+environment values, raw descriptions, full command arguments, or endpoint
+URLs.
+
+CI can select the lowest failing severity. Exit `0` means analysis completed
+without reaching that threshold, exit `2` means analysis completed and reached
+the threshold, and exit `1` means the input/output operation failed. The
+default `--fail-on none` reports findings without failing a pipeline.
+
+```bash
+ardur preflight tool-server \
+  --config examples/tool-server-preflight/risky-gemini.json \
+  --format json \
+  --fail-on high > preflight.json
+```
+
+`--output` uses an atomic owner-only file writer and prints a compact JSON
+status envelope instead of the report. Input failures return stable conditions
+such as `config_missing`, `config_malformed`, `config_duplicate_key`, and
+`server_collection_missing` without echoing local paths or file contents.
+
+Supported v0.1 shapes are top-level `mcpServers`, VS Code-style `servers`, and
+static `{name, tools}` manifests. A per-server `includeTools` list can seed a
+closed tool catalog. Missing tool metadata is reported rather than discovered
+dynamically. See the full
+[`Tool-Server Preflight v0.1`](/__ardur_internal__/source/docs/specs/tool-server-preflight-v0.1/)
+contract and the
+[`examples/tool-server-preflight/`](/__ardur_internal__/source/examples/tool-server-preflight/readme/)
+fixtures.
+
+A clean report is not proof that a server is safe or behaves as declared.
+Runtime Ardur policy, resolved-argument authorization, receipts, dependency
+provenance, and external observation remain separate controls.
 
 ### `ardur posture scan`
 

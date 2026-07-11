@@ -142,3 +142,14 @@ def governance_telemetry_v01_schema() -> dict:
         .read_text(encoding="utf-8")
     )
     return json.loads(raw)
+
+
+@lru_cache(maxsize=1)
+def tool_server_preflight_report_v01_schema() -> dict:
+    """Return the Tool-Server Preflight Report v0.1 schema."""
+    raw = (
+        files(__package__)
+        .joinpath("tool_server_preflight_report_v01.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    return json.loads(raw)

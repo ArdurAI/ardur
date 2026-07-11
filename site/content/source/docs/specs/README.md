@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "8a272008fae9f4f9b962b5642292c2e451bbd25c88de81ef4665c30160b4ed82"
+source_sha256: "dcde77e995049c18ce58d5639be43c54e946d0b3e6b7fc8f903650056d882f72"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -46,12 +46,14 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
 | [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
 | [Governance Telemetry Profile v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) | **implemented verified export** | Signed-chain-first redacted JSONL plus OTLP/HTTP JSON traces/logs with deterministic correlation IDs; not a collector, SIEM, delivery guarantee, or vendor connector |
+| [Tool-Server Preflight v0.1](/__ardur_internal__/source/docs/specs/tool-server-preflight-v0.1/) | **implemented static analysis** | Strict JSON MCP/tool-server config scan, redacted deterministic report, CI threshold exits, and deny-oriented capability/policy skeleton; not runtime safety proof |
 | [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt v0.2 schema](/__ardur_internal__/repo/docs/specs/execution-receipt-v0.2.schema.json) | **implemented** | Runtime-aligned action enums and required version/canonicalization claims |
+| [Tool-Server Preflight report schema](/__ardur_internal__/repo/docs/specs/tool-server-preflight-report-v0.1.schema.json) | **implemented** | Closed deterministic JSON contract for findings, discovered server metadata, and suggested controls |
 | [Execution Receipt v0.2 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
 | [Ardur DRP Profile v0.1 schema](/__ardur_internal__/repo/docs/specs/ardur-drp-profile-v0.1.schema.json) | **implemented** | Closed-world Authorization Object and critical extension contract |
 | [Ardur DRP Profile v0.1 fixture](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-chain.json) | **implementation fixture** | Organic root/child/grandchild signatures, external public trust/context, and self-verification report; not independent conformance |
