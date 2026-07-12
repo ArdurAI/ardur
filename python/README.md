@@ -194,6 +194,14 @@ python/
 
 A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
 
+Library deployments that enable Biscuit JWT-SVID holder binding configure a
+server-owned Biscuit issuer key, `TrustBundle`, and expected audience on
+`GovernanceProxy`; clients present only `peer_jwt_svid`. Once configured, the
+SVID is mandatory and per-call inputs cannot replace the issuer, JWKS, trust
+domain, or audience. Without server trust configuration, Biscuit sessions
+remain explicitly `svid_bound=false`. JWT-SVID is still a bearer credential
+with a bounded replay window.
+
 ## Protocol identifier rename
 
 This implementation is a **clean break** on protocol identifiers — v0.1 receipts, passports, and attestations only emit and accept the new Ardur type strings. There is no dual-type backward-compat shim. If you have artifacts produced before the rename, they won't validate against this code, and that's intentional.

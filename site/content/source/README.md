@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "721a4428fd0715940c338eba0ababa9dc5011f4b0dae53c56099f3d4394d97cb"
+source_sha256: "7288038d4c91e2aefb13c2a7434c8c10d44a6539251f4d6fdcf8bce18d32d216"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -222,7 +222,7 @@ Concretely — these are the design principles the repo is being built to meet, 
 
 - **Public-by-default as a working principle.** The aim is that every public claim ties to a verifier path, an artifact, a re-runnable test, or an explicit limitation note. The code-bearing runtime is landing in phases per the [public import plan](/__ardur_internal__/source/docs/public-import-plan/); claims that depend on not-yet-verified runtime behavior still need explicit caveats.
 - **Composable with what already exists.** Designed around SPIFFE for workload identity, Biscuit for first-party-attenuation credentials, Cedar for policy, the individual AAT Internet-Draft for delegation-token semantics, and EAT (RFC 9711) for attestation-token semantics. We didn't reinvent the substrate.
-- **Cryptographically bound by design.** Mission credentials are designed to be signed by an issuer key, holder-bound to a SPIFFE SVID, and produce signed receipts chain-hashed to the previous one. The design is documented in the [ADRs](/__ardur_internal__/source/docs/decisions/readme/); the public code that implements it is being curated in phases.
+- **Cryptographically bound by design.** Mission credentials are designed to be signed by an issuer key and produce signed receipts chain-hashed to the previous one. The Python Biscuit path reports SPIFFE holder binding only when the proxy has a server-owned Biscuit issuer key, JWT-SVID trust bundle, and audience and the presented credentials verify against them; request payloads cannot choose those verifier inputs. JWT-SVID itself remains a replayable bearer credential, so this is bounded holder evidence rather than universal replay prevention. The design is documented in the [ADRs](/__ardur_internal__/source/docs/decisions/readme/); the public code that implements it is being curated in phases.
 - **Delegation that narrows, never widens.** Child sessions get strictly narrower authority than their parent — fewer tools, smaller resource scope, smaller budget. The narrowing discipline is formalised in [ADR-017](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/).
 - **Explicit about what it doesn't do.** Scope-level governance can't catch semantic misuse — if an allowed tool is used on an allowed resource for the wrong reason, that's a different layer's job.
 - **MIT licensed.** The research foundation (the Silence Theorem, the protocol formalism, the benchmark methodology) will be linked from this repo when the paper's public identifier is assigned. Articles in this repo paraphrase the research in original prose; they do not reproduce paper content.

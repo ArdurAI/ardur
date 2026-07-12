@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "db4e3aec28cfa4d6b03475a4d4c920385cd32aed2f2c057707ba06311b8695a9"
+source_sha256: "1995b42fa18efb7a0de1c15978f95f8994237b9cd90301242cdcc91002309d7f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -205,6 +205,23 @@ with cross-node clock drift) in favor of the explicit window. Archival
 re-verification can pass `future_skew_s=None`/`past_skew_s=None` per
 call. Go uses a tighter 30s default consistent with the SD-JWT-VC
 profile's clock-drift tolerance.
+
+## Biscuit JWT-SVID holder binding is server-pinned but still bearer evidence
+
+The Python proxy accepts a Biscuit peer JWT-SVID only when its verifier has a
+server-owned Biscuit issuer key, trust bundle, and expected audience. Request
+payloads cannot supply or override the JWKS, trust domain, or audience, and a
+per-call issuer key cannot replace the configured issuer. Configured binding is
+fail-closed: omitting the SVID, presenting a matching SPIFFE ID under an
+untrusted key, using a different trust domain, or relying on a bundle key not
+marked `use=jwt-svid` rejects the session. `svid_bound=true` is recorded only
+after all of those checks pass.
+
+This closes presenter-owned-root forgery; it does not turn JWT-SVID into proof
+of a live channel or one-time possession. JWT-SVID is a bearer credential and
+can be replayed during its validity window if both the Biscuit and SVID are
+stolen. Deployments needing channel-bound workload identity should prefer the
+X.509-SVID mTLS pattern in ADR-022.
 
 ## Operator + webhook /metrics endpoints (deployment hardening required)
 

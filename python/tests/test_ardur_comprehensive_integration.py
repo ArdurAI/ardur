@@ -44,6 +44,8 @@ from vibap.tls import generate_self_signed_cert
 
 CLOUD_MODEL = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
 API_KEY = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
+_BISCUIT_HOLDER_SPIFFE_ID = "spiffe://ardur.dev/agent/test-runner"
+_BISCUIT_SVID_AUDIENCE = "vibap://spiffe-mock"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -303,6 +305,7 @@ class TestArdurComprehensive:
         report = ScenarioReport()
 
         policy_store = InMemoryPolicyStore()
+        from vibap.spiffe_identity import make_mock_trust_bundle
 
         proxy = GovernanceProxy(
             log_path=tmp_path / "governance_log.jsonl",
@@ -311,6 +314,10 @@ class TestArdurComprehensive:
             private_key=private_key,  # so receipt signing uses same key
             keys_dir=keys_dir,
             biscuit_issuer_public_key=biscuit_keypair.public_key,
+            biscuit_peer_trust_bundle=make_mock_trust_bundle(
+                _BISCUIT_HOLDER_SPIFFE_ID
+            ),
+            biscuit_svid_audience=_BISCUIT_SVID_AUDIENCE,
             policy_store=policy_store,
         )
 
@@ -547,7 +554,7 @@ def _verify_biscuit_spiffe(base, proxy, biscuit_keypair):
     from vibap.biscuit_passport import encode_biscuit_b64, issue_biscuit_passport
     from vibap.spiffe_identity import make_mock_svid_bundle, make_mock_trust_bundle
 
-    holder_spiffe = "spiffe://ardur.dev/agent/test-runner"
+    holder_spiffe = _BISCUIT_HOLDER_SPIFFE_ID
     private_bytes = bytes(biscuit_keypair.private_key.to_bytes())
 
     mission = MissionPassport(
@@ -578,11 +585,20 @@ def _verify_biscuit_spiffe(base, proxy, biscuit_keypair):
         "peer_jwt_svid": svid_bundle.jwt_svid_token,
         "peer_trust_jwks": trust_bundle.jwks,
         "peer_trust_domain": trust_bundle.trust_domain,
-        "svid_audience": "vibap://spiffe-mock",
+        "svid_audience": _BISCUIT_SVID_AUDIENCE,
+    })
+    assert status == 400
+    assert "caller-supplied" in body["error"]
+
+    status, body, _ = _post_tls(base, "/session/start", {
+        "token": biscuit_b64,
+        "token_type": "biscuit",
+        "peer_jwt_svid": svid_bundle.jwt_svid_token,
     })
     assert status == 200, f"biscuit+spiffe start failed: {body}"
     assert body["credential_format"] == "biscuit-v1"
     sid = body["session_id"]
+    assert proxy.sessions[sid].passport_claims["svid_bound"] is True
 
     # Allowed tool within scope
     status, eval_body, _ = _post_tls(base, "/evaluate", {
@@ -943,10 +959,12 @@ def _verify_biscuit_attenuation_chain(base, proxy, biscuit_keypair):
         encode_biscuit_b64,
         issue_biscuit_passport,
     )
+    from vibap.spiffe_identity import make_mock_svid_bundle
 
     private_bytes = bytes(biscuit_keypair.private_key.to_bytes())
     root_private = PrivateKey.from_bytes(private_bytes, Algorithm.Ed25519)
-    holder_spiffe = "spiffe://ardur.dev/agent/root"
+    holder_spiffe = _BISCUIT_HOLDER_SPIFFE_ID
+    peer_svid = make_mock_svid_bundle(holder_spiffe, iat=int(time.time()))
 
     mission = MissionPassport(
         agent_id="root-agent",
@@ -963,7 +981,11 @@ def _verify_biscuit_attenuation_chain(base, proxy, biscuit_keypair):
     root_bytes = issue_biscuit_passport(mission, root_private, "spiffe://ardur.dev/issuer", ttl_s=600)
     root_b64 = encode_biscuit_b64(root_bytes)
 
-    status, body, _ = _post_tls(base, "/session/start", {"token": root_b64, "token_type": "biscuit"})
+    status, body, _ = _post_tls(base, "/session/start", {
+        "token": root_b64,
+        "token_type": "biscuit",
+        "peer_jwt_svid": peer_svid.jwt_svid_token,
+    })
     assert status == 200, f"root biscuit start: {body}"
     root_sid = body["session_id"]
 
@@ -980,8 +1002,15 @@ def _verify_biscuit_attenuation_chain(base, proxy, biscuit_keypair):
         child_max_tool_calls=50,
     )
     child_b64 = encode_biscuit_b64(child_bytes)
+    child_svid = make_mock_svid_bundle(
+        "spiffe://ardur.dev/agent/child", iat=int(time.time())
+    )
 
-    status, body, _ = _post_tls(base, "/session/start", {"token": child_b64, "token_type": "biscuit"})
+    status, body, _ = _post_tls(base, "/session/start", {
+        "token": child_b64,
+        "token_type": "biscuit",
+        "peer_jwt_svid": child_svid.jwt_svid_token,
+    })
     assert status == 200
     child_sid = body["session_id"]
 
@@ -998,8 +1027,15 @@ def _verify_biscuit_attenuation_chain(base, proxy, biscuit_keypair):
         child_max_tool_calls=10,
     )
     gc_b64 = encode_biscuit_b64(gc_bytes)
+    gc_svid = make_mock_svid_bundle(
+        "spiffe://ardur.dev/agent/grandchild", iat=int(time.time())
+    )
 
-    status, body, _ = _post_tls(base, "/session/start", {"token": gc_b64, "token_type": "biscuit"})
+    status, body, _ = _post_tls(base, "/session/start", {
+        "token": gc_b64,
+        "token_type": "biscuit",
+        "peer_jwt_svid": gc_svid.jwt_svid_token,
+    })
     assert status == 200
     gc_sid = body["session_id"]
 
