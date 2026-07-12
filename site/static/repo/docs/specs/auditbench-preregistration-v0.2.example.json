@@ -1,0 +1,21 @@
+{
+  "schema_version": "auditbench.preregistration.v0.2",
+  "study_id": "auditbench-pilot-example",
+  "mode": "pilot",
+  "protocol_sha256": "sha256:0d41fd1b752a58301eb599237b50220dd9e84f3eb615614bb328c6f22b6b8577",
+  "registration_assurance": "self_asserted",
+  "registered_at": "2026-01-01T00:00:00Z",
+  "metrics": [
+    "accuracy",
+    "false_safe_rate",
+    "missed_violation_rate",
+    "over_abstention_rate",
+    "per_class_prf"
+  ],
+  "minimum_annotators_per_view": 2,
+  "held_out_minimum_basis_points": 3000,
+  "allowed_suts": [
+    "ardur",
+    "opa"
+  ]
+}

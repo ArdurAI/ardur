@@ -190,7 +190,8 @@ func BuildSeal(rootDir, corpusDir, protocolPath, preregPath, goldPath, annotatio
 	}
 	seal := Seal{
 		SchemaVersion: SealSchema, StudyID: prereg.StudyID, Mode: prereg.Mode,
-		SealedAt: sealedAt, Protocol: protocolDigest, Preregistration: preregDigest, Gold: goldDigest,
+		RegistrationAssurance: prereg.RegistrationAssurance,
+		SealedAt:              sealedAt, Protocol: protocolDigest, Preregistration: preregDigest, Gold: goldDigest,
 		Annotations: annotationsDigest, Adjudications: adjudicationsDigest,
 		Splits: splitsDigest, Corpus: corpus,
 	}
@@ -203,8 +204,8 @@ func BuildSeal(rootDir, corpusDir, protocolPath, preregPath, goldPath, annotatio
 }
 
 func VerifySeal(rootDir, corpusDir, protocolPath, preregPath, goldPath, annotationsPath, adjudicationsPath, splitsPath string, seal Seal) error {
-	if seal.SchemaVersion != SealSchema || !validSHA256(seal.RootSHA256) {
-		return errors.New("invalid seal")
+	if err := validateSealEnvelope(seal); err != nil {
+		return err
 	}
 	rebuilt, err := BuildSeal(rootDir, corpusDir, protocolPath, preregPath, goldPath, annotationsPath, adjudicationsPath, splitsPath, seal.SealedAt)
 	if err != nil {
@@ -226,10 +227,23 @@ func sealRootDigest(seal Seal) (string, error) {
 }
 
 func SealDigest(seal Seal) (string, error) {
-	if seal.SchemaVersion != SealSchema || !validSHA256(seal.RootSHA256) {
-		return "", errors.New("invalid seal")
+	if err := validateSealEnvelope(seal); err != nil {
+		return "", err
 	}
 	return ArtifactDigest(seal)
+}
+
+func validateSealEnvelope(seal Seal) error {
+	if seal.SchemaVersion != SealSchema || !validSHA256(seal.RootSHA256) {
+		return errors.New("invalid seal")
+	}
+	if seal.Mode != ModePilot {
+		return fmt.Errorf("unsupported seal mode %q", seal.Mode)
+	}
+	if seal.RegistrationAssurance != RegistrationAssuranceSelfAsserted {
+		return fmt.Errorf("unsupported seal registration_assurance %q", seal.RegistrationAssurance)
+	}
+	return nil
 }
 
 func digestRelative(rootAbs, path, role string) (FileDigest, error) {

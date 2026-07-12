@@ -216,8 +216,17 @@ func (prereg Preregistration) Validate() error {
 	if !validSHA256(prereg.ProtocolSHA256) {
 		return errors.New("invalid protocol_sha256")
 	}
+	if prereg.RegistrationAssurance != RegistrationAssuranceSelfAsserted {
+		return fmt.Errorf("unsupported registration_assurance %q", prereg.RegistrationAssurance)
+	}
 	if err := validateTime("registered_at", prereg.RegisteredAt); err != nil {
 		return err
+	}
+	if prereg.RegistrationURI != "" {
+		parsed, err := url.Parse(prereg.RegistrationURI)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return errors.New("registration_uri must be HTTPS when provided")
+		}
 	}
 	if len(prereg.Metrics) == 0 {
 		return errors.New("no preregistered metrics")
@@ -254,10 +263,7 @@ func (prereg Preregistration) Validate() error {
 		}
 	}
 	if prereg.Mode == ModeHeadline {
-		parsed, err := url.Parse(prereg.RegistrationURI)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-			return errors.New("headline mode requires an HTTPS registration_uri")
-		}
+		return errors.New("headline mode requires externally verified registration evidence; registration_uri and registered_at are self-asserted")
 	}
 	return nil
 }

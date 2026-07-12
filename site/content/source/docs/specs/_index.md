@@ -46,6 +46,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ardur-drp-mapping-v0.1.json`](/__ardur_internal__/repo/docs/specs/ardur-drp-mapping-v0.1.json)
 - [`ardur-drp-profile-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/ardur-drp-profile-v0.1.schema.json)
 - [`auditbench-preregistration-v0.1.example.json`](/__ardur_internal__/repo/docs/specs/auditbench-preregistration-v0.1.example.json)
+- [`auditbench-preregistration-v0.2.example.json`](/__ardur_internal__/repo/docs/specs/auditbench-preregistration-v0.2.example.json)
 - [`auditbench-splits-v0.1.example.json`](/__ardur_internal__/repo/docs/specs/auditbench-splits-v0.1.example.json)
 - [`drp-conformance-bundle-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/drp-conformance-bundle-v0.1.schema.json)
 - [`drp-implementation-fixture-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/drp-implementation-fixture-report-v0.1.schema.json)

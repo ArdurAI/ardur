@@ -22,9 +22,35 @@ registration. Those facts require an externally governed process and external
 records.
 
 `pilot` mode is for pipeline tests and method dry runs. Its results are not
-independent evidence. `headline` mode additionally requires an HTTPS
-registration URI, but the URI and human roles still require review outside the
-binary.
+independent evidence. The implemented v0.2 preregistration contract labels its
+timestamp and optional HTTPS registration URI as `self_asserted`. `headline`
+mode fails closed even when such a URI is present. No headline result is
+eligible until a later contract verifies external registration evidence and
+binds it to the frozen protocol.
+
+## Preregistration evidence
+
+`auditbench.preregistration.v0.2` requires
+`registration_assurance: self_asserted`. The value means:
+
+- `registered_at` is supplied by the artifact author, not a trusted timestamp;
+- an optional `registration_uri` is only a syntactically valid HTTPS reference;
+- the binary has not resolved that URI, checked registry state, or proved that
+  its record contains the frozen `protocol_sha256`; and
+- chronology checks constrain the local artifact graph but do not establish
+  when an external service received the study.
+
+The seal and score report use v0.2 schemas and repeat the mode and registration
+assurance so downstream consumers cannot mistake a pilot artifact for externally
+registered evidence. Scoring rejects mode or assurance drift between the
+preregistration and seal. The older v0.1 preregistration, seal, and score-report
+contracts are deliberately rejected rather than silently reinterpreted; no real
+study was published under them. The v0.1 example remains as a historical
+artifact for auditability, not as accepted pipeline input.
+
+A future externally verified profile requires a frozen evidence artifact that
+binds a canonical registry record and registry-owned timestamp to the exact
+protocol or preregistration digest. URI reachability alone is insufficient.
 
 ## Separation of powers
 
@@ -42,11 +68,13 @@ binary.
    view. A disagreement requires a third person who did not annotate that
    scenario. The gold verdict is `insufficient_evidence` when evidence is
    insufficient or world truth remains unknown.
-5. `auditbench-score seal` binds the frozen protocol, preregistration, raw
+5. `auditbench-score seal` binds the frozen protocol, self-asserted
+   preregistration assurance, raw
    captures, regenerated views, bundle hashes, annotation/adjudication digest,
    gold set, and split manifest. At least 30 percent of scenarios must be held
    out. Capture and annotation times must fall between registration and seal.
-6. `auditbench-score score` accepts only preregistered SUT identifiers, exact
+6. `auditbench-score score` accepts only matching pilot mode and registration
+   assurance, preregistered SUT identifiers, exact
    split coverage, tri-state verdicts, a matching seal digest, and results
    created no earlier than the seal time. The report binds the exact SUT result
    artifact digest as well as the study seal digest.
@@ -59,8 +87,8 @@ external capture
     -> policy + oracle view ------> separate-role oracle annotators --+
     -> policy + evidence view ----> separate-role evidence annotators +-> adjudication -> gold
 
-frozen protocol + preregistration + corpus + gold + split manifest
-    -> local content-integrity seal
+frozen protocol + self-asserted preregistration + corpus + gold + split manifest
+    -> local content-integrity seal (pilot only)
     -> SUT run against sealed artifacts
     -> score (held-out by default)
 ```
@@ -99,8 +127,13 @@ not proof that the rubric or annotators are unbiased.
   external anchor, participant attestation, or proof of independence.
   Publication use should place the frozen protocol and its digest in an
   external immutable or embargoed registration before SUT evaluation.
-- The binaries do not sandbox a SUT. A headline run must expose only its sealed
-  evidence inputs in a separate execution environment; access to oracle, gold,
+- The binary performs no registry network request. This preserves deterministic
+  offline verification and avoids treating endpoint availability as evidence.
+  A future registry adapter must validate canonical identity, public and
+  non-withdrawn state, registry-owned time, and archived-content binding, then
+  preserve a bounded response digest for replay.
+- The binaries do not sandbox a SUT. Any future headline run must expose only
+  its sealed evidence inputs in a separate execution environment; access to oracle, gold,
   annotation, or held-out answer files invalidates the result.
 
 ## Commands
@@ -161,6 +194,8 @@ go run ./cmd/auditbench-score score \
 - a real OPA adapter and at least one additional third-party SUT;
 - an isolated evidence-only SUT runner or independently reviewed equivalent;
 - an external preregistration and trusted timestamp/signature;
+- a versioned external registration-evidence schema and offline verifier that
+  binds registry-owned metadata to the frozen protocol;
 - the embargoed held-out corpus and one-time headline scoring run.
 
 Until those exist, issue #40 remains open. The implemented artifact is an
@@ -170,6 +205,7 @@ independent AuditBench result.
 ## Methodology references
 
 - [OSF registrations and preregistrations](https://help.osf.io/article/330-welcome-to-registrations)
+- [OSF API documentation](https://developer.osf.io/)
 - ACM, "Artifact Review and Badging - Current" (primary policy reviewed
   2026-07-11; ACM returns 403 to automated link checkers)
 - [NIST AI Risk Management Framework 1.0](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf)
