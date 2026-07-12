@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "e0e4e0dd5c641878bfbebbe8a98a98208a9b2fdc89e5850598aa69d3325fc521"
+source_sha256: "e5e4003b98713343970d2d4d42420e844e580de142f13e9de190c35a2f61fb42"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -44,6 +44,22 @@ Do not use `--no-ringbuf` as a production fallback for a failing event
 consumer. A healthy socket in this mode proves control-plane liveness only; it
 does not prove that a governed process is observed or constrained below the
 tool-call boundary.
+
+## Control-plane shutdown and handler drain
+
+On SIGINT or SIGTERM, the daemon stops accepting control-socket connections,
+cancels the request context, and closes accepted Unix connections so blocked
+reads and writes return. It tracks every accepted handler and waits up to five
+seconds for those handlers to return. A handler already inside a bounded map or
+evidence operation may finish that operation; a request that has not begun its
+authorized mutation observes cancellation and stops.
+
+BPF policy maps and guard handles remain live until the handler drain is
+proven. If a non-cooperative handler outlives the five-second deadline, the
+daemon logs `control socket handler drain timed out` and deliberately skips
+explicit guard-handle teardown. Process exit then owns cleanup. This avoids
+closing a live map handle underneath the stuck handler while keeping shutdown
+bounded; it is a fail-safe exit path, not evidence that the request completed.
 
 ## Seccomp governance endpoint
 
@@ -137,10 +153,13 @@ enter Ardur's lifecycle ringbuf when no governed session exists.
 For each `register_session`, the daemon adds the verified nonzero cgroup before
 the registry can return success and before the launch gate is released. A map
 update failure rejects that registration so the enabled producer cannot omit
-the new session. Session end and TTL expiry first retire the userspace route and
-wait for already-matched evidence work, then remove the cgroup. Multiple active
-sessions retain independent entries. The BPF allowlist capacity is 4,096,
-matching the daemon session registry's active-session limit.
+the new session. Session end and TTL expiry retire the userspace route after any
+already-matched event finishes mutable correlation, then remove the cgroup;
+they do not hold the daemon-wide routing lock behind evidence `fsync`. A stable
+per-session append shard preserves JSONL order across a reused session ID while
+the old append completes. Multiple active sessions retain independent entries.
+The BPF allowlist capacity is 4,096, matching the daemon session registry's
+active-session limit.
 
 For non-root socket peers, registration also fails closed unless the daemon can
 resolve the kernel-supplied `SO_PEERCRED` PID in its `/proc` view, verify that

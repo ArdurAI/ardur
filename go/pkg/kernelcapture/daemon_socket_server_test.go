@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -153,6 +155,215 @@ func TestDaemonUnixSocketServerEnforcesBoundedConcurrency(t *testing.T) {
 	}
 }
 
+func TestDaemonUnixSocketServerCancellationDrainsInFlightHandlerBeforeServeReturns(t *testing.T) {
+	entered := make(chan struct{})
+	observedCancel := make(chan struct{})
+	allowReturn := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(allowReturn) }) }
+	defer releaseHandler()
+
+	server := listenDaemonUnixSocketServerForTest(t, daemonSocketServerTestOptions{
+		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
+			return DaemonSocketPeerObservation{
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
+				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+				SocketPath:       socketPath,
+			}, nil
+		},
+		handleAuthorizedRequest: func(ctx context.Context, req DaemonProtocolRequest, handshake DaemonProtocolPeerHandshake) DaemonProtocolResponse {
+			close(entered)
+			<-ctx.Done()
+			close(observedCancel)
+			<-allowReturn
+			return DefaultDaemonAuthorizedProtocolResponse(req, handshake)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(ctx) }()
+
+	conn := dialDaemonUnixSocket(t, server.SocketPath())
+	defer conn.Close()
+	if _, err := conn.Write(daemonHealthRequest(t)); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("authorized handler did not start")
+	}
+	cancel()
+	select {
+	case <-observedCancel:
+	case <-time.After(time.Second):
+		t.Fatal("authorized handler did not observe context cancellation")
+	}
+	select {
+	case err := <-serveErr:
+		t.Fatalf("Serve returned before the in-flight handler drained: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseHandler()
+	select {
+	case err := <-serveErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context cancellation after drain", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not return after the in-flight handler drained")
+	}
+}
+
+func TestDaemonUnixSocketServerCancellationUnblocksAndDrainsPartialRequest(t *testing.T) {
+	server := listenDaemonUnixSocketServerForTest(t, daemonSocketServerTestOptions{
+		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
+			return DaemonSocketPeerObservation{
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
+				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+				SocketPath:       socketPath,
+			}, nil
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(ctx) }()
+
+	conn := dialDaemonUnixSocket(t, server.SocketPath())
+	defer conn.Close()
+	deadline := time.Now().Add(time.Second)
+	for len(server.semaphore) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("partial request handler did not acquire its concurrency slot")
+		}
+		runtime.Gosched()
+	}
+	cancel()
+	select {
+	case err := <-serveErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not return after cancellation")
+	}
+	if got := len(server.semaphore); got != 0 {
+		t.Fatalf("active handler slots after Serve returned = %d, want 0", got)
+	}
+}
+
+func TestDaemonUnixSocketServerCancellationBeforeDispatchSkipsAuthorizedMutation(t *testing.T) {
+	observerEntered := make(chan struct{})
+	releaseObserver := make(chan struct{})
+	var handled atomic.Int32
+	server := listenDaemonUnixSocketServerForTest(t, daemonSocketServerTestOptions{
+		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
+			close(observerEntered)
+			<-releaseObserver
+			return DaemonSocketPeerObservation{
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
+				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+				SocketPath:       socketPath,
+			}, nil
+		},
+		handleAuthorizedRequest: func(_ context.Context, req DaemonProtocolRequest, handshake DaemonProtocolPeerHandshake) DaemonProtocolResponse {
+			handled.Add(1)
+			return DefaultDaemonAuthorizedProtocolResponse(req, handshake)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(ctx) }()
+	conn := dialDaemonUnixSocket(t, server.SocketPath())
+	defer conn.Close()
+	if _, err := conn.Write(daemonHealthRequest(t)); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	select {
+	case <-observerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("peer observer did not start")
+	}
+	cancel()
+	close(releaseObserver)
+	select {
+	case err := <-serveErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Serve error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not drain after cancellation")
+	}
+	if got := handled.Load(); got != 0 {
+		t.Fatalf("authorized mutations after cancellation = %d, want 0", got)
+	}
+}
+
+func TestDaemonUnixSocketServerReportsBoundedDrainTimeout(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHandler()
+
+	server := listenDaemonUnixSocketServerForTest(t, daemonSocketServerTestOptions{
+		shutdownTimeout: 50 * time.Millisecond,
+		policy:          DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
+			return DaemonSocketPeerObservation{
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
+				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+				SocketPath:       socketPath,
+			}, nil
+		},
+		handleAuthorizedRequest: func(_ context.Context, req DaemonProtocolRequest, handshake DaemonProtocolPeerHandshake) DaemonProtocolResponse {
+			close(entered)
+			<-release // Deliberately ignore cancellation to exercise the hard deadline.
+			return DefaultDaemonAuthorizedProtocolResponse(req, handshake)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(ctx) }()
+	conn := dialDaemonUnixSocket(t, server.SocketPath())
+	defer conn.Close()
+	if _, err := conn.Write(daemonHealthRequest(t)); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("authorized handler did not start")
+	}
+	cancel()
+	select {
+	case err := <-serveErr:
+		if !errors.Is(err, ErrDaemonSocketServerShutdownTimeout) {
+			t.Fatalf("Serve error = %v, want handler-drain timeout", err)
+		}
+		if !errors.Is(err, ErrDaemonSocketServer) {
+			t.Fatalf("Serve error = %v, want generic socket-server classification", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not honor its bounded drain timeout")
+	}
+	select {
+	case <-server.HandlersDrained():
+		t.Fatal("HandlersDrained closed while the non-cooperative handler was still running")
+	default:
+	}
+	releaseHandler()
+	select {
+	case <-server.HandlersDrained():
+	case <-time.After(time.Second):
+		t.Fatal("HandlersDrained did not close after the handler eventually returned")
+	}
+}
+
 func TestDaemonUnixSocketServerRejectsInvalidConfig(t *testing.T) {
 	t.Parallel()
 
@@ -173,30 +384,32 @@ func TestDaemonUnixSocketServerRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestDaemonUnixSocketServerServeIsSingleUse(t *testing.T) {
+	server, cancel := startDaemonUnixSocketServerForTest(t, daemonSocketServerTestOptions{
+		policy: DaemonPeerAuthorizationPolicy{AllowedUIDs: []uint32{501}},
+		observePeer: func(_ *net.UnixConn, socketPath string) (DaemonSocketPeerObservation, error) {
+			return DaemonSocketPeerObservation{
+				Credentials:      DaemonObservedPeerCredentials{UID: 501, GID: 20, PID: 4321, ProcessStartTimeTicks: 800001},
+				CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+				SocketPath:       socketPath,
+			}, nil
+		},
+	})
+	cancel()
+	if err := server.Serve(context.Background()); err == nil || !strings.Contains(err.Error(), "only once") {
+		t.Fatalf("second Serve error = %v, want single-use rejection", err)
+	}
+}
+
 type daemonSocketServerTestOptions struct {
 	policy                   DaemonPeerAuthorizationPolicy
 	observePeer              DaemonPeerCredentialObserver
 	handleAuthorizedRequest  DaemonAuthorizedProtocolHandler
 	maxConcurrentConnections int
+	shutdownTimeout          time.Duration
 }
 
-func shortDaemonSocketPathForTest(t *testing.T) string {
-	t.Helper()
-
-	// Darwin's sockaddr_un path budget is small and t.TempDir includes the full
-	// test name, so keep the bound path intentionally short. The directory is
-	// unique per test and cleaned up after the server removes the socket file.
-	dir, err := os.MkdirTemp("/tmp", "ardur-sock-*")
-	if err != nil {
-		t.Fatalf("MkdirTemp returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
-	})
-	return filepath.Join(dir, "s.sock")
-}
-
-func startDaemonUnixSocketServerForTest(t *testing.T, opts daemonSocketServerTestOptions) (*DaemonUnixSocketServer, func()) {
+func listenDaemonUnixSocketServerForTest(t *testing.T, opts daemonSocketServerTestOptions) *DaemonUnixSocketServer {
 	t.Helper()
 
 	plan, err := BuildDaemonCustodyPlan(DefaultDaemonCustodyConfig())
@@ -213,11 +426,40 @@ func startDaemonUnixSocketServerForTest(t *testing.T, opts daemonSocketServerTes
 	if opts.maxConcurrentConnections != 0 {
 		cfg.MaxConcurrentConnections = opts.maxConcurrentConnections
 	}
+	if opts.shutdownTimeout != 0 {
+		cfg.ShutdownTimeout = opts.shutdownTimeout
+	}
 
 	server, err := ListenDaemonUnixSocketServer(cfg)
 	if err != nil {
 		t.Fatalf("ListenDaemonUnixSocketServer returned error: %v", err)
 	}
+	return server
+}
+
+func shortDaemonSocketPathForTest(t *testing.T) string {
+	t.Helper()
+
+	// Darwin's sockaddr_un path budget is small and t.TempDir includes the full
+	// test name, so keep the bound path intentionally short. Local agents may set
+	// ARDUR_TEST_SOCKET_TMPDIR to a short external-volume path; CI keeps /tmp.
+	baseDir := os.Getenv("ARDUR_TEST_SOCKET_TMPDIR")
+	if baseDir == "" {
+		baseDir = "/tmp"
+	}
+	dir, err := os.MkdirTemp(baseDir, "ardur-sock-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	return filepath.Join(dir, "s.sock")
+}
+
+func startDaemonUnixSocketServerForTest(t *testing.T, opts daemonSocketServerTestOptions) (*DaemonUnixSocketServer, func()) {
+	t.Helper()
+	server := listenDaemonUnixSocketServerForTest(t, opts)
 	ctx, cancelContext := context.WithCancel(context.Background())
 	serveErrCh := make(chan error, 1)
 	go func() {

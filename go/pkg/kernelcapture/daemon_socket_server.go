@@ -14,9 +14,14 @@ import (
 	"time"
 )
 
-const DefaultDaemonUnixSocketMode fs.FileMode = 0o660
+const (
+	DefaultDaemonUnixSocketMode        fs.FileMode = 0o660
+	DefaultDaemonServerShutdownTimeout             = 5 * time.Second
+	MaxDaemonServerShutdownTimeout                 = time.Minute
+)
 
 var ErrDaemonSocketServer = errors.New("kernelcapture: daemon socket server failed")
+var ErrDaemonSocketServerShutdownTimeout = fmt.Errorf("%w: handler drain timed out", ErrDaemonSocketServer)
 
 type DaemonPeerCredentialObserver func(*net.UnixConn, string) (DaemonSocketPeerObservation, error)
 
@@ -35,6 +40,7 @@ type DaemonUnixSocketServerConfig struct {
 	MaxRequestBytes          int64
 	ReadTimeout              time.Duration
 	MaxConcurrentConnections int
+	ShutdownTimeout          time.Duration
 
 	ObservePeerCredentials  DaemonPeerCredentialObserver
 	HandleAuthorizedRequest DaemonAuthorizedProtocolHandler
@@ -52,6 +58,15 @@ type DaemonUnixSocketServer struct {
 	listener   *net.UnixListener
 	socketPath string
 	semaphore  chan struct{}
+	handlerWG  sync.WaitGroup
+	handlersMu sync.Mutex
+	handlers   map[*net.UnixConn]struct{}
+
+	handlersDrained chan struct{}
+	serveDone       chan struct{}
+	drainOnce       sync.Once
+	serveDoneOnce   sync.Once
+	serveStarted    atomic.Bool
 
 	closed    atomic.Bool
 	closeMu   sync.Mutex
@@ -67,6 +82,7 @@ func DefaultDaemonUnixSocketServerConfig(plan DaemonCustodyPlan, policy DaemonPe
 		MaxRequestBytes:          DefaultDaemonAcceptLoopMaxRequestBytes,
 		ReadTimeout:              DefaultDaemonAcceptLoopReadTimeout,
 		MaxConcurrentConnections: DefaultDaemonAcceptLoopMaxConcurrentConnections,
+		ShutdownTimeout:          DefaultDaemonServerShutdownTimeout,
 		ObservePeerCredentials:   ObserveLinuxUnixPeerCredentials,
 		HandleAuthorizedRequest:  defaultDaemonAuthorizedProtocolHandler,
 	}
@@ -90,10 +106,13 @@ func ListenDaemonUnixSocketServer(cfg DaemonUnixSocketServerConfig) (*DaemonUnix
 	}
 
 	return &DaemonUnixSocketServer{
-		cfg:        cfg,
-		listener:   listener,
-		socketPath: bindPath,
-		semaphore:  make(chan struct{}, cfg.MaxConcurrentConnections),
+		cfg:             cfg,
+		listener:        listener,
+		socketPath:      bindPath,
+		semaphore:       make(chan struct{}, cfg.MaxConcurrentConnections),
+		handlers:        make(map[*net.UnixConn]struct{}),
+		handlersDrained: make(chan struct{}),
+		serveDone:       make(chan struct{}),
 	}, nil
 }
 
@@ -104,13 +123,35 @@ func (s *DaemonUnixSocketServer) SocketPath() string {
 	return s.socketPath
 }
 
+// HandlersDrained closes only after Serve has stopped accepting and every
+// accepted connection handler has returned. It remains open when the bounded
+// drain deadline expires before handlers finish.
+func (s *DaemonUnixSocketServer) HandlersDrained() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.handlersDrained
+}
+
+// ServeDone closes when Serve returns, including after a bounded drain timeout.
+func (s *DaemonUnixSocketServer) ServeDone() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.serveDone
+}
+
 func (s *DaemonUnixSocketServer) Serve(ctx context.Context) error {
 	if s == nil || s.listener == nil {
 		return daemonSocketServerError("server is not listening")
 	}
+	if !s.serveStarted.CompareAndSwap(false, true) {
+		return daemonSocketServerError("Serve may be called only once")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer s.serveDoneOnce.Do(func() { close(s.serveDone) })
 
 	stop := make(chan struct{})
 	go func() {
@@ -122,20 +163,28 @@ func (s *DaemonUnixSocketServer) Serve(ctx context.Context) error {
 	}()
 	defer close(stop)
 
+	var acceptErr error
+acceptLoop:
 	for {
 		conn, err := s.listener.AcceptUnix()
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				acceptErr = ctx.Err()
+				break acceptLoop
 			}
 			if s.closed.Load() || isDaemonSocketServerClosedError(err) {
-				return nil
+				break acceptLoop
 			}
-			return daemonSocketServerError("accept unix connection: %v", err)
+			acceptErr = daemonSocketServerError("accept unix connection: %v", err)
+			break acceptLoop
 		}
 
 		select {
 		case s.semaphore <- struct{}{}:
+			s.handlersMu.Lock()
+			s.handlers[conn] = struct{}{}
+			s.handlerWG.Add(1)
+			s.handlersMu.Unlock()
 			go s.handleAcceptedConnection(ctx, conn)
 		default:
 			_ = writeDaemonProtocolResponse(conn, DaemonProtocolResponse{
@@ -146,6 +195,14 @@ func (s *DaemonUnixSocketServer) Serve(ctx context.Context) error {
 			_ = conn.Close()
 		}
 	}
+
+	if ctx.Err() != nil {
+		// Closing accepted connections is the documented way to unblock pending
+		// net.Conn reads/writes. Handlers already inside business logic receive the
+		// canceled ctx and are covered by the bounded WaitGroup drain below.
+		s.closeAcceptedConnections()
+	}
+	return errors.Join(acceptErr, s.drainAcceptedConnections())
 }
 
 func (s *DaemonUnixSocketServer) Close() error {
@@ -190,8 +247,12 @@ func DefaultDaemonAuthorizedProtocolResponse(req DaemonProtocolRequest, handshak
 
 func (s *DaemonUnixSocketServer) handleAcceptedConnection(ctx context.Context, conn *net.UnixConn) {
 	defer func() {
-		<-s.semaphore
 		_ = conn.Close()
+		s.handlersMu.Lock()
+		delete(s.handlers, conn)
+		s.handlersMu.Unlock()
+		<-s.semaphore
+		s.handlerWG.Done()
 	}()
 	// One misbehaving request (e.g. a handler bug reachable only in a
 	// specific degraded state, such as BPF-LSM maps not being loaded) must
@@ -209,15 +270,59 @@ func (s *DaemonUnixSocketServer) handleAcceptedConnection(ctx context.Context, c
 		}
 	}()
 
+	if ctx.Err() != nil {
+		return
+	}
 	req, handshake, err := s.authorizeAcceptedConnection(conn)
 	if err != nil {
 		_ = writeDaemonProtocolResponse(conn, daemonProtocolErrorResponse(req, err))
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	resp := s.cfg.HandleAuthorizedRequest(ctx, req, handshake)
+	if ctx.Err() != nil {
+		return
+	}
 	resp = normalizeDaemonProtocolResponse(resp, req, handshake)
 	if err := writeDaemonProtocolResponse(conn, resp); err != nil {
 		return
+	}
+}
+
+func (s *DaemonUnixSocketServer) drainAcceptedConnections() error {
+	s.drainOnce.Do(func() {
+		go func() {
+			s.handlerWG.Wait()
+			close(s.handlersDrained)
+		}()
+	})
+	timer := time.NewTimer(s.cfg.ShutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.handlersDrained:
+		return nil
+	case <-timer.C:
+		s.closeAcceptedConnections()
+		select {
+		case <-s.handlersDrained:
+			return nil
+		default:
+			return fmt.Errorf("%w after %s", ErrDaemonSocketServerShutdownTimeout, s.cfg.ShutdownTimeout)
+		}
+	}
+}
+
+func (s *DaemonUnixSocketServer) closeAcceptedConnections() {
+	s.handlersMu.Lock()
+	connections := make([]*net.UnixConn, 0, len(s.handlers))
+	for conn := range s.handlers {
+		connections = append(connections, conn)
+	}
+	s.handlersMu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
 	}
 }
 
@@ -290,6 +395,9 @@ func normalizeDaemonUnixSocketServerConfig(cfg DaemonUnixSocketServerConfig) Dae
 	if cfg.MaxConcurrentConnections == 0 {
 		cfg.MaxConcurrentConnections = DefaultDaemonAcceptLoopMaxConcurrentConnections
 	}
+	if cfg.ShutdownTimeout == 0 {
+		cfg.ShutdownTimeout = DefaultDaemonServerShutdownTimeout
+	}
 	if cfg.ObservePeerCredentials == nil {
 		cfg.ObservePeerCredentials = ObserveLinuxUnixPeerCredentials
 	}
@@ -328,6 +436,9 @@ func validateDaemonUnixSocketServerConfig(cfg DaemonUnixSocketServerConfig) erro
 	}
 	if cfg.HandleAuthorizedRequest == nil {
 		return daemonSocketServerError("authorized protocol handler is required")
+	}
+	if cfg.ShutdownTimeout <= 0 || cfg.ShutdownTimeout > MaxDaemonServerShutdownTimeout {
+		return daemonSocketServerError("shutdown timeout must be between 1ns and %s", MaxDaemonServerShutdownTimeout)
 	}
 	return nil
 }
