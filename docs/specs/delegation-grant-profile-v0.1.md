@@ -144,6 +144,19 @@ This profile normatively depends on the following parts of the AAT draft:
 12. Appendix D only for the boundary that an interoperable CWT encoding is
     not defined by this profile.
 
+### 2.5. Empty Constraint Maps
+
+This profile preserves draft-00 Sections 3.3 and 7 semantics for tool argument
+maps. A tool mapped to `{}` is authorized without argument restrictions. A
+non-empty map is closed-world: every invocation argument MUST be named, and
+every named constraint MUST have a matching argument. A child MAY introduce
+constraints beneath an empty parent map because doing so narrows unrestricted
+authority. Once the parent map is non-empty, children MUST preserve its exact
+argument-key set and may only narrow the corresponding constraints.
+
+Issuers that require a fixed argument shape while allowing arbitrary values
+MUST name each permitted argument with an explicit `wildcard` constraint.
+
 ## 3. The `mission_ref` Claim
 
 ### 3.1. Purpose

@@ -75,7 +75,8 @@ draft-01 migration choice. The v0.1 verifier therefore also:
 - treats token `iat` skew as a one-sided future tolerance while retaining a
   bilateral PoP replay window;
 - validates root issuer URI shape;
-- enforces exact closed-world argument-key preservation;
+- enforces exact closed-world argument-key preservation beneath non-empty
+  parent maps while preserving the draft's unrestricted `{}` semantics;
 - rejects duplicate JSON member names, malformed constraint objects, and
   non-integral delegation depths without parsing full claims before signature
   verification;

@@ -2,7 +2,7 @@
 title: "AAT draft-01 Migration Decision"
 description: "**Reviewed 2026-07-11.** Ardur preserves the existing"
 source_path: "docs/specs/aat-draft-01-migration-decision.md"
-source_sha256: "7c9a2f67c5350c1a90fda185fb6c0984744cf0ba00bcee73a888c2f4c42ac31b"
+source_sha256: "6b6612e8f555826b144d151956e4f6798c33cccb1762afdc8d634a06cec19e7a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -92,7 +92,8 @@ draft-01 migration choice. The v0.1 verifier therefore also:
 - treats token `iat` skew as a one-sided future tolerance while retaining a
   bilateral PoP replay window;
 - validates root issuer URI shape;
-- enforces exact closed-world argument-key preservation;
+- enforces exact closed-world argument-key preservation beneath non-empty
+  parent maps while preserving the draft's unrestricted `{}` semantics;
 - rejects duplicate JSON member names, malformed constraint objects, and
   non-integral delegation depths without parsing full claims before signature
   verification;

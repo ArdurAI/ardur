@@ -698,7 +698,8 @@ func verifyLeafInvocation(leaf *Token, tool string, args map[string]interface{})
 		}
 	}
 
-	// Check for unknown args in closed-world mode (if toolConstraints is non-empty)
+	// AAT §3.3 defines an empty map as unrestricted arguments. Once any
+	// constraint is present, the map becomes a closed-world invocation shape.
 	if len(toolConstraints) > 0 {
 		for argName := range args {
 			if _, ok := toolConstraints[argName]; !ok {
@@ -727,7 +728,8 @@ func verifyCapabilityMonotonicity(parent, child *Token) error {
 			return fmt.Errorf("%w: child tool %q not in parent", ErrDenyStep4Q1ToolExpansion, childTool)
 		}
 
-		// 4q2: closed-world shape — if parent has constraints, child must constrain same args
+		// 4q2: a non-empty parent map fixes the closed-world argument shape.
+		// An empty parent map is unrestricted, so a child may add constraints.
 		if len(parentArgMap) > 0 && len(childArgMap) != len(parentArgMap) {
 			return fmt.Errorf("%w: parent and child argument keys differ for tool %q", ErrDenyStep4Q2ArgumentShape, childTool)
 		}
