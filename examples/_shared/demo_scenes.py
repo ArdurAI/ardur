@@ -1048,8 +1048,6 @@ def scene_5_impersonation(
         ctx.proxy.start_session_from_biscuit(
             impostor_biscuit, ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
         fail("UNEXPECTED: impostor biscuit accepted")
     except PermissionError as e:
@@ -1063,13 +1061,11 @@ def scene_6_session(ctx: DemoContext):
     banner(6, "Start the governed session (real SPIFFE binding)",
            framework=ctx.framework)
     step("proxy.start_session_from_biscuit(biscuit, issuer_pub, "
-         "peer_jwt_svid=<ours>, peer_trust_bundle=<SPIRE JWKS>)")
+         "peer_jwt_svid=<ours>)")
     try:
         session = ctx.proxy.start_session_from_biscuit(
             ctx.biscuit_bytes, ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
         show("svid_bound", True)
     except Exception as exc:
@@ -1180,8 +1176,6 @@ def scene_10_delegation(
         child_session = ctx.proxy.start_session_from_biscuit(
             child_biscuit, ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
     except Exception:
         child_session = ctx.proxy.start_session_from_biscuit(
@@ -1414,7 +1408,10 @@ def bootstrap_capability_profile(ctx: DemoContext) -> None:
 
     try:
         from vibap.spiffe_identity import TrustBundle
+        spiffe_verifier_available = True
     except ModuleNotFoundError:
+        spiffe_verifier_available = False
+
         @dataclass
         class TrustBundle:
             trust_domain: str
@@ -1444,6 +1441,11 @@ def bootstrap_capability_profile(ctx: DemoContext) -> None:
         state_dir=ctx.demo_dir / "state",
         private_key=ctx.proxy_priv,
         public_key=ctx.proxy_priv.public_key(),
+        biscuit_issuer_public_key=ctx.issuer_pub,
+        biscuit_peer_trust_bundle=(
+            ctx.tb if spiffe_verifier_available else None
+        ),
+        biscuit_svid_audience="ardur-proxy",
         policy_store=policy_store,
     )
     write_public_key_artifact(ctx)
@@ -1453,8 +1455,6 @@ def bootstrap_capability_profile(ctx: DemoContext) -> None:
             ctx.biscuit_bytes,
             ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
         show("svid_bound", True)
     except Exception as exc:
@@ -1740,7 +1740,10 @@ def run_demo(
     # doesn't have spiffe-python, define locally)
     try:
         from vibap.spiffe_identity import TrustBundle
+        spiffe_verifier_available = True
     except ModuleNotFoundError:
+        spiffe_verifier_available = False
+
         @dataclass
         class TrustBundle:
             trust_domain: str
@@ -1779,6 +1782,11 @@ def run_demo(
         state_dir=ctx.demo_dir / "state",
         private_key=ctx.proxy_priv,
         public_key=ctx.proxy_priv.public_key(),
+        biscuit_issuer_public_key=ctx.issuer_pub,
+        biscuit_peer_trust_bundle=(
+            ctx.tb if spiffe_verifier_available else None
+        ),
+        biscuit_svid_audience="ardur-proxy",
         policy_store=policy_store,
     )
     write_public_key_artifact(ctx)

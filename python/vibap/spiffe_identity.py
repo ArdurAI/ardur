@@ -138,7 +138,7 @@ def verify_jwt_svid(
         raise ValueError(f"JWT-SVID audience/shape validation failed: {exc}") from exc
 
     spiffe_id = str(insecure_svid.spiffe_id)
-    jwks = _jwks_for_spiffe_id(trust_bundle, spiffe_id)
+    jwks = _jwt_svid_jwks(_jwks_for_spiffe_id(trust_bundle, spiffe_id))
 
     try:
         bundle_bytes = json.dumps(jwks, sort_keys=True).encode("utf-8")
@@ -308,6 +308,20 @@ def _jwks_for_spiffe_id(trust_bundle: TrustBundle, spiffe_id: str) -> dict:
     if trust_domain in trust_bundle.federated_bundles:
         return trust_bundle.federated_bundles[trust_domain]
     raise ValueError(f"No trust bundle available for trust domain '{trust_domain}'")
+
+
+def _jwt_svid_jwks(jwks: dict) -> dict:
+    keys = jwks.get("keys")
+    if not isinstance(keys, list):
+        raise ValueError("Trust bundle JWKS does not contain a key list")
+    jwt_svid_keys = [
+        dict(key)
+        for key in keys
+        if isinstance(key, dict) and key.get("use") == "jwt-svid"
+    ]
+    if not jwt_svid_keys:
+        raise ValueError("Trust bundle JWKS does not contain JWT-SVID signing keys")
+    return {"keys": jwt_svid_keys}
 
 
 def _select_jwk(jwks: dict, spiffe_id: str) -> dict:
@@ -499,7 +513,7 @@ def _public_key_to_jwk(
         "y": _b64url(y_bytes),
         "kid": key_id,
         "alg": "ES256",
-        "use": "sig",
+        "use": "jwt-svid" if purpose == "jwt-authority" else "sig",
         "spiffe_id": spiffe_id,
         "purpose": purpose,
     }

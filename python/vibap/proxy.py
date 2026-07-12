@@ -1828,6 +1828,8 @@ class GovernanceProxy:
         policy_store: Any | None = None,
         lineage_budget_ledger: LineageBudgetLedger | None = None,
         biscuit_issuer_public_key: Any | None = None,
+        biscuit_peer_trust_bundle: Any | None = None,
+        biscuit_svid_audience: str = "ardur-proxy",
     ) -> None:
         # policy_store: optional PolicyStore (see vibap.policy_store).
         # When provided, the proxy resolves additional_policies from
@@ -1867,6 +1869,43 @@ class GovernanceProxy:
             self.state_dir
         )
         self._biscuit_issuer_public_key = biscuit_issuer_public_key
+        if (
+            not isinstance(biscuit_svid_audience, str)
+            or not biscuit_svid_audience.strip()
+        ):
+            raise ValueError("biscuit_svid_audience must be a non-empty server value")
+        if len(biscuit_svid_audience.encode("utf-8")) > 256:
+            raise ValueError("biscuit_svid_audience exceeds 256 bytes")
+        if biscuit_peer_trust_bundle is not None:
+            from .spiffe_identity import TrustBundle
+
+            if biscuit_issuer_public_key is None:
+                raise ValueError(
+                    "biscuit_peer_trust_bundle requires biscuit_issuer_public_key"
+                )
+            if not isinstance(biscuit_peer_trust_bundle, TrustBundle):
+                raise TypeError("biscuit_peer_trust_bundle must be a TrustBundle")
+            if (
+                not isinstance(biscuit_peer_trust_bundle.trust_domain, str)
+                or not biscuit_peer_trust_bundle.trust_domain.strip()
+            ):
+                raise ValueError("Biscuit peer trust domain must be non-empty")
+            if not isinstance(biscuit_peer_trust_bundle.jwks, dict):
+                raise ValueError("Biscuit peer trust bundle JWKS must be an object")
+            keys = biscuit_peer_trust_bundle.jwks.get("keys")
+            if not isinstance(keys, list) or not keys:
+                raise ValueError("Biscuit peer trust bundle must contain JWT keys")
+            if not any(
+                isinstance(key, dict) and key.get("use") == "jwt-svid"
+                for key in keys
+            ):
+                raise ValueError(
+                    "Biscuit peer trust bundle has no JWT-SVID signing keys"
+                )
+        self._biscuit_peer_trust_bundle = copy.deepcopy(
+            biscuit_peer_trust_bundle
+        )
+        self._biscuit_svid_audience = biscuit_svid_audience.strip()
         self.receipt_private_key = private_key or load_private_key(keys_dir=keys_dir)
         self.receipt_public_key = self.receipt_private_key.public_key()
         self._session_receipt_integrity_key = hashlib.sha256(
@@ -2790,8 +2829,6 @@ class GovernanceProxy:
         audience: str = "ardur-proxy",
         now: int | None = None,
         peer_jwt_svid: str | None = None,
-        peer_trust_bundle=None,
-        svid_audience: str | None = None,
     ) -> GovernanceSession:
         """Start a governed session from a Biscuit mission passport.
 
@@ -2801,14 +2838,12 @@ class GovernanceProxy:
         produces, and runs the rest of the session-start machinery
         (single-use jti check, lineage revocation check, persistence).
 
-        Phase 5 integration (A1, 2026-04-17): when ``peer_jwt_svid`` and
-        ``peer_trust_bundle`` are supplied, this also performs SPIFFE
-        peer-identity binding. The JWT-SVID is verified against the
-        trust bundle (signature, expiry, audience) and the SVID's
-        SPIFFE ID is compared to the passport's ``holder_spiffe_id``
-        claim. Mismatch raises PermissionError. This closes the
-        bearer-token gap: a stolen Biscuit can no longer be replayed
-        by a party who doesn't also possess the holder's SVID.
+        When the proxy has a server-owned ``biscuit_peer_trust_bundle``,
+        every Biscuit session requires ``peer_jwt_svid``. The SVID is
+        verified against that pinned bundle and the server-configured
+        audience before its SPIFFE ID is compared with the passport's
+        ``holder_spiffe_id``. The request can never choose the trust root,
+        trust domain, or audience.
 
         After this call the session behaves identically to one started
         via :meth:`start_session` — every subsequent ``evaluate_tool_call``
@@ -2828,30 +2863,25 @@ class GovernanceProxy:
             audience: conventional ``aud`` claim for the synthesized
                 session; defaults to ``"ardur-proxy"``.
             now: optional unix timestamp override for expiry checking.
-            peer_jwt_svid: (optional) the JWT-SVID presented by the
-                peer agent at connection time. If supplied, SPIFFE
-                peer-identity binding is enforced.
-            peer_trust_bundle: (optional, required when
-                ``peer_jwt_svid`` is supplied) the SPIFFE
-                :class:`TrustBundle` against which the SVID is
-                verified.
-            svid_audience: (optional) expected ``aud`` claim on the
-                JWT-SVID. Defaults to ``audience`` if not supplied.
+            peer_jwt_svid: the JWT-SVID presented by the peer agent.
+                Required when the proxy has server-owned Biscuit peer
+                trust configured and forbidden otherwise.
 
         Raises:
             BiscuitVerifyError: the credential does not verify.
             PermissionError: SVID binding requested but the SVID
                 doesn't match the passport's holder_spiffe_id, or the
                 SVID fails its own verification.
-            ValueError: if the jti is already in use (single-use rule),
-                or if only one of (peer_jwt_svid, peer_trust_bundle) is
-                supplied without the other.
+            ValueError: if the jti is already in use (single-use rule).
         """
-        # Validate SVID binding args up-front.
-        if (peer_jwt_svid is None) != (peer_trust_bundle is None):
-            raise ValueError(
-                "peer_jwt_svid and peer_trust_bundle must be supplied "
-                "together or not at all"
+        peer_trust_bundle = self._biscuit_peer_trust_bundle
+        if peer_trust_bundle is None and peer_jwt_svid is not None:
+            raise PermissionError(
+                "peer JWT-SVID verification is not configured on this server"
+            )
+        if peer_trust_bundle is not None and not peer_jwt_svid:
+            raise PermissionError(
+                "peer JWT-SVID is required by the server's Biscuit binding policy"
             )
 
         from .biscuit_passport import (
@@ -2859,32 +2889,41 @@ class GovernanceProxy:
             encode_biscuit_b64,
         )
 
+        verification_key = (
+            self._biscuit_issuer_public_key
+            if peer_trust_bundle is not None
+            else issuer_public_key
+        )
         context = verify_biscuit_passport(
-            biscuit_token, issuer_public_key, now=now
+            biscuit_token, verification_key, now=now
         )
 
-        # Phase 5 A1: SPIFFE peer-identity binding.
-        #
-        # If the caller supplied a peer JWT-SVID, verify it against the
-        # trust bundle and require its SPIFFE ID to equal the
-        # passport's holder_spiffe_id claim. This closes the bearer-
-        # token gap — a stolen Biscuit can't be replayed without the
-        # holder's SVID.
+        # The verifier owns both the bundle and expected audience. The peer
+        # supplies only its credential.
         svid_bound = False
         if peer_jwt_svid is not None:
             from .spiffe_identity import verify_jwt_svid
+            from spiffe import SpiffeId
 
-            expected_audience = svid_audience or audience
             try:
                 svid_claims = verify_jwt_svid(
                     peer_jwt_svid,
                     peer_trust_bundle,
-                    expected_audience,
+                    self._biscuit_svid_audience,
                 )
             except Exception as exc:
                 raise PermissionError(
                     f"peer JWT-SVID verification failed: {exc}"
                 ) from exc
+
+            verified_trust_domain = SpiffeId(
+                svid_claims.spiffe_id
+            ).trust_domain.name
+            if verified_trust_domain != peer_trust_bundle.trust_domain:
+                raise PermissionError(
+                    f"SVID trust domain {verified_trust_domain!r} does not match "
+                    "the server-configured Biscuit peer trust domain"
+                )
 
             if context.spiffe_id is None or context.spiffe_id == "":
                 raise PermissionError(
@@ -5335,43 +5374,24 @@ def serve_proxy(
 
                         biscuit_bytes = decode_biscuit_b64(token)
                         peer_jwt_svid = payload.get("peer_jwt_svid")
+                        caller_trust_fields = {
+                            "peer_trust_jwks",
+                            "peer_trust_domain",
+                            "svid_audience",
+                        }.intersection(payload)
+                        if caller_trust_fields:
+                            raise ValueError(
+                                "caller-supplied JWT-SVID trust or audience fields "
+                                "are forbidden; configure them on the proxy server"
+                            )
                         if peer_jwt_svid is not None:
                             if not isinstance(peer_jwt_svid, str):
                                 raise ValueError("peer_jwt_svid must be a string")
-                            peer_trust_jwks = payload.get("peer_trust_jwks")
-                            if not isinstance(peer_trust_jwks, dict):
-                                raise ValueError(
-                                    "peer_trust_jwks is required when "
-                                    "peer_jwt_svid is supplied"
-                                )
-                            from .spiffe_identity import TrustBundle
-
-                            peer_trust_bundle = TrustBundle(
-                                trust_domain=str(
-                                    payload.get("peer_trust_domain", "ardur.dev")
-                                ),
-                                jwks=peer_trust_jwks,
-                                federated_bundles={},
-                            )
-                            kwargs: dict[str, Any] = {
-                                "peer_jwt_svid": peer_jwt_svid,
-                                "peer_trust_bundle": peer_trust_bundle,
-                            }
-                            svid_audience = payload.get("svid_audience")
-                            if svid_audience is not None:
-                                if not isinstance(svid_audience, str):
-                                    raise ValueError("svid_audience must be a string")
-                                kwargs["svid_audience"] = svid_audience
-                            session = proxy.start_session_from_biscuit(
-                                biscuit_bytes,
-                                proxy._biscuit_issuer_public_key,
-                                **kwargs,
-                            )
-                        else:
-                            session = proxy.start_session_from_biscuit(
-                                biscuit_bytes,
-                                proxy._biscuit_issuer_public_key,
-                            )
+                        session = proxy.start_session_from_biscuit(
+                            biscuit_bytes,
+                            proxy._biscuit_issuer_public_key,
+                            peer_jwt_svid=peer_jwt_svid,
+                        )
                     else:
                         raise ValueError(f"unsupported token_type: {token_type}")
                     set_active_session_id(session.jti)

@@ -114,3 +114,13 @@ class TestVerifyJwtSvidInputValidation:
         trust = make_mock_trust_bundle(_SPIFFE_ID)
         with pytest.raises(ValueError):
             verify_jwt_svid(bundle.jwt_svid_token, trust, "wrong-audience")
+
+    def test_non_jwt_svid_bundle_keys_are_rejected(self):
+        now = int(time.time())
+        bundle = make_mock_svid_bundle(_SPIFFE_ID, iat=now, exp=now + 600)
+        trust = make_mock_trust_bundle(_SPIFFE_ID)
+        for key in trust.jwks["keys"]:
+            key["use"] = "sig"
+
+        with pytest.raises(ValueError, match="does not contain JWT-SVID"):
+            verify_jwt_svid(bundle.jwt_svid_token, trust, _AUDIENCE)

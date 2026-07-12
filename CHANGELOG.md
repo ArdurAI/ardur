@@ -5,6 +5,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Pin Biscuit holder verification to a server-owned issuer key, JWT-SVID trust
+  bundle, and audience; require configured binding on every presentation; and
+  reject caller-supplied roots plus non-`jwt-svid` bundle keys
 - Require RFC 8785 canonical payload bytes for versioned Execution Receipt v0.2 JWTs while preserving explicit legacy v0.1 verification
 - Keep the upstream RFC 8785 package as a declared dependency with an attributed Apache-2.0 fallback for dependency-less source-checkout runners
 - Bind the final action-receipt JWT hash and kernel loss/kill-switch rollup in the signed behavioral attestation
@@ -38,6 +41,8 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the
+  Biscuit holder claim; `svid_bound=true` now requires pinned-root verification
 - Enforce cumulative direct-hook tool-call budgets from verified receipt chains
 - Compose mission-declared policy backends in the direct Claude Code hook
 - Canonicalize persisted forbid-rule hashes and key them by actual mission ID

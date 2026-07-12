@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "725430f144969384aa9b0120c17f7cf4223557ed527226c6e7ffb58890ef17cd"
+source_sha256: "123f185c432b1a3ebd401b476ed3a8056d8b4b4222f5f48f5915b9e1c3d92763"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -52,6 +52,15 @@ basename but not its parent path and does not collect argv, hashes, uid,
 environment, or file content. It does not attest or enforce. Issue #67 remains
 in progress for stronger fingerprints and corpus-backed precision/recall
 thresholds.
+
+The Python Biscuit session path now accepts JWT-SVID holder binding only from
+server-owned Biscuit issuer-key, trust-bundle, and audience configuration. A
+configured binding is mandatory for every Biscuit presentation; per-call
+issuer keys and caller-supplied JWKS, trust-domain, and audience fields cannot
+select the verifier's authority. Only SPIFFE bundle keys marked
+`use=jwt-svid` can verify the peer, and `svid_bound=true` is recorded only after
+signature, audience, trust-domain, and holder-ID checks. JWT-SVID remains a
+replayable bearer credential, so this does not claim complete replay prevention.
 
 The offline `ardur evidence correlate` command can now verify a receipt journal
 and compare it with operator-supplied normalized, Tetragon, or Falco JSONL. It

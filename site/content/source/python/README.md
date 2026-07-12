@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "bff2fac947020d545f0d8e5da64c0a150b1455679ba57d4321a09a57525593d4"
+source_sha256: "f02999af282102ee963ff382e238870502a9e416a62c6af3c578a5e8bd61595c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -210,6 +210,14 @@ python/
 ```
 
 A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+
+Library deployments that enable Biscuit JWT-SVID holder binding configure a
+server-owned Biscuit issuer key, `TrustBundle`, and expected audience on
+`GovernanceProxy`; clients present only `peer_jwt_svid`. Once configured, the
+SVID is mandatory and per-call inputs cannot replace the issuer, JWKS, trust
+domain, or audience. Without server trust configuration, Biscuit sessions
+remain explicitly `svid_bound=false`. JWT-SVID is still a bearer credential
+with a bounded replay window.
 
 ## Protocol identifier rename
 
