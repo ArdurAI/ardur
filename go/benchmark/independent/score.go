@@ -61,6 +61,12 @@ func Score(prereg Preregistration, seal Seal, gold GoldSet, splits SplitManifest
 	if result.StudyID != prereg.StudyID || gold.StudyID != prereg.StudyID || splits.StudyID != prereg.StudyID || seal.StudyID != prereg.StudyID {
 		return ScoreReport{}, errors.New("study_id mismatch")
 	}
+	if seal.Mode != prereg.Mode {
+		return ScoreReport{}, errors.New("preregistration mode does not match seal")
+	}
+	if seal.RegistrationAssurance != prereg.RegistrationAssurance {
+		return ScoreReport{}, errors.New("registration_assurance does not match seal")
+	}
 	if !slices.Contains(prereg.AllowedSUTs, result.SUTID) {
 		return ScoreReport{}, fmt.Errorf("SUT %q was not preregistered", result.SUTID)
 	}
@@ -111,7 +117,8 @@ func Score(prereg Preregistration, seal Seal, gold GoldSet, splits SplitManifest
 		confusion[actual] = make(map[string]int, len(labels))
 	}
 	report := ScoreReport{
-		SchemaVersion: ScoreReportSchema, StudyID: prereg.StudyID, SUTID: result.SUTID,
+		SchemaVersion: ScoreReportSchema, StudyID: prereg.StudyID, Mode: prereg.Mode,
+		RegistrationAssurance: prereg.RegistrationAssurance, SUTID: result.SUTID,
 		SealSHA256: sealHash, SUTResultSHA256: resultHash,
 		Split: split, Scenarios: len(goldByScenario),
 	}

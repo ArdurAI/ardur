@@ -32,6 +32,7 @@
     "docs/specs/ardur-drp-mapping-v0.1.json": "repo/docs/specs/ardur-drp-mapping-v0.1.json",
     "docs/specs/ardur-drp-profile-v0.1.schema.json": "repo/docs/specs/ardur-drp-profile-v0.1.schema.json",
     "docs/specs/auditbench-preregistration-v0.1.example.json": "repo/docs/specs/auditbench-preregistration-v0.1.example.json",
+    "docs/specs/auditbench-preregistration-v0.2.example.json": "repo/docs/specs/auditbench-preregistration-v0.2.example.json",
     "docs/specs/auditbench-splits-v0.1.example.json": "repo/docs/specs/auditbench-splits-v0.1.example.json",
     "docs/specs/conformance/aat-draft01-v0.2/fixture.json": "repo/docs/specs/conformance/aat-draft01-v0.2/fixture.json",
     "docs/specs/conformance/drp-v0.1/bundle.json": "repo/docs/specs/conformance/drp-v0.1/bundle.json",

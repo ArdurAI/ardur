@@ -1,6 +1,7 @@
 package independent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -186,6 +187,26 @@ func TestSealAndScoreEndToEnd(t *testing.T) {
 	if report.SUTResultSHA256 != resultHash {
 		t.Fatalf("SUT result digest = %q, want %q", report.SUTResultSHA256, resultHash)
 	}
+	if report.Mode != ModePilot {
+		t.Fatalf("score report mode = %q, want %q", report.Mode, ModePilot)
+	}
+	for name, artifact := range map[string]any{
+		"preregistration": study.prereg,
+		"seal":            study.seal,
+		"score report":    report,
+	} {
+		data, err := json.Marshal(artifact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if got := fields["registration_assurance"]; got != "self_asserted" {
+			t.Fatalf("%s registration_assurance = %#v, want self_asserted", name, got)
+		}
+	}
 
 	development := heldOut
 	development.Predictions = []Prediction{
@@ -205,6 +226,40 @@ func TestSealAndScoreEndToEnd(t *testing.T) {
 		bad.SealSHA256 = fakeHash("wrong")
 		if _, err := Score(study.prereg, study.seal, study.gold, study.splits, bad, SplitHeldOut); err == nil || !strings.Contains(err.Error(), "different seal") {
 			t.Fatalf("Score error = %v", err)
+		}
+	})
+
+	t.Run("seal mode", func(t *testing.T) {
+		badSeal := study.seal
+		badSeal.Mode = ModeHeadline
+		badResult := heldOut
+		var err error
+		badResult.SealSHA256, err = ArtifactDigest(badSeal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Score(study.prereg, badSeal, study.gold, study.splits, badResult, SplitHeldOut); err == nil || !strings.Contains(err.Error(), "mode does not match seal") {
+			t.Fatalf("Score error = %v", err)
+		}
+		if _, err := SealDigest(badSeal); err == nil || !strings.Contains(err.Error(), "unsupported seal mode") {
+			t.Fatalf("SealDigest error = %v", err)
+		}
+	})
+
+	t.Run("registration assurance", func(t *testing.T) {
+		badSeal := study.seal
+		badSeal.RegistrationAssurance = "externally_verified"
+		badResult := heldOut
+		var err error
+		badResult.SealSHA256, err = ArtifactDigest(badSeal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Score(study.prereg, badSeal, study.gold, study.splits, badResult, SplitHeldOut); err == nil || !strings.Contains(err.Error(), "registration_assurance does not match seal") {
+			t.Fatalf("Score error = %v", err)
+		}
+		if _, err := SealDigest(badSeal); err == nil || !strings.Contains(err.Error(), "unsupported seal registration_assurance") {
+			t.Fatalf("SealDigest error = %v", err)
 		}
 	})
 
@@ -308,17 +363,41 @@ func TestHeadlinePreregistrationRequiresExternalRegistration(t *testing.T) {
 	study := writeTestStudy(t)
 	prereg := study.prereg
 	prereg.Mode = ModeHeadline
-	prereg.RegistrationURI = ""
-	if err := prereg.Validate(); err == nil || !strings.Contains(err.Error(), "registration_uri") {
-		t.Fatalf("Validate error = %v", err)
-	}
 	prereg.RegistrationURI = "https://osf.io/example"
-	if err := prereg.Validate(); err != nil {
-		t.Fatal(err)
+	if err := prereg.Validate(); err == nil || !strings.Contains(err.Error(), "externally verified registration evidence") {
+		t.Fatalf("Validate error = %v, want fail-closed headline rejection", err)
 	}
+	prereg.Mode = ModePilot
+	prereg.RegistrationURI = "http://example.test/unverified"
+	if err := prereg.Validate(); err == nil || !strings.Contains(err.Error(), "registration_uri must be HTTPS") {
+		t.Fatalf("Validate error = %v, want invalid URI rejection", err)
+	}
+	prereg.RegistrationURI = ""
+	prereg.RegistrationAssurance = ""
+	if err := prereg.Validate(); err == nil || !strings.Contains(err.Error(), "registration_assurance") {
+		t.Fatalf("Validate error = %v, want missing assurance rejection", err)
+	}
+	prereg.RegistrationAssurance = RegistrationAssuranceSelfAsserted
+	prereg.SchemaVersion = "auditbench.preregistration.v0.1"
+	if err := prereg.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported preregistration schema") {
+		t.Fatalf("Validate error = %v, want legacy schema rejection", err)
+	}
+	prereg.SchemaVersion = PreregistrationSchema
 	prereg.Metrics = append(prereg.Metrics, "post_hoc_metric")
 	if err := prereg.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported preregistered metric") {
 		t.Fatalf("Validate error = %v", err)
+	}
+}
+
+func TestRegistrationArtifactSchemasAreVersioned(t *testing.T) {
+	if PreregistrationSchema != "auditbench.preregistration.v0.2" {
+		t.Fatalf("PreregistrationSchema = %q", PreregistrationSchema)
+	}
+	if SealSchema != "auditbench.seal.v0.2" {
+		t.Fatalf("SealSchema = %q", SealSchema)
+	}
+	if ScoreReportSchema != "auditbench.score_report.v0.2" {
+		t.Fatalf("ScoreReportSchema = %q", ScoreReportSchema)
 	}
 }
 
@@ -329,8 +408,17 @@ func TestPublishedPilotExamplesAreInternallyConsistent(t *testing.T) {
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", "..", ".."))
 	protocolPath := filepath.Join(repoRoot, "docs", "specs", "auditbench-pilot-protocol-v0.1.md")
-	preregPath := filepath.Join(repoRoot, "docs", "specs", "auditbench-preregistration-v0.1.example.json")
+	preregPath := filepath.Join(repoRoot, "docs", "specs", "auditbench-preregistration-v0.2.example.json")
+	legacyPreregPath := filepath.Join(repoRoot, "docs", "specs", "auditbench-preregistration-v0.1.example.json")
 	splitsPath := filepath.Join(repoRoot, "docs", "specs", "auditbench-splits-v0.1.example.json")
+
+	var legacyPrereg Preregistration
+	if err := ReadStrictJSON(legacyPreregPath, &legacyPrereg); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacyPrereg.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported preregistration schema") {
+		t.Fatalf("legacy Validate error = %v, want schema rejection", err)
+	}
 
 	var prereg Preregistration
 	if err := ReadStrictJSON(preregPath, &prereg); err != nil {
@@ -445,7 +533,8 @@ func writeTestStudy(t *testing.T) testStudy {
 	}
 	prereg := Preregistration{
 		SchemaVersion: PreregistrationSchema, StudyID: testStudyID, Mode: ModePilot,
-		ProtocolSHA256: protocolHash, RegisteredAt: testRegistered,
+		ProtocolSHA256: protocolHash, RegistrationAssurance: RegistrationAssuranceSelfAsserted,
+		RegisteredAt:             testRegistered,
 		Metrics:                  []string{"accuracy", "false_safe_rate", "missed_violation_rate", "over_abstention_rate", "per_class_prf"},
 		MinimumAnnotatorsPerView: 2, HeldOutMinimumBasisPoints: 3000,
 		AllowedSUTs: []string{"ardur", "opa"},
