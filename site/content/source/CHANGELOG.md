@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "a6f092694200269a62cce11351ee9e9df61f674f963a4df0bbb7b4509f445aa8"
+source_sha256: "fe22ee406089062d7cb4f51d4a915bdfb23becbc780979b818711900dc32c7b9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,6 +30,9 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Opt-in, observe-only Linux AI-agent launch recognition with a versioned
+  exact-`comm` registry, in-kernel prefilter, operator class overrides, and
+  explicit low-confidence identity boundaries
 - Personal action-firewall profile and one-command provider-free ASK/DENY proof
 - Readable Claude Code action summaries with signed action-budget evidence
 - Execution Receipt v0.2 schema, embedded package copy, and canonical golden fixture

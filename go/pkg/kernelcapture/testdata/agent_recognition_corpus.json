@@ -1,0 +1,12 @@
+[
+  {"name":"claude-code","comm":"claude","expected_status":"recognized","expected_agent_type":"claude_code"},
+  {"name":"codex-cli","comm":"codex","expected_status":"recognized","expected_agent_type":"codex_cli"},
+  {"name":"gemini-cli","comm":"gemini","expected_status":"recognized","expected_agent_type":"gemini_cli"},
+  {"name":"kimi-cli","comm":"kimi","expected_status":"recognized","expected_agent_type":"kimi_cli"},
+  {"name":"hard-negative-node","comm":"node","expected_status":"unknown","expected_agent_type":""},
+  {"name":"hard-negative-python","comm":"python3","expected_status":"unknown","expected_agent_type":""},
+  {"name":"hard-negative-git","comm":"git","expected_status":"unknown","expected_agent_type":""},
+  {"name":"hard-negative-bash","comm":"bash","expected_status":"unknown","expected_agent_type":""},
+  {"name":"substring-is-not-a-match","comm":"my-codex","expected_status":"unknown","expected_agent_type":""},
+  {"name":"unknown-agent-name","comm":"grok","expected_status":"unknown","expected_agent_type":""}
+]

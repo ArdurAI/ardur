@@ -155,6 +155,11 @@ type daemon struct {
 	// lifecycleFilter owns the process-exec producer allowlist. It has its own
 	// lock because map updates must not run under routing or policy-map locks.
 	lifecycleFilter *lifecycleFilterManager
+	// agentRecognizer classifies only bounded exec metadata admitted by the
+	// opt-in producer prefilter. Recognition is heuristic and observe-only.
+	agentRecognitionMu       sync.RWMutex
+	agentRecognizer          *kernelcapture.AgentRecognizer
+	agentRecognitionObserver func(kernelcapture.ProcessEvent, kernelcapture.AgentRecognitionResult)
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
@@ -306,6 +311,61 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		appliedAllow:              make(map[string]*appliedAllowRecord),
 		cgroupVerifier:            verifyRegisterSessionCgroup,
 	}, nil
+}
+
+func (d *daemon) enableAgentRecognition(opts kernelcapture.AgentRecognizerOptions) error {
+	recognizer, err := kernelcapture.NewEmbeddedAgentRecognizer(opts)
+	if err != nil {
+		return err
+	}
+	if err := d.lifecycleFilter.setAgentRecognitionComms(recognizer.PrefilterComms()); err != nil {
+		return err
+	}
+	d.agentRecognitionMu.Lock()
+	d.agentRecognizer = recognizer
+	d.agentRecognitionMu.Unlock()
+	return nil
+}
+
+func (d *daemon) disableAgentRecognition() {
+	d.agentRecognitionMu.Lock()
+	d.agentRecognizer = nil
+	d.agentRecognitionMu.Unlock()
+}
+
+func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
+	if evt.Type != kernelcapture.ProcessEventExec {
+		return
+	}
+	d.agentRecognitionMu.RLock()
+	recognizer := d.agentRecognizer
+	observer := d.agentRecognitionObserver
+	d.agentRecognitionMu.RUnlock()
+	if recognizer == nil {
+		return
+	}
+	result := recognizer.Classify(kernelcapture.AgentRecognitionInput{Comm: evt.Comm})
+	if result.Status == kernelcapture.AgentRecognitionStatusUnknown {
+		return
+	}
+	d.log.Info("AI agent launch candidate observed",
+		"recognition_status", result.Status,
+		"agent_type", result.AgentType,
+		"confidence", result.Confidence,
+		"identity_assurance", result.IdentityAssurance,
+		"governance_action", result.GovernanceAction,
+		"registry_version", result.RegistryVersion,
+		"registry_sha256", result.RegistrySHA256,
+		"matched_rule_ids", result.MatchedRuleIDs,
+		"matched_signal_kinds", result.MatchedSignalKinds,
+		"pid", evt.PID,
+		"ppid", evt.PPID,
+		"cgroup", evt.CgroupID,
+		"comm", evt.Comm,
+	)
+	if observer != nil {
+		observer(evt, result)
+	}
 }
 
 // registerSeccompListener records that sessionID now has a live seccomp
@@ -1354,6 +1414,7 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 	if evt.ObservedAt.IsZero() {
 		evt.ObservedAt = time.Now().UTC()
 	}
+	d.observeAgentLaunch(evt)
 	route := d.lockRouteEvent(&evt)
 	if route == nil {
 		return
@@ -1790,19 +1851,40 @@ func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) error
 	return nil
 }
 
+func splitCommaSeparatedValues(raw string) []string {
+	var values []string
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
 func main() {
 	var (
-		socketPath        = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
-		seccompSocketPath = flag.String("seccomp-socket", defaultSeccompSocketPath, "Unix-domain socket ardur-exec-shim hands off its seccomp listener fd on (seccomp tier, plan E4)")
-		evidenceDir       = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
-		stateDir          = flag.String("state-dir", defaultStateDir, "Daemon state directory")
-		noRingbuf         = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
-		disableBPFLSM     = flag.Bool("disable-bpf-lsm", false, "Skip the BPF-LSM guard tier and force the seccomp user-notify fallback, even on hosts where BPF-LSM is available. Exec/exit observation still runs; only the BPF-LSM enforcement tier is suppressed. Used to exercise the seccomp path where BPF-LSM would otherwise win tier selection.")
-		debug             = flag.Bool("debug", false, "Enable debug-level logging")
-		pruneEvery        = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
-		guardReadyTimeout = flag.Duration("guard-ready-timeout", 10*time.Second, "How long to wait for the BPF-LSM guard to report load success/failure before falling back to the seccomp tier")
+		socketPath            = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
+		seccompSocketPath     = flag.String("seccomp-socket", defaultSeccompSocketPath, "Unix-domain socket ardur-exec-shim hands off its seccomp listener fd on (seccomp tier, plan E4)")
+		evidenceDir           = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
+		stateDir              = flag.String("state-dir", defaultStateDir, "Daemon state directory")
+		noRingbuf             = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
+		disableBPFLSM         = flag.Bool("disable-bpf-lsm", false, "Skip the BPF-LSM guard tier and force the seccomp user-notify fallback, even on hosts where BPF-LSM is available. Exec/exit observation still runs; only the BPF-LSM enforcement tier is suppressed. Used to exercise the seccomp path where BPF-LSM would otherwise win tier selection.")
+		debug                 = flag.Bool("debug", false, "Enable debug-level logging")
+		pruneEvery            = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
+		guardReadyTimeout     = flag.Duration("guard-ready-timeout", 10*time.Second, "How long to wait for the BPF-LSM guard to report load success/failure before falling back to the seccomp tier")
+		agentRecognition      = flag.Bool("agent-recognition", false, "Observe release-bound AI agent launch candidates using bounded process metadata")
+		agentRecognitionAllow = flag.String("agent-recognition-allow", "", "Comma-separated agent types allowed in the recognition prefilter")
+		agentRecognitionDeny  = flag.String("agent-recognition-deny", "", "Comma-separated agent types denied from the recognition prefilter")
 	)
 	flag.Parse()
+	if !*agentRecognition && (strings.TrimSpace(*agentRecognitionAllow) != "" || strings.TrimSpace(*agentRecognitionDeny) != "") {
+		fmt.Fprintln(os.Stderr, "--agent-recognition-allow and --agent-recognition-deny require --agent-recognition")
+		os.Exit(2)
+	}
+	if *agentRecognition && *noRingbuf {
+		fmt.Fprintln(os.Stderr, "--agent-recognition cannot be combined with --no-ringbuf")
+		os.Exit(2)
+	}
 
 	level := slog.LevelInfo
 	if *debug {
@@ -1823,6 +1905,19 @@ func main() {
 	if err != nil {
 		log.Error("init daemon", "error", err)
 		os.Exit(1)
+	}
+	if *agentRecognition {
+		if err := d.enableAgentRecognition(kernelcapture.AgentRecognizerOptions{
+			AllowAgentTypes: splitCommaSeparatedValues(*agentRecognitionAllow),
+			DenyAgentTypes:  splitCommaSeparatedValues(*agentRecognitionDeny),
+		}); err != nil {
+			log.Error("configure agent recognition", "error", err)
+			os.Exit(2)
+		}
+		log.Info("agent recognition enabled",
+			"identity_assurance", "heuristic_process_metadata",
+			"governance_action", "observe_only",
+		)
 	}
 
 	// Ensure socket directory exists.

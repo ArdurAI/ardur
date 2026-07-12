@@ -46,6 +46,15 @@ ringbuf loss or producer-counter uncertainty makes it `degraded`. This is not a
 universal file/network/host-effect percentage, and receipt source assurance is
 the authenticated session owner rather than daemon-side JWT verification.
 
+The Linux daemon also has an opt-in `--agent-recognition` preview. It adds an
+exact, in-kernel `comm` prefilter for the release-bound `claude`, `codex`,
+`gemini`, and `kimi` command names and logs matching execs as low-confidence,
+observe-only launch candidates. The default cgroup-scoped capture path is
+unchanged. This preview does not inspect argv, paths, binary hashes, or file
+contents; it does not attest, adopt, authorize, or enforce the observed
+process; and a basename match is not proof of agent identity. Multi-signal
+classification and measured precision/recall remain tracked by issue #67.
+
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)
 produces schema-validated JSON and Markdown reports that keep governance-only
@@ -168,7 +177,10 @@ the exact claims the artifacts do and do not support.
 > boundary. A successfully daemon-linked Linux `ardur run` additionally
 > captures cgroup-scoped process exec/exit events and measures their
 > receipt-correlation gap, but still does not claim universal file, network, or
-> provider-hidden effect coverage. The offline runtime-evidence correlator can
+> provider-hidden effect coverage. An explicit Linux `--agent-recognition`
+> preview can surface a bounded set of exact-name exec candidates outside a
+> governed cgroup, but it is heuristic, observe-only, and not identity,
+> attestation, or governance. The offline runtime-evidence correlator can
 > inspect supplied sensor events, but does not create or authenticate them.
 > macOS Endpoint Security and broader native effect coverage remain roadmap
 > work. See [`docs/coverage-map.md`](docs/coverage-map.md) for the precise

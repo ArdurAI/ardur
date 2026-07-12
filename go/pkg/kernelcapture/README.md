@@ -30,6 +30,14 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - reads scoped process exec+exit lifecycle samples from a ringbuf.
   - runs deterministic root and child commands.
   - projects the observed exec and exit events through the same correlator.
+- Includes an opt-in exact-`comm` agent-recognition foundation:
+  - validates and digests an embedded, release-bound four-agent registry;
+  - applies operator allow/deny overrides before installing at most 64 exact
+    names in the BPF prefilter;
+  - emits recognized exec candidates without weakening cgroup-scoped lifecycle
+    capture, while dropping noncandidate host execs and all host-wide exits;
+  - labels basename-only matches low-confidence and observe-only, with no
+    attestation, policy selection, process adoption, or enforcement.
 - Includes a local-only dry-run daemon custody scaffold and read-only preflight
   inspector for the root-owned config/state/socket/bpffs boundary, plus bounded
   Linux Slice 2 installer surfaces: a privileged `ardur-sensor install`
@@ -235,7 +243,7 @@ Rootless privileged containers can still fail if memlock cannot be raised or tra
 
 ## Privileged boundary
 
-This package now contains bounded Linux-only Slice 2 daemon installer, systemd service, and link-pinning surfaces, but they remain development proof points rather than production daemon readiness. The `ardur-sensor install` path runs kernel capability checks, calls `InstallDaemonCustody` to create root-owned config/state custody paths with fd-anchored TOCTOU protections, installs a systemd unit, and can run `systemctl daemon-reload` plus `systemctl enable --now` unless `--no-enable` is supplied. The systemd unit declares `Type=notify`, watchdog timing, restrictive runtime/state/log directories, and BPF-related capability bounds. `LoadAndAttachProcessExecEBPFPinned` pins tracepoint links, the ringbuf, and its monotonic producer-drop counter as one restart-surviving generation; stale partial generations are removed before fresh attach. The only live socket behavior in this package remains the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; the only daemon session state remains the in-memory `DaemonSessionRegistry` proof seam, which binds ownership to daemon-observed UID/GID/PID plus process-start ticks for status/end requests; the daemon session/cgroup handoff remains a no-mutation plan seam. These are not release packages, cross-platform installers, persistent production session managers, cgroup assignment mechanisms, live enforcement, file/network side-effect capture, or production lifecycle guarantees.
+This package now contains bounded Linux-only Slice 2 daemon installer, systemd service, and link-pinning surfaces, but they remain development proof points rather than production daemon readiness. The `ardur-sensor install` path runs kernel capability checks, calls `InstallDaemonCustody` to create root-owned config/state custody paths with fd-anchored TOCTOU protections, installs a systemd unit, and can run `systemctl daemon-reload` plus `systemctl enable --now` unless `--no-enable` is supplied. The systemd unit declares `Type=notify`, watchdog timing, restrictive runtime/state/log directories, and BPF-related capability bounds. `LoadAndAttachProcessExecEBPFPinned` pins tracepoint links, the ringbuf, its monotonic producer-drop counter, the cgroup filter maps, and the opt-in recognition maps as one restart-surviving generation; stale partial generations are removed before fresh attach. The only live socket behavior in this package remains the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; the only daemon session state remains the in-memory `DaemonSessionRegistry` proof seam, which binds ownership to daemon-observed UID/GID/PID plus process-start ticks for status/end requests; the daemon session/cgroup handoff remains a no-mutation plan seam. These are not release packages, cross-platform installers, persistent production session managers, cgroup assignment mechanisms, universal agent identity, auto-attestation, auto-governance, file/network side-effect capture, or production lifecycle guarantees.
 `BuildDaemonCustodyPlan` records the local-only dry-run daemon custody boundary as validated data:
 
 - config path: `/etc/ardur/kernelcapture-daemon.toml`, `0600`, root-owned
@@ -278,6 +286,8 @@ Not claimed yet:
 - client-visible protocol expansion from daemon-internal status snapshots
 - daemon-created/assigned per-session cgroups
 - universal CLI capture
+- multi-signal or high-confidence agent identity, auto-attestation, process
+  adoption, or auto-governance
 - file/network/privilege side-effect capture
 - macOS/Windows kernel capture
 - unprivileged/no-install eBPF support

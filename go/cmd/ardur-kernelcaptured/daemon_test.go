@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -529,6 +530,47 @@ func TestProcessKernelEventReleasesRouteWithNilCorrelator(t *testing.T) {
 		t.Fatal("nil-correlator event leaked its route lease")
 	}
 	route.mu.Unlock()
+}
+
+func TestAgentRecognitionObservesUnroutedExecOnlyWhenEnabled(t *testing.T) {
+	tests := []struct {
+		name    string
+		enable  bool
+		event   kernelcapture.ProcessEvent
+		wantHit bool
+	}{
+		{name: "disabled", event: kernelcapture.ProcessEvent{PID: 41, Type: kernelcapture.ProcessEventExec, Comm: "claude"}},
+		{name: "recognized exec", enable: true, event: kernelcapture.ProcessEvent{PID: 42, Type: kernelcapture.ProcessEventExec, Comm: "claude"}, wantHit: true},
+		{name: "unknown exec", enable: true, event: kernelcapture.ProcessEvent{PID: 43, Type: kernelcapture.ProcessEventExec, Comm: "python3"}},
+		{name: "recognized name on exit", enable: true, event: kernelcapture.ProcessEvent{PID: 44, Type: kernelcapture.ProcessEventExit, Comm: "claude"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newTestDaemon(t)
+			if tt.enable {
+				if err := d.enableAgentRecognition(kernelcapture.AgentRecognizerOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var got kernelcapture.AgentRecognitionResult
+			d.agentRecognitionObserver = func(_ kernelcapture.ProcessEvent, result kernelcapture.AgentRecognitionResult) {
+				got = result
+			}
+			d.processKernelEvent(tt.event)
+			if hit := got.Status != ""; hit != tt.wantHit {
+				t.Fatalf("observer hit=%t result=%+v, want %t", hit, got, tt.wantHit)
+			}
+			if tt.wantHit && (got.AgentType != "claude_code" || got.GovernanceAction != "observe_only") {
+				t.Fatalf("unsafe or incorrect recognition result: %+v", got)
+			}
+		})
+	}
+}
+
+func TestSplitCommaSeparatedValues(t *testing.T) {
+	if got, want := splitCommaSeparatedValues(" claude_code, codex_cli ,,"), []string{"claude_code", "codex_cli"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("split values = %v, want %v", got, want)
+	}
 }
 
 func TestRouteEventConcurrentRoutingAndRetirement(t *testing.T) {

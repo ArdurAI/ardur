@@ -8,9 +8,15 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"structs"
 
 	"github.com/cilium/ebpf"
 )
+
+type processExecArdurCommKey struct {
+	_    structs.HostLayout
+	Comm [16]int8
+}
 
 // Names of all BPF objects in the ELF.
 //
@@ -20,6 +26,8 @@ const (
 	processExecMapEvents                  = "events"
 	processExecMapFilterControl           = "filter_control"
 	processExecMapLifecycleEventsDropped  = "lifecycle_events_dropped"
+	processExecMapRecognitionComms        = "recognition_comms"
+	processExecMapRecognitionControl      = "recognition_control"
 	processExecProgHandleSchedProcessExec = "handle_sched_process_exec"
 	processExecProgHandleSchedProcessExit = "handle_sched_process_exit"
 )
@@ -78,6 +86,8 @@ type processExecMapSpecs struct {
 	Events                 *ebpf.MapSpec `ebpf:"events"`
 	FilterControl          *ebpf.MapSpec `ebpf:"filter_control"`
 	LifecycleEventsDropped *ebpf.MapSpec `ebpf:"lifecycle_events_dropped"`
+	RecognitionComms       *ebpf.MapSpec `ebpf:"recognition_comms"`
+	RecognitionControl     *ebpf.MapSpec `ebpf:"recognition_control"`
 }
 
 // processExecVariableSpecs contains global variables before they are loaded into the kernel.
@@ -110,6 +120,8 @@ type processExecMaps struct {
 	Events                 *ebpf.Map `ebpf:"events"`
 	FilterControl          *ebpf.Map `ebpf:"filter_control"`
 	LifecycleEventsDropped *ebpf.Map `ebpf:"lifecycle_events_dropped"`
+	RecognitionComms       *ebpf.Map `ebpf:"recognition_comms"`
+	RecognitionControl     *ebpf.Map `ebpf:"recognition_control"`
 }
 
 func (m *processExecMaps) Close() error {
@@ -118,6 +130,8 @@ func (m *processExecMaps) Close() error {
 		m.Events,
 		m.FilterControl,
 		m.LifecycleEventsDropped,
+		m.RecognitionComms,
+		m.RecognitionControl,
 	)
 }
 

@@ -93,8 +93,13 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 		log.Warn("process lifecycle pinning unavailable; restart survival disabled", "error", pinErr)
 	}
 	if err := d.lifecycleFilter.install(handles); err != nil {
+		d.disableAgentRecognition()
 		log.Warn("process lifecycle cgroup filter unavailable; using permissive capture when safe and rejecting registration otherwise", "error", err)
 	} else {
+		if recognitionErr := d.lifecycleFilter.agentRecognitionError(); recognitionErr != nil {
+			d.disableAgentRecognition()
+			log.Warn("agent recognition prefilter unavailable; recognition disabled while scoped lifecycle capture remains active", "error", recognitionErr)
+		}
 		defer func() {
 			if err := d.lifecycleFilter.detach(handles); err != nil {
 				log.Warn("quiesce process lifecycle cgroup filter", "error", err)

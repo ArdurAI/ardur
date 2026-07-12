@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "2d8a062dd2e8c190bd714ef7ac6250c2bb7ff9160b6f30dd93d09b4ae06b16d7"
+source_sha256: "0d249207a4baf88bdeab4a08c60178635873054ad0b36092eb0827992ba07884"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -42,6 +42,15 @@ adds Linux eBPF kernel-level capture; v1.0 adds macOS Endpoint Security
 Framework. See [`docs/coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the full
 audit, [`docs/known-limitations.md`](/__ardur_internal__/source/docs/known-limitations/) for the
 caveat list, and [`ROADMAP.md`](/__ardur_internal__/source/roadmap/) for the phase plan.
+
+An opt-in Linux `ardur-kernelcaptured --agent-recognition` preview now admits
+exec events whose exact 15-byte-or-shorter Linux `comm` matches the embedded
+`claude`, `codex`, `gemini`, or `kimi` registry. It reports low-confidence,
+observe-only candidates and never writes an unrouted candidate into governed
+session evidence. It does not collect argv, paths, hashes, uid, environment, or
+file content, and it does not attest or enforce. Issue #67 remains in progress
+for multi-signal fingerprints, interpreter/script detection, and corpus-backed
+precision/recall thresholds.
 
 The offline `ardur evidence correlate` command can now verify a receipt journal
 and compare it with operator-supplied normalized, Tetragon, or Falco JSONL. It
@@ -98,6 +107,9 @@ complete sensor coverage.
 - broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
+- completion of agent recognition issue #67 beyond the exact-`comm`,
+  observe-only Linux foundation: binary hashes, argv/interpreter signals,
+  maintained corpus thresholds, and cross-platform launch sources
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - independent AuditBench annotation collection and headline scoring; the strict capture/blind-label/seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 

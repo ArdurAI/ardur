@@ -5,17 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
 type fakeLifecycleCgroupFilter struct {
-	mu      sync.Mutex
-	ops     []string
-	allowed map[uint64]struct{}
-	enabled bool
-	fail    map[string]error
+	mu               sync.Mutex
+	ops              []string
+	allowed          map[uint64]struct{}
+	enabled          bool
+	fail             map[string]error
+	recognitionComms []string
 }
 
 func newFakeLifecycleCgroupFilter() *fakeLifecycleCgroupFilter {
@@ -73,6 +75,17 @@ func (f *fakeLifecycleCgroupFilter) ClearLifecycleCgroups() error {
 	return nil
 }
 
+func (f *fakeLifecycleCgroupFilter) ConfigureAgentRecognitionComms(comms []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	op := "recognition:" + strings.Join(comms, ",")
+	if err := f.record(op); err != nil {
+		return err
+	}
+	f.recognitionComms = append([]string(nil), comms...)
+	return nil
+}
+
 func TestLifecycleFilterInstallKeepsIdleProducerQuiet(t *testing.T) {
 	manager := newLifecycleFilterManager()
 	filter := newFakeLifecycleCgroupFilter()
@@ -82,9 +95,44 @@ func TestLifecycleFilterInstallKeepsIdleProducerQuiet(t *testing.T) {
 	if !filter.enabled || len(filter.allowed) != 0 {
 		t.Fatalf("idle filter enabled=%t allowed=%v, want enabled empty", filter.enabled, filter.allowed)
 	}
-	wantOps := []string{"enabled:false", "clear", "enabled:true"}
+	wantOps := []string{"enabled:false", "clear", "enabled:true", "recognition:"}
 	if !reflect.DeepEqual(filter.ops, wantOps) {
 		t.Fatalf("install operations = %v, want %v", filter.ops, wantOps)
+	}
+}
+
+func TestLifecycleFilterInstallsRecognitionWithoutWeakeningCgroupScope(t *testing.T) {
+	manager := newLifecycleFilterManager()
+	if err := manager.setAgentRecognitionComms([]string{"claude", "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	filter := newFakeLifecycleCgroupFilter()
+	if err := manager.install(filter); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if !filter.enabled || !reflect.DeepEqual(filter.recognitionComms, []string{"claude", "codex"}) {
+		t.Fatalf("installed state enabled=%t recognition=%v", filter.enabled, filter.recognitionComms)
+	}
+	if err := manager.agentRecognitionError(); err != nil {
+		t.Fatalf("recognition status: %v", err)
+	}
+}
+
+func TestLifecycleFilterRecognitionFailureKeepsScopedProducerSafe(t *testing.T) {
+	manager := newLifecycleFilterManager()
+	if err := manager.setAgentRecognitionComms([]string{"claude"}); err != nil {
+		t.Fatal(err)
+	}
+	filter := newFakeLifecycleCgroupFilter()
+	filter.fail["recognition:claude"] = errors.New("recognition map unavailable")
+	if err := manager.install(filter); err != nil {
+		t.Fatalf("optional recognition failure broke lifecycle install: %v", err)
+	}
+	if !filter.enabled || len(filter.recognitionComms) != 0 {
+		t.Fatalf("unsafe fallback enabled=%t recognition=%v", filter.enabled, filter.recognitionComms)
+	}
+	if err := manager.agentRecognitionError(); err == nil {
+		t.Fatal("recognition failure was not reported")
 	}
 }
 
@@ -201,5 +249,8 @@ func TestLifecycleFilterDetachLeavesPinnedProducerQuiet(t *testing.T) {
 	}
 	if !filter.enabled || len(filter.allowed) != 0 {
 		t.Fatalf("detached filter enabled=%t allowed=%v, want enabled empty", filter.enabled, filter.allowed)
+	}
+	if len(filter.recognitionComms) != 0 {
+		t.Fatalf("detached recognition prefilter = %v, want empty", filter.recognitionComms)
 	}
 }
