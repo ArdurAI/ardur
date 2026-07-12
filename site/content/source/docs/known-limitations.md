@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "1995b42fa18efb7a0de1c15978f95f8994237b9cd90301242cdcc91002309d7f"
+source_sha256: "bc9b7a8ad7aa764a8f409d6529a564085a3131358afa36b2439cabb3ba7bcb23"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -222,6 +222,22 @@ of a live channel or one-time possession. JWT-SVID is a bearer credential and
 can be replayed during its validity window if both the Biscuit and SVID are
 stolen. Deployments needing channel-bound workload identity should prefer the
 X.509-SVID mTLS pattern in ADR-022.
+
+## BPF policy-map teardown is serialized, but mid-run failover is not automatic
+
+The Linux daemon publishes the complete BPF policy-map handle set and the
+`bpf_lsm` tier under one lifecycle mutex. Health reads and every map operation
+participate in that same boundary. On guard exit, the daemon waits for in-flight
+map users, withdraws the tier and all shared map references, and only then
+closes the underlying BPF handles. Startup fallback selection is serialized as
+well, so a BPF load completing after the readiness timeout cannot replace an
+already selected seccomp tier.
+
+If a live BPF-LSM guard exits mid-run, the daemon records degradation and
+reports enforcement tier `none`. It does not automatically start or migrate
+the workload to seccomp user-notify after that failure; seccomp supervision is
+currently selected only during startup. Operators must treat the degradation
+event as an availability incident rather than assuming transparent failover.
 
 ## Operator + webhook /metrics endpoints (deployment hardening required)
 

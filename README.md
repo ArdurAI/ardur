@@ -81,7 +81,7 @@ At the reviewed `dev` tree on 2026-07-11, the current gates were:
 | Python local matrix (Python 3.13) | 1,665 passed, 33 skipped; CI separately enforces its coverage threshold |
 | Python CI | Python 3.10 and 3.13 passed; lint and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
-| Linux enforcement CI | BPF generation plus Go build/vet/race tests, live BPF-LSM kernel smoke, strict BPF `ardur run --enforce` with a kernel-stopped, exact-artifact bootstrap and denied child exec, seccomp smoke, and full seccomp E2E with an authenticated governance call followed by a denied unrelated loopback connect passed |
+| Linux enforcement CI | BPF generation plus Go build/vet/race tests, policy-map startup/teardown lifetime races, live BPF-LSM kernel smoke, strict BPF `ardur run --enforce` with a kernel-stopped, exact-artifact bootstrap and denied child exec, seccomp smoke, and full seccomp E2E with an authenticated governance call followed by a denied unrelated loopback connect passed |
 | Security and release hygiene | CodeQL for Python and Go, secret scanning, formats, links, Hugo, package build, and OCI smoke passed |
 
 These gates verify the checked-in runtime and its configured integration

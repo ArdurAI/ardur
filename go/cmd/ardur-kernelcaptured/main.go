@@ -210,11 +210,12 @@ type daemon struct {
 	// goroutine and read from every socket-handling goroutine concurrently.
 	activeTier string
 
-	// applyMu serializes every BPF policy-map mutation — ApplyPolicyMaps,
-	// RemovePolicyMaps, SetKillSwitch. Those run in per-connection goroutines
-	// (and RemovePolicyMaps also on session-end), and ApplyPolicyMaps' double
-	// buffer is a read-active-slot / write-inactive-slot / flip sequence that is
-	// only atomic if writers are serialized. Distinct from mu (routing index).
+	// applyMu serializes every BPF policy-map mutation and owns the lifetime of
+	// policyMaps. Guard startup publishes the complete handle set under this
+	// lock; teardown withdraws the tier and handle set under it before closing
+	// the underlying BPF fds. Every map user holds applyMu for its full operation,
+	// so teardown cannot close a handle that an in-flight request still uses.
+	// Distinct from mu (routing index); when both are needed, applyMu comes first.
 	applyMu sync.Mutex
 
 	// appliedAllow tracks, per session, the path/net allowlist entries most
@@ -578,23 +579,61 @@ func (d *daemon) handleRegisterReceipt(req kernelcapture.DaemonProtocolRequest, 
 // enforcementTier reports which kernel-enforcement backend is currently live —
 // EnforcementTierBPFLSM, daemonTierSeccomp, or EnforcementTierNone.
 //
-// The authoritative source is activeTier, which main()'s startup tier selection
-// sets to bpf_lsm, seccomp, or none (E4 added the seccomp fallback; a plain
-// PolicyMapsReady probe can't tell seccomp from none, since the seccomp tier
-// holds no BPF policy maps). When activeTier hasn't been decided yet — the
-// zero value or the daemonTierNone default, e.g. a unit test that populates
-// policyMaps directly without going through startup — fall back to a live
-// policyMaps probe so a loaded guard still reports bpf_lsm. In real runtime
-// activeTier is set to bpf_lsm exactly when the maps load, so the two never
-// disagree there; the fallback only matters for that bypass path.
+// The authoritative source is activeTier. BPF map publication commits
+// activeTier=bpf_lsm in the same applyMu critical section, so health never
+// needs to infer a tier from a separately changing handle struct.
 func (d *daemon) enforcementTier() string {
-	if tier := d.getActiveTier(); tier != "" && tier != daemonTierNone {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	if tier := d.getActiveTier(); tier == daemonTierBPFLSM || tier == daemonTierSeccomp {
 		return tier
 	}
-	if kernelcapture.PolicyMapsReady(d.policyMaps) {
-		return kernelcapture.EnforcementTierBPFLSM
-	}
 	return kernelcapture.EnforcementTierNone
+}
+
+// activatePolicyMaps publishes one complete guard handle set and its live tier
+// as a single lifecycle transition. The caller retains ownership of the
+// underlying handles and must call deactivatePolicyMaps before closing them.
+func (d *daemon) activatePolicyMaps(maps kernelcapture.PolicyMaps) bool {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	if !kernelcapture.PolicyMapsReady(maps) {
+		return false
+	}
+	if tier := d.getActiveTier(); tier != "" && tier != daemonTierNone {
+		return false
+	}
+	d.policyMaps = maps
+	d.setActiveTier(daemonTierBPFLSM)
+	return true
+}
+
+// activateSeccompTier commits the startup fallback only if a BPF guard did not
+// win the same lifecycle lock first. A guard that loads after this returns
+// false from activatePolicyMaps and closes without publishing its handles.
+func (d *daemon) activateSeccompTier() bool {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	if tier := d.getActiveTier(); tier != "" && tier != daemonTierNone {
+		return false
+	}
+	d.setActiveTier(daemonTierSeccomp)
+	return true
+}
+
+// deactivatePolicyMaps makes the guard unreachable to new map users and waits
+// for every in-flight user to finish. It returns whether BPF-LSM was live so a
+// mid-run caller can decide whether to emit degradation evidence. The owner may
+// close the withdrawn handles only after this method returns.
+func (d *daemon) deactivatePolicyMaps() bool {
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	wasActive := d.getActiveTier() == daemonTierBPFLSM
+	if wasActive {
+		d.setActiveTier(daemonTierNone)
+	}
+	d.policyMaps = kernelcapture.PolicyMaps{}
+	return wasActive
 }
 
 // getActiveTier returns the current activeTier under mu. See activeTier's
@@ -624,9 +663,8 @@ func (d *daemon) setActiveTier(tier string) {
 // reason OTHER than this daemon's own ctx-cancellation watcher — e.g. the
 // guard was force-detached externally (bpftool link detach, or the same
 // external-tamper class RunTamperAudit checks for on its own timer). Either
-// way, d.policyMaps was already cleared to its zero value by runGuardConsumer's
-// defer by the time this runs; activeTier must not keep claiming bpf_lsm past
-// that point.
+// way, this transition withdraws activeTier and policyMaps before the guard
+// owner closes the underlying BPF handles.
 //
 // No-op if activeTier was never actually bpf_lsm — covers the startup-load-
 // failure case, where runGuardConsumer returns immediately (before this
@@ -642,11 +680,10 @@ func (d *daemon) setActiveTier(tier string) {
 // (degraded) tier — never silently keeping a stale bpf_lsm claim alive — is
 // the fix; auto-failover is a larger, separate change.
 func (d *daemon) degradeGuardTier(cause error, log *slog.Logger) {
-	previous := d.getActiveTier()
-	if previous != daemonTierBPFLSM {
+	if !d.deactivatePolicyMaps() {
 		return
 	}
-	d.setActiveTier(daemonTierNone)
+	previous := daemonTierBPFLSM
 
 	detail := fmt.Sprintf(
 		"guard consumer exited while the daemon is still running; enforcement tier downgraded from %q to %q",
@@ -2018,18 +2055,14 @@ func main() {
 					log.Warn("BPF-LSM guard unavailable (enforcement degraded to seccomp-advertised)",
 						"error", err)
 				}
-				// Reached whether runGuardConsumer failed mid-run (err != nil)
-				// or its ringbuf closed cleanly for a reason other than our
-				// own shutdown watcher (err == nil — e.g. an external force-
-				// detach); either way the guard is no longer attached. Issue
-				// #121: never leave activeTier claiming bpf_lsm past this point.
-				d.degradeGuardTier(err, log)
+				// runGuardConsumer withdraws the tier and map handles before
+				// returning, so this goroutine only reports the terminal cause.
 			}()
 
 			select {
 			case err := <-guardOutcome:
 				if err == nil {
-					d.setActiveTier(daemonTierBPFLSM)
+					// runGuardConsumer already published maps + tier atomically.
 				} else {
 					log.Warn("BPF-LSM tier not active, falling back to seccomp tier", "error", err)
 				}
@@ -2042,8 +2075,7 @@ func main() {
 			log.Warn("BPF-LSM guard tier disabled via --disable-bpf-lsm; forcing seccomp user-notify tier")
 		}
 
-		if d.getActiveTier() != daemonTierBPFLSM && ctx.Err() == nil {
-			d.setActiveTier(daemonTierSeccomp)
+		if ctx.Err() == nil && d.activateSeccompTier() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

@@ -268,7 +268,9 @@ It rejects repository-controlled privileged paths when repository-root validatio
 ## Concurrency contract
 
 - `Correlator` is goroutine-safe and supports concurrent receipt registration and event correlation.
-- Race-safety is covered by `go test -race ./pkg/kernelcapture`.
+- Race-safety is covered by `go test -race ./...` on Linux, including daemon
+  policy-map publication, tier selection, in-flight use, withdrawal, and close
+  ordering.
 
 ## Current MVP claim boundary
 

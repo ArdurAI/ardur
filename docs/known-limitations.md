@@ -206,6 +206,22 @@ can be replayed during its validity window if both the Biscuit and SVID are
 stolen. Deployments needing channel-bound workload identity should prefer the
 X.509-SVID mTLS pattern in ADR-022.
 
+## BPF policy-map teardown is serialized, but mid-run failover is not automatic
+
+The Linux daemon publishes the complete BPF policy-map handle set and the
+`bpf_lsm` tier under one lifecycle mutex. Health reads and every map operation
+participate in that same boundary. On guard exit, the daemon waits for in-flight
+map users, withdraws the tier and all shared map references, and only then
+closes the underlying BPF handles. Startup fallback selection is serialized as
+well, so a BPF load completing after the readiness timeout cannot replace an
+already selected seccomp tier.
+
+If a live BPF-LSM guard exits mid-run, the daemon records degradation and
+reports enforcement tier `none`. It does not automatically start or migrate
+the workload to seccomp user-notify after that failure; seccomp supervision is
+currently selected only during startup. Operators must treat the degradation
+event as an availability incident rather than assuming transparent failover.
+
 ## Operator + webhook /metrics endpoints (deployment hardening required)
 
 The `cmd/operator` and `cmd/webhook` binaries expose Prometheus metrics

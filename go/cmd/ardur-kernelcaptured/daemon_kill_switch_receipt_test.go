@@ -57,7 +57,7 @@ func TestHandleSetKillSwitch_WritesAttributedHashChainedReceipt(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, _ := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 
 	// Admin (uid 0) peer; testPeerHandshakeUID pins PID 4321.
 	root := testPeerHandshakeUID("", kernelcapture.DaemonProtocolMethodSetKillSwitch, 0)
@@ -114,7 +114,7 @@ func TestHandleSetKillSwitch_EvidenceFailureRollsBackWithoutAdvancingChain(t *te
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, observed := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 	stub := newStubFS()
 	stub.err = errors.New("evidence volume unavailable")
 	d.fs = stub
@@ -162,7 +162,7 @@ func TestHandleSetKillSwitch_RollbackFailureSurfacesSessionEvidenceGap(t *testin
 	maps, _ := countingPolicyMaps()
 	kill := &rollbackFailKillSwitchMap{}
 	maps.KillSwitch = kill
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 	stub := newStubFS()
 	stub.err = errors.New("evidence volume unavailable")
 	d.fs = stub
@@ -191,7 +191,7 @@ func TestHandleSetKillSwitch_SessionStatusBindsTamperHeadAndImpact(t *testing.T)
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, _ := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
 		SessionID: "attested-session", RootPID: 4321, CgroupID: 43,
 	}, "attested-session")
@@ -221,7 +221,7 @@ func TestHandleSetKillSwitch_DeniedNonRootWritesNoReceipt(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, _ := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 
 	nonRoot := testPeerHandshakeUID("", kernelcapture.DaemonProtocolMethodSetKillSwitch, 501)
 	if resp := d.handleSetKillSwitch(setKillSwitchReq(true), nonRoot); resp.OK {
@@ -252,7 +252,7 @@ func TestHandleSetKillSwitch_ReceiptOrderingUnderConcurrentAuditTicks(t *testing
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, _ := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 	root := testPeerHandshakeUID("", kernelcapture.DaemonProtocolMethodSetKillSwitch, 0)
 
 	const iterations = 40

@@ -67,7 +67,19 @@ func TestHandleAuthorizedRequest_HealthReportsNoneWithoutGuard(t *testing.T) {
 func TestHandleAuthorizedRequest_HealthReportsBPFLSMWhenGuardLoaded(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
-	d.policyMaps = kernelcapture.PolicyMaps{
+	d.activatePolicyMaps(readyHealthPolicyMaps())
+
+	resp := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
+	if !resp.OK {
+		t.Fatalf("health response = %+v, want OK", resp)
+	}
+	if resp.EnforcementTier != kernelcapture.EnforcementTierBPFLSM {
+		t.Fatalf("EnforcementTier = %q, want %q", resp.EnforcementTier, kernelcapture.EnforcementTierBPFLSM)
+	}
+}
+
+func readyHealthPolicyMaps() kernelcapture.PolicyMaps {
+	return kernelcapture.PolicyMaps{
 		CgroupOpPolicy:           &fakeHealthPolicyMap{},
 		CgroupPathAllow:          &fakeHealthPolicyMap{},
 		CgroupFileAllow:          &fakeHealthPolicyMap{},
@@ -78,14 +90,6 @@ func TestHandleAuthorizedRequest_HealthReportsBPFLSMWhenGuardLoaded(t *testing.T
 		CgroupNetAllow:           &fakeHealthPolicyMap{},
 		CgroupManaged:            &fakeHealthPolicyMap{},
 		KillSwitch:               &fakeHealthPolicyMap{},
-	}
-
-	resp := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
-	if !resp.OK {
-		t.Fatalf("health response = %+v, want OK", resp)
-	}
-	if resp.EnforcementTier != kernelcapture.EnforcementTierBPFLSM {
-		t.Fatalf("EnforcementTier = %q, want %q", resp.EnforcementTier, kernelcapture.EnforcementTierBPFLSM)
 	}
 }
 
