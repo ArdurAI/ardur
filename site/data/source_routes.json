@@ -236,6 +236,7 @@
     "docs/protocol-roots.md": "source/docs/protocol-roots/",
     "docs/public-import-plan.md": "source/docs/public-import-plan/",
     "docs/reference/README.md": "source/docs/reference/readme/",
+    "docs/reference/advisory-ai-controls.md": "source/docs/reference/advisory-ai-controls/",
     "docs/reference/ardur-md-profile.md": "source/docs/reference/ardur-md-profile/",
     "docs/reference/cli.md": "source/docs/reference/cli/",
     "docs/reference/kernel-capture-daemon.md": "source/docs/reference/kernel-capture-daemon/",

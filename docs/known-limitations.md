@@ -4,8 +4,13 @@ This page distinguishes documented product boundaries from implementation bugs.
 
 ## Research and foundation surfaces not yet broad runtime claims
 
-- semantic judging is advisory unless a specific runtime policy path consumes
-  its verdict
+- semantic judging and behavioral fingerprinting are library-only prototypes:
+  neither is wired into `python/vibap/proxy.py`, so their outputs are not
+  authoritative governance verdicts
+- the semantic judge returns `UNSURE` on exceptions; behavioral fingerprinting
+  defaults to `policy="fail_open"`, where a definite `FAIL` rejects but
+  `UNSURE` proceeds. A custom enforcement integration must deliberately choose
+  `policy="fail_closed"` and accept its provider-availability trade-off
 - behavioral templates are the intended deterministic direction, but broad
   marketing claims still require template coverage and L5 evidence
 - streaming reconciliation and active revocation primitives exist, but broader
