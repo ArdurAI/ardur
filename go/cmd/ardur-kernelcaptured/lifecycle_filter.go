@@ -15,6 +15,7 @@ type lifecycleCgroupFilter interface {
 	AllowLifecycleCgroup(uint64) error
 	RemoveLifecycleCgroup(uint64) error
 	ClearLifecycleCgroups() error
+	ConfigureAgentRecognitionComms([]string) error
 }
 
 // lifecycleFilterManager serializes producer-filter state independently of
@@ -32,6 +33,9 @@ type lifecycleFilterManager struct {
 	controller lifecycleCgroupFilter
 	sessions   map[string]uint64
 	owners     map[uint64]string
+
+	recognitionComms []string
+	recognitionErr   error
 }
 
 func newLifecycleFilterManager() *lifecycleFilterManager {
@@ -67,12 +71,42 @@ func (m *lifecycleFilterManager) install(controller lifecycleCgroupFilter) error
 	if err := controller.SetLifecycleCgroupFilterEnabled(true); err != nil {
 		return m.resolveInstallFailureLocked(controller, fmt.Errorf("enable lifecycle cgroup filter after reconciliation: %w", err))
 	}
+	m.recognitionErr = nil
+	if err := controller.ConfigureAgentRecognitionComms(m.recognitionComms); err != nil {
+		cleanupErr := controller.ConfigureAgentRecognitionComms(nil)
+		m.recognitionErr = errors.Join(fmt.Errorf("configure agent recognition prefilter: %w", err), cleanupErr)
+	}
 
 	m.controller = controller
 	m.startupErr = nil
 	m.unsafeErr = nil
 	m.startupOnce.Do(func() { close(m.startup) })
 	return nil
+}
+
+// setAgentRecognitionComms stores the exact comm prefilter selected before
+// producer startup. Runtime mutation is intentionally unsupported so the
+// classifier and kernel map cannot silently drift apart.
+func (m *lifecycleFilterManager) setAgentRecognitionComms(comms []string) error {
+	if m == nil {
+		return fmt.Errorf("lifecycle filter manager is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.controller != nil {
+		return fmt.Errorf("agent recognition prefilter is already installed")
+	}
+	m.recognitionComms = append([]string(nil), comms...)
+	return nil
+}
+
+func (m *lifecycleFilterManager) agentRecognitionError() error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.recognitionErr
 }
 
 func (m *lifecycleFilterManager) resolveInstallFailureLocked(controller lifecycleCgroupFilter, cause error) error {
@@ -179,6 +213,8 @@ func (m *lifecycleFilterManager) detach(controller lifecycleCgroupFilter) error 
 	disableErr := controller.SetLifecycleCgroupFilterEnabled(false)
 	clearErr := controller.ClearLifecycleCgroups()
 	enableErr := controller.SetLifecycleCgroupFilterEnabled(true)
+	recognitionErr := controller.ConfigureAgentRecognitionComms(nil)
 	m.controller = nil
-	return errors.Join(disableErr, clearErr, enableErr)
+	m.recognitionErr = nil
+	return errors.Join(disableErr, clearErr, enableErr, recognitionErr)
 }

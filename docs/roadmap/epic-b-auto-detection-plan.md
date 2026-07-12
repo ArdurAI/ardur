@@ -1,8 +1,10 @@
 # Epic B — Transparent Auto-Detection & Auto-Governance
 
-Status: **planning document only** (2026-07-02). Read-only research pass; no
-code changed. This plan proposes work; it does not authorize it, and every
-enforcement slice inherits the existing security gates and the honest
+Status: **planning document with an implementation foundation** (updated
+2026-07-11). The exact-`comm`, observe-only Linux recognition prefilter is now
+implemented; B1/B2 acceptance gates remain open. This plan proposes the
+remaining work, and every enforcement slice inherits the existing security
+gates and the honest
 enforcement boundary in `docs/security-model.md` ("what the reference proxy
 enforces today" is the conservative claim).
 
@@ -47,9 +49,30 @@ Epic B builds only the **front half** (detect → classify → attest → adopt)
 one new decision seam (policy without a human). That is the scoping discipline
 for the whole epic: **do not re-implement enforcement; feed it.**
 
-> Notion architecture/roadmap context was not reachable in this pass (the Notion
-> connector is auth-gated and this was a non-interactive session). If a Notion
-> Epic-B page exists, reconcile this plan against it before B1 kickoff.
+The 2026-07-11 implementation pass was reconciled against the current Host
+Agent architecture/roadmap and Linux gap-analysis project notes before code
+changes began.
+
+### 1.1 Implementation checkpoint (2026-07-11)
+
+The first #67 foundation lands below the full B1/B2 bar:
+
+- `process_exec.bpf.c` keeps the existing cgroup allowlist and adds a separate,
+  disabled-by-default exact-`comm` hash-map admission path for exec events only.
+- The embedded registry recognizes the official command names `claude`,
+  `codex`, `gemini`, and `kimi`; hard negatives include generic runtimes and
+  shells. Operator allow/deny classes are applied before populating the map.
+- Userspace labels every match heuristic, low-confidence, and observe-only. It
+  neither persists unrouted candidates as session evidence nor attests, adopts,
+  authorizes, or governs the process.
+- Registry and BPF capacities are both 64 exact names. The canonical registry
+  digest is release metadata, not independent provenance.
+
+Still required before #67 closes: binary digest and argv/interpreter signals,
+an independently maintained labeled corpus including installation variants,
+explicit precision/recall thresholds, measured false-negative accounting and
+exec-storm overhead, plus macOS/Windows launch sources. The current exact-name
+fixture is a regression corpus, not a performance or accuracy claim.
 
 ---
 

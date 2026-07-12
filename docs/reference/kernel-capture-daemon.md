@@ -140,6 +140,52 @@ still validates session ownership before writing evidence. It does not claim
 universal process capture, observe provider-hidden actions, or write unrelated
 host events into session evidence.
 
+## Opt-in agent recognition preview
+
+Start the Linux daemon with recognition explicitly enabled:
+
+```bash
+ardur-kernelcaptured --agent-recognition
+```
+
+The embedded registry currently contains four release-bound exact Linux
+`comm` values: `claude` (`claude_code`), `codex` (`codex_cli`), `gemini`
+(`gemini_cli`), and `kimi` (`kimi_cli`). The BPF producer checks those names in
+a 64-entry hash map and emits matching exec events alongside the unchanged
+cgroup-scoped lifecycle feed. Nonmatching host execs and all host-wide exit
+events are dropped before ringbuf reservation. The registry is versioned and
+SHA-256-digested; the digest is integrity metadata for the embedded rules, not
+a signature or software-provenance assertion.
+
+Operator class overrides are applied before the map is populated:
+
+```bash
+ardur-kernelcaptured --agent-recognition \
+  --agent-recognition-allow claude_code,codex_cli \
+  --agent-recognition-deny codex_cli
+```
+
+Deny takes precedence over allow. Unknown class names fail startup, override
+flags require `--agent-recognition`, and recognition cannot be combined with
+`--no-ringbuf`. Every daemon start disables and clears any inherited
+recognition map before installing the selected names. If optional recognition
+configuration fails, the classifier is disabled while normal cgroup-scoped
+lifecycle capture remains active. Clean detach disables and clears recognition
+so pinned tracepoints do not keep emitting candidates without a consumer.
+
+The daemon classifies only bounded process metadata already present in the
+lifecycle event and logs a recognized candidate before session routing. An
+unrouted candidate is not appended to a session evidence log. Exact-name-only
+evidence has `confidence=low`,
+`identity_assurance=heuristic_process_metadata`, and
+`governance_action=observe_only`. No argv, executable path, binary hash, uid,
+environment, or file content is collected by this preview. It does not issue a
+passport, adopt a process, select policy, or enforce an action. A process can
+reuse one of these names, while interpreter-backed installs can appear as
+`node` or another generic runtime; both false positives and false negatives
+therefore remain possible. Issue #67 remains open for the multi-signal corpus
+and precision/recall gate.
+
 ## Lifecycle capture loss
 
 Lifecycle capture has two observable loss sources. If the eBPF producer cannot

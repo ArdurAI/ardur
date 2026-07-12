@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "f058f42ce79df29796f26ed1ecee5499c90330e97a77d01b0e4342f88ce127b9"
+source_sha256: "9fd016329c1d456c12007a6ff91714564ca8681408fac9781b9a7f242545d643"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -62,6 +62,15 @@ effects plus the observed-effect gap ratio. An empty sample is `not_measured`;
 ringbuf loss or producer-counter uncertainty makes it `degraded`. This is not a
 universal file/network/host-effect percentage, and receipt source assurance is
 the authenticated session owner rather than daemon-side JWT verification.
+
+The Linux daemon also has an opt-in `--agent-recognition` preview. It adds an
+exact, in-kernel `comm` prefilter for the release-bound `claude`, `codex`,
+`gemini`, and `kimi` command names and logs matching execs as low-confidence,
+observe-only launch candidates. The default cgroup-scoped capture path is
+unchanged. This preview does not inspect argv, paths, binary hashes, or file
+contents; it does not attest, adopt, authorize, or enforce the observed
+process; and a basename match is not proof of agent identity. Multi-signal
+classification and measured precision/recall remain tracked by issue #67.
 
 For performance engineering, the
 [Linux governance overhead harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)
@@ -185,7 +194,10 @@ the exact claims the artifacts do and do not support.
 > boundary. A successfully daemon-linked Linux `ardur run` additionally
 > captures cgroup-scoped process exec/exit events and measures their
 > receipt-correlation gap, but still does not claim universal file, network, or
-> provider-hidden effect coverage. The offline runtime-evidence correlator can
+> provider-hidden effect coverage. An explicit Linux `--agent-recognition`
+> preview can surface a bounded set of exact-name exec candidates outside a
+> governed cgroup, but it is heuristic, observe-only, and not identity,
+> attestation, or governance. The offline runtime-evidence correlator can
 > inspect supplied sensor events, but does not create or authenticate them.
 > macOS Endpoint Security and broader native effect coverage remain roadmap
 > work. See [`docs/coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the precise

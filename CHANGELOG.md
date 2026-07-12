@@ -13,6 +13,9 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Opt-in, observe-only Linux AI-agent launch recognition with a versioned
+  exact-`comm` registry, in-kernel prefilter, operator class overrides, and
+  explicit low-confidence identity boundaries
 - Personal action-firewall profile and one-command provider-free ASK/DENY proof
 - Readable Claude Code action summaries with signed action-budget evidence
 - Execution Receipt v0.2 schema, embedded package copy, and canonical golden fixture

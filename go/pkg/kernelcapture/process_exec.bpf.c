@@ -16,6 +16,7 @@
 #define ARDUR_FILTER_DISABLED 0
 #define ARDUR_FILTER_ENABLED 1
 #define ARDUR_ALLOWED_CGROUPS_MAX 4096
+#define ARDUR_RECOGNITION_COMMS_MAX 64
 
 struct ns_common {
     unsigned int inum;
@@ -49,6 +50,10 @@ struct ardur_process_event {
     char comm[16];
 };
 
+struct ardur_comm_key {
+    char comm[16];
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 12);
@@ -78,6 +83,20 @@ struct {
     __type(value, __u8);
 } allowed_cgroups SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u8);
+} recognition_control SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, ARDUR_RECOGNITION_COMMS_MAX);
+    __type(key, struct ardur_comm_key);
+    __type(value, __u8);
+} recognition_comms SEC(".maps");
+
 static __always_inline int cgroup_allowed(__u64 cgroup_id) {
     __u32 control_key = ARDUR_FILTER_CONTROL_KEY;
     __u8 *filter_enabled;
@@ -95,8 +114,25 @@ static __always_inline int cgroup_allowed(__u64 cgroup_id) {
     return allowed != 0;
 }
 
+static __always_inline int recognition_allowed(__u8 event_type, struct ardur_comm_key *comm) {
+    __u32 control_key = ARDUR_FILTER_CONTROL_KEY;
+    __u8 *recognition_enabled;
+    __u8 *recognized;
+
+    if (event_type != ARDUR_EVENT_EXEC) {
+        return 0;
+    }
+    recognition_enabled = bpf_map_lookup_elem(&recognition_control, &control_key);
+    if (!recognition_enabled || *recognition_enabled != ARDUR_FILTER_ENABLED) {
+        return 0;
+    }
+    recognized = bpf_map_lookup_elem(&recognition_comms, comm);
+    return recognized != 0;
+}
+
 static __always_inline int submit_process_event(__u8 event_type) {
     struct ardur_process_event *event;
+    struct ardur_comm_key comm = {};
     __u32 zero = 0;
     __u64 *dropped;
     __u64 pid_tgid;
@@ -107,7 +143,8 @@ static __always_inline int submit_process_event(__u8 event_type) {
     struct pid_namespace *pidns;
 
     cgroup_id = bpf_get_current_cgroup_id();
-    if (!cgroup_allowed(cgroup_id)) {
+    bpf_get_current_comm(&comm.comm, sizeof(comm.comm));
+    if (!cgroup_allowed(cgroup_id) && !recognition_allowed(event_type, &comm)) {
         return 0;
     }
 
@@ -128,7 +165,7 @@ static __always_inline int submit_process_event(__u8 event_type) {
     event->pid = pid_tgid >> 32;
     event->tid = (__u32)pid_tgid;
     event->cgroup_id = cgroup_id;
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
+    __builtin_memcpy(event->comm, comm.comm, sizeof(event->comm));
 
     task = (struct task_struct *)bpf_get_current_task_btf();
     if (task) {
