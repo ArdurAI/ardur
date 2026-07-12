@@ -18,18 +18,24 @@ type processExecArdurCommKey struct {
 	Comm [16]int8
 }
 
+type processExecArdurExecutableBasenameKey struct {
+	_    structs.HostLayout
+	Name [64]int8
+}
+
 // Names of all BPF objects in the ELF.
 //
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
-	processExecMapAllowedCgroups          = "allowed_cgroups"
-	processExecMapEvents                  = "events"
-	processExecMapFilterControl           = "filter_control"
-	processExecMapLifecycleEventsDropped  = "lifecycle_events_dropped"
-	processExecMapRecognitionComms        = "recognition_comms"
-	processExecMapRecognitionControl      = "recognition_control"
-	processExecProgHandleSchedProcessExec = "handle_sched_process_exec"
-	processExecProgHandleSchedProcessExit = "handle_sched_process_exit"
+	processExecMapAllowedCgroups                 = "allowed_cgroups"
+	processExecMapEvents                         = "events"
+	processExecMapFilterControl                  = "filter_control"
+	processExecMapLifecycleEventsDropped         = "lifecycle_events_dropped"
+	processExecMapRecognitionComms               = "recognition_comms"
+	processExecMapRecognitionControl             = "recognition_control"
+	processExecMapRecognitionExecutableBasenames = "recognition_executable_basenames"
+	processExecProgHandleSchedProcessExec        = "handle_sched_process_exec"
+	processExecProgHandleSchedProcessExit        = "handle_sched_process_exit"
 )
 
 // loadProcessExec returns the embedded CollectionSpec for processExec.
@@ -82,12 +88,13 @@ type processExecProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type processExecMapSpecs struct {
-	AllowedCgroups         *ebpf.MapSpec `ebpf:"allowed_cgroups"`
-	Events                 *ebpf.MapSpec `ebpf:"events"`
-	FilterControl          *ebpf.MapSpec `ebpf:"filter_control"`
-	LifecycleEventsDropped *ebpf.MapSpec `ebpf:"lifecycle_events_dropped"`
-	RecognitionComms       *ebpf.MapSpec `ebpf:"recognition_comms"`
-	RecognitionControl     *ebpf.MapSpec `ebpf:"recognition_control"`
+	AllowedCgroups                 *ebpf.MapSpec `ebpf:"allowed_cgroups"`
+	Events                         *ebpf.MapSpec `ebpf:"events"`
+	FilterControl                  *ebpf.MapSpec `ebpf:"filter_control"`
+	LifecycleEventsDropped         *ebpf.MapSpec `ebpf:"lifecycle_events_dropped"`
+	RecognitionComms               *ebpf.MapSpec `ebpf:"recognition_comms"`
+	RecognitionControl             *ebpf.MapSpec `ebpf:"recognition_control"`
+	RecognitionExecutableBasenames *ebpf.MapSpec `ebpf:"recognition_executable_basenames"`
 }
 
 // processExecVariableSpecs contains global variables before they are loaded into the kernel.
@@ -116,12 +123,13 @@ func (o *processExecObjects) Close() error {
 //
 // It can be passed to loadProcessExecObjects or ebpf.CollectionSpec.LoadAndAssign.
 type processExecMaps struct {
-	AllowedCgroups         *ebpf.Map `ebpf:"allowed_cgroups"`
-	Events                 *ebpf.Map `ebpf:"events"`
-	FilterControl          *ebpf.Map `ebpf:"filter_control"`
-	LifecycleEventsDropped *ebpf.Map `ebpf:"lifecycle_events_dropped"`
-	RecognitionComms       *ebpf.Map `ebpf:"recognition_comms"`
-	RecognitionControl     *ebpf.Map `ebpf:"recognition_control"`
+	AllowedCgroups                 *ebpf.Map `ebpf:"allowed_cgroups"`
+	Events                         *ebpf.Map `ebpf:"events"`
+	FilterControl                  *ebpf.Map `ebpf:"filter_control"`
+	LifecycleEventsDropped         *ebpf.Map `ebpf:"lifecycle_events_dropped"`
+	RecognitionComms               *ebpf.Map `ebpf:"recognition_comms"`
+	RecognitionControl             *ebpf.Map `ebpf:"recognition_control"`
+	RecognitionExecutableBasenames *ebpf.Map `ebpf:"recognition_executable_basenames"`
 }
 
 func (m *processExecMaps) Close() error {
@@ -132,6 +140,7 @@ func (m *processExecMaps) Close() error {
 		m.LifecycleEventsDropped,
 		m.RecognitionComms,
 		m.RecognitionControl,
+		m.RecognitionExecutableBasenames,
 	)
 }
 

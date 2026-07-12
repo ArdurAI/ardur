@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	linuxEBPFExecTracepoint = "sched/sched_process_exec"
+	linuxEBPFExecTracepoint = "raw/sched_process_exec"
 	linuxEBPFExitTracepoint = "sched/sched_process_exit"
 )
 
@@ -103,6 +103,21 @@ type LinuxEBPFCgroupFilterSmokeResult struct {
 	UnexpectedTargetSeen bool
 }
 
+// LinuxEBPFAgentRecognitionSmokeResult records a script-backed executable
+// basename admission and a generic-command hard negative.
+type LinuxEBPFAgentRecognitionSmokeResult struct {
+	Platform                string
+	KernelRelease           string
+	BTFAvailable            bool
+	AttachedTracepoint      string
+	ExecutableBasename      string
+	Event                   ProcessEvent
+	NegativeCommand         string
+	NegativePID             uint32
+	NegativeTimedOut        bool
+	UnexpectedNegativeEvent bool
+}
+
 // RunLinuxEBPFExecSmoke loads the generated process lifecycle eBPF producer,
 // attaches exec/exit tracepoints, runs one deterministic command, reads scoped
 // ringbuf samples, and projects them through the existing correlation/receipt
@@ -140,7 +155,7 @@ func RunLinuxEBPFExecSmoke(ctx context.Context, opts LinuxEBPFExecSmokeOptions) 
 	}
 	defer objs.Close()
 
-	execTP, err := link.Tracepoint("sched", "sched_process_exec", objs.HandleSchedProcessExec, nil)
+	execTP, err := attachProcessExecProgram(objs.HandleSchedProcessExec)
 	if err != nil {
 		return nil, fmt.Errorf("attach %s tracepoint: %w", linuxEBPFExecTracepoint, err)
 	}
@@ -318,12 +333,7 @@ func RunLinuxEBPFCgroupFilterPositiveSmoke(ctx context.Context, opts LinuxEBPFCg
 		return nil, err
 	}
 	defer disallowProcessExecCgroup(&objs, testRunnerCgroupID)
-	if err := enableProcessExecCgroupFilter(&objs); err != nil {
-		return nil, err
-	}
-	defer disableProcessExecCgroupFilter(&objs)
-
-	execTP, err := link.Tracepoint("sched", "sched_process_exec", objs.HandleSchedProcessExec, nil)
+	execTP, err := attachProcessExecProgram(objs.HandleSchedProcessExec)
 	if err != nil {
 		return nil, fmt.Errorf("attach %s tracepoint: %w", linuxEBPFExecTracepoint, err)
 	}
@@ -461,7 +471,7 @@ func RunLinuxEBPFCgroupFilterNegativeSmoke(ctx context.Context, opts LinuxEBPFCg
 	}
 	defer disableProcessExecCgroupFilter(&objs)
 
-	execTP, err := link.Tracepoint("sched", "sched_process_exec", objs.HandleSchedProcessExec, nil)
+	execTP, err := attachProcessExecProgram(objs.HandleSchedProcessExec)
 	if err != nil {
 		return nil, fmt.Errorf("attach %s tracepoint: %w", linuxEBPFExecTracepoint, err)
 	}
@@ -539,6 +549,126 @@ func RunLinuxEBPFCgroupFilterNegativeSmoke(ctx context.Context, opts LinuxEBPFCg
 	}, nil
 }
 
+// RunLinuxEBPFAgentRecognitionSmoke denies the current cgroup, enables only
+// the executable-basename recognition map, and proves that a script named
+// codex is admitted while an unrelated executable is not. The temporary full
+// path is never copied into the ringbuf event.
+func RunLinuxEBPFAgentRecognitionSmoke(ctx context.Context, timeout time.Duration) (*LinuxEBPFAgentRecognitionSmokeResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	kernelRelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
+	btfAvailable := fileReadable("/sys/kernel/btf/vmlinux")
+	_ = rlimit.RemoveMemlock()
+
+	var objs processExecObjects
+	if err := loadProcessExecObjects(&objs, nil); err != nil {
+		return nil, fmt.Errorf("load process-exec eBPF objects: %w", err)
+	}
+	defer objs.Close()
+	handles := &ProcessExecEBPFHandles{objs: objs}
+	if err := handles.ConfigureAgentRecognitionNames(nil, []string{"codex"}); err != nil {
+		return nil, err
+	}
+	if err := enableProcessExecCgroupFilter(&objs); err != nil {
+		return nil, err
+	}
+	defer disableProcessExecCgroupFilter(&objs)
+
+	execTP, err := attachProcessExecProgram(objs.HandleSchedProcessExec)
+	if err != nil {
+		return nil, fmt.Errorf("attach %s raw tracepoint: %w", linuxEBPFExecTracepoint, err)
+	}
+	defer execTP.Close()
+	reader, err := ringbuf.NewReader(objs.Events)
+	if err != nil {
+		return nil, fmt.Errorf("open eBPF ringbuf reader: %w", err)
+	}
+	source := &RingbufProcessSource{reader: &linuxRingbufReader{reader: reader}, closeFn: reader.Close}
+	defer source.Close()
+
+	scriptDir, err := os.MkdirTemp("", "ardur-agent-recognition-")
+	if err != nil {
+		return nil, fmt.Errorf("create agent-recognition smoke directory: %w", err)
+	}
+	defer os.RemoveAll(scriptDir)
+	scriptPath := filepath.Join(scriptDir, "codex")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		return nil, fmt.Errorf("write script-backed agent smoke fixture: %w", err)
+	}
+
+	smokeCtx, cancelSmoke := context.WithTimeout(ctx, timeout)
+	defer cancelSmoke()
+	positive := exec.Command(scriptPath)
+	if err := positive.Start(); err != nil {
+		return nil, fmt.Errorf("start script-backed agent smoke fixture: %w", err)
+	}
+	positivePID := uint32(positive.Process.Pid)
+	event, ok, readErr := source.Next(smokeCtx, SessionScope{})
+	waitErr := positive.Wait()
+	if readErr != nil {
+		return nil, fmt.Errorf("read script-backed agent-recognition event for pid %d: %w", positivePID, readErr)
+	}
+	if !ok {
+		return nil, fmt.Errorf("script-backed agent-recognition event for pid %d was not emitted", positivePID)
+	}
+	if waitErr != nil {
+		return nil, fmt.Errorf("script-backed agent smoke fixture failed: %w", waitErr)
+	}
+	if event.Type != ProcessEventExec || event.ExecutableBasename != "codex" {
+		return nil, fmt.Errorf("script-backed agent event = type %q basename %q, want exec/codex", event.Type, event.ExecutableBasename)
+	}
+
+	negative := exec.Command("/usr/bin/true")
+	if err := negative.Start(); err != nil {
+		return nil, fmt.Errorf("start agent-recognition hard negative: %w", err)
+	}
+	negativePID := uint32(negative.Process.Pid)
+	negativeCtx, cancelNegative := context.WithTimeout(smokeCtx, 500*time.Millisecond)
+	defer cancelNegative()
+	unexpectedNegativeEvent := false
+	negativeTimedOut := false
+	for {
+		_, ok, err := source.Next(negativeCtx, SessionScope{})
+		if err != nil {
+			var nextErr *RingbufNextError
+			if errors.As(err, &nextErr) && nextErr.Kind == RingbufErrorDeadlineExceeded {
+				negativeTimedOut = true
+				break
+			}
+			_ = negative.Wait()
+			return nil, fmt.Errorf("read agent-recognition hard negative for pid %d: %w", negativePID, err)
+		}
+		if ok {
+			unexpectedNegativeEvent = true
+			break
+		}
+	}
+	if err := negative.Wait(); err != nil {
+		return nil, fmt.Errorf("agent-recognition hard negative failed: %w", err)
+	}
+	if unexpectedNegativeEvent || !negativeTimedOut {
+		return nil, fmt.Errorf("generic executable unexpectedly passed basename recognition (pid=%d event=%t timeout=%t)", negativePID, unexpectedNegativeEvent, negativeTimedOut)
+	}
+
+	return &LinuxEBPFAgentRecognitionSmokeResult{
+		Platform:                "linux",
+		KernelRelease:           strings.TrimSpace(string(kernelRelease)),
+		BTFAvailable:            btfAvailable,
+		AttachedTracepoint:      linuxEBPFExecTracepoint,
+		ExecutableBasename:      "codex",
+		Event:                   event,
+		NegativeCommand:         "/usr/bin/true",
+		NegativePID:             negativePID,
+		NegativeTimedOut:        negativeTimedOut,
+		UnexpectedNegativeEvent: unexpectedNegativeEvent,
+	}, nil
+}
+
 // RunLinuxEBPFSessionSmoke attaches the same local eBPF lifecycle producer as
 // RunLinuxEBPFExecSmoke, then launches a shell command that spawns a child. The
 // harness seeds scope from the root PID, switches to the root cgroup, and uses a
@@ -572,7 +702,7 @@ func RunLinuxEBPFSessionSmoke(ctx context.Context, opts LinuxEBPFSessionSmokeOpt
 	}
 	defer objs.Close()
 
-	execTP, err := link.Tracepoint("sched", "sched_process_exec", objs.HandleSchedProcessExec, nil)
+	execTP, err := attachProcessExecProgram(objs.HandleSchedProcessExec)
 	if err != nil {
 		return nil, fmt.Errorf("attach %s tracepoint: %w", linuxEBPFExecTracepoint, err)
 	}

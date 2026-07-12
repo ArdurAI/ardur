@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const ringbufRecordMinSize = 60
+const ringbufRecordMinSize = 124
 
 const defaultRingbufPollInterval = 200 * time.Millisecond
 
@@ -141,6 +141,11 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 		return ProcessEvent{}, err
 	}
 	comm := strings.TrimRight(string(commBuf), "\x00")
+	executableBasenameBuf := make([]byte, 64)
+	if _, err := reader.Read(executableBasenameBuf); err != nil {
+		return ProcessEvent{}, err
+	}
+	executableBasename := strings.TrimRight(string(executableBasenameBuf), "\x00")
 
 	return ProcessEvent{
 		Type:                decodeProcessEventType(rawType),
@@ -150,6 +155,7 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 		PIDNamespaceID:      uint64(pidNamespaceID),
 		CgroupID:            cgroupID,
 		Comm:                comm,
+		ExecutableBasename:  executableBasename,
 		ExitCode:            exitCode,
 		ObservedMonotonicNS: monotonicNS,
 	}, nil

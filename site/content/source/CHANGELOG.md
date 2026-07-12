@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "fe22ee406089062d7cb4f51d4a915bdfb23becbc780979b818711900dc32c7b9"
+source_sha256: "c75298bbf813a45b402ced13cf3940ab740755a4ef65e057963c1bd85637a4ea"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -31,7 +31,8 @@ All notable changes to Ardur will be documented in this file.
 
 ### Added
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
-  exact-`comm` registry, in-kernel prefilter, operator class overrides, and
+  exact-name registry, separate in-kernel `comm` and successful-exec basename
+  prefilters, operator class overrides, script-launcher smoke coverage, and
   explicit low-confidence identity boundaries
 - Personal action-firewall profile and one-command provider-free ASK/DENY proof
 - Readable Claude Code action summaries with signed action-budget evidence

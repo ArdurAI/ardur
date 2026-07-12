@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	processExecFilterControlKey = uint32(0)
-	processExecFilterDisabled   = uint8(0)
-	processExecFilterEnabled    = uint8(1)
-	processExecAllowedMarker    = uint8(1)
-	processExecRecognitionMax   = maxAgentRecognitionComms
+	processExecFilterControlKey       = uint32(0)
+	processExecFilterDisabled         = uint8(0)
+	processExecFilterEnabled          = uint8(1)
+	processExecAllowedMarker          = uint8(1)
+	processExecRecognitionMax         = maxAgentRecognitionComms
+	processExecRecognitionBasenameMax = maxAgentRecognitionExecutableBasenames
 )
 
 func (h *ProcessExecEBPFHandles) SetLifecycleCgroupFilterEnabled(enabled bool) error {
@@ -67,35 +68,42 @@ func (h *ProcessExecEBPFHandles) ClearLifecycleCgroups() error {
 	return errors.Join(errs...)
 }
 
-// ConfigureAgentRecognitionComms atomically replaces the exact Linux comm
-// prefilter. It disables recognition before mutation and enables it only after
-// every bounded key has been installed.
-func (h *ProcessExecEBPFHandles) ConfigureAgentRecognitionComms(comms []string) error {
+// ConfigureAgentRecognitionNames atomically replaces the exact Linux comm and
+// successful-exec basename prefilters. It disables recognition before mutation
+// and enables it only after every bounded key has been installed.
+func (h *ProcessExecEBPFHandles) ConfigureAgentRecognitionNames(comms, executableBasenames []string) error {
 	if h == nil {
 		return fmt.Errorf("process-exec handles are not loaded")
 	}
 	control := h.recognitionControl()
 	recognized := h.recognitionComms()
-	if control == nil || recognized == nil {
+	recognizedBasenames := h.recognitionExecutableBasenames()
+	if control == nil || recognized == nil || recognizedBasenames == nil {
 		return fmt.Errorf("process-exec recognition maps are not loaded")
 	}
 	if err := setProcessExecRecognitionEnabled(control, false); err != nil {
 		return err
 	}
-	if err := clearProcessExecRecognitionComms(recognized); err != nil {
+	if err := errors.Join(
+		clearProcessExecRecognitionComms(recognized),
+		clearProcessExecRecognitionBasenames(recognizedBasenames),
+	); err != nil {
 		return err
 	}
-	if len(comms) == 0 {
+	if len(comms) == 0 && len(executableBasenames) == 0 {
 		return nil
 	}
 	if len(comms) > processExecRecognitionMax {
 		return fmt.Errorf("process-exec recognition comm count %d exceeds %d", len(comms), processExecRecognitionMax)
 	}
+	if len(executableBasenames) > processExecRecognitionBasenameMax {
+		return fmt.Errorf("process-exec recognition basename count %d exceeds %d", len(executableBasenames), processExecRecognitionBasenameMax)
+	}
 	seen := make(map[[16]byte]struct{}, len(comms))
 	for _, comm := range comms {
 		key, err := processExecRecognitionCommKey(comm)
 		if err != nil {
-			_ = clearProcessExecRecognitionComms(recognized)
+			_ = errors.Join(clearProcessExecRecognitionComms(recognized), clearProcessExecRecognitionBasenames(recognizedBasenames))
 			return err
 		}
 		if _, exists := seen[key]; exists {
@@ -103,12 +111,28 @@ func (h *ProcessExecEBPFHandles) ConfigureAgentRecognitionComms(comms []string) 
 		}
 		seen[key] = struct{}{}
 		if err := recognized.Update(key, processExecAllowedMarker, ebpf.UpdateAny); err != nil {
-			cleanupErr := clearProcessExecRecognitionComms(recognized)
+			cleanupErr := errors.Join(clearProcessExecRecognitionComms(recognized), clearProcessExecRecognitionBasenames(recognizedBasenames))
 			return errors.Join(fmt.Errorf("update process-exec recognition comm %q: %w", comm, err), cleanupErr)
 		}
 	}
+	seenBasenames := make(map[[64]byte]struct{}, len(executableBasenames))
+	for _, basename := range executableBasenames {
+		key, err := processExecRecognitionBasenameKey(basename)
+		if err != nil {
+			_ = errors.Join(clearProcessExecRecognitionComms(recognized), clearProcessExecRecognitionBasenames(recognizedBasenames))
+			return err
+		}
+		if _, exists := seenBasenames[key]; exists {
+			continue
+		}
+		seenBasenames[key] = struct{}{}
+		if err := recognizedBasenames.Update(key, processExecAllowedMarker, ebpf.UpdateAny); err != nil {
+			cleanupErr := errors.Join(clearProcessExecRecognitionComms(recognized), clearProcessExecRecognitionBasenames(recognizedBasenames))
+			return errors.Join(fmt.Errorf("update process-exec recognition basename %q: %w", basename, err), cleanupErr)
+		}
+	}
 	if err := setProcessExecRecognitionEnabled(control, true); err != nil {
-		cleanupErr := clearProcessExecRecognitionComms(recognized)
+		cleanupErr := errors.Join(clearProcessExecRecognitionComms(recognized), clearProcessExecRecognitionBasenames(recognizedBasenames))
 		return errors.Join(err, cleanupErr)
 	}
 	return nil
@@ -140,6 +164,13 @@ func (h *ProcessExecEBPFHandles) recognitionComms() *ebpf.Map {
 		return h.recognitionCommsMap
 	}
 	return h.objs.RecognitionComms
+}
+
+func (h *ProcessExecEBPFHandles) recognitionExecutableBasenames() *ebpf.Map {
+	if h.recognitionExecutableBasenamesMap != nil {
+		return h.recognitionExecutableBasenamesMap
+	}
+	return h.objs.RecognitionExecutableBasenames
 }
 
 func enableProcessExecCgroupFilter(objs *processExecObjects) error {
@@ -213,11 +244,21 @@ func disallowProcessExecCgroupMap(allowed *ebpf.Map, cgroupID uint64) error {
 
 func processExecRecognitionCommKey(raw string) ([16]byte, error) {
 	var key [16]byte
-	comm, ok := normalizeAgentExecutableName(raw)
+	comm, ok := normalizeAgentComm(raw)
 	if !ok {
 		return key, fmt.Errorf("invalid process-exec recognition comm")
 	}
 	copy(key[:], comm)
+	return key, nil
+}
+
+func processExecRecognitionBasenameKey(raw string) ([64]byte, error) {
+	var key [64]byte
+	basename, ok := normalizeAgentExecutableBasename(raw)
+	if !ok {
+		return key, fmt.Errorf("invalid process-exec recognition executable basename")
+	}
+	copy(key[:], basename)
 	return key, nil
 }
 
@@ -236,23 +277,31 @@ func setProcessExecRecognitionEnabled(control *ebpf.Map, enabled bool) error {
 }
 
 func clearProcessExecRecognitionComms(recognized *ebpf.Map) error {
+	return clearProcessExecRecognitionMap[[16]byte](recognized, "comm")
+}
+
+func clearProcessExecRecognitionBasenames(recognized *ebpf.Map) error {
+	return clearProcessExecRecognitionMap[[64]byte](recognized, "basename")
+}
+
+func clearProcessExecRecognitionMap[K comparable](recognized *ebpf.Map, label string) error {
 	if recognized == nil {
-		return fmt.Errorf("process-exec recognition comm map is not loaded")
+		return fmt.Errorf("process-exec recognition %s map is not loaded", label)
 	}
-	keys := make([][16]byte, 0, recognized.MaxEntries())
+	keys := make([]K, 0, recognized.MaxEntries())
 	iterator := recognized.Iterate()
-	var key [16]byte
+	var key K
 	var value uint8
 	for iterator.Next(&key, &value) {
 		keys = append(keys, key)
 	}
 	if err := iterator.Err(); err != nil {
-		return fmt.Errorf("iterate process-exec recognition comm map: %w", err)
+		return fmt.Errorf("iterate process-exec recognition %s map: %w", label, err)
 	}
 	var errs []error
 	for _, key := range keys {
 		if err := recognized.Delete(key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
-			errs = append(errs, fmt.Errorf("delete process-exec recognition comm: %w", err))
+			errs = append(errs, fmt.Errorf("delete process-exec recognition %s: %w", label, err))
 		}
 	}
 	return errors.Join(errs...)

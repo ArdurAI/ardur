@@ -14,7 +14,8 @@ All notable changes to Ardur will be documented in this file.
 
 ### Added
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
-  exact-`comm` registry, in-kernel prefilter, operator class overrides, and
+  exact-name registry, separate in-kernel `comm` and successful-exec basename
+  prefilters, operator class overrides, script-launcher smoke coverage, and
   explicit low-confidence identity boundaries
 - Personal action-firewall profile and one-command provider-free ASK/DENY proof
 - Readable Claude Code action summaries with signed action-budget evidence

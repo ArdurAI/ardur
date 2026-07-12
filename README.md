@@ -46,14 +46,16 @@ ringbuf loss or producer-counter uncertainty makes it `degraded`. This is not a
 universal file/network/host-effect percentage, and receipt source assurance is
 the authenticated session owner rather than daemon-side JWT verification.
 
-The Linux daemon also has an opt-in `--agent-recognition` preview. It adds an
-exact, in-kernel `comm` prefilter for the release-bound `claude`, `codex`,
-`gemini`, and `kimi` command names and logs matching execs as low-confidence,
-observe-only launch candidates. The default cgroup-scoped capture path is
-unchanged. This preview does not inspect argv, paths, binary hashes, or file
-contents; it does not attest, adopt, authorize, or enforce the observed
-process; and a basename match is not proof of agent identity. Multi-signal
-classification and measured precision/recall remain tracked by issue #67.
+The Linux daemon also has an opt-in `--agent-recognition` preview. It adds
+separate exact, in-kernel Linux `comm` and successful-exec basename prefilters
+for the release-bound `claude`, `codex`, `gemini`, and `kimi` command names and
+logs matching execs as low-confidence, observe-only launch candidates. The
+default cgroup-scoped capture path is unchanged. The producer derives only a
+bounded basename and never emits the parent path; it does not collect argv,
+binary hashes, environment, or file contents. It does not attest, adopt,
+authorize, or enforce the observed process, and an exact name is not proof of
+agent identity. Stronger fingerprints and measured precision/recall remain
+tracked by issue #67.
 
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)

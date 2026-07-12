@@ -2,7 +2,7 @@
 title: "Epic B — Transparent Auto-Detection & Auto-Governance"
 description: "Status: **planning document with an implementation foundation** (updated"
 source_path: "docs/roadmap/epic-b-auto-detection-plan.md"
-source_sha256: "b061104736ccd85ec66c5c8c6c04428af0726b3695197317fd41fdac78eb910a"
+source_sha256: "24300b4446a3690a58da2c20370b73d4e575206ad7472f7fa6cb42c20f91d638"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -18,7 +18,7 @@ This page is generated from the public repository source file. Edit the source f
 {{< /proof-status >}}
 
 Status: **planning document with an implementation foundation** (updated
-2026-07-11). The exact-`comm`, observe-only Linux recognition prefilter is now
+2026-07-11). The exact-name, observe-only Linux recognition prefilter is now
 implemented; B1/B2 acceptance gates remain open. This plan proposes the
 remaining work, and every enforcement slice inherits the existing security
 gates and the honest
@@ -44,7 +44,8 @@ its PID, then `apply_policy` lowered BPF plans onto that cgroup.
 The detection eBPF reflects that ordering. `process_exec.bpf.c` gates every
 event on `cgroup_allowed(cgroup_id)` (a hash map the wrapper populates) and
 emits only `struct ardur_process_event{ pid, ppid, tid, pid_namespace_id,
-cgroup_id, comm[16] }` — **no argv, no binary path, no uid**. It is a scoped
+cgroup_id, comm[16], executable_basename[64] }` — **no argv, full binary path,
+or uid**. It is a scoped
 correlator feed, not a host sensor.
 
 Epic B inverts the control flow. A CrowdStrike-style sensor must govern agents
@@ -74,16 +75,18 @@ changes began.
 
 The first #67 foundation lands below the full B1/B2 bar:
 
-- `process_exec.bpf.c` keeps the existing cgroup allowlist and adds a separate,
-  disabled-by-default exact-`comm` hash-map admission path for exec events only.
+- `process_exec.bpf.c` keeps the existing cgroup allowlist and adds separate,
+  disabled-by-default exact-`comm` and successful-exec basename hash-map
+  admission paths for exec events only.
 - The embedded registry recognizes the official command names `claude`,
   `codex`, `gemini`, and `kimi`; hard negatives include generic runtimes and
   shells. Operator allow/deny classes are applied before populating the map.
 - Userspace labels every match heuristic, low-confidence, and observe-only. It
   neither persists unrouted candidates as session evidence nor attests, adopts,
   authorizes, or governs the process.
-- Registry and BPF capacities are both 64 exact names. The canonical registry
-  digest is release metadata, not independent provenance.
+- Each registry signal and BPF map has a 64-name capacity. The successful-exec
+  path emits only a bounded basename, never its parent path. The canonical
+  registry digest is release metadata, not independent provenance.
 
 Still required before #67 closes: binary digest and argv/interpreter signals,
 an independently maintained labeled corpus including installation variants,
