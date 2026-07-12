@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "3f9555948bbcf01dd380eddf03c6fedb03686c1fed7f7f5e0f5125ad62f3811f"
+source_sha256: "8c69468dc7656a79739a37fcc05bff056ed40b811eb661fdd3fa1c2b7131db86"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Label exported actor/verifier identity as signed receipt claims while
+  explicitly reporting that the detached exporter did not verify SPIFFE
+  workload identity
 - Add an opt-in verifier-clock maximum-age policy for offline evidence bundles,
   bound future-dated receipts by explicit skew, and report that age checks do
   not provide one-time replay protection

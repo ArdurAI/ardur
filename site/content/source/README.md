@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "a45c6e678053c608ac13c30d6ddc3771d27a2f9039d8769e5b3ec89f5e793eec"
+source_sha256: "af9b9a63cb0c6ee285dac130fd17d1fd2f60ce389cce0dafeb913a639b6613b3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -277,7 +277,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixture examples | live-provider wrappers and more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, draft-00 DG v0.1 plus the versioned draft-01 DG v0.2 JWT AAT profile | independent AAT interoperability, OPA, and broader Biscuit datalog examples |
-| **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for operator telemetry; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
+| **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for Go operator-ingress telemetry; detached receipt export labels actor/verifier strings as signed claims, not SPIFFE-verified workloads; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
 | **Receipts sink**    | local JSON / stdout receipts; verified redacted governance JSONL; OTLP/HTTP JSON traces and logs; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | production collector deployment/auth/retention examples, checkpoint witnessing/consistency monitoring, vendor-specific sinks, broader durable storage examples, and integrated multi-artifact chain verification |
 
 In the Go credential identity layer, SPIRE authenticates the workload

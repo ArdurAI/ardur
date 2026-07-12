@@ -22,6 +22,17 @@ The local event binds:
 - signed invocation and arguments digests; and
 - the verified source-journal digest.
 
+`actor` and `verifier_id` are signed receipt claims. The exporter reports
+`identity_claims_signed: true` because the verified receipt signature covers
+those strings. It also reports `spiffe_workload_identity_verified: false`:
+a `spiffe://`-shaped string is not an SVID, and the detached journal carries no
+SVID or binding between the receipt signing key and a SPIFFE workload identity.
+
+A future `true` state would require the verifier to validate an X.509-SVID,
+JWT-SVID, or another SPIFFE-defined SVID against the authoritative trust-domain
+bundle and bind that proof to the receipt signer or issuance event. Validating
+only the later exporter workload would authenticate the wrong principal.
+
 ## Redaction
 
 The default export never includes prompts, raw tool arguments, raw targets,
@@ -72,3 +83,9 @@ placing credentials in command-line arguments.
   <https://opentelemetry.io/docs/specs/semconv/general/naming/>
 - Official OTLP JSON request examples:
   <https://github.com/open-telemetry/opentelemetry-proto/tree/v1.10.0/examples>
+- SPIFFE Identity and Verifiable Identity Document:
+  <https://spiffe.io/docs/latest/spiffe-specs/spiffe-id/>
+- SPIFFE X.509-SVID validation:
+  <https://spiffe.io/docs/latest/spiffe-specs/x509-svid/#5-validation>
+- SPIFFE JWT-SVID subject and validation:
+  <https://spiffe.io/docs/latest/spiffe-specs/jwt-svid/#3-jwt-claims>

@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "30bd1f5cf15d1829f25e726db32ddf70fc30b66c1f4bdee67b05b1662de28384"
+source_sha256: "1fea299ec7bbbaab8f235015d0812a0139c62271b100ae0166b0ff0f5da32177"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -45,7 +45,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Receiver Attestation v0.1](/__ardur_internal__/source/docs/specs/receiver-attestation-v0.1/) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
 | [Offline Verification Bundle v0.1](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
 | [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
-| [Governance Telemetry Profile v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) | **implemented verified export** | Signed-chain-first redacted JSONL plus OTLP/HTTP JSON traces/logs with deterministic correlation IDs; not a collector, SIEM, delivery guarantee, or vendor connector |
+| [Governance Telemetry Profile v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) | **implemented verified export** | Signed-chain-first redacted JSONL plus OTLP/HTTP JSON traces/logs with deterministic correlation IDs and explicit signer-claim versus SPIFFE-workload assurance; not a collector, SIEM, delivery guarantee, or vendor connector |
 | [Tool-Server Preflight v0.1](/__ardur_internal__/source/docs/specs/tool-server-preflight-v0.1/) | **implemented static analysis** | Strict JSON MCP/tool-server config scan, redacted deterministic report, CI threshold exits, and deny-oriented capability/policy skeleton; not runtime safety proof |
 | [Agentic Policy Conformance Profile v0.1](/__ardur_internal__/source/docs/specs/agentic-policy-conformance-v0.1/) | **implemented self-test** | Eight no-key runtime-policy/delegation scenarios with offline signed-receipt binding; provenance context is not semantic content detection |
 | [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -67,7 +67,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [AAT draft-01 DG v0.2 fixture](/__ardur_internal__/source/docs/specs/conformance/aat-draft01-v0.2/readme/) | **implementation self-test** | Deterministic organic chain and audience-bound PoP; no private keys, IETF claim, or independent pass |
 | [Runtime evidence event schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
 | [Runtime evidence correlation report schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-correlation-report-v0.1.schema.json) | **implemented** | Closed deterministic redacted association report; source assurance remains separate from match confidence |
-| [Governance telemetry event schema](/__ardur_internal__/repo/docs/specs/governance-telemetry-v0.1.schema.json) | **implemented** | Closed redacted event contract linking each export to a verified receipt, parent hash, signed decision, budget, and source-journal digest |
+| [Governance telemetry event schema](/__ardur_internal__/repo/docs/specs/governance-telemetry-v0.1.schema.json) | **implemented** | Closed redacted event contract linking each export to a verified receipt, parent hash, signed decision, budget, source-journal digest, and explicit non-SPIFFE-verified identity assurance |
 | [Governance telemetry golden fixture](/__ardur_internal__/repo/docs/specs/conformance/governance-telemetry-v0.1/events.jsonl) | **implementation fixture** | Canonical redacted PERMIT event used for schema and OTLP projection regression |
 | [Linux governance benchmark report schema](/__ardur_internal__/repo/docs/specs/linux-governance-benchmark-report-v0.1.schema.json) | **implemented** | Closed smoke/stress report separating governance-only, imported evidence, sustained resources, and optional paired sensor measurements |
 | [AuditBench evaluation protocol v0.1](/__ardur_internal__/source/docs/specs/auditbench-evaluation-protocol-v0.1/) | **pipeline implemented; no real study** | Strict raw capture, blind two-view annotation, adjudication, local content-integrity sealing, held-out scoring, and explicit external-human proof boundary |

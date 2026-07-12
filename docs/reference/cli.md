@@ -365,6 +365,11 @@ actor/verifier/grant IDs, tri-state outcomes, rule/source labels, reason codes,
 budget state, and risk classifications remain. `--output` uses atomic mode
 `0600` writes and rejects symlink targets.
 
+The actor and verifier IDs are signed receipt claims, not independently
+authenticated SPIFFE workloads. Every event and OTLP projection reports that
+the identity strings are signature-covered and that SPIFFE workload identity
+was not verified. A `spiffe://` prefix alone does not upgrade that assurance.
+
 See [Governance Telemetry v0.1](../specs/governance-telemetry-v0.1.md) and its
 [golden event](../specs/conformance/governance-telemetry-v0.1/events.jsonl).
 

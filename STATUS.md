@@ -66,6 +66,9 @@ policy source/rule labels, reason codes, budget state, and bounded risk
 classifications. It never exports raw prompts, tool arguments, targets, paths,
 or policy-reason prose by default. This is a one-shot connector, not a hosted
 collector, SIEM, dashboard, delivery guarantee, or vendor-specific integration.
+Actor and verifier IDs are signature-covered receipt claims; the exporter does
+not validate a SPIFFE SVID or bind the receipt signer to workload identity, and
+reports that boundary in JSONL and OTLP.
 
 The Linux governance-overhead harness now provides a schema-validated PR smoke
 and manual stress profile. It measures configured governance paths and optional

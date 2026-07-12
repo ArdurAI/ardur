@@ -88,6 +88,11 @@ collection; reruns can duplicate records, so sinks should deduplicate on
 `ardur.receipt.id`. Vendor-specific SIEM, LLM-observability, and EDR
 connectors remain separate work.
 
+The projected `actor` and `verifier_id` values are signed receipt claims. The
+detached exporter does not validate an SVID or bind the receipt signing key to
+a SPIFFE workload identity, even when either string begins with `spiffe://`.
+Machine-readable JSONL and OTLP fields report this assurance boundary.
+
 ## Product limits
 
 Ardur is not:

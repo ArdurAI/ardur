@@ -221,6 +221,34 @@ def test_verified_export_links_receipts_and_omits_sensitive_content(
     assert '"reason"' not in serialized
 
 
+def test_spiffe_shaped_claims_remain_signed_claims_not_verified_workload_identity(
+    tmp_path: Path,
+) -> None:
+    journal, _public_path, private_key = _signed_journal(tmp_path)
+
+    event = verified_governance_events(
+        journal,
+        receipt_public_key=private_key.public_key(),
+    )[0]
+
+    assert event["actor"].startswith("spiffe://")
+    assert event["verifier_id"].startswith("spiffe://")
+    assert event["verification"]["identity_claims_signed"] is True
+    assert event["verification"]["spiffe_workload_identity_verified"] is False
+
+    span = otlp_payloads([event])["traces"]["resourceSpans"][0]["scopeSpans"][0][
+        "spans"
+    ][0]
+    attributes = _attributes_by_key(span["attributes"])
+    assert attributes["ardur.verification.identity_claims_signed"]["boolValue"] is True
+    assert (
+        attributes["ardur.verification.spiffe_workload_identity_verified"][
+            "boolValue"
+        ]
+        is False
+    )
+
+
 def test_tampered_journal_is_rejected_before_export(tmp_path: Path) -> None:
     journal, _public_path, private_key = _signed_journal(tmp_path)
     records = [json.loads(line) for line in journal.read_text().splitlines()]

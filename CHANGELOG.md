@@ -5,6 +5,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Label exported actor/verifier identity as signed receipt claims while
+  explicitly reporting that the detached exporter did not verify SPIFFE
+  workload identity
 - Add an opt-in verifier-clock maximum-age policy for offline evidence bundles,
   bound future-dated receipts by explicit skew, and report that age checks do
   not provide one-time replay protection
