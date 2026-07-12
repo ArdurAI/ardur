@@ -18,7 +18,8 @@ type MockIdentityProvider struct {
 
 // MockIdentityProviderOptions configures a MockIdentityProvider.
 type MockIdentityProviderOptions struct {
-	SPIFFEID    string
+	SPIFFEID string
+	// OwnerID is self-asserted attribution, matching SPIREClient behavior.
 	OwnerID     string
 	TrustDomain string
 	ExpiresAt   time.Time
@@ -40,7 +41,7 @@ func NewMockIdentityProvider(opts MockIdentityProviderOptions) *MockIdentityProv
 	return &MockIdentityProvider{
 		identity: &AgentIdentity{
 			SPIFFEID:    opts.SPIFFEID,
-			OwnerID:     opts.OwnerID,
+			OwnerID:     UnverifiedOwnerID(opts.OwnerID),
 			TrustDomain: opts.TrustDomain,
 			ExpiresAt:   opts.ExpiresAt,
 			A2ACardRef:  opts.A2ACardRef,

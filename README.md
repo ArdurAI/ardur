@@ -263,6 +263,14 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for operator telemetry; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
 | **Receipts sink**    | local JSON / stdout receipts; verified redacted governance JSONL; OTLP/HTTP JSON traces and logs; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | production collector deployment/auth/retention examples, checkpoint witnessing/consistency monitoring, vendor-specific sinks, broader durable storage examples, and integrated multi-artifact chain verification |
 
+In the Go credential identity layer, SPIRE authenticates the workload
+`spiffe_id`; the configured deployer `owner_id` is signed attribution, not an
+authenticated owner binding. New credentials state
+`owner_id_assurance: "self_asserted"`, and verifiers reject missing or stronger
+unimplemented assurance values. [ADR-024](docs/decisions/ADR-024-self-asserted-owner-identity-assurance.md)
+records the boundary and the proof required before a verified owner state can
+exist.
+
 If you'd use an integration that isn't listed, file an [integration request](https://github.com/ArdurAI/ardur/issues/new?template=integration_request.yml) — it's the strongest signal we have for prioritisation.
 
 ## Naming Note

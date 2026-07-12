@@ -332,6 +332,9 @@ func TestIssue_VerifiedLevel_WithProviders(t *testing.T) {
 	if cred.Claims.Identity.SPIFFEID == "" {
 		t.Error("identity should come from SPIRE mock")
 	}
+	if cred.Claims.Identity.OwnerIDAssurance != credential.OwnerIDAssuranceSelfAsserted {
+		t.Errorf("owner assurance = %q, want %q", cred.Claims.Identity.OwnerIDAssurance, credential.OwnerIDAssuranceSelfAsserted)
+	}
 	if cred.Claims.Provenance == nil {
 		t.Error("provenance should be set when image is verified")
 	}

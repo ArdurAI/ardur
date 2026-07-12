@@ -114,6 +114,18 @@ func (s StatusValue) String() string {
 
 // --- VIBAP Credential Layers ---
 
+// OwnerIDAssurance describes how the owner/deployer attribution was proven.
+// Only self-asserted attribution is implemented. A verified state must not be
+// added until issuance verifies owner-controlled proof against configured
+// trust anchors.
+type OwnerIDAssurance string
+
+const (
+	// OwnerIDAssuranceSelfAsserted means the issuer signed the configured owner
+	// string as attribution but did not authenticate the ownership relation.
+	OwnerIDAssuranceSelfAsserted OwnerIDAssurance = "self_asserted"
+)
+
 // IdentityClaims represents Layer 1: Agent Identity.
 // Always disclosed — verifiers need to know who the agent is.
 //
@@ -123,9 +135,13 @@ type IdentityClaims struct {
 	// Per-instance SPIFFE ID: spiffe://ardur.dev/ns/{ns}/sa/{sa}/instance/{pod-uid}
 	SPIFFEID string `json:"spiffe_id"`
 
-	// SPIFFE ID of the deploying human or service account.
-	// Implements dual-identity binding per draft-ni-wimse-ai-agent-identity-02.
+	// SPIFFE-formatted deploying human or service-account attribution.
+	// This value is not an authenticated dual-identity binding.
 	OwnerID string `json:"owner_id"`
+
+	// Assurance for OwnerID. It is signed as part of the credential so a
+	// consumer cannot mistake configured attribution for SPIRE verification.
+	OwnerIDAssurance OwnerIDAssurance `json:"owner_id_assurance"`
 
 	// URL to the agent's A2A Agent Card (Google A2A protocol).
 	// Optional — only set if the agent participates in A2A discovery.

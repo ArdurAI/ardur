@@ -238,6 +238,14 @@ func Verify(raw string, issuerPubKey ed25519.PublicKey, opts *VerifyOptions) (*V
 			result.Valid = false
 			result.Errors = append(result.Errors, "identity layer: owner_id is empty")
 		}
+		if cred.Claims.Identity.OwnerIDAssurance != OwnerIDAssuranceSelfAsserted {
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"identity layer: unsupported owner_id_assurance %q; only %q is implemented",
+				cred.Claims.Identity.OwnerIDAssurance,
+				OwnerIDAssuranceSelfAsserted,
+			))
+		}
 	}
 
 	// Step 11: Verify intent layer specifics

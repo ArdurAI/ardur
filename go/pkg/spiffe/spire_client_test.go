@@ -3,6 +3,7 @@ package spiffe
 import (
 	"context"
 	"crypto/x509"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,9 @@ func TestSPIREClientSVIDToIdentityMapsCertificateMetadata(t *testing.T) {
 	}
 	if identity.OwnerID != client.ownerID {
 		t.Fatalf("OwnerID = %q, want %q", identity.OwnerID, client.ownerID)
+	}
+	if got := reflect.TypeOf(identity.OwnerID).Name(); got != "UnverifiedOwnerID" {
+		t.Fatalf("OwnerID type = %q, want UnverifiedOwnerID", got)
 	}
 	if identity.TrustDomain != "example.org" {
 		t.Fatalf("TrustDomain = %q, want example.org", identity.TrustDomain)
