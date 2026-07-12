@@ -97,6 +97,39 @@ _BROAD_NETWORK_VALUES = {
 _NPM_EXACT_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 _SHA256_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _SHA256_SRI_RE = re.compile(r"^sha256-[A-Za-z0-9+/]{43}=$")
+_SAFE_EVIDENCE_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,255}$")
+
+# JSON Schema 2020-12 locations whose values are themselves schemas. The
+# compatibility entries cover still-common earlier-draft forms accepted by
+# tool manifests. Keeping these categories explicit prevents instance data in
+# annotations such as default/examples/const from being scanned as schemas.
+_SCHEMA_VALUE_KEYWORDS = frozenset(
+    {
+        "additionalItems",
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
+_SCHEMA_ARRAY_KEYWORDS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+_SCHEMA_MAPPING_KEYWORDS = frozenset(
+    {
+        "$defs",
+        "definitions",
+        "dependencies",
+        "dependentSchemas",
+        "patternProperties",
+        "properties",
+    }
+)
 
 
 class ToolPreflightError(ValueError):
@@ -618,6 +651,65 @@ def _instruction_indicators(description: str) -> list[str]:
     return indicators
 
 
+def _schema_member_path(path: str, member: str) -> str:
+    if _SAFE_EVIDENCE_PATH_SEGMENT_RE.fullmatch(member):
+        return f"{path}.{member}"
+    return f"{path}[member_sha256:{_sha256_text(member)}]"
+
+
+def _schema_descriptions(schema: Any, path: str) -> list[tuple[str, str]]:
+    """Return description annotations from supported JSON Schema subschemas."""
+
+    descriptions: list[tuple[str, str]] = []
+    stack: list[tuple[Any, str]] = [(schema, path)]
+    while stack:
+        current, current_path = stack.pop()
+        if not isinstance(current, Mapping):
+            continue
+
+        description = current.get("description")
+        if "description" in current and not isinstance(description, str):
+            raise ToolPreflightError(
+                "tool_schema_description_invalid",
+                f"{current_path}.description must be a string",
+            )
+        if isinstance(description, str):
+            descriptions.append((f"{current_path}.description", description))
+
+        for keyword in sorted(_SCHEMA_VALUE_KEYWORDS, reverse=True):
+            child = current.get(keyword)
+            child_path = f"{current_path}.{keyword}"
+            if isinstance(child, list):
+                stack.extend(
+                    (item, f"{child_path}[{index}]")
+                    for index, item in reversed(list(enumerate(child)))
+                )
+            elif isinstance(child, Mapping):
+                stack.append((child, child_path))
+
+        for keyword in sorted(_SCHEMA_ARRAY_KEYWORDS, reverse=True):
+            children = current.get(keyword)
+            if isinstance(children, list):
+                child_path = f"{current_path}.{keyword}"
+                stack.extend(
+                    (item, f"{child_path}[{index}]")
+                    for index, item in reversed(list(enumerate(children)))
+                )
+
+        for keyword in sorted(_SCHEMA_MAPPING_KEYWORDS, reverse=True):
+            children = current.get(keyword)
+            if not isinstance(children, Mapping):
+                continue
+            child_path = f"{current_path}.{keyword}"
+            stack.extend(
+                (item, _schema_member_path(child_path, member))
+                for member, item in reversed(list(children.items()))
+                if isinstance(member, str) and isinstance(item, Mapping)
+            )
+
+    return descriptions
+
+
 def _scan_server(
     config: Mapping[str, Any],
     collection: str,
@@ -875,21 +967,28 @@ def _scan_server(
                 "tool_description_invalid", f"{tool_path}.description must be a string"
             )
         description = description or ""
-        instruction_indicators = _instruction_indicators(description)
-        if instruction_indicators:
-            findings.append(
-                _finding(
-                    "TS010",
-                    "instruction_injection",
-                    "high",
-                    server_name,
-                    f"{tool_path}.description",
-                    instruction_indicators,
-                    "Remove instruction-like behavior from tool metadata; keep descriptions factual, reviewable, and bound to a trusted manifest digest.",
-                    tool=tool_name,
-                    value=description,
+        descriptions = [(f"{tool_path}.description", description)]
+        for schema_key in ("inputSchema", "parameters"):
+            if schema_key in tool:
+                descriptions.extend(
+                    _schema_descriptions(tool[schema_key], f"{tool_path}.{schema_key}")
                 )
-            )
+        for description_path, description_value in descriptions:
+            instruction_indicators = _instruction_indicators(description_value)
+            if instruction_indicators:
+                findings.append(
+                    _finding(
+                        "TS010",
+                        "instruction_injection",
+                        "high",
+                        server_name,
+                        description_path,
+                        instruction_indicators,
+                        "Remove instruction-like behavior from tool metadata; keep descriptions factual, reviewable, and bound to a trusted manifest digest.",
+                        tool=tool_name,
+                        value=description_value,
+                    )
+                )
         annotations = _mapping(tool.get("annotations"))
         if not annotations:
             findings.append(

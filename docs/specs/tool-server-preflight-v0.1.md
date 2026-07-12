@@ -31,6 +31,15 @@ closed list when a host config does not embed definitions. A server config with
 neither field receives `TS015 tool_surface_not_declared`; the scanner does not
 connect to the server to discover the missing catalog.
 
+For embedded tool definitions, `TS010` checks the tool-level `description` and
+inline description annotations under `inputSchema` or legacy `parameters`.
+Traversal follows JSON Schema 2020-12 schema-bearing applicators and common
+earlier-draft equivalents. Instance values under `default`, `examples`, and
+`const` are not treated as schemas. External `$ref` targets and custom
+vocabulary subschema locations are not resolved by this static scanner. An
+inline schema `description` with a non-string value fails the scan as invalid
+metadata rather than being silently ignored.
+
 YAML, JSON with duplicate members, non-finite numbers, empty server
 collections, oversized/deep documents, final-component symlinks, unsafe
 identifiers, and unsupported root shapes fail closed.
@@ -49,8 +58,10 @@ The scanner MUST NOT:
 The input is opened read-only with no-follow semantics, verified against the
 pre-opened inode, bounded to 1 MiB, and parsed with duplicate-key, depth, node,
 string-length, and finite-number checks. Reports omit the input path, literal
-environment values, descriptions, full command paths, arguments, and URLs. Sensitive
-evidence is represented by stable indicators and, where useful, SHA-256.
+environment values, descriptions, full command paths, arguments, and URLs.
+Unsafe schema-member names in evidence paths are replaced by their SHA-256.
+Sensitive evidence is represented by stable indicators and, where useful,
+SHA-256.
 
 ## 4. Rules
 
@@ -65,7 +76,7 @@ evidence is represented by stable indicators and, where useful, SHA-256.
 | `TS007` | critical | host confirmation bypass (`trust: true`) |
 | `TS008` | high | broad filesystem root in scope or arguments |
 | `TS009` | high | remote transport without a domain allowlist |
-| `TS010` | high | instruction-like or concealed behavior in a description |
+| `TS010` | high | instruction-like or concealed behavior in a tool or inline parameter-schema description |
 | `TS011` | medium | tool risk annotations are absent |
 | `TS012` | critical/high | generic shell/command tool, adjusted when a gate exists |
 | `TS013` | high | open-world/network tool without a domain allowlist |
