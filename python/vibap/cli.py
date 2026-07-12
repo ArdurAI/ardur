@@ -5455,7 +5455,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL (legacy hub path)")
     run.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    run.add_argument("--home", type=Path, help="Ardur home directory (ephemeral by default for governance)")
+    # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
+    # values survive to the handler instead of being normalized to
+    # ``Path('.')`` (the CWD) by argparse.  The handler rejects empty/whitespace
+    # values before any ``Path()`` conversion or governance execution.
+    run.add_argument("--home", type=str, help="Ardur home directory (ephemeral by default for governance)")
     # Governance-bridge flags. Supplying any of these switches `ardur run` from
     # the legacy hub-streaming path to the zero-setup governance launcher.
     run.add_argument("--mission", help="mission text for the governed agent run")

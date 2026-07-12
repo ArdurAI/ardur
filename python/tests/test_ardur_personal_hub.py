@@ -2926,6 +2926,113 @@ def test_run_under_hub_streams_output_without_subprocess_run(tmp_path, capfd, mo
     assert "Next steps:" not in captured.err
 
 
+# ---------------------------------------------------------------------------
+# run --home empty/whitespace pre-validation
+#
+# ``--home`` is ``type=str`` on the CLI parser so that empty/whitespace-only
+# values reach the handler instead of being silently normalised to
+# ``Path('.')`` by argparse.  These tests verify the handler-side guard.
+# ---------------------------------------------------------------------------
+
+
+def test_run_under_hub_empty_home_rejected(tmp_path, capsys, monkeypatch):
+    """``home=""`` exits 2 before any Hub I/O."""
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("empty home must fail before Hub calls")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=["echo", "hello"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home="",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "non-empty path" in captured.err
+
+
+def test_run_under_hub_whitespace_home_rejected(tmp_path, capsys, monkeypatch):
+    """``home="   "`` exits 2 before any Hub I/O."""
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("whitespace home must fail before Hub calls")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=["echo", "hello"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home="   ",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "non-empty path" in captured.err
+
+
+def test_run_under_hub_none_home_not_rejected(tmp_path, capsys, monkeypatch):
+    """``home=None`` (flag omitted) proceeds to Hub I/O (not validation exit 2)."""
+
+    def fail_hub_request(*_args, **_kwargs):
+        # Simulate connection refused so we get exit 127, not 2.
+        raise ConnectionError("hub unreachable")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+
+    try:
+        exit_code = run_under_hub(
+            Namespace(
+                command=["echo", "hello"],
+                hub_url="http://127.0.0.1:8765",
+                hub_token=None,
+                home=None,
+            )
+        )
+    except ConnectionError:
+        # If the monkeypatched Hub raises before run_under_hub maps the error,
+        # that still proves the validation guard did not fire.
+        return
+
+    # If we got an exit code it must NOT be 2 (the validation rejection code).
+    assert exit_code != 2
+
+
+def test_run_under_hub_valid_home_not_rejected(tmp_path, capfd, monkeypatch):
+    """``home=<real-dir>`` proceeds past validation to Hub I/O."""
+
+    sentinel = tmp_path / "hub-called.txt"
+
+    def fake_hub_request(method, path, *_args, **_kwargs):
+        sentinel.write_text("called", encoding="utf-8")
+        return {"ok": False, "error": "simulated_start_failure"}
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=["echo", "hello"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token=None,
+            home=str(tmp_path),
+        )
+    )
+
+    assert sentinel.exists()
+    # Exit 127 = Hub failure, not 2 = validation rejection
+    assert exit_code != 2
+
+
 @contextmanager
 def _running_hub(home):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _HubRequestHandler)

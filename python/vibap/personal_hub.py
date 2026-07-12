@@ -2183,6 +2183,17 @@ def run_under_hub(args: argparse.Namespace) -> int:
         print("ardur run requires a command after --", file=sys.stderr)
         _print_run_missing_command_next_steps()
         return 2
+
+    # Validate --home before any Hub I/O.  ``--home`` is ``type=str`` on the
+    # CLI parser so an empty or whitespace-only value reaches here as-is
+    # (instead of being silently normalised to ``Path('.')`` by argparse).
+    # ``None`` means the flag was omitted and the default home should be used.
+    home_arg = getattr(args, "home", None)
+    if home_arg is not None and not str(home_arg).strip():
+        print("ardur run --home must be a non-empty path after trimming whitespace.", file=sys.stderr)
+        print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+        return 2
+
     session_id = f"cli:{uuid.uuid4()}"
     start_payload = {
         "source": {"type": "cli", "app": command[0], "process": " ".join(command)},
