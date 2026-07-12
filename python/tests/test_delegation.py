@@ -363,7 +363,7 @@ class TestResourceScopeNarrowing:
                 agent_id="p",
                 mission="coord",
                 allowed_tools=["read"],
-                resource_scope=[],
+                resource_scope=["**"],
                 delegation_allowed=True,
                 max_delegation_depth=2,
             ),
@@ -382,7 +382,33 @@ class TestResourceScopeNarrowing:
         claims = verify_passport(child_token, public_key, parent_token=parent_token)
         assert claims["resource_scope"] == ["/tmp/*"]
 
-    def test_restricted_parent_cannot_delegate_empty_child_scope(self, private_key, public_key):
+    def test_absent_parent_scope_cannot_delegate_resource_authority(
+        self, private_key, public_key
+    ):
+        parent_token = issue_passport(
+            MissionPassport(
+                agent_id="p",
+                mission="coord",
+                allowed_tools=["read"],
+                resource_scope=[],
+                delegation_allowed=True,
+                max_delegation_depth=2,
+            ),
+            private_key,
+            ttl_s=600,
+        )
+        with pytest.raises(PermissionError, match="scope escalation \\(resources\\)"):
+            derive_child_passport(
+                parent_token=parent_token,
+                public_key=public_key,
+                private_key=private_key,
+                child_agent_id="c",
+                child_allowed_tools=["read"],
+                child_mission="sub",
+                child_resource_scope=["/tmp/*"],
+            )
+
+    def test_restricted_parent_can_delegate_empty_child_scope(self, private_key, public_key):
         parent_token = issue_passport(
             MissionPassport(
                 agent_id="p",
@@ -395,16 +421,17 @@ class TestResourceScopeNarrowing:
             private_key,
             ttl_s=600,
         )
-        with pytest.raises(PermissionError, match="cannot widen"):
-            derive_child_passport(
-                parent_token=parent_token,
-                public_key=public_key,
-                private_key=private_key,
-                child_agent_id="c",
-                child_allowed_tools=["read"],
-                child_mission="sub",
-                child_resource_scope=[],
-            )
+        child_token = derive_child_passport(
+            parent_token=parent_token,
+            public_key=public_key,
+            private_key=private_key,
+            child_agent_id="c",
+            child_allowed_tools=["read"],
+            child_mission="sub",
+            child_resource_scope=[],
+        )
+        claims = verify_passport(child_token, public_key, parent_token=parent_token)
+        assert claims["resource_scope"] == []
 
 
 class TestEmptyChildTools:

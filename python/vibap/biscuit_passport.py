@@ -30,9 +30,11 @@ from biscuit_auth import (
 
 from .passport import (
     MissionPassport,
+    UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
     _cwd_is_subpath,
     _normalize_cwd,
     derive_mission_id,
+    resource_scope_is_explicitly_unrestricted,
 )
 
 # Verified against the installed biscuit_auth 0.4.0 runtime in
@@ -412,6 +414,11 @@ def derive_child_biscuit(
         _add_fact(child_block, "forbidden_tool", tool)
     for scope in final_resource_scope:
         _add_fact(child_block, "resource_scope", scope)
+    if child_resource_scope is not None and not final_resource_scope:
+        # A Biscuit block with no resource_scope facts otherwise means
+        # "inherit the previous block". Carry an explicit signed marker so an
+        # attenuated empty scope (deny all) is distinguishable from omission.
+        _add_fact(child_block, "resource_scope_empty", True)
     for side_effect_class in parent_context.allowed_side_effect_classes:
         _add_fact(child_block, "allowed_side_effect_class", side_effect_class)
     for side_effect_class, budget in sorted(final_per_class_budget.items()):
@@ -482,6 +489,20 @@ def _context_from_blocks(blocks: list[dict[str, list[list[Any]]]]) -> PassportCo
     effective_allowed_tools = _fact_values(root, "allowed_tool", str)
     effective_forbidden_tools = _fact_values(root, "forbidden_tool", str)
     effective_resource_scope = _fact_values(root, "resource_scope", str)
+    if (
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN in effective_resource_scope
+        and not resource_scope_is_explicitly_unrestricted(
+            effective_resource_scope
+        )
+    ):
+        raise ValueError(
+            "unrestricted '**' must be the only authority resource scope pattern"
+        )
+    if "resource_scope_empty" in root:
+        if _required_single(root, "resource_scope_empty", bool) is not True:
+            raise ValueError("malformed:resource_scope_empty")
+        if effective_resource_scope:
+            raise ValueError("conflicting:resource_scope and resource_scope_empty")
     effective_allowed_side_effect_classes = _fact_values(
         root, "allowed_side_effect_class", str
     )
@@ -537,8 +558,23 @@ def _context_from_blocks(blocks: list[dict[str, list[list[Any]]]]) -> PassportCo
             effective_allowed_tools = _fact_values(block, "allowed_tool", str)
         if "forbidden_tool" in block:
             effective_forbidden_tools = _fact_values(block, "forbidden_tool", str)
-        if "resource_scope" in block:
-            effective_resource_scope = _fact_values(block, "resource_scope", str)
+        requested_resource_scope: list[str] | None = None
+        if "resource_scope_empty" in block:
+            if _required_single(block, "resource_scope_empty", bool) is not True:
+                raise ValueError("malformed:resource_scope_empty")
+            if "resource_scope" in block:
+                raise ValueError("conflicting:resource_scope and resource_scope_empty")
+            requested_resource_scope = []
+        elif "resource_scope" in block:
+            requested_resource_scope = _fact_values(block, "resource_scope", str)
+        if requested_resource_scope is not None:
+            try:
+                effective_resource_scope = _derive_resource_scope(
+                    effective_resource_scope,
+                    requested_resource_scope,
+                )
+            except BiscuitAttenuationError as exc:
+                raise ValueError(str(exc)) from exc
         if "allowed_side_effect_class" in block:
             effective_allowed_side_effect_classes = _fact_values(
                 block, "allowed_side_effect_class", str
@@ -610,6 +646,7 @@ def _extract_authority_block_facts(authorizer: Any, source: str) -> dict[str, An
         "allowed_tool",
         "forbidden_tool",
         "resource_scope",
+        "resource_scope_empty",
         "allowed_side_effect_class",
     ):
         rows = _query_fact_terms(authorizer, name, 1)
@@ -740,6 +777,7 @@ def _unknown_fact_map(block: dict[str, Any]) -> dict[str, Any]:
         "allowed_tool",
         "forbidden_tool",
         "resource_scope",
+        "resource_scope_empty",
         "allowed_side_effect_class",
         "max_tool_calls",
         "max_tool_calls_per_class",
@@ -762,7 +800,16 @@ def _derive_resource_scope(
     if child_scope is None:
         return list(parent_scope)
     normalized_child_scope = _dedupe_preserve_order(child_scope)
-    if not parent_scope:
+    if (
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN in normalized_child_scope
+        and not resource_scope_is_explicitly_unrestricted(normalized_child_scope)
+    ):
+        raise BiscuitAttenuationError(
+            "unrestricted '**' must be the only resource scope pattern"
+        )
+    if not normalized_child_scope:
+        return []
+    if resource_scope_is_explicitly_unrestricted(parent_scope):
         return normalized_child_scope
     for child_entry in normalized_child_scope:
         if not any(
@@ -776,6 +823,10 @@ def _derive_resource_scope(
 def _resource_scope_is_narrower(child: str, parent: str) -> bool:
     if child == parent:
         return True
+    if parent == UNRESTRICTED_RESOURCE_SCOPE_PATTERN:
+        return True
+    if child == UNRESTRICTED_RESOURCE_SCOPE_PATTERN:
+        return False
     if child.startswith("/") and parent.startswith("/"):
         try:
             return _cwd_is_subpath(

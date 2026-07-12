@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 
 import pytest
 
@@ -16,6 +17,53 @@ from vibap.proxy import Decision, _check_resource_scope, _sanitize_value
 
 
 class TestResourceScopeSecurity:
+    def test_absent_scope_denies_resource_bearing_arguments(self):
+        ok, reason = _check_resource_scope(
+            {"file_path": "/etc/passwd"},
+            resource_scope=[],
+        )
+
+        assert not ok
+        assert "resource_scope is missing or empty" in reason
+        assert "['**']" in reason
+
+    def test_absent_scope_does_not_block_resource_free_arguments(self):
+        ok, reason = _check_resource_scope(
+            {"count": 3, "enabled": True},
+            resource_scope=[],
+        )
+
+        assert ok
+        assert reason == ""
+
+    def test_explicit_unrestricted_scope_permits_resource(self):
+        ok, reason = _check_resource_scope(
+            {"file_path": "/etc/passwd"},
+            resource_scope=["**"],
+        )
+
+        assert ok
+        assert reason == ""
+
+    def test_explicit_unrestricted_sentinel_must_be_the_only_pattern(self):
+        ok, reason = _check_resource_scope(
+            {"file_path": "/etc/passwd"},
+            resource_scope=["**", "/workspace/*"],
+        )
+
+        assert not ok
+        assert "must be the only resource_scope pattern" in reason
+
+    def test_session_start_warns_for_explicit_unrestricted_scope(
+        self, proxy, example_mission, private_key, caplog
+    ):
+        token = issue_passport(example_mission, private_key, ttl_s=60)
+
+        with caplog.at_level(logging.WARNING, logger="vibap.proxy"):
+            proxy.start_session(token)
+
+        assert "explicitly grants unrestricted resource_scope" in caplog.text
+
     def test_existing_symlink_escape_is_rejected_after_lexical_match(self, tmp_path):
         workspace = tmp_path / "workspace"
         outside = tmp_path / "outside"

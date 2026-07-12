@@ -310,6 +310,99 @@ def test_derive_rejects_scope_expansion() -> None:
         )
 
 
+def test_explicit_unrestricted_parent_can_derive_bounded_scope() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(resource_scope=["**"]),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+
+    child = derive_child_biscuit(
+        parent,
+        keypair.private_key,
+        "spiffe://example.org/agent/child",
+        child_resource_scope=["/workspace/project"],
+        now=101,
+    )
+
+    context = verify_biscuit_passport(child, keypair.public_key, now=102)
+    assert context.resource_scope == ["/workspace/project"]
+
+
+def test_empty_parent_scope_cannot_derive_resource_authority() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(resource_scope=[]),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+
+    with pytest.raises(BiscuitAttenuationError, match="resource scope expansion"):
+        derive_child_biscuit(
+            parent,
+            keypair.private_key,
+            "spiffe://example.org/agent/child",
+            child_resource_scope=["/workspace/project"],
+            now=101,
+        )
+
+
+def test_bounded_parent_can_derive_empty_resource_scope() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(resource_scope=["/workspace/project"]),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+
+    child = derive_child_biscuit(
+        parent,
+        keypair.private_key,
+        "spiffe://example.org/agent/child",
+        child_resource_scope=[],
+        now=101,
+    )
+
+    context = verify_biscuit_passport(child, keypair.public_key, now=102)
+    assert context.resource_scope == []
+
+
+def test_verifier_rejects_handcrafted_scope_expansion_from_empty_parent() -> None:
+    from biscuit_auth import BlockBuilder, Fact
+
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(resource_scope=[]),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    block = BlockBuilder()
+    for fact in (
+        'jti("handcrafted-expansion")',
+        f'parent_jti("{parent_context.jti}")',
+        'spiffe_id("spiffe://example.org/agent/attacker")',
+        "iat(101)",
+        "exp(200)",
+        "max_tool_calls(1)",
+        "max_duration_s(99)",
+        "delegation_allowed(false)",
+        "max_delegation_depth(0)",
+        'allowed_tool("read_file")',
+        'resource_scope("/workspace/project")',
+    ):
+        block.add_fact(Fact(fact))
+    token = Biscuit.from_bytes(parent, keypair.public_key).append(block).to_bytes()
+
+    with pytest.raises(BiscuitVerifyError, match="resource scope expansion"):
+        verify_biscuit_passport(token, keypair.public_key, now=102)
+
+
 def test_derive_rejects_budget_expansion() -> None:
     keypair = _keypair()
     parent = issue_biscuit_passport(

@@ -5,7 +5,7 @@
   "mission": "Analyze Q1 sales; no PII; compliance-screened outbound.",
   "allowed_tools": ["read_file", "write_file", "send_email"],
   "forbidden_tools": ["delete_file"],
-  "resource_scope": [],
+  "resource_scope": ["**"],
   "allowed_side_effect_classes": ["none", "read", "internal_write", "external_send"],
   "max_tool_calls": 20,
   "max_duration_s": 600,

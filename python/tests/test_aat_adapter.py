@@ -38,6 +38,28 @@ class _Response:
         return False
 
 
+def test_aat_empty_mission_scope_cannot_grant_resource_authority() -> None:
+    with pytest.raises(PermissionError, match="widens mission resource_scope"):
+        aat_adapter_module._extract_resource_scope(
+            {"resource_scope": ["/workspace/*"]},
+            [],
+        )
+
+
+def test_aat_explicit_unrestricted_mission_can_grant_bounded_scope() -> None:
+    assert aat_adapter_module._extract_resource_scope(
+        {"resource_scope": ["/workspace/*"]},
+        ["**"],
+    ) == ["/workspace/*"]
+
+
+def test_aat_bounded_mission_can_grant_empty_scope() -> None:
+    assert aat_adapter_module._extract_resource_scope(
+        {"resource_scope": []},
+        ["/workspace/*"],
+    ) == []
+
+
 def _install_fetch_map(
     monkeypatch,
     mapping: dict[str, str],
@@ -81,7 +103,7 @@ def _issue_md(
         mission="authoritative AAT-backed mission",
         allowed_tools=allowed_tools or ["read"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=max_tool_calls,
         max_duration_s=300,
         delegation_allowed=True,
@@ -1017,7 +1039,7 @@ class TestAATAdapterEndToEnd:
             mission_id=mission_id,
             allowed_tools=["read_file", "write_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=10,
             max_duration_s=600,
             delegation_allowed=True,
@@ -1136,7 +1158,7 @@ class TestAATAdapterEndToEnd:
             mission_id=mission_id,
             allowed_tools=["read_file", "write_file", "search_files"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=20,
             max_duration_s=600,
         )

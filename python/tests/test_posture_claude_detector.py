@@ -16,7 +16,7 @@ def _issue_mission(tmp_path: Path) -> str:
         mission="exercise Claude Code posture detection fixtures",
         allowed_tools=["Read", "Write", "Bash", "WebFetch", "Task", "SubagentStart"],
         forbidden_tools=["Write"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=50,
         max_duration_s=600,
     )

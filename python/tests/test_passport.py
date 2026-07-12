@@ -324,6 +324,20 @@ class TestDelegation:
             )
 
 
+class TestResourceScopeClaim:
+    def test_unrestricted_sentinel_must_be_the_only_pattern(self):
+        with pytest.raises(
+            ValueError,
+            match="must be the only resource_scope pattern",
+        ):
+            MissionPassport(
+                agent_id="ambiguous-scope",
+                mission="reject ambiguous unrestricted authority",
+                allowed_tools=["read_file"],
+                resource_scope=["**", "/workspace/*"],
+            )
+
+
 class TestCwdClaim:
     """C8: optional `cwd` passport claim for relative-path resolution.
 

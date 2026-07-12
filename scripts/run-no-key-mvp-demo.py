@@ -202,6 +202,7 @@ def run_demo(*, port: int, timeout_s: float) -> float:
                         "mission": "demonstrate local governance decisions",
                         "allowed_tools": ["read_file", "delete_file"],
                         "forbidden_tools": ["delete_file"],
+                        "resource_scope": ["**"],
                         "max_tool_calls": 2,
                     }
                 },

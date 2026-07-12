@@ -141,8 +141,8 @@ def public_key(keypair) -> ec.EllipticCurvePublicKey:
 def example_mission() -> MissionPassport:
     """A plain, non-delegating mission used for simple pass/fail flows.
 
-    resource_scope is intentionally empty here so tests can use arbitrary
-    arguments without having to match a glob. There's a separate
+    resource_scope is explicitly unrestricted here so tests can use arbitrary
+    arguments without having to match a bounded glob. There's a separate
     ``scoped_mission`` fixture for resource-scope tests.
     """
     return MissionPassport(
@@ -150,7 +150,7 @@ def example_mission() -> MissionPassport:
         mission="run Q1 sales analysis",
         allowed_tools=["read_file", "write_file", "analyze"],
         forbidden_tools=["delete_file", "execute_shell"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=5,
         max_duration_s=60,
         delegation_allowed=False,

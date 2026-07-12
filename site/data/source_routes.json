@@ -219,6 +219,7 @@
     "docs/decisions/ADR-020-persisted-session-reverification-on-load.md": "source/docs/decisions/adr-020-persisted-session-reverification-on-load/",
     "docs/decisions/ADR-021-kb-jwt-server-challenged-nonce.md": "source/docs/decisions/adr-021-kb-jwt-server-challenged-nonce/",
     "docs/decisions/ADR-022-operator-telemetry-spiffe-mtls.md": "source/docs/decisions/adr-022-operator-telemetry-spiffe-mtls/",
+    "docs/decisions/ADR-023-explicit-resource-scope-authority.md": "source/docs/decisions/adr-023-explicit-resource-scope-authority/",
     "docs/decisions/README.md": "source/docs/decisions/readme/",
     "docs/demo/enforce-e2e.md": "source/docs/demo/enforce-e2e/",
     "docs/engineering-standards.md": "source/docs/engineering-standards/",

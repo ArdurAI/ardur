@@ -15,7 +15,9 @@ enforcement, and verifiable evidence.
 ## Core security gates (enforced by the reference proxy)
 
 - tool calls must match declared tools
-- resource access must match declared scopes
+- resource access must match declared scopes; absent or empty
+  `resource_scope` grants no resource authority, and unrestricted access
+  requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
 - KB-JWT nonce replay store and AAT proof-of-possession default-on

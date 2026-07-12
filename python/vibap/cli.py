@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import jwt
 
@@ -37,6 +37,7 @@ from .passport import (
     DEFAULT_KEYS_DIR,
     KeyDirectoryError,
     MissionPassport,
+    UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
     _ensure_default_home_dir,
     derive_mission_id,
     generate_keypair,
@@ -1314,6 +1315,33 @@ def cmd_issue(args: argparse.Namespace) -> int:
         response, exit_code = issue_budget_failure
         _print_json(response)
         return exit_code
+    requested_scope = list(args.resource_scope or [])
+    if (
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope
+        and requested_scope != [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
+    ):
+        _print_json(
+            {
+                "ok": False,
+                "condition": "issue_resource_scope_invalid",
+                "error": "issue_resource_scope_invalid",
+                "error_code": "issue_resource_scope_invalid",
+                "message": "The unrestricted resource scope sentinel must stand alone.",
+                "detail": "unrestricted '**' must be the only resource_scope pattern",
+                "next_steps": [
+                    {
+                        "condition": "issue_resource_scope_invalid",
+                        "action": "choose_bounded_or_unrestricted_scope",
+                        "command": "ardur issue ... --resource-scope <pattern>",
+                        "detail": (
+                            "Use bounded patterns, or use the sole '**' pattern "
+                            "only when every resource is intentionally permitted."
+                        ),
+                    }
+                ],
+            }
+        )
+        return 1
     try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
@@ -1324,7 +1352,7 @@ def cmd_issue(args: argparse.Namespace) -> int:
         mission=args.mission,
         allowed_tools=list(args.allowed_tools or []),
         forbidden_tools=list(args.forbidden_tools or []),
-        resource_scope=list(args.resource_scope or []),
+        resource_scope=requested_scope,
         max_tool_calls=args.max_tool_calls,
         max_duration_s=args.max_duration_s,
         delegation_allowed=args.delegation_allowed,
@@ -1332,7 +1360,12 @@ def cmd_issue(args: argparse.Namespace) -> int:
     )
     token = issue_passport(mission, private_key, ttl_s=args.ttl_s)
     claims = verify_passport(token, public_key)
-    _print_json({"token": token, "claims": claims})
+    response: dict[str, Any] = {"token": token, "claims": claims}
+    if mission.resource_scope == [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]:
+        response["warnings"] = [
+            "resource_scope explicitly permits all resources via the sole '**' pattern"
+        ]
+    _print_json(response)
     return 0
 
 
@@ -4906,7 +4939,12 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--mission", required=True, help="declared mission string")
     issue.add_argument("--allowed-tools", nargs="*", default=[], help="allowed tool names")
     issue.add_argument("--forbidden-tools", nargs="*", default=[], help="forbidden tool names")
-    issue.add_argument("--resource-scope", nargs="*", default=[], help="resource scope patterns")
+    issue.add_argument(
+        "--resource-scope",
+        nargs="*",
+        default=[],
+        help="resource patterns; empty grants none, sole '**' explicitly grants all",
+    )
     issue.add_argument("--max-tool-calls", default=50, help="max permitted tool calls")
     issue.add_argument("--max-duration-s", default=600, help="max mission duration in seconds")
     issue.add_argument("--delegation-allowed", action="store_true", help="allow one-step delegation")
@@ -5513,8 +5551,9 @@ def build_parser() -> argparse.ArgumentParser:
     resource_scope_group.add_argument(
         "--no-resource-scope",
         action="store_true",
-        help="skip the default cwd-based file resource_scope (path_allow); use for a "
-        "mission that is genuinely network-only, since the seccomp fallback tier "
+        help="explicitly grant all user-space resources while skipping the default "
+        "cwd-based kernel file resource_scope (path_allow); use for a mission that "
+        "is genuinely network-only, since the seccomp fallback tier "
         "(active when BPF-LSM is unavailable) can only ever enforce network policy — "
         "a mission that also carries a file-scope dimension can never be fully "
         "enforceable on that tier",

@@ -161,6 +161,48 @@ def test_direct_hook_denies_workspace_symlink_escape_and_signs_violation(
     ]
 
 
+def test_direct_hook_denies_resource_when_signed_scope_is_empty(
+    tmp_path, monkeypatch
+):
+    from vibap.claude_code_hook import handle_pre_tool_use
+    from vibap.claude_code_report import build_claude_code_report
+
+    keys = tmp_path / "keys"
+    private_key, _public_key = generate_keypair(keys_dir=keys)
+    mission = MissionPassport(
+        agent_id="missing-scope",
+        mission="do not infer resource authority",
+        allowed_tools=["Write"],
+        resource_scope=[],
+        max_tool_calls=10,
+        max_duration_s=600,
+    )
+    token = issue_passport(mission, private_key, ttl_s=600)
+    chain_dir = tmp_path / "chains"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "missing-scope")
+
+    output = handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Write",
+            tool_input={
+                "file_path": str(tmp_path / "would-have-been-unrestricted.txt"),
+                "content": "blocked\n",
+            },
+            suffix="missing-scope",
+        ),
+        keys_dir=keys,
+    )
+
+    assert "resource_scope is missing or empty" in _deny_reason(output)
+    report = build_claude_code_report(chain_dir=chain_dir, keys_dir=keys)
+    assert report["totals"]["verdicts"] == {"violation": 1}
+    assert report["chains"][0]["actions"][0]["policies"] == [
+        {"backend": "native", "decision": "Deny"}
+    ]
+
+
 def test_direct_hook_composes_signed_forbid_rules_policy(tmp_path, monkeypatch):
     from vibap.claude_code_hook import handle_pre_tool_use
     from vibap.claude_code_report import build_claude_code_report
@@ -350,7 +392,7 @@ def _issue_wildcard_test_passport(
         mission="test Claude Code trace path containment",
         allowed_tools=["*"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
     )
@@ -735,7 +777,7 @@ def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(tmp_path, 
         mission="observe subagent launch",
         allowed_tools=["*"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=10,
         max_duration_s=600,
     )
@@ -846,7 +888,7 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(tmp_pat
         mission="observe child lifecycle",
         allowed_tools=["*"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
     )
@@ -970,7 +1012,7 @@ def test_report_keeps_unmatched_child_tools_trace_only(tmp_path, monkeypatch):
         mission="do not guess child attribution",
         allowed_tools=["*"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
     )
@@ -1082,7 +1124,7 @@ def test_parallel_pre_tool_use_processes_serialize_receipt_chain(tmp_path):
         mission="parallel subagent launch",
         allowed_tools=["Agent"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
     )

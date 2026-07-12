@@ -162,7 +162,7 @@ def _start_jwt_session_with_mission_id(base, private_key, mission_id, policy_sto
         mission_id=mission_id,
         allowed_tools=["read_file", "write_file", "search_files", "list_directory"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=100,
         max_duration_s=600,
     )
@@ -456,7 +456,7 @@ def _start_jwt_session(base, private_key, mission=None):
             mission="comprehensive test",
             allowed_tools=["read_file", "write_file", "search_files", "list_directory"],
             forbidden_tools=["delete_file"],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=100,
             max_duration_s=600,
         )
@@ -638,7 +638,7 @@ def _verify_ollama_multiturn(base, proxy, private_key):
         mission="build a complete Personal Journal API from scratch",
         allowed_tools=["read_file", "write_file", "list_directory", "search_files"],
         forbidden_tools=["delete_file", "execute_shell"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=200,
         max_duration_s=1800,
     )
@@ -866,7 +866,7 @@ def _verify_jwt_delegation_chain(base, proxy, private_key):
         mission="parent mission with delegation",
         allowed_tools=["read_file", "write_file", "search_files", "list_directory"],
         forbidden_tools=["delete_file"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=100,
         max_duration_s=600,
         delegation_allowed=True,

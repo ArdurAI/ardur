@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "f7050ff1acf488b557e62eaeb77b4a1bc267545a138949009f4d8479883d0649"
+source_sha256: "65370e89259e3b45b8d1aae206869f4af1c006f5173f62cd4db69e2f557b957d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -190,7 +190,14 @@ ardur issue --agent-id ID --mission TEXT
             [--ttl-s N] [--keys-dir DIR]
 ```
 
-Prints `{"token": "...", "claims": {...}}` to stdout.
+Prints `{"token": "...", "claims": {...}}` to stdout. An absent or empty
+`resource_scope` grants no resource authority: calls with resource-bearing
+arguments fail closed, while calls with no resource candidate remain eligible
+for the other policy gates. To intentionally permit every resource, pass the
+sole pattern `--resource-scope '**'`. The signed claim is
+`"resource_scope": ["**"]`, and the success JSON includes a `warnings` array
+because this is an explicit unrestricted grant. The `"**"` sentinel cannot be
+combined with another scope pattern.
 
 Empty or whitespace-only `--keys-dir` fails closed before key generation,
 identity validation, or signing. It exits non-zero and writes parseable stdout
@@ -718,8 +725,13 @@ check. Each canonical root produces exact and subtree proxy patterns and is
 also passed to BPF path lowering; the existing kernel-tier and bounded path
 depth limits still apply. Glob patterns and roots outside the working directory
 are rejected before keys or a passport are created. `--no-resource-scope` is
-mutually exclusive with `--resource-scope`; it removes file scope only for a
-mission that is genuinely network-only and relies on the seccomp fallback.
+mutually exclusive with `--resource-scope`. It is an explicit unrestricted
+resource grant at the user-space policy boundary: the signed passport records
+`resource_scope: ["**"]`, and the run summary warns about that authority. The
+flag still omits file operations from kernel-policy lowering so a genuinely
+network-only mission can rely on the seccomp fallback. It must not be described
+as filesystem confinement; use the default or bounded `--resource-scope` roots
+when the mission should be file-scoped.
 
 Safe local example:
 

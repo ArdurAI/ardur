@@ -50,7 +50,7 @@ def _issue_passport(
         mission="MIC conformance test",
         allowed_tools=allowed_tools or ["read_file", "write_file"],
         forbidden_tools=["delete_file"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=10,
         max_duration_s=60,
     )
@@ -458,7 +458,7 @@ class TestConformanceProfileGating:
             mission="No conformance profile set",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=5,
             max_duration_s=60,
         )

@@ -833,6 +833,7 @@ class PersonalHub:
             return {"ok": True, **index[session_key], "existing": True}
 
         mission_payload = _dict(payload.get("mission"))
+        requested_resource_scope = mission_payload.get("resource_scope")
         mission = MissionPassport(
             agent_id=str(mission_payload.get("agent_id") or self._agent_id(source)),
             mission=str(
@@ -844,7 +845,11 @@ class PersonalHub:
                 or ["browser_observe", "desktop_observe", "cli_command", "cli_observe"]
             ),
             forbidden_tools=list(mission_payload.get("forbidden_tools") or []),
-            resource_scope=list(mission_payload.get("resource_scope") or []),
+            resource_scope=(
+                ["**"]
+                if requested_resource_scope is None
+                else list(requested_resource_scope)
+            ),
             max_tool_calls=int(mission_payload.get("max_tool_calls") or 5000),
             max_duration_s=int(mission_payload.get("max_duration_s") or 86400),
             allowed_side_effect_classes=list(

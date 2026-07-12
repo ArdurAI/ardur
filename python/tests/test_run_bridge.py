@@ -28,7 +28,7 @@ import pytest
 from vibap import kernel_correlation as kc
 from vibap import run_bridge
 from vibap.attestation import ATTESTATION_SCHEMA_VERSION, verify_attestation
-from vibap.passport import load_public_key
+from vibap.passport import load_public_key, verify_passport
 from vibap.receipt import RECEIPT_SCHEMA_VERSION, verify_chain
 from vibap.run_bridge import (
     DEFAULT_MAX_DURATION_S,
@@ -914,6 +914,15 @@ def test_no_resource_scope_omits_file_ops_from_lowered_plan(
     assert ops == {OP_NET_CONNECT}
     assert OP_FILE_READ not in ops
     assert OP_FILE_WRITE not in ops
+    passport_token = (tmp_path / "seccomp-net-only-home" / "active_mission.jwt").read_text(
+        encoding="utf-8"
+    ).strip()
+    claims = verify_passport(
+        passport_token,
+        load_public_key(keys_dir=tmp_path / "seccomp-net-only-home" / "keys"),
+    )
+    assert claims["resource_scope"] == ["**"]
+    assert any("explicitly unrestricted resource scope" in note for note in result.notes)
 
 
 def test_ardur_run_enforce_aborts_when_seccomp_listener_never_attaches(

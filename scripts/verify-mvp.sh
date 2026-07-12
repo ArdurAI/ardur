@@ -200,7 +200,7 @@ printf 'Authorization: Bearer %s\n' "$API_TOKEN" > "$AUTH_HEADER_FILE"
 echo "-- Auth and lifecycle --"
 require_check "auth-required metrics returns 401 without a token" check_metrics_requires_auth
 
-MISSION_PAYLOAD='{"mission":{"agent_id":"mvp-verifier","mission":"verify the local governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"max_tool_calls":4}}'
+MISSION_PAYLOAD='{"mission":{"agent_id":"mvp-verifier","mission":"verify the local governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"resource_scope":["**"],"max_tool_calls":4}}'
 ISSUE_RESPONSE="$(post_json /issue "$MISSION_PAYLOAD")"
 PASSPORT="$(printf '%s' "$ISSUE_RESPONSE" | extract_json_string token)"
 require_check "issue a mission passport" test -n "$PASSPORT"

@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "cc53ce73d5dee8aacd02b3e73eb2e03284f8fb24f0823395c546a0c8b9979b57"
+source_sha256: "c84055b87867a7c1c688719806c4c562737ad620ffc2f8f11a3c0aa10440114f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -32,7 +32,9 @@ enforcement, and verifiable evidence.
 ## Core security gates (enforced by the reference proxy)
 
 - tool calls must match declared tools
-- resource access must match declared scopes
+- resource access must match declared scopes; absent or empty
+  `resource_scope` grants no resource authority, and unrestricted access
+  requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
 - KB-JWT nonce replay store and AAT proof-of-possession default-on

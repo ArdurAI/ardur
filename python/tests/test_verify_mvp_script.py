@@ -130,6 +130,7 @@ def test_verifier_uses_current_authenticated_proxy_contract() -> None:
                     "mission": "verify the local governance proxy",
                     "allowed_tools": ["read_file", "delete_file"],
                     "forbidden_tools": ["delete_file"],
+                    "resource_scope": ["**"],
                     "max_tool_calls": 4,
                 }
             },
