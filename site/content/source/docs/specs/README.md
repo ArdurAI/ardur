@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "a7b316ea126911523216841fe88684f6d2ed0216838fe6827642010f72177c1a"
+source_sha256: "30bd1f5cf15d1829f25e726db32ddf70fc30b66c1f4bdee67b05b1662de28384"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -70,7 +70,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Governance telemetry event schema](/__ardur_internal__/repo/docs/specs/governance-telemetry-v0.1.schema.json) | **implemented** | Closed redacted event contract linking each export to a verified receipt, parent hash, signed decision, budget, and source-journal digest |
 | [Governance telemetry golden fixture](/__ardur_internal__/repo/docs/specs/conformance/governance-telemetry-v0.1/events.jsonl) | **implementation fixture** | Canonical redacted PERMIT event used for schema and OTLP projection regression |
 | [Linux governance benchmark report schema](/__ardur_internal__/repo/docs/specs/linux-governance-benchmark-report-v0.1.schema.json) | **implemented** | Closed smoke/stress report separating governance-only, imported evidence, sustained resources, and optional paired sensor measurements |
-| [AuditBench independent evaluation profile v0.1](/__ardur_internal__/source/docs/specs/auditbench-independent-evaluation-v0.1/) | **pipeline implemented; corpus pending** | Strict raw capture, blind two-view annotation, adjudication, content sealing, held-out scoring, and explicit external-human proof boundary |
+| [AuditBench evaluation protocol v0.1](/__ardur_internal__/source/docs/specs/auditbench-evaluation-protocol-v0.1/) | **pipeline implemented; no real study** | Strict raw capture, blind two-view annotation, adjudication, local content-integrity sealing, held-out scoring, and explicit external-human proof boundary |
 | [Runtime evidence portable fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/) | **implementation self-test** | Ephemeral-key signed journal plus normalized/Tetragon/Falco inputs and reports; no private keys, sensor deployment, network dependency, or source-authenticity claim |
 | [Transparency Anchor v0.1 schema](/__ardur_internal__/repo/docs/specs/transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
 | [Transparency Anchor v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |

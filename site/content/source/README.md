@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "67f8980c78305524e926db33f9a7b27340a2b4b349bb208283abe76b7eea385b"
+source_sha256: "ebbf908d76d9586cf8c8b6d6e397d44b1b35ad9c10c7e8f2ac13b469aa9ab4d9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -82,10 +82,12 @@ paired sensor overhead separate. Pull requests run a small shape-only smoke;
 host-specific stress results are manual evidence, not a universal overhead
 claim.
 
-The [AuditBench independent evaluation profile](/__ardur_internal__/source/docs/specs/auditbench-independent-evaluation-v0.1/)
-adds strict raw-capture replay, blind two-view annotations, content sealing, and
-held-out tri-state scoring. The pipeline is implemented; no independently
-labeled headline corpus or comparative result is claimed yet.
+The [AuditBench evaluation protocol](/__ardur_internal__/source/docs/specs/auditbench-evaluation-protocol-v0.1/)
+adds strict raw-capture replay, blind two-view annotations, a local
+content-integrity seal, and held-out tri-state scoring. The pipeline is
+implemented, but it does not authenticate annotators or demonstrate evaluator
+independence. No real annotation study, headline corpus, or comparative result
+is claimed.
 
 [Research](/__ardur_internal__/source/research/) · [Status](/__ardur_internal__/source/status/) · [Coverage Map](/__ardur_internal__/source/docs/coverage-map/) · [Roadmap](/__ardur_internal__/source/roadmap/) · [Media](/__ardur_internal__/source/media-notes/) · [Articles](/__ardur_internal__/source/docs/articles/readme/) · [Docs](/__ardur_internal__/source/docs/readme/) · [Reference](/__ardur_internal__/source/docs/reference/readme/) · [Phase 1 Demo Packet](/__ardur_internal__/source/docs/guides/phase1-demo-packet/) · [Read the Phase 1 Evidence Bundle](/__ardur_internal__/source/docs/guides/read-phase1-evidence-bundle/) · [Evidence Site Source](/__ardur_internal__/source/site/readme/)
 

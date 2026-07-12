@@ -1,4 +1,5 @@
-// auditbench-score seals, verifies, and scores independently labeled studies.
+// auditbench-score creates and verifies local content-integrity seals and
+// scores submitted labels.
 package main
 
 import (
@@ -91,7 +92,7 @@ func runSeal(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("sealed study %s (%s)\n", seal.StudyID, digest)
+	fmt.Printf("wrote unsigned content-integrity seal for study %s (%s)\n", seal.StudyID, digest)
 	return nil
 }
 
@@ -114,7 +115,7 @@ func runVerify(args []string) error {
 	if err := independent.VerifySeal(paths.root, paths.corpus, paths.protocol, paths.prereg, paths.gold, paths.annotations, paths.adjudications, paths.splits, seal); err != nil {
 		return err
 	}
-	fmt.Printf("verified study %s (%s)\n", seal.StudyID, seal.RootSHA256)
+	fmt.Printf("verified local content-integrity seal for study %s (%s)\n", seal.StudyID, seal.RootSHA256)
 	return nil
 }
 
@@ -156,6 +157,12 @@ func runScore(args []string) error {
 	if err := independent.WriteArtifact(*output, report); err != nil {
 		return err
 	}
-	fmt.Printf("scored %s on %s: %d/%d correct\n", report.SUTID, report.Split, report.Correct, report.Scenarios)
+	fmt.Printf(
+		"scored submitted labels for %s on %s using local content-integrity seal: %d/%d correct\n",
+		report.SUTID,
+		report.Split,
+		report.Correct,
+		report.Scenarios,
+	)
 	return nil
 }
