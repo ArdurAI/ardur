@@ -70,6 +70,7 @@ patch = ["subprocess"]
 ardur = "vibap.cli:main"
 ardur-verify = "vibap.offline_verification:main"
 ardur-drp-fixtures = "vibap.drp_conformance:main"
+ardur-policy-conformance = "vibap.policy_conformance:main"
 # Deprecated alias retained for one release cycle to ease migration
 # from the legacy CLI name; emits a deprecation warning on use.
 ardur-proxy = "vibap.cli:main"

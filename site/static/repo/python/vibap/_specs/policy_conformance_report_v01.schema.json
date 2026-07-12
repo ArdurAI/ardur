@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.dev/spec/policy-conformance-report-v0.1.schema.json",
+  "title": "Ardur Agentic Policy Conformance Report v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_schema_version",
+    "bundle_id",
+    "bundle_sha256",
+    "evidence_class",
+    "claim_boundary",
+    "ok",
+    "summary",
+    "scenarios",
+    "not_claimed"
+  ],
+  "properties": {
+    "schema_version": {"const": "ardur.policy_conformance_report.v0.1"},
+    "bundle_schema_version": {"const": "ardur.policy_conformance_bundle.v0.1"},
+    "bundle_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"},
+    "bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evidence_class": {"const": "implementation-self-test"},
+    "claim_boundary": {"type": "string", "minLength": 1, "maxLength": 2048},
+    "ok": {"type": "boolean"},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "failed"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scenario_id",
+          "risk_class",
+          "policy_path",
+          "decision",
+          "reason_code",
+          "receipt_id",
+          "receipt_verification",
+          "verifier_status",
+          "failures"
+        ],
+        "properties": {
+          "scenario_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,95}$"},
+          "risk_class": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"},
+          "policy_path": {"enum": ["native", "derive_child_passport"]},
+          "decision": {"enum": ["PERMIT", "DENY", "ERROR"]},
+          "reason_code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"},
+          "receipt_id": {
+            "oneOf": [
+              {"type": "string", "pattern": "^receipt:[0-9a-f]{32}$"},
+              {"type": "null"}
+            ]
+          },
+          "receipt_verification": {"enum": ["verified", "failed"]},
+          "verifier_status": {"enum": ["pass", "fail"]},
+          "failures": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string", "minLength": 1, "maxLength": 2048}
+          }
+        }
+      }
+    },
+    "not_claimed": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256}
+    }
+  }
+}
