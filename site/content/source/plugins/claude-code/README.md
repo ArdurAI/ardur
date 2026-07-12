@@ -2,7 +2,7 @@
 title: "Ardur Claude Code Plugin"
 description: "This plugin protects Claude Code at the local tool boundary. `PreToolUse` runs"
 source_path: "plugins/claude-code/README.md"
-source_sha256: "3861b480f43df0140bf783bb1c266aec4da76ffb3d15b25b3ddf7543458564de"
+source_sha256: "6b2409fc4a2922a12845c00cb61695025f712585d0be751327fa59a4de77e484"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -159,7 +159,10 @@ profile is a friendly layer over the same capabilities, not a replacement.
 1. `PreToolUse` fires.
 2. Ardur maps the Claude Code tool input into declared telemetry.
 3. Ardur checks the active Mission Passport: allowed tools, forbidden tools,
-   resource scope, cwd, and relevant policy backends.
+   resource scope, cwd, and relevant policy backends. Absolute local scope
+   paths are canonicalized so an in-scope symlink that resolves outside is
+   denied. This pre-dispatch check cannot distinguish hard-link aliases or
+   prevent path replacement before the tool's later filesystem operation.
 4. If permitted, Ardur appends a compliant receipt and lets Claude Code continue
    its normal permission flow.
 5. If denied, Ardur appends a violation receipt and returns

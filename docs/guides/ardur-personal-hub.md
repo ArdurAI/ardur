@@ -82,7 +82,9 @@ complete release artifact.
 
 - `personal-firewall`: allows reads and edits inside the protected folder,
   denies shell and external network tools, blocks common secret-like argument
-  markers, and caps the signed session at 40 governed tool calls.
+  markers, and caps the signed session at 40 governed tool calls. Absolute local
+  paths are canonicalized before the scope decision, so an in-folder symlink
+  that resolves outside is denied.
 - `read-only`: review code without editing files or running commands.
 - `safe-coding`: edit files inside the protected folder, but block shell
   commands.
@@ -98,7 +100,9 @@ The personal session cap is an action budget, not a provider-billing estimate.
 A dollar-denominated cap requires trusted signed cost telemetry from the
 provider adapter. Secret markers are conservative patterns, not universal data
 loss prevention, and allowed actions still pass through the agent's native
-permission flow.
+permission flow. The scope receipt is pre-dispatch path evidence: it cannot
+distinguish a hard-link alias or prevent a path component from being replaced
+between the check and Claude Code's later filesystem operation.
 
 For source installs, `pip install -e python/` installs Ardur's required Python
 dependencies from `python/pyproject.toml`. The development Homebrew formula is

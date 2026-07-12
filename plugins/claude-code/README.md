@@ -142,7 +142,10 @@ profile is a friendly layer over the same capabilities, not a replacement.
 1. `PreToolUse` fires.
 2. Ardur maps the Claude Code tool input into declared telemetry.
 3. Ardur checks the active Mission Passport: allowed tools, forbidden tools,
-   resource scope, cwd, and relevant policy backends.
+   resource scope, cwd, and relevant policy backends. Absolute local scope
+   paths are canonicalized so an in-scope symlink that resolves outside is
+   denied. This pre-dispatch check cannot distinguish hard-link aliases or
+   prevent path replacement before the tool's later filesystem operation.
 4. If permitted, Ardur appends a compliant receipt and lets Claude Code continue
    its normal permission flow.
 5. If denied, Ardur appends a violation receipt and returns

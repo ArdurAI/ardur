@@ -112,6 +112,55 @@ def test_direct_hook_enforces_cumulative_signed_tool_call_budget(tmp_path, monke
     )
 
 
+def test_direct_hook_denies_workspace_symlink_escape_and_signs_violation(
+    tmp_path, monkeypatch
+):
+    from vibap.claude_code_hook import handle_pre_tool_use
+    from vibap.claude_code_report import build_claude_code_report
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (workspace / "escape").symlink_to(outside, target_is_directory=True)
+    keys = tmp_path / "keys"
+    private_key, _public_key = generate_keypair(keys_dir=keys)
+    mission = MissionPassport(
+        agent_id="personal-scope",
+        mission="keep writes inside the configured workspace",
+        allowed_tools=["Write"],
+        resource_scope=[str(workspace), f"{workspace}/*"],
+        cwd=str(workspace),
+        max_tool_calls=10,
+        max_duration_s=600,
+    )
+    token = issue_passport(mission, private_key, ttl_s=600)
+    chain_dir = tmp_path / "chains"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "personal-scope")
+
+    output = handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Write",
+            tool_input={
+                "file_path": str(workspace / "escape" / "stolen.txt"),
+                "content": "must stay local\n",
+            },
+            suffix="symlink-escape",
+        ),
+        keys_dir=keys,
+    )
+
+    assert "resolves outside resource_scope" in _deny_reason(output)
+    assert not (outside / "stolen.txt").exists()
+    report = build_claude_code_report(chain_dir=chain_dir, keys_dir=keys)
+    assert report["totals"]["verdicts"] == {"violation": 1}
+    assert report["chains"][0]["actions"][0]["policies"] == [
+        {"backend": "native", "decision": "Deny"}
+    ]
+
+
 def test_direct_hook_composes_signed_forbid_rules_policy(tmp_path, monkeypatch):
     from vibap.claude_code_hook import handle_pre_tool_use
     from vibap.claude_code_report import build_claude_code_report

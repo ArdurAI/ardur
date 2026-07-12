@@ -49,7 +49,10 @@ The provider-free demo preserves the agent's normal permission prompt for a
 safe workspace read, denies outside-workspace writes, secret-like arguments,
 and external network access, then verifies the signed receipt chain. Its
 session cap is measured in governed tool calls; monetary cost remains unknown
-unless an adapter supplies trusted signed cost telemetry.
+unless an adapter supplies trusted signed cost telemetry. Absolute local scope
+paths are canonicalized before a permit, which rejects symlink escapes; the
+pre-dispatch hook still cannot prove hard-link identity or prevent post-check
+path replacement before the tool opens the path.
 
 Every durable receipt sink also queues an idempotent local transparency-anchor
 sidecar. Network submission is a separate `ardur anchor` operation, and

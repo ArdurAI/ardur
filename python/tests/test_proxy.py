@@ -16,6 +16,85 @@ from vibap.proxy import Decision, _check_resource_scope, _sanitize_value
 
 
 class TestResourceScopeSecurity:
+    def test_existing_symlink_escape_is_rejected_after_lexical_match(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        outside = tmp_path / "outside"
+        workspace.mkdir()
+        outside.mkdir()
+        (workspace / "escape").symlink_to(outside, target_is_directory=True)
+
+        ok, reason = _check_resource_scope(
+            {"file_path": str(workspace / "escape" / "stolen.txt")},
+            resource_scope=[str(workspace), f"{workspace}/*"],
+            cwd=str(workspace),
+        )
+
+        assert not ok
+        assert "resolves outside resource_scope" in reason
+
+    def test_relative_symlink_escape_is_rejected_against_declared_cwd(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        outside = tmp_path / "outside"
+        workspace.mkdir()
+        outside.mkdir()
+        (workspace / "escape").symlink_to(outside, target_is_directory=True)
+
+        ok, reason = _check_resource_scope(
+            {"file_path": "escape/stolen.txt"},
+            resource_scope=[str(workspace), f"{workspace}/*"],
+            cwd=str(workspace),
+        )
+
+        assert not ok
+        assert "resolves outside resource_scope" in reason
+
+    def test_dangling_symlink_escape_is_rejected_for_future_output(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "escape").symlink_to(
+            tmp_path / "outside" / "missing", target_is_directory=True
+        )
+
+        ok, reason = _check_resource_scope(
+            {"file_path": str(workspace / "escape" / "future.txt")},
+            resource_scope=[str(workspace), f"{workspace}/*"],
+            cwd=str(workspace),
+        )
+
+        assert not ok
+        assert "resolves outside resource_scope" in reason
+
+    def test_symlink_loop_fails_closed_after_lexical_match(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "loop").symlink_to(
+            workspace / "loop", target_is_directory=True
+        )
+
+        ok, reason = _check_resource_scope(
+            {"file_path": str(workspace / "loop" / "future.txt")},
+            resource_scope=[str(workspace), f"{workspace}/*"],
+            cwd=str(workspace),
+        )
+
+        assert not ok
+        assert "canonical path resolution failed" in reason
+
+    def test_symlink_that_resolves_within_scope_remains_permitted(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        target = workspace / "target"
+        target.mkdir(parents=True)
+        (workspace / "alias").symlink_to(target, target_is_directory=True)
+
+        ok, reason = _check_resource_scope(
+            {"file_path": str(workspace / "alias" / "future.txt")},
+            resource_scope=[str(workspace), f"{workspace}/*"],
+            cwd=str(workspace),
+        )
+
+        assert ok
+        assert reason == ""
+
     def test_path_hint_list_wrapped_bare_value_is_scope_checked(self):
         ok, reason = _check_resource_scope(
             {"directory": ["hr"]},

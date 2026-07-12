@@ -352,7 +352,9 @@ def run_personal_firewall_demo(
         "verification": report["verification"],
         "temporary_state_removed": True,
         "evidence_boundary": (
-            "configured local Claude Code tool-boundary proof; not provider-hidden, "
+            "configured local Claude Code pre-dispatch tool-boundary proof with "
+            "canonical path checking; hard-link aliases and post-check filesystem "
+            "races remain outside this hook-only evidence, which is not provider-hidden, "
             "kernel, universal secret-detection, or monetary-cost evidence"
         ),
     }
