@@ -7,6 +7,9 @@ All notable changes to Ardur will be documented in this file.
 ### Security
 - Serialize the Linux daemon's BPF policy-map handle lifetime so startup,
   health, in-flight mutations, tier withdrawal, and close cannot race
+- Make the Linux cgroup-ownership verifier independently fail closed when a
+  non-root handshake has no resolvable peer PID, preserving the upstream
+  `SO_PEERCRED` identity gate as defense in depth
 - Pin Biscuit holder verification to a server-owned issuer key, JWT-SVID trust
   bundle, and audience; require configured binding on every presentation; and
   reject caller-supplied roots plus non-`jwt-svid` bundle keys

@@ -3,12 +3,14 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
@@ -141,12 +143,57 @@ func TestVerifyRegisterSessionCgroup_BogusRootRejected(t *testing.T) {
 	}
 }
 
-func TestVerifyRegisterSessionCgroup_PeerNotVisibleSkips(t *testing.T) {
-	// If the peer itself is not visible in /proc (cross-PID-namespace daemon),
-	// neither ancestry nor cgroup ownership can be established — skip rather
-	// than break such a deployment.
-	if err := verifyRegisterSessionCgroup(hsWithPID(1<<30), regReq(1, 12345), quietLogger()); err != nil {
-		t.Fatalf("unresolvable peer should skip the check, got: %v", err)
+func TestVerifyRegisterSessionCgroup_PeerNotVisibleRejected(t *testing.T) {
+	// If the peer itself is not visible in /proc, neither ancestry nor cgroup
+	// ownership can be established. Accepting the registration would restore
+	// the cross-workload enforcement path closed by issue #119, so fail closed.
+	err := verifyRegisterSessionCgroup(hsWithPID(1<<30), regReq(1, 12345), quietLogger())
+	if err == nil {
+		t.Fatal("unresolvable non-root peer should be rejected, not granted enforce rights")
+	}
+	if !strings.Contains(err.Error(), "not visible in the daemon /proc view") {
+		t.Fatalf("unresolvable peer error = %q, want explicit daemon /proc visibility failure", err)
+	}
+}
+
+func TestVerifyRegisterSessionCgroup_PeerPIDUnavailableRejected(t *testing.T) {
+	// Cross-namespace peer-credential translation can yield no usable PID in
+	// the receiver's namespace. UID authorization alone cannot bind that peer
+	// to root_pid or cgroup_id, so an unavailable PID must also fail closed.
+	err := verifyRegisterSessionCgroup(hsWithPID(0), regReq(1, 12345), quietLogger())
+	if err == nil {
+		t.Fatal("non-root peer without a usable peer pid should be rejected")
+	}
+	if !strings.Contains(err.Error(), "peer pid is unavailable") {
+		t.Fatalf("missing peer pid error = %q, want explicit unavailable-pid failure", err)
+	}
+}
+
+func TestHandleAuthorizedRequest_PeerNotVisibleDoesNotRegisterSession(t *testing.T) {
+	d := newTestDaemon(t)
+	d.cgroupVerifier = verifyRegisterSessionCgroup
+	const sessionID = "proc-invisible-peer"
+	req := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    sessionID,
+			RootPID:      1,
+			CgroupID:     12345,
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   60,
+		},
+	}
+
+	resp := d.handleAuthorizedRequest(context.Background(), req, hsWithPID(1<<30))
+	if resp.OK {
+		t.Fatalf("register_session for an unresolvable non-root peer succeeded: %+v", resp)
+	}
+	if !strings.Contains(resp.Error, "peer pid") || !strings.Contains(resp.Error, "not visible") {
+		t.Fatalf("register_session error = %q, want explicit peer-pid visibility failure", resp.Error)
+	}
+	if _, registered := d.registry.Session(sessionID); registered {
+		t.Fatal("rejected unresolvable peer was persisted in the session registry")
 	}
 }
 

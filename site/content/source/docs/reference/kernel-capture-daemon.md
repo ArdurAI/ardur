@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "059f077769377f17ca3c6355d1bd8720cfc1c25c56d50c2eb94ac7fc5c511029"
+source_sha256: "f042c10a9495d5f353843d0f40540a919e7496b020e14547c0d0bef8b3fdc9e6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -141,6 +141,15 @@ the new session. Session end and TTL expiry first retire the userspace route and
 wait for already-matched evidence work, then remove the cgroup. Multiple active
 sessions retain independent entries. The BPF allowlist capacity is 4,096,
 matching the daemon session registry's active-session limit.
+
+For non-root socket peers, registration also fails closed unless the daemon can
+resolve the kernel-supplied `SO_PEERCRED` PID in its `/proc` view, verify that
+`root_pid` descends from that peer, and confirm that `root_pid` occupies the
+claimed cgroup. Run the enforcement daemon in a PID namespace that can observe
+its clients (normally the host/ancestor namespace, with a matching procfs
+mount). A topology that cannot map the peer PID is rejected rather than granted
+unverified cgroup-enforcement rights; there is no implicit cross-namespace
+bypass.
 
 If startup reconciliation itself fails, the daemon leaves filtering disabled
 and continues the prior permissive capture behavior rather than enabling a

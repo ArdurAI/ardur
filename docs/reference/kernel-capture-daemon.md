@@ -125,6 +125,15 @@ wait for already-matched evidence work, then remove the cgroup. Multiple active
 sessions retain independent entries. The BPF allowlist capacity is 4,096,
 matching the daemon session registry's active-session limit.
 
+For non-root socket peers, registration also fails closed unless the daemon can
+resolve the kernel-supplied `SO_PEERCRED` PID in its `/proc` view, verify that
+`root_pid` descends from that peer, and confirm that `root_pid` occupies the
+claimed cgroup. Run the enforcement daemon in a PID namespace that can observe
+its clients (normally the host/ancestor namespace, with a matching procfs
+mount). A topology that cannot map the peer PID is rejected rather than granted
+unverified cgroup-enforcement rights; there is no implicit cross-namespace
+bypass.
+
 If startup reconciliation itself fails, the daemon leaves filtering disabled
 and continues the prior permissive capture behavior rather than enabling a
 partial allowlist that could hide governed events. It logs the degradation; the
