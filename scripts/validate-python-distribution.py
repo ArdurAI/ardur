@@ -47,6 +47,7 @@ REQUIRED_RUNTIME_FILES = (
     PurePosixPath("vibap/linux_benchmark.py"),
     PurePosixPath("vibap/offline_verification.py"),
     PurePosixPath("vibap/offline_verification_fixture.py"),
+    PurePosixPath("vibap/policy_conformance.py"),
     PurePosixPath("vibap/runtime_evidence.py"),
     PurePosixPath("vibap/transparency.py"),
 )
@@ -198,6 +199,7 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
             == {
                 "ardur": "vibap.cli:main",
                 "ardur-drp-fixtures": "vibap.drp_conformance:main",
+                "ardur-policy-conformance": "vibap.policy_conformance:main",
                 "ardur-proxy": "vibap.cli:main",
                 "ardur-verify": "vibap.offline_verification:main",
             },

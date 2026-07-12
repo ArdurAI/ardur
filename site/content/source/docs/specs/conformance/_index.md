@@ -18,4 +18,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`aat-draft01-v0.2/`](/__ardur_internal__/source/docs/specs/conformance/aat-draft01-v0.2/)
 - [`drp-v0.1/`](/__ardur_internal__/source/docs/specs/conformance/drp-v0.1/)
 - [`governance-telemetry-v0.1/`](/__ardur_internal__/source/docs/specs/conformance/governance-telemetry-v0.1/)
+- [`policy-v0.1/`](/__ardur_internal__/source/docs/specs/conformance/policy-v0.1/)
 - [`runtime-evidence-v0.1/`](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/)

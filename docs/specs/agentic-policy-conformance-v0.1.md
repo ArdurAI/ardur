@@ -1,0 +1,54 @@
+# Agentic Policy Conformance Profile v0.1
+
+## Purpose
+
+This profile defines a compact regression contract for Ardur's runtime action
+governance. It is intentionally local and deterministic: a contributor can run
+the same policy and receipt checks without a model provider, API key, network
+service, or private fixture key.
+
+## Evidence Boundary
+
+The fixture's provenance fields describe why a modeled agent requested an
+action. Ardur evaluates the action at its tool boundary. The profile does not
+claim semantic prompt-injection detection, malware analysis, model-behavior
+coverage, host-effect observation, or independent certification.
+
+## Required Coverage
+
+The public v0.1 bundle includes a permitted read baseline and denials for:
+
+- indirect prompt influence resulting in an external send;
+- confidential-data exfiltration through a forbidden tool;
+- unexpected destructive tool use;
+- child authority widening through `derive_child_passport`;
+- use after the mission tool-call budget is exhausted;
+- an unsafe external network write; and
+- untrusted artifact influence resulting in a state-changing upload.
+
+## Verification Contract
+
+For every scenario, the runner MUST:
+
+1. validate the closed bundle schema with bounded, duplicate-safe JSON parsing;
+2. execute the declared production policy path;
+3. compare the actual decision and stable reason code with the fixture;
+4. verify the P-256 Execution Receipt signature and schema offline;
+5. bind the receipt to the scenario grant, tool, RFC 8785 arguments hash,
+   verdict, reason, and provenance fields; and
+6. emit a closed report row containing scenario id, risk class, policy path,
+   decision, reason code, receipt id, receipt-verification state, verifier
+   status, and bounded diagnostics.
+
+Only an all-pass report has `ok: true`. Invalid input is an invocation error;
+policy, expectation, or receipt failures are scenario failures.
+
+## Fixture Key Handling
+
+The generator creates an ephemeral P-256 signing key in memory. It persists the
+public key and signed receipts only. Committed bundles MUST NOT contain private
+keys, environment values, live credentials, realistic confidential payloads,
+or raw attack text.
+
+The portable fixture bundle and contributor procedure are under
+[`conformance/policy-v0.1/`](./conformance/policy-v0.1/README.md).

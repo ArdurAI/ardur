@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "dcde77e995049c18ce58d5639be43c54e946d0b3e6b7fc8f903650056d882f72"
+source_sha256: "a7b316ea126911523216841fe88684f6d2ed0216838fe6827642010f72177c1a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -47,6 +47,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
 | [Governance Telemetry Profile v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) | **implemented verified export** | Signed-chain-first redacted JSONL plus OTLP/HTTP JSON traces/logs with deterministic correlation IDs; not a collector, SIEM, delivery guarantee, or vendor connector |
 | [Tool-Server Preflight v0.1](/__ardur_internal__/source/docs/specs/tool-server-preflight-v0.1/) | **implemented static analysis** | Strict JSON MCP/tool-server config scan, redacted deterministic report, CI threshold exits, and deny-oriented capability/policy skeleton; not runtime safety proof |
+| [Agentic Policy Conformance Profile v0.1](/__ardur_internal__/source/docs/specs/agentic-policy-conformance-v0.1/) | **implemented self-test** | Eight no-key runtime-policy/delegation scenarios with offline signed-receipt binding; provenance context is not semantic content detection |
 | [Execution Receipt EAT/CWT Profile](/__ardur_internal__/source/docs/specs/execution-receipt-eat-profile-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](/__ardur_internal__/source/docs/specs/idm-extension-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](/__ardur_internal__/source/docs/specs/revocation-v0.1/) | **migrated** | Public-import annotated; clean-break rename applied |
@@ -59,6 +60,9 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Ardur DRP Profile v0.1 fixture](/__ardur_internal__/repo/docs/specs/fixtures/ardur-drp-profile-v0.1-chain.json) | **implementation fixture** | Organic root/child/grandchild signatures, external public trust/context, and self-verification report; not independent conformance |
 | [DRP implementation fixture bundle schema](/__ardur_internal__/repo/docs/specs/drp-conformance-bundle-v0.1.schema.json) | **implemented** | Closed portable scenario, trust, expectation, and external-status contract |
 | [DRP implementation fixture report schema](/__ardur_internal__/repo/docs/specs/drp-implementation-fixture-report-v0.1.schema.json) | **implemented** | Closed deterministic scenario result, verifier status, and bundle-digest contract |
+| [Agentic policy conformance bundle schema](/__ardur_internal__/repo/docs/specs/policy-conformance-bundle-v0.1.schema.json) | **implemented** | Closed policy path, provenance, mission claim, action, expectation, and signed-receipt fixture contract |
+| [Agentic policy conformance report schema](/__ardur_internal__/repo/docs/specs/policy-conformance-report-v0.1.schema.json) | **implemented** | Closed scenario decision, reason, receipt-verification, diagnostics, and summary contract |
+| [Agentic policy portable fixtures](/__ardur_internal__/source/docs/specs/conformance/policy-v0.1/readme/) | **implementation self-test** | Safe baseline plus seven risk classes; deterministic, no network or private fixture keys |
 | [DRP portable implementation fixtures](/__ardur_internal__/source/docs/specs/conformance/drp-v0.1/readme/) | **implementation self-test** | Seven signed deterministic scenarios and report; no private keys, network dependency, IETF claim, or independent pass |
 | [AAT draft-01 DG v0.2 fixture](/__ardur_internal__/source/docs/specs/conformance/aat-draft01-v0.2/readme/) | **implementation self-test** | Deterministic organic chain and audience-bound PoP; no private keys, IETF claim, or independent pass |
 | [Runtime evidence event schema](/__ardur_internal__/repo/docs/specs/runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
