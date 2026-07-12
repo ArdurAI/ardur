@@ -15,6 +15,8 @@ import hashlib
 import json
 import os
 import re
+import stat
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -41,6 +43,8 @@ CHAIN_FILENAME = "receipts.jsonl"
 SUBAGENT_REGISTRY_FILENAME = "subagents.jsonl"
 CLAUDE_CODE_VISIBILITY_FULL = "full"
 HOOK_INPUT_MAX_CHARS = 1024 * 1024
+HOOK_STATE_MAX_BYTES = 16 * 1024 * 1024
+HOOK_STATE_MAX_RECEIPTS = 8192
 _SAFE_TRACE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 
 
@@ -545,36 +549,150 @@ def _backfill_telemetry_fields(receipt_obj: Any, arguments: Mapping[str, Any]) -
         receipt_obj.instruction_bearing = bool(instruction_bearing)
 
 
-def _evaluate_native_policy(
+def _evaluate_composed_policy(
     event: Any,
     claims: dict[str, Any],
+    *,
+    session_state: Mapping[str, Any] | None = None,
 ) -> "tuple[str, list[Any]]":
-    """Run the native backend; return (final_decision_str, decisions_list).
-
-    Only the native backend runs here — forbid_rules and other additional
-    backends are driven by mission-declared ``additional_policies`` in the
-    full proxy, not as a default. Calling forbid_rules without a valid
-    mission-provided policy_spec (including a SHA-256 integrity hash) would
-    unconditionally Deny every call.
-    """
-    from .policy_backend import compose_decisions, get_backend, timed_evaluate
-
-    native_backend = get_backend("native")
-    decision = timed_evaluate(
-        native_backend,
-        tool_name=event.tool_name,
-        arguments=event.arguments,
-        principal=event.actor,
-        target=event.target,
-        # Match the proxy's shared_context shape: key is "passport", not
-        # "passport_claims". The NativeBackend reads context["passport"] to
-        # access allowed_tools, forbidden_tools, resource_scope, etc.
-        context={"passport": claims, "session": {}},
-        policy_spec={},
+    """Evaluate native and mission-declared policy backends with deny-wins."""
+    from .policy_backend import (
+        PolicyDecision,
+        compose_decisions,
+        get_backend,
+        timed_evaluate,
     )
-    decisions = [decision]
+
+    context = {
+        "passport": claims,
+        "session": dict(session_state or {}),
+        "action_class": event.action_class,
+        "resource_family": event.resource_family,
+        "side_effect_class": event.side_effect_class,
+        "policy_metadata": {
+            "action_class": event.action_class,
+            "resource_family": event.resource_family,
+            "side_effect_class": event.side_effect_class,
+        },
+    }
+    decisions: list[Any] = []
+    additional = claims.get("additional_policies", [])
+    if not isinstance(additional, list):
+        additional = [{"backend": "invalid_additional_policies"}]
+    specs: list[Mapping[str, Any]] = [
+        {"backend": "native", "label": "ardur_builtin"}
+    ]
+    for item in additional:
+        specs.append(
+            item
+            if isinstance(item, Mapping)
+            else {"backend": "invalid_additional_policy_entry"}
+        )
+    for spec in specs:
+        backend_name = str(spec.get("backend", ""))
+        label = str(spec.get("label", ""))
+        try:
+            backend = get_backend(backend_name)
+        except KeyError:
+            decisions.append(
+                PolicyDecision(
+                    backend=backend_name or "unknown",
+                    label=label,
+                    decision="Deny",
+                    reasons=(f"unknown policy backend: {backend_name or '<empty>'}",),
+                    eval_ms=0.0,
+                )
+            )
+            continue
+        decisions.append(
+            timed_evaluate(
+                backend,
+                tool_name=event.tool_name,
+                arguments=event.arguments,
+                principal=event.actor,
+                target=event.target,
+                context=context,
+                policy_spec={} if backend_name == "native" else dict(spec),
+            )
+        )
     final, _denier = compose_decisions(decisions)
     return final, decisions
+
+
+def _verified_pretool_session_state_unlocked(
+    state: ChainState,
+    public_key: Any,
+    passport_claims: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Rebuild cumulative hook budget state from the verified receipt chain."""
+    from .receipt import verify_chain
+
+    tokens = []
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(state.file, flags)
+    except FileNotFoundError:
+        fd = None
+    if fd is not None:
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise ValueError("Claude Code receipt chain is not a regular file")
+            raw = handle.read(HOOK_STATE_MAX_BYTES + 1)
+        if len(raw) > HOOK_STATE_MAX_BYTES:
+            raise ValueError("Claude Code receipt chain exceeds the verification limit")
+        tokens = [line.strip() for line in raw.decode("utf-8").splitlines() if line.strip()]
+        if len(tokens) > HOOK_STATE_MAX_RECEIPTS:
+            raise ValueError("Claude Code receipt chain has too many receipts")
+    receipt_claims = verify_chain(tokens, public_key, verify_expiry=False) if tokens else []
+    permitted_pre = [
+        claim
+        for claim in receipt_claims
+        if str(claim.get("step_id", "")).endswith(":pre")
+        and claim.get("verdict") == "compliant"
+    ]
+    by_class: dict[str, int] = {}
+    for claim in permitted_pre:
+        side_effect = str(claim.get("side_effect_class", "none"))
+        by_class[side_effect] = by_class.get(side_effect, 0) + 1
+    try:
+        issued_at = float(passport_claims.get("iat", time.time()))
+    except (TypeError, ValueError):
+        issued_at = time.time()
+    return {
+        "tool_call_count": len(permitted_pre),
+        "tool_call_count_by_class": by_class,
+        "side_effect_counts": by_class,
+        "delegated_budget_reserved": 0,
+        "elapsed_s": max(0.0, time.time() - issued_at),
+    }
+
+
+def _hook_budget_evidence(
+    *,
+    passport_claims: Mapping[str, Any],
+    session_state: Mapping[str, Any],
+    event: Any,
+    permitted: bool,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    ceiling = max(0, int(passport_claims.get("max_tool_calls", 0)))
+    used_before = max(0, int(session_state.get("tool_call_count", 0)))
+    amount = 1 if permitted else 0
+    remaining_before = max(0, ceiling - used_before)
+    remaining_after = max(0, remaining_before - amount)
+    return (
+        {
+            "operation": "consume" if permitted else "reject",
+            "resource": "tool_call",
+            "amount": amount,
+            "unit": "tool_call",
+            "remaining_for_parent": remaining_before,
+            "remaining_after": remaining_after,
+            "used_total": used_before,
+            "reserved_total": 0,
+            "side_effect_class": event.side_effect_class,
+        },
+        {"tool_calls": remaining_after},
+    )
 
 
 def _policy_decision_dicts(decisions: list[Any]) -> list[dict[str, Any]]:
@@ -614,6 +732,7 @@ def _emit_chained_receipt(
     hook_input: Mapping[str, Any] | None = None,
     measurements: Mapping[str, Any] | None = None,
     subagent_record: Mapping[str, Any] | None = None,
+    budget_remaining: Mapping[str, int] | None = None,
 ) -> Any:
     """Build, sign, and append one receipt to the per-trace chain.
 
@@ -624,48 +743,66 @@ def _emit_chained_receipt(
     ``build_receipt`` and ``sign_receipt`` to land the digest inside the
     signed payload.
     """
-    from .receipt import build_receipt, sign_receipt
-
     private_key = load_private_key(keys_dir=keys_dir)
     state = resolve_chain_state(trace_id=trace_id)
     with _locked(state):
-        # Parent lookup and append must be in one critical section. Claude Code
-        # can dispatch parallel subagents, producing multiple hook processes at
-        # the same time; a split read/sign/append lets several receipts become
-        # independent roots and breaks chain verification.
-        parent_hash = _strip_hash_prefix(_previous_receipt_hash_unlocked(state))
-        if decisions:
-            event.policy_decisions = _policy_decision_dicts(decisions)
-        receipt_obj = build_receipt(
-            decision_enum,
-            event,
-            parent_hash,
-            # Pass None so build_receipt calls _signed_policy_decisions internally,
-            # which normalises event.policy_decisions to the schema-valid
-            # {"backend","decision","reason"} shape. Raw PolicyDecision.to_dict()
-            # output carries extra fields ("label", "reasons") that fail the
-            # receipt schema validator if passed through directly.
-            policy_decisions=None,
+        return _emit_chained_receipt_unlocked(
+            state=state,
+            private_key=private_key,
+            decision_enum=decision_enum,
+            event=event,
+            decisions=decisions,
             reason=reason,
-        )
-        # Backfill the four content-class telemetry fields from arguments onto
-        # the receipt's first-class optional fields. Without this, those fields
-        # pass the proxy gate (which reads them from arguments) but never land
-        # in the signed receipt payload that auditors verify.
-        _backfill_telemetry_fields(receipt_obj, event.arguments)
-        _attach_claude_code_measurements(
-            receipt_obj,
-            hook_input or {},
             trace_id=trace_id,
-            tool_name=str(getattr(event, "tool_name", "")),
-            metadata=measurements,
+            hook_input=hook_input,
+            measurements=measurements,
+            subagent_record=subagent_record,
+            budget_remaining=budget_remaining,
         )
-        signed = sign_receipt(receipt_obj, private_key)
-        if subagent_record is not None:
-            record = dict(subagent_record)
-            record["receipt_id"] = receipt_obj.receipt_id
-            _append_subagent_event_unlocked(state, record)
-        _append_receipt_unlocked(state, signed)
+
+
+def _emit_chained_receipt_unlocked(
+    *,
+    state: ChainState,
+    private_key: Any,
+    decision_enum: Any,
+    event: Any,
+    decisions: list,
+    reason: str,
+    trace_id: str,
+    hook_input: Mapping[str, Any] | None = None,
+    measurements: Mapping[str, Any] | None = None,
+    subagent_record: Mapping[str, Any] | None = None,
+    budget_remaining: Mapping[str, int] | None = None,
+) -> Any:
+    """Append one receipt while the caller holds the trace lock."""
+    from .receipt import build_receipt, sign_receipt
+
+    parent_hash = _strip_hash_prefix(_previous_receipt_hash_unlocked(state))
+    if decisions:
+        event.policy_decisions = _policy_decision_dicts(decisions)
+    receipt_obj = build_receipt(
+        decision_enum,
+        event,
+        parent_hash,
+        policy_decisions=None,
+        reason=reason,
+        budget_remaining=dict(budget_remaining or {}),
+    )
+    _backfill_telemetry_fields(receipt_obj, event.arguments)
+    _attach_claude_code_measurements(
+        receipt_obj,
+        hook_input or {},
+        trace_id=trace_id,
+        tool_name=str(getattr(event, "tool_name", "")),
+        metadata=measurements,
+    )
+    signed = sign_receipt(receipt_obj, private_key)
+    if subagent_record is not None:
+        record = dict(subagent_record)
+        record["receipt_id"] = receipt_obj.receipt_id
+        _append_subagent_event_unlocked(state, record)
+    _append_receipt_unlocked(state, signed)
     return receipt_obj
 
 
@@ -688,7 +825,7 @@ def handle_pre_tool_use(
         trace context to chain into).
     """
     from .claude_code_telemetry import map_tool_call
-    from .proxy import Decision, PolicyEvent
+    from .proxy import Decision, PolicyEvent, _legacy_denial_reason
 
     try:
         claims = load_active_passport(keys_dir=keys_dir)
@@ -706,60 +843,81 @@ def handle_pre_tool_use(
         arguments=arguments,
         trace_id=trace_id,
     )
-    final, decisions = _evaluate_native_policy(event, claims)
+    private_key = load_private_key(keys_dir=keys_dir)
+    state = resolve_chain_state(trace_id=trace_id)
+    try:
+        with _locked(state):
+            session_state = _verified_pretool_session_state_unlocked(
+                state,
+                private_key.public_key(),
+                claims,
+            )
+            final, decisions = _evaluate_composed_policy(
+                event,
+                claims,
+                session_state=session_state,
+            )
+            budget_delta, budget_remaining = _hook_budget_evidence(
+                passport_claims=claims,
+                session_state=session_state,
+                event=event,
+                permitted=final == "Allow",
+            )
+            event.budget_delta = budget_delta
 
-    if final == "Deny":
-        denier = next(
-            (d for d in decisions if d.decision == "Deny"),
-            None,
-        )
-        reasons = list(denier.reasons) if denier else ["denied by composed policy"]
-        reason_text = "; ".join(reasons)
+            if final == "Deny":
+                denier = next(
+                    (d for d in decisions if d.decision == "Deny"),
+                    None,
+                )
+                reasons = list(denier.reasons) if denier else ["denied by composed policy"]
+                reason_text = "; ".join(reasons)
+                deny_event = PolicyEvent(
+                    timestamp=event.timestamp,
+                    step_id=event.step_id,
+                    actor=event.actor,
+                    verifier_id=event.verifier_id,
+                    tool_name=event.tool_name,
+                    arguments=event.arguments,
+                    action_class=event.action_class,
+                    target=event.target,
+                    resource_family=event.resource_family,
+                    side_effect_class=event.side_effect_class,
+                    decision=Decision.DENY,
+                    reason=reason_text,
+                    passport_jti=event.passport_jti,
+                    trace_id=event.trace_id,
+                    denial_reason=_legacy_denial_reason(Decision.DENY, reason_text),
+                    budget_delta=budget_delta,
+                )
+                _emit_chained_receipt_unlocked(
+                    state=state,
+                    private_key=private_key,
+                    decision_enum=Decision.DENY,
+                    event=deny_event,
+                    decisions=decisions,
+                    reason=reason_text,
+                    trace_id=trace_id,
+                    hook_input=hook_input,
+                    budget_remaining=budget_remaining,
+                )
+                return _pre_tool_use_deny_output(f"ardur: blocked - {reason_text}")
 
-        # Reconstruct the event with the actual deny verdict so the
-        # receipt's ER claims reflect what really happened. Preserve
-        # `denial_reason` from the original event so any DenialReason
-        # the backend set propagates into receipt.internal_denial_code
-        # rather than collapsing to the "unknown" fallback.
-        deny_event = PolicyEvent(
-            timestamp=event.timestamp,
-            step_id=event.step_id,
-            actor=event.actor,
-            verifier_id=event.verifier_id,
-            tool_name=event.tool_name,
-            arguments=event.arguments,
-            action_class=event.action_class,
-            target=event.target,
-            resource_family=event.resource_family,
-            side_effect_class=event.side_effect_class,
-            decision=Decision.DENY,
-            reason=reason_text,
-            passport_jti=event.passport_jti,
-            trace_id=event.trace_id,
-            denial_reason=event.denial_reason,
-            budget_delta=event.budget_delta,
+            receipt_obj = _emit_chained_receipt_unlocked(
+                state=state,
+                private_key=private_key,
+                decision_enum=Decision.PERMIT,
+                event=event,
+                decisions=decisions,
+                reason="allowed by composed policy",
+                trace_id=trace_id,
+                hook_input=hook_input,
+                budget_remaining=budget_remaining,
+            )
+    except Exception:  # noqa: BLE001 - hook boundary must deny on policy/chain failure
+        return _pre_tool_use_deny_output(
+            "ardur: blocked - signed receipt chain is unavailable or invalid"
         )
-        _emit_chained_receipt(
-            decision_enum=Decision.DENY,
-            event=deny_event,
-            decisions=decisions,
-            reason=reason_text,
-            trace_id=trace_id,
-            keys_dir=keys_dir,
-            hook_input=hook_input,
-        )
-        return _pre_tool_use_deny_output(f"ardur: blocked - {reason_text}")
-
-    # Allow: build + sign + chain receipt via the shared helper.
-    receipt_obj = _emit_chained_receipt(
-        decision_enum=Decision.PERMIT,
-        event=event,
-        decisions=decisions,
-        reason="allowed by composed policy",
-        trace_id=trace_id,
-        keys_dir=keys_dir,
-        hook_input=hook_input,
-    )
     return {
         "continue": True,
         "systemMessage": f"ardur: allowed (receipt {receipt_obj.receipt_id})",

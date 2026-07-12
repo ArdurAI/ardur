@@ -27,6 +27,12 @@ pip install -e python/
 ardur profile init --template read-only --path ARDUR.md
 ```
 
+To see the conservative personal flow before configuring Claude Code, run:
+
+```bash
+ardur personal-firewall demo
+```
+
 Open `ARDUR.md` in any text editor:
 
 ```markdown
@@ -109,6 +115,9 @@ Claim boundary — per-platform numbers:
 
 ## Built-In Options
 
+- `ardur profile init --template personal-firewall`: workspace-scoped reads
+  and edits, common secret-like argument blocks, no shell/network tools, and a
+  signed 40-action session cap.
 - `ardur profile init --template read-only`: safest first run. Allows reading
   and searching only.
 - `ardur profile init --template safe-coding`: allows local file edits inside
@@ -117,6 +126,12 @@ Claim boundary — per-platform numbers:
   a Markdown profile.
 - `ardur protect claude-code --scope . --mode safe-coding`: flag-based setup
   for technical users.
+- `ardur protect claude-code --scope . --mode personal-firewall`: the same
+  native capability defaults without a Markdown profile; use the profile when
+  you also want its secret-like argument rules.
+
+The action cap is enforced in governed tool calls. Ardur does not infer a
+dollar cost when Claude Code supplies no trusted signed billing telemetry.
 
 Advanced users can still use `ardur issue`, `ARDUR_MISSION_PASSPORT`,
 `ARDUR_CC_HOOK_DIR`, and custom Mission Passport fields directly. The Markdown

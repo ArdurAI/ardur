@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from vibap.ardur_profile import InvalidProfilePathError, load_ardur_profile, write_profile_template
+from vibap.backed_policy_store import FileBackedPolicyStore
 from vibap.cli import (
     claude_code_doctor,
     cmd_profile_init,
@@ -242,6 +243,52 @@ Duration: 2h
     assert parsed.max_duration_s == 7200
     assert parsed.allowed_tools == ["Read", "Glob", "Grep"]
     assert parsed.forbidden_tools == ["Bash", "Write"]
+
+
+def test_personal_firewall_profile_embeds_canonical_policy_and_store_key(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    profile = write_profile_template(
+        project / "ARDUR.md",
+        template="personal-firewall",
+    )
+    parsed = load_ardur_profile(profile)
+
+    assert parsed.allowed_tools == ["Read", "Glob", "Grep", "Edit", "MultiEdit", "Write"]
+    assert parsed.forbidden_tools == ["Bash", "WebFetch", "WebSearch"]
+    assert parsed.max_tool_calls == 40
+    assert parsed.forbid_rules[0]["forbid_when"]["arg_contains"] == [
+        "api_key=",
+        "api-key=",
+        "access_token=",
+        "authorization: bearer",
+        "password=",
+        "BEGIN PRIVATE KEY",
+        "AKIA",
+        "ghp_",
+        "github_pat_",
+        "xoxb-",
+    ]
+
+    home = tmp_path / "home"
+    keys = tmp_path / "keys"
+    result = protect_claude_code(
+        _protect_args(profile=profile, home=home, keys_dir=keys)
+    )
+    claims = verify_passport(
+        Path(str(result["active_passport"])).read_text().strip(),
+        load_public_key(keys),
+    )
+
+    policies = claims["additional_policies"]
+    assert policies[0]["backend"] == "forbid_rules"
+    assert len(policies[0]["policy_sha256"]) == 64
+    assert FileBackedPolicyStore(home).get_policies(
+        mission_id=claims["mission_id"]
+    ) == policies
 
 
 def test_protect_claude_code_from_profile_writes_verifiable_passport(tmp_path):

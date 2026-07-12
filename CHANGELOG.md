@@ -13,6 +13,8 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Personal action-firewall profile and one-command provider-free ASK/DENY proof
+- Readable Claude Code action summaries with signed action-budget evidence
 - Execution Receipt v0.2 schema, embedded package copy, and canonical golden fixture
 - Comprehensive E2E showcase test suite (28 tests, 7 layers)
 - Live adversarial scoreboard and continuous harness
@@ -32,6 +34,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Enforce cumulative direct-hook tool-call budgets from verified receipt chains
+- Compose mission-declared policy backends in the direct Claude Code hook
+- Canonicalize persisted forbid-rule hashes and key them by actual mission ID
 - CI baseline repair after AskUserQuestion landing
 - Claude AskUserQuestion hash handling
 - Gemini hook contract aligned with CLI 0.44.1

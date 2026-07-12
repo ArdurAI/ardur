@@ -21,6 +21,9 @@ FRIENDLY_TOOL_ALIASES = {
     "shell commands": ["Bash"],
     "run commands": ["Bash"],
     "bash": ["Bash"],
+    "external network access": ["WebFetch", "WebSearch"],
+    "external network": ["WebFetch", "WebSearch"],
+    "network access": ["WebFetch", "WebSearch"],
 }
 
 PROFILE_TEMPLATES = {
@@ -68,6 +71,26 @@ Duration: 1d
 #   action == Action::"read_file",
 #   resource is Resource
 # ) when { resource.path like "/data/*" };
+""",
+    "personal-firewall": """# Ardur Personal Action Firewall
+Mode: personal firewall
+Mission: Help inside this project while keeping risky actions local and reviewable.
+Protect folder: .
+Max tool calls: 40
+Duration: 4h
+
+## Allow
+- Read files
+- Search files
+- Edit files
+- Write files
+
+## Block
+- Run shell commands
+- External network access
+
+## Forbid Rules
+- personal_secret_like_argument: forbid_when arg_contains api_key=, api-key=, access_token=, authorization: bearer, password=, BEGIN PRIVATE KEY, AKIA, ghp_, github_pat_, xoxb-
 """,
 }
 
@@ -301,7 +324,7 @@ def _parse_forbid_rule_items(items: list[str]) -> list[dict[str, Any]]:
 
 
 def _set_predicate(dst: dict[str, Any], key: str, raw: str) -> None:
-    if key == "tool_name_in":
+    if key in {"tool_name_in", "arg_contains"}:
         dst[key] = [v.strip() for v in raw.split(",") if v.strip()]
     else:
         dst[key] = raw.rstrip(",")
