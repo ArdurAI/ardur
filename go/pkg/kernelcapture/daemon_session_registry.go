@@ -30,14 +30,22 @@ type DaemonSessionClock func() time.Time
 // It is intentionally metadata-only: it does not claim cgroup creation, BPF map
 // mutation, process execution, or live kernel enforcement.
 type DaemonSessionRecord struct {
-	SessionID       string
-	MissionID       string
-	TraceID         string
-	RootPID         uint32
-	PIDNamespaceID  uint32
-	CgroupID        uint64
-	EventClasses    []string
-	HandoffMetadata map[string]any
+	SessionID string
+	MissionID string
+	TraceID   string
+	// RegistrationGeneration is a daemon-local monotonic identity for this
+	// specific registration lifetime. Session IDs may be reused after end or
+	// expiry, so the string alone cannot prove two lookups saw the same record.
+	RegistrationGeneration uint64
+	RootPID                uint32
+	// RootProcessStartTimeTicks binds RootPID to the process lifetime the
+	// daemon observed while accepting register_session. It is distinct from
+	// PeerProcessStartTimeTicks because the launcher registers its child.
+	RootProcessStartTimeTicks uint64
+	PIDNamespaceID            uint32
+	CgroupID                  uint64
+	EventClasses              []string
+	HandoffMetadata           map[string]any
 
 	RegisteredAt time.Time
 	ExpiresAt    time.Time
@@ -65,10 +73,11 @@ func (r DaemonSessionRecord) Status(now time.Time) string {
 // authorized daemon protocol requests. It deliberately performs no privileged
 // filesystem, cgroup, BPF, service-lifecycle, or process-management work.
 type DaemonSessionRegistry struct {
-	mu          sync.RWMutex
-	sessions    map[string]DaemonSessionRecord
-	now         DaemonSessionClock
-	maxSessions int
+	mu                         sync.RWMutex
+	sessions                   map[string]DaemonSessionRecord
+	now                        DaemonSessionClock
+	maxSessions                int
+	nextRegistrationGeneration uint64
 }
 
 func NewDaemonSessionRegistry() *DaemonSessionRegistry {
@@ -125,6 +134,58 @@ func (r *DaemonSessionRegistry) ActiveSessionForPeer(sessionID string, handshake
 	}
 	if !daemonSessionRegistryPeerOwnsRecord(record, handshake) {
 		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q is owned by a different peer", ErrDaemonSessionRegistry, sessionID)
+	}
+	return record, nil
+}
+
+// ActiveSessionForDelegatedRootPeer resolves an active session only when an
+// independently authorized socket peer is the exact root process the session
+// owner registered. The launcher owns the control-plane session, while its
+// exec shim is a different process that legitimately transfers the seccomp
+// listener; this delegated gate preserves that split without reducing it to
+// daemon-wide UID/GID authorization.
+func (r *DaemonSessionRegistry) ActiveSessionForDelegatedRootPeer(sessionID string, observation DaemonSocketPeerObservation, authorization DaemonPeerAuthorization) (DaemonSessionRecord, error) {
+	record, _, err := r.lookupActiveSession(sessionID, r.currentTime())
+	if err != nil {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: %v", ErrDaemonSessionRegistry, err)
+	}
+	if !daemonSessionRegistryDelegatedRootPeerOwnsRecord(record, observation, authorization) {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q root process is owned by a different peer", ErrDaemonSessionRegistry, sessionID)
+	}
+	return record, nil
+}
+
+// ActiveSessionForDelegatedRootPeerGeneration revalidates that the delegated
+// root still owns the same registration lifetime observed earlier. Session IDs
+// are reusable after end or expiry; accepting a replacement record here could
+// attach an in-flight listener using metadata from the prior registration.
+func (r *DaemonSessionRegistry) ActiveSessionForDelegatedRootPeerGeneration(sessionID string, observation DaemonSocketPeerObservation, authorization DaemonPeerAuthorization, registrationGeneration uint64) (DaemonSessionRecord, error) {
+	if registrationGeneration == 0 {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q registration generation is required", ErrDaemonSessionRegistry, sessionID)
+	}
+	record, err := r.ActiveSessionForDelegatedRootPeer(sessionID, observation, authorization)
+	if err != nil {
+		return DaemonSessionRecord{}, err
+	}
+	if record.RegistrationGeneration != registrationGeneration {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q registration was replaced", ErrDaemonSessionRegistry, sessionID)
+	}
+	return record, nil
+}
+
+// ActiveSessionGeneration resolves an active session only if it is still the
+// same registration lifetime. Long-lived daemon work uses this to fail closed
+// after a session ID is ended or expired and then reused.
+func (r *DaemonSessionRegistry) ActiveSessionGeneration(sessionID string, registrationGeneration uint64) (DaemonSessionRecord, error) {
+	if registrationGeneration == 0 {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q registration generation is required", ErrDaemonSessionRegistry, sessionID)
+	}
+	record, err := r.ActiveSession(sessionID)
+	if err != nil {
+		return DaemonSessionRecord{}, err
+	}
+	if record.RegistrationGeneration != registrationGeneration {
+		return DaemonSessionRecord{}, fmt.Errorf("%w: session %q registration was replaced", ErrDaemonSessionRegistry, sessionID)
 	}
 	return record, nil
 }
@@ -201,12 +262,18 @@ func (r *DaemonSessionRegistry) handleRegisterSession(req DaemonProtocolRequest,
 			return daemonSessionRegistryErrorResponse(req, DaemonSessionStatusCapacityExceeded, "session registry capacity exceeded: max active sessions is %d", r.effectiveMaxSessions())
 		}
 	}
+	if r.nextRegistrationGeneration == ^uint64(0) {
+		return daemonSessionRegistryErrorResponse(req, DaemonSessionStatusCapacityExceeded, "session registration generation space exhausted")
+	}
+	r.nextRegistrationGeneration++
 
 	record := DaemonSessionRecord{
 		SessionID:                 sessionID,
 		MissionID:                 strings.TrimSpace(register.MissionID),
 		TraceID:                   strings.TrimSpace(register.TraceID),
+		RegistrationGeneration:    r.nextRegistrationGeneration,
 		RootPID:                   register.RootPID,
+		RootProcessStartTimeTicks: register.RootProcessStartTimeTicks,
 		PIDNamespaceID:            register.PIDNamespaceID,
 		CgroupID:                  register.CgroupID,
 		EventClasses:              append([]string(nil), register.EventClasses...),
@@ -285,6 +352,25 @@ func daemonSessionRegistryPeerOwnsRecord(record DaemonSessionRecord, handshake D
 		record.PeerProcessStartTimeTicks == handshake.ProcessStartTimeTicks &&
 		record.PeerProcessStartTimeTicks == handshake.Authorization.ProcessStartTimeTicks &&
 		record.CredentialSource == handshake.CredentialSource
+}
+
+func daemonSessionRegistryDelegatedRootPeerOwnsRecord(record DaemonSessionRecord, observation DaemonSocketPeerObservation, authorization DaemonPeerAuthorization) bool {
+	credentials := observation.Credentials
+	if authorization.Verdict != DaemonPeerAuthorizationVerdictAllow ||
+		record.RootProcessStartTimeTicks == 0 ||
+		credentials.ProcessStartTimeTicks == 0 ||
+		authorization.ProcessStartTimeTicks == 0 {
+		return false
+	}
+	if credentials.UID != authorization.UID ||
+		credentials.GID != authorization.GID ||
+		credentials.PID != authorization.PID ||
+		credentials.ProcessStartTimeTicks != authorization.ProcessStartTimeTicks {
+		return false
+	}
+	return record.RootPID == authorization.PID &&
+		record.RootProcessStartTimeTicks == authorization.ProcessStartTimeTicks &&
+		record.CredentialSource == observation.CredentialSource
 }
 
 func (r *DaemonSessionRegistry) currentTime() time.Time {

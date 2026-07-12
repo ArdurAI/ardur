@@ -190,10 +190,15 @@ type daemon struct {
 	// (if ever) a seccomp listener attaches for it. Non-nil on every
 	// platform; on non-Linux it simply never gets a listener to serve.
 	seccompPolicy *kernelcapture.SeccompPolicyStore
-	// seccompListeners tracks the cancel func for each session's seccomp
-	// supervisor goroutine (Linux only; always empty elsewhere), keyed by
-	// session_id and guarded by mu like the other session-scoped maps above.
-	seccompListeners map[string]context.CancelFunc
+	// seccompListeners tracks each session's supervisor together with the
+	// immutable registry generation that installed it (Linux only; always empty
+	// elsewhere). Keyed by session_id and guarded by mu.
+	seccompListeners map[string]seccompListenerRegistration
+	// seccompSessionMu makes handoff/notification reads atomic against
+	// register/end/expiry lifecycle writes. Supervisors may read concurrently;
+	// replacement cannot publish new session state while a prior-generation
+	// notification or handoff is being decided.
+	seccompSessionMu sync.RWMutex
 
 	// activeTier is decided once at startup (see main(): "prefer BPF-LSM
 	// when active, fall back to seccomp when it isn't") and advertised on
@@ -227,7 +232,7 @@ type daemon struct {
 	// cgroupVerifier gates register_session on the peer owning the claimed
 	// cgroup/root_pid. Injected so tests (which register synthetic PIDs) can
 	// substitute a no-op; production wires verifyRegisterSessionCgroup.
-	cgroupVerifier func(kernelcapture.DaemonProtocolPeerHandshake, *kernelcapture.DaemonRegisterSessionRequest, *slog.Logger) error
+	cgroupVerifier func(kernelcapture.DaemonProtocolPeerHandshake, *kernelcapture.DaemonRegisterSessionRequest, *slog.Logger) (uint64, error)
 }
 
 // appliedAllowRecord is the last allowlist set written for a session.
@@ -239,6 +244,11 @@ type appliedAllowRecord struct {
 	bootstrapFiles map[bootstrapFileObject]kernelcapture.BootstrapFile
 	trustedRoot    bool
 	controlPlane   *kernelcapture.DaemonControlPlaneEndpoint
+}
+
+type seccompListenerRegistration struct {
+	registrationGeneration uint64
+	cancel                 context.CancelFunc
 }
 
 type bootstrapFileObject struct {
@@ -307,7 +317,7 @@ func newDaemon(log *slog.Logger, socketPath, evidenceDir, stateDir string, owner
 		fs:                        osEvidenceFS{},
 		tamperChain:               kernelcapture.NewTamperReceiptChain(),
 		seccompPolicy:             kernelcapture.NewSeccompPolicyStore(),
-		seccompListeners:          make(map[string]context.CancelFunc),
+		seccompListeners:          make(map[string]seccompListenerRegistration),
 		activeTier:                daemonTierNone,
 		appliedAllow:              make(map[string]*appliedAllowRecord),
 		cgroupVerifier:            verifyRegisterSessionCgroup,
@@ -374,25 +384,36 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 // supervisor, returning false (without recording anything) if one is already
 // registered — callers must treat false as "reject this handoff," not as a
 // signal to replace the existing listener.
-func (d *daemon) registerSeccompListener(sessionID string, cancel context.CancelFunc) bool {
+func (d *daemon) registerSeccompListener(sessionID string, registrationGeneration uint64, cancel context.CancelFunc) bool {
+	if registrationGeneration == 0 {
+		return false
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if _, exists := d.seccompListeners[sessionID]; exists {
 		return false
 	}
-	d.seccompListeners[sessionID] = cancel
+	d.seccompListeners[sessionID] = seccompListenerRegistration{
+		registrationGeneration: registrationGeneration,
+		cancel:                 cancel,
+	}
 	return true
 }
 
-// unregisterSeccompListener stops (if still running) and forgets sessionID's
-// seccomp supervisor. Safe to call even if no listener was ever registered.
-func (d *daemon) unregisterSeccompListener(sessionID string) {
+// unregisterSeccompListener stops and forgets sessionID's supervisor only if
+// it still belongs to registrationGeneration. A late defer from generation A
+// must never remove generation B's replacement listener.
+func (d *daemon) unregisterSeccompListener(sessionID string, registrationGeneration uint64) {
 	d.mu.Lock()
-	cancel, ok := d.seccompListeners[sessionID]
-	delete(d.seccompListeners, sessionID)
+	listener, ok := d.seccompListeners[sessionID]
+	if ok && listener.registrationGeneration == registrationGeneration {
+		delete(d.seccompListeners, sessionID)
+	} else {
+		ok = false
+	}
 	d.mu.Unlock()
-	if ok && cancel != nil {
-		cancel()
+	if ok && listener.cancel != nil {
+		listener.cancel()
 	}
 }
 
@@ -437,15 +458,40 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 	// to another workload.
 	lifecycleFilterAdded := false
 	if req.Method == kernelcapture.DaemonProtocolMethodRegisterSession && req.RegisterSession != nil {
-		if err := d.cgroupVerifier(handshake, req.RegisterSession, d.log); err != nil {
+		// Work on a private copy: the root-process identity below is daemon
+		// evidence and must not mutate or be supplied by caller-owned request
+		// memory.
+		register := *req.RegisterSession
+		req.RegisterSession = &register
+		if err := kernelcapture.ValidateDaemonProtocolRequest(req); err != nil {
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          req.Method,
+				SessionID:       register.SessionID,
+				OK:              false,
+				Error:           fmt.Sprintf("invalid register_session request: %v", err),
+			}
+		}
+		rootProcessStartTimeTicks, verifyErr := d.cgroupVerifier(handshake, req.RegisterSession, d.log)
+		if verifyErr != nil {
 			return kernelcapture.DaemonProtocolResponse{
 				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
 				Method:          req.Method,
 				SessionID:       req.RegisterSession.SessionID,
 				OK:              false,
-				Error:           fmt.Sprintf("register_session cgroup ownership check failed: %v", err),
+				Error:           fmt.Sprintf("register_session cgroup ownership check failed: %v", verifyErr),
 			}
 		}
+		if registerSessionRootProcessStartTimeRequired && rootProcessStartTimeTicks == 0 {
+			return kernelcapture.DaemonProtocolResponse{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          req.Method,
+				SessionID:       register.SessionID,
+				OK:              false,
+				Error:           "register_session root process identity was not verified",
+			}
+		}
+		register.RootProcessStartTimeTicks = rootProcessStartTimeTicks
 		// #119 collision guard: even a claim that passes ownership verification
 		// must not be allowed to bind a cgroup_id that another live session
 		// already holds — two sessions must never be able to govern the same
@@ -473,6 +519,11 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		}
 	}
 
+	serializesSeccompLifecycle := req.Method == kernelcapture.DaemonProtocolMethodRegisterSession || req.Method == kernelcapture.DaemonProtocolMethodEndSession
+	if serializesSeccompLifecycle {
+		d.seccompSessionMu.Lock()
+		defer d.seccompSessionMu.Unlock()
+	}
 	resp := d.registry.HandleAuthorizedRequest(ctx, req, handshake)
 	if !resp.OK {
 		if lifecycleFilterAdded {
@@ -708,6 +759,11 @@ func (d *daemon) degradeGuardTier(cause error, log *slog.Logger) {
 // the policy into the BPF enforcement maps.
 func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, handshake kernelcapture.DaemonProtocolPeerHandshake) kernelcapture.DaemonProtocolResponse {
 	ap := req.ApplyPolicy
+	// Keep the owner/generation lookup and every policy publication atomic with
+	// register/end/expiry transitions. Lock order is seccompSessionMu then
+	// applyMu, matching lifecycle cleanup below.
+	d.seccompSessionMu.RLock()
+	defer d.seccompSessionMu.RUnlock()
 	errResp := func(msg string) kernelcapture.DaemonProtocolResponse {
 		return kernelcapture.DaemonProtocolResponse{
 			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
@@ -1107,10 +1163,21 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 	if sessionID == "" || reg == nil {
 		return
 	}
+	// Policies are keyed by session_id, which is reusable after end/expiry.
+	// Every accepted registration starts empty so generation B can never inherit
+	// generation A's seccomp decision state.
+	kernelcapture.RemoveSeccompPolicy(d.seccompPolicy, sessionID)
 	producerCounterGap := d.lifecycleProducerCounterEvidenceGapActive()
 	d.tamperWriteMu.Lock()
 	defer d.tamperWriteMu.Unlock()
 	d.mu.Lock()
+	var replacedSeccompCancel context.CancelFunc
+	if record, ok := d.registry.Session(sessionID); ok && record.RegistrationGeneration != 0 {
+		if listener, attached := d.seccompListeners[sessionID]; attached && listener.registrationGeneration != record.RegistrationGeneration {
+			delete(d.seccompListeners, sessionID)
+			replacedSeccompCancel = listener.cancel
+		}
+	}
 
 	if reg.CgroupID != 0 {
 		d.cgroupIndex[reg.CgroupID] = sessionID
@@ -1149,6 +1216,9 @@ func (d *daemon) onSessionRegistered(reg *kernelcapture.DaemonRegisterSessionReq
 		"ttl_s", reg.TTLSeconds,
 	)
 	d.mu.Unlock()
+	if replacedSeccompCancel != nil {
+		replacedSeccompCancel()
+	}
 
 	// Close the transition window between the first counter-state snapshot and
 	// publishing the new summary. A failure recorded before publication cannot
@@ -1211,7 +1281,7 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	// same lock as the map deletes above; call it below, outside the lock,
 	// since the supervisor goroutine it stops may itself try to touch
 	// d.mu-guarded state on its way out.
-	seccompCancel, hadSeccompListener := d.seccompListeners[sessionID]
+	seccompListener, hadSeccompListener := d.seccompListeners[sessionID]
 	delete(d.seccompListeners, sessionID)
 	d.mu.Unlock()
 	if err := d.lifecycleFilter.remove(sessionID); err != nil {
@@ -1220,8 +1290,8 @@ func (d *daemon) onSessionEnded(sessionID string) {
 	}
 
 	kernelcapture.RemoveSeccompPolicy(d.seccompPolicy, sessionID)
-	if hadSeccompListener && seccompCancel != nil {
-		seccompCancel()
+	if hadSeccompListener && seccompListener.cancel != nil {
+		seccompListener.cancel()
 	}
 
 	d.log.Info("session ended", "session_id", sessionID)
@@ -1651,6 +1721,8 @@ func (d *daemon) observabilityGapSummaryForSession(sessionID string) (kernelcapt
 // pruneExpiredSessions removes sessions that the registry has expired so the
 // cgroup index does not leak indefinitely.
 func (d *daemon) pruneExpiredSessions() {
+	d.seccompSessionMu.Lock()
+	defer d.seccompSessionMu.Unlock()
 	type expiredPolicy struct {
 		cgroupID       uint64
 		rootPID        uint32
@@ -1687,8 +1759,8 @@ func (d *daemon) pruneExpiredSessions() {
 			delete(d.enforceSummaries, sid)
 			delete(d.lifecycleCaptureSummaries, sid)
 			delete(d.observabilityGaps, sid)
-			if cancel, ok := d.seccompListeners[sid]; ok {
-				expiredSeccompCancels = append(expiredSeccompCancels, cancel)
+			if listener, ok := d.seccompListeners[sid]; ok {
+				expiredSeccompCancels = append(expiredSeccompCancels, listener.cancel)
 				delete(d.seccompListeners, sid)
 			}
 			expiredSessionIDs = append(expiredSessionIDs, sid)

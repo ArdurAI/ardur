@@ -135,6 +135,9 @@ type DaemonRegisterSessionRequest struct {
 	EventClasses    []string       `json:"event_classes"`
 	TTLSeconds      int64          `json:"ttl_seconds"`
 	HandoffMetadata map[string]any `json:"handoff_metadata,omitempty"`
+	// RootProcessStartTimeTicks is stamped from daemon-observed /proc identity
+	// after cgroup/ancestry verification. It is never accepted from JSON.
+	RootProcessStartTimeTicks uint64 `json:"-"`
 }
 
 // DaemonRegisterReceiptRequest reports one governance receipt to the daemon

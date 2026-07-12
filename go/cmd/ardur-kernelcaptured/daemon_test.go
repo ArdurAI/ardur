@@ -76,14 +76,14 @@ func newTestDaemon(t *testing.T) *daemon {
 		fs:                        osEvidenceFS{},
 		tamperChain:               kernelcapture.NewTamperReceiptChain(),
 		seccompPolicy:             kernelcapture.NewSeccompPolicyStore(),
-		seccompListeners:          make(map[string]context.CancelFunc),
+		seccompListeners:          make(map[string]seccompListenerRegistration),
 		activeTier:                daemonTierNone,
 		appliedAllow:              make(map[string]*appliedAllowRecord),
 		// No-op cgroup verifier: daemon-flow tests register synthetic PIDs that
 		// aren't real /proc descendants. The real check is covered directly by
 		// daemon_cgroup_verify_linux_test.go.
-		cgroupVerifier: func(kernelcapture.DaemonProtocolPeerHandshake, *kernelcapture.DaemonRegisterSessionRequest, *slog.Logger) error {
-			return nil
+		cgroupVerifier: func(kernelcapture.DaemonProtocolPeerHandshake, *kernelcapture.DaemonRegisterSessionRequest, *slog.Logger) (uint64, error) {
+			return 1, nil
 		},
 	}
 	d.lifecycleFilter.markUnavailable(errors.New("lifecycle filter unavailable in unit test"))
@@ -291,7 +291,7 @@ func TestOnSessionEnded_ClearsSeccompState(t *testing.T) {
 	}
 
 	cancelled := false
-	if !d.registerSeccompListener("sec-session-001", func() { cancelled = true }) {
+	if !d.registerSeccompListener("sec-session-001", 1, func() { cancelled = true }) {
 		t.Fatal("registerSeccompListener: expected first registration to succeed")
 	}
 
@@ -335,7 +335,7 @@ func TestPruneExpiredSessions_ClearsSeccompState(t *testing.T) {
 		t.Fatalf("ApplySeccompPolicy: %v", err)
 	}
 	cancelled := false
-	if !d.registerSeccompListener("phantom-seccomp-session", func() { cancelled = true }) {
+	if !d.registerSeccompListener("phantom-seccomp-session", 1, func() { cancelled = true }) {
 		t.Fatal("registerSeccompListener: expected first registration to succeed")
 	}
 
@@ -362,11 +362,180 @@ func TestPruneExpiredSessions_ClearsSeccompState(t *testing.T) {
 // on this to refuse a retried/duplicate handoff.
 func TestRegisterSeccompListener_RejectsDuplicate(t *testing.T) {
 	d := newTestDaemon(t)
-	if !d.registerSeccompListener("dup-session", func() {}) {
+	if !d.registerSeccompListener("dup-session", 1, func() {}) {
 		t.Fatal("first registerSeccompListener call: expected success")
 	}
-	if d.registerSeccompListener("dup-session", func() {}) {
+	if d.registerSeccompListener("dup-session", 2, func() {}) {
 		t.Error("second registerSeccompListener call for the same session: expected rejection")
+	}
+}
+
+func TestUnregisterSeccompListener_DoesNotRemoveReplacementGeneration(t *testing.T) {
+	d := newTestDaemon(t)
+	firstCancelled := false
+	if !d.registerSeccompListener("reused-session", 1, func() { firstCancelled = true }) {
+		t.Fatal("register generation 1 listener")
+	}
+	d.unregisterSeccompListener("reused-session", 1)
+	if !firstCancelled {
+		t.Fatal("generation 1 listener was not cancelled")
+	}
+
+	secondCancelled := false
+	if !d.registerSeccompListener("reused-session", 2, func() { secondCancelled = true }) {
+		t.Fatal("register generation 2 listener")
+	}
+	// Model generation 1's supervisor defer arriving after generation 2 has
+	// attached. It must be a compare-and-delete no-op.
+	d.unregisterSeccompListener("reused-session", 1)
+	if secondCancelled {
+		t.Fatal("stale generation 1 cleanup cancelled generation 2 listener")
+	}
+	d.mu.RLock()
+	listener, ok := d.seccompListeners["reused-session"]
+	d.mu.RUnlock()
+	if !ok || listener.registrationGeneration != 2 {
+		t.Fatalf("replacement listener = %+v, present=%t; want generation 2", listener, ok)
+	}
+}
+
+func TestRegisterSessionRetiresPriorGenerationSeccompListener(t *testing.T) {
+	d := newTestDaemon(t)
+	oldCancelled := false
+	if !d.registerSeccompListener("replacement-registration", 99, func() { oldCancelled = true }) {
+		t.Fatal("register prior-generation listener")
+	}
+	if err := kernelcapture.ApplySeccompPolicy(d.seccompPolicy, "replacement-registration", kernelcapture.DaemonApplyPolicyRequest{
+		SessionID: "replacement-registration",
+		OpPolicies: []kernelcapture.DaemonOpPolicy{{
+			Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionDeny, EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+		}},
+	}); err != nil {
+		t.Fatalf("seed prior-generation seccomp policy: %v", err)
+	}
+	const peerStartTicks = 12345678
+	handshake := kernelcapture.DaemonProtocolPeerHandshake{
+		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
+		Method:                kernelcapture.DaemonProtocolMethodRegisterSession,
+		CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProcessStartTimeTicks: peerStartTicks,
+		Authorization: kernelcapture.DaemonPeerAuthorization{
+			Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
+			UID:                   uint32(os.Getuid()),
+			PID:                   uint32(os.Getpid()),
+			ProcessStartTimeTicks: peerStartTicks,
+		},
+	}
+	request := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    "replacement-registration",
+			RootPID:      50,
+			CgroupID:     17,
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   120,
+		},
+	}
+	response := d.handleAuthorizedRequest(context.Background(), request, handshake)
+	if !response.OK {
+		t.Fatalf("replacement registration response = %+v", response)
+	}
+	if !oldCancelled {
+		t.Fatal("accepted replacement registration did not cancel prior-generation listener")
+	}
+	if d.seccompListenerAttached(request.RegisterSession.SessionID) {
+		t.Fatal("accepted replacement registration retained prior-generation listener")
+	}
+	if decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, request.RegisterSession.SessionID, net.ParseIP("192.0.2.10")); decision.HasPolicy {
+		t.Fatalf("accepted replacement registration inherited prior-generation policy: %+v", decision)
+	}
+}
+
+func TestApplyPolicyLifecycleLeasePreventsPublicationAcrossReplacement(t *testing.T) {
+	d := newTestDaemon(t)
+	d.activeTier = daemonTierSeccomp
+	const peerStartTicks = 12345678
+	handshake := kernelcapture.DaemonProtocolPeerHandshake{
+		ProtocolVersion:       kernelcapture.DaemonProtocolVersion,
+		Method:                kernelcapture.DaemonProtocolMethodRegisterSession,
+		CredentialSource:      kernelcapture.DaemonPeerCredentialSourceLinuxSOPeerCred,
+		ProcessStartTimeTicks: peerStartTicks,
+		Authorization: kernelcapture.DaemonPeerAuthorization{
+			Verdict:               kernelcapture.DaemonPeerAuthorizationVerdictAllow,
+			UID:                   uint32(os.Getuid()),
+			PID:                   uint32(os.Getpid()),
+			ProcessStartTimeTicks: peerStartTicks,
+		},
+	}
+	register := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    "apply-replacement-barrier",
+			RootPID:      50,
+			CgroupID:     17,
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   120,
+		},
+	}
+	if response := d.handleAuthorizedRequest(context.Background(), register, handshake); !response.OK {
+		t.Fatalf("initial register response = %+v", response)
+	}
+	apply := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+		ApplyPolicy: &kernelcapture.DaemonApplyPolicyRequest{
+			SessionID:   register.RegisterSession.SessionID,
+			Generation:  1,
+			EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+			OpPolicies: []kernelcapture.DaemonOpPolicy{{
+				Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionDeny, EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+			}},
+		},
+	}
+
+	d.applyMu.Lock()
+	applyDone := make(chan kernelcapture.DaemonProtocolResponse, 1)
+	go func() { applyDone <- d.handleAuthorizedRequest(context.Background(), apply, handshake) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for d.seccompSessionMu.TryLock() {
+		d.seccompSessionMu.Unlock()
+		if time.Now().After(deadline) {
+			d.applyMu.Unlock()
+			t.Fatal("apply_policy did not acquire lifecycle read lease")
+		}
+		runtime.Gosched()
+	}
+	end := kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodEndSession,
+		EndSession:      &kernelcapture.DaemonEndSessionRequest{SessionID: register.RegisterSession.SessionID},
+	}
+	endDone := make(chan kernelcapture.DaemonProtocolResponse, 1)
+	go func() { endDone <- d.handleAuthorizedRequest(context.Background(), end, handshake) }()
+	select {
+	case response := <-endDone:
+		d.applyMu.Unlock()
+		t.Fatalf("end/replacement lifecycle crossed stalled apply: %+v", response)
+	case <-time.After(50 * time.Millisecond):
+	}
+	d.applyMu.Unlock()
+
+	if response := <-applyDone; !response.OK {
+		t.Fatalf("stalled apply response = %+v", response)
+	}
+	if response := <-endDone; !response.OK {
+		t.Fatalf("end response = %+v", response)
+	}
+	if decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, register.RegisterSession.SessionID, net.ParseIP("192.0.2.10")); decision.HasPolicy {
+		t.Fatalf("ended generation retained stalled apply policy: %+v", decision)
+	}
+	if response := d.handleAuthorizedRequest(context.Background(), register, handshake); !response.OK {
+		t.Fatalf("replacement register response = %+v", response)
+	}
+	if decision := kernelcapture.EvaluateSeccompConnect(d.seccompPolicy, register.RegisterSession.SessionID, net.ParseIP("192.0.2.10")); decision.HasPolicy {
+		t.Fatalf("replacement registration inherited prior policy: %+v", decision)
 	}
 }
 

@@ -69,6 +69,14 @@ func ObserveLinuxUnixPeerCredentials(conn *net.UnixConn, socketPath string) (Dae
 	}, nil
 }
 
+// ObserveLinuxProcessStartTimeTicks reads the kernel's process start-time
+// identity for pid from /proc/<pid>/stat. Callers use it to bind a numeric PID
+// to one process lifetime instead of accepting a later process that reused the
+// same PID.
+func ObserveLinuxProcessStartTimeTicks(pid uint32) (uint64, error) {
+	return readLinuxProcProcessStartTimeTicks(pid)
+}
+
 func readLinuxProcProcessStartTimeTicks(pid uint32) (uint64, error) {
 	if pid == 0 {
 		return 0, fmt.Errorf("%w: observed peer pid is required", ErrDaemonPeerCredentialRetrieval)

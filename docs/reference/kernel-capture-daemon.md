@@ -134,6 +134,28 @@ mount). A topology that cannot map the peer PID is rejected rather than granted
 unverified cgroup-enforcement rights; there is no implicit cross-namespace
 bypass.
 
+For non-root registration, the daemon also reads `root_pid`'s process start time
+from `/proc/<root_pid>/stat` before and after those ownership checks and retains
+the stable value; the already-privileged root path records one such observation.
+This is distinct from the control-socket owner: the launcher registers the
+session, then its PID-preserving child execs into `ardur-exec-shim`. The seccomp
+handoff therefore requires the independently authorized handoff peer's
+`SO_PEERCRED` PID and separately observed `/proc` start time to match that
+registered root identity before the daemon acknowledges or supervises the
+transferred listener. PID plus clock-tick start time hardens numeric PID reuse
+but is not a pidfd task handle. `SCM_RIGHTS` transfers the listener reference;
+it does not by itself establish Ardur session ownership. Immediately after
+reserving the listener, the daemon revalidates both that root identity and an
+immutable daemon-local registration generation, so an ended session cannot be
+silently replaced under the same `session_id` while a handoff is in flight. A
+shared lifecycle barrier also keeps register, end, and expiry transitions from
+interleaving with handoff acknowledgement or notification decisions. Listener
+entries and cleanup carry that generation, so a late supervisor exit from an
+older registration cannot remove a replacement listener. Each accepted
+registration also clears the reusable session ID's prior seccomp policy, and
+policy publication holds the same lifecycle read barrier, preventing an
+in-flight apply from crossing into a replacement generation.
+
 If startup reconciliation itself fails, the daemon leaves filtering disabled
 and continues the prior permissive capture behavior rather than enabling a
 partial allowlist that could hide governed events. It logs the degradation; the

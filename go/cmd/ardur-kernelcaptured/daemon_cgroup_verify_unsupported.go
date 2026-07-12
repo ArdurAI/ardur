@@ -13,6 +13,8 @@ import (
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
 
-func verifyRegisterSessionCgroup(_ kernelcapture.DaemonProtocolPeerHandshake, _ *kernelcapture.DaemonRegisterSessionRequest, _ *slog.Logger) error {
-	return nil
+const registerSessionRootProcessStartTimeRequired = false
+
+func verifyRegisterSessionCgroup(_ kernelcapture.DaemonProtocolPeerHandshake, _ *kernelcapture.DaemonRegisterSessionRequest, _ *slog.Logger) (uint64, error) {
+	return 0, nil
 }

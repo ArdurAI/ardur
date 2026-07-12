@@ -47,9 +47,20 @@ type seccompHandoffResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+type receivedSeccompListenerHandoff struct {
+	sessionID     string
+	fd            int
+	observation   kernelcapture.DaemonSocketPeerObservation
+	authorization kernelcapture.DaemonPeerAuthorization
+}
+
 const (
 	seccompHandoffMaxHeaderBytes = 4096
 	seccompHandoffReadTimeout    = 10 * time.Second
+	// Linux caps one SCM_RIGHTS message at 253 descriptors. Receive enough
+	// control space to inspect and close every descriptor before enforcing the
+	// stricter Ardur contract of exactly one.
+	seccompHandoffMaxReceivedFDs = 253
 )
 
 // runSeccompHandoffServer accepts ardur-exec-shim connections on socketPath,
@@ -100,24 +111,31 @@ func runSeccompHandoffServer(ctx context.Context, socketPath string, d *daemon, 
 
 func (d *daemon) handleSeccompHandoffConnection(ctx context.Context, conn *net.UnixConn, socketPath string, log *slog.Logger) {
 	defer conn.Close()
+	// Freeze register/end/expiry transitions from credential observation
+	// through acknowledgment. The bounded read deadline below limits how long
+	// even an authorized peer can retain this shared lifecycle lease.
+	d.seccompSessionMu.RLock()
+	defer d.seccompSessionMu.RUnlock()
 
-	sessionID, fd, err := receiveSeccompListenerHandoff(conn, socketPath, d.peerPolicy)
+	handoff, err := receiveSeccompListenerHandoff(conn, socketPath, d.peerPolicy)
 	if err != nil {
 		log.Warn("seccomp handoff rejected", "error", err)
 		_ = sendSeccompHandoffResponse(conn, false, err.Error())
 		return
 	}
+	sessionID := handoff.sessionID
+	fd := handoff.fd
 
-	record, err := d.registry.ActiveSession(sessionID)
+	record, err := d.registry.ActiveSessionForDelegatedRootPeer(sessionID, handoff.observation, handoff.authorization)
 	if err != nil {
-		log.Warn("seccomp handoff for unknown/inactive session", "session_id", sessionID, "error", err)
+		log.Warn("seccomp handoff for unknown, inactive, or differently owned session", "session_id", sessionID, "error", err)
 		_ = sendSeccompHandoffResponse(conn, false, "session not found or not active")
 		unix.Close(fd)
 		return
 	}
 
 	superviseCtx, cancel := context.WithCancel(ctx)
-	if !d.registerSeccompListener(sessionID, cancel) {
+	if !d.registerSeccompListener(sessionID, record.RegistrationGeneration, cancel) {
 		// A listener for this session is already being supervised — most
 		// likely a retried handoff. Refuse the duplicate rather than run two
 		// supervisors racing to answer the same notifications.
@@ -127,10 +145,21 @@ func (d *daemon) handleSeccompHandoffConnection(ctx context.Context, conn *net.U
 		unix.Close(fd)
 		return
 	}
+	// Close the lookup-to-insert race with end_session: if session end landed
+	// before insertion, its cleanup could not see this listener. Revalidating
+	// after insertion either rejects/removes that stale attach, or guarantees a
+	// later end_session will observe and cancel the registered listener.
+	if _, err := d.registry.ActiveSessionForDelegatedRootPeerGeneration(sessionID, handoff.observation, handoff.authorization, record.RegistrationGeneration); err != nil {
+		log.Warn("seccomp handoff session ended, was replaced, or ownership changed during listener attachment", "session_id", sessionID, "error", err)
+		d.unregisterSeccompListener(sessionID, record.RegistrationGeneration)
+		_ = sendSeccompHandoffResponse(conn, false, "session not found or not active")
+		unix.Close(fd)
+		return
+	}
 
 	if err := sendSeccompHandoffResponse(conn, true, ""); err != nil {
 		log.Warn("ack seccomp handoff", "session_id", sessionID, "error", err)
-		d.unregisterSeccompListener(sessionID)
+		d.unregisterSeccompListener(sessionID, record.RegistrationGeneration)
 		cancel()
 		unix.Close(fd)
 		return
@@ -139,9 +168,9 @@ func (d *daemon) handleSeccompHandoffConnection(ctx context.Context, conn *net.U
 	log.Info("seccomp connect-notify listener attached",
 		"session_id", sessionID, "cgroup_id", record.CgroupID, "root_pid", record.RootPID)
 	go func() {
-		defer d.unregisterSeccompListener(sessionID)
+		defer d.unregisterSeccompListener(sessionID, record.RegistrationGeneration)
 		defer unix.Close(fd)
-		superviseSeccompListener(superviseCtx, fd, sessionID, record.CgroupID, d, log)
+		superviseSeccompListener(superviseCtx, fd, sessionID, record.RegistrationGeneration, record.CgroupID, d, log)
 	}()
 }
 
@@ -150,58 +179,85 @@ func (d *daemon) handleSeccompHandoffConnection(ctx context.Context, conn *net.U
 // SO_PEERCRED + UID/GID policy the main control socket uses. On any error the
 // received fd (if one was successfully parsed before the error) is closed —
 // callers must not assume the fd is still open after a non-nil error.
-func receiveSeccompListenerHandoff(conn *net.UnixConn, socketPath string, policy kernelcapture.DaemonPeerAuthorizationPolicy) (string, int, error) {
+func receiveSeccompListenerHandoff(conn *net.UnixConn, socketPath string, policy kernelcapture.DaemonPeerAuthorizationPolicy) (receivedSeccompListenerHandoff, error) {
 	observation, err := kernelcapture.ObserveLinuxUnixPeerCredentials(conn, socketPath)
 	if err != nil {
-		return "", -1, fmt.Errorf("observe peer credentials: %w", err)
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("observe peer credentials: %w", err)
 	}
-	if _, err := kernelcapture.AuthorizeObservedDaemonPeer(observation.Credentials, policy); err != nil {
-		return "", -1, fmt.Errorf("unauthorized peer: %w", err)
+	authorization, err := kernelcapture.AuthorizeObservedDaemonPeer(observation.Credentials, policy)
+	if err != nil {
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("unauthorized peer: %w", err)
 	}
 
 	if err := conn.SetReadDeadline(time.Now().Add(seccompHandoffReadTimeout)); err != nil {
-		return "", -1, fmt.Errorf("set read deadline: %w", err)
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("set read deadline: %w", err)
 	}
 
 	msgBuf := make([]byte, seccompHandoffMaxHeaderBytes)
-	oobBuf := make([]byte, unix.CmsgSpace(4)) // exactly one fd (4-byte int)
-	n, oobn, _, _, err := conn.ReadMsgUnix(msgBuf, oobBuf)
+	oobBuf := make([]byte, unix.CmsgSpace(4*seccompHandoffMaxReceivedFDs))
+	n, oobn, flags, _, err := conn.ReadMsgUnix(msgBuf, oobBuf)
 	if err != nil {
-		return "", -1, fmt.Errorf("read handoff message: %w", err)
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("read handoff message: %w", err)
+	}
+	if flags&unix.MSG_CTRUNC != 0 {
+		closeSeccompHandoffRights(oobBuf[:oobn])
+		return receivedSeccompListenerHandoff{}, errors.New("handoff ancillary data was truncated")
 	}
 	if oobn == 0 {
-		return "", -1, errors.New("handoff message carried no ancillary data (no fd)")
+		return receivedSeccompListenerHandoff{}, errors.New("handoff message carried no ancillary data (no fd)")
 	}
 
 	scms, err := unix.ParseSocketControlMessage(oobBuf[:oobn])
 	if err != nil {
-		return "", -1, fmt.Errorf("parse control message: %w", err)
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("parse control message: %w", err)
 	}
 	if len(scms) != 1 {
-		return "", -1, fmt.Errorf("expected exactly one control message, got %d", len(scms))
+		closeSeccompHandoffRights(oobBuf[:oobn])
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("expected exactly one control message, got %d", len(scms))
 	}
 	fds, err := unix.ParseUnixRights(&scms[0])
 	if err != nil {
-		return "", -1, fmt.Errorf("parse unix rights: %w", err)
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("parse unix rights: %w", err)
 	}
 	if len(fds) != 1 {
 		for _, extra := range fds {
 			unix.Close(extra)
 		}
-		return "", -1, fmt.Errorf("expected exactly one fd, got %d", len(fds))
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("expected exactly one fd, got %d", len(fds))
 	}
 	fd := fds[0]
 
 	var header seccompHandoffRequest
 	if err := json.Unmarshal(msgBuf[:n], &header); err != nil {
 		unix.Close(fd)
-		return "", -1, fmt.Errorf("decode handoff header: %w", err)
+		return receivedSeccompListenerHandoff{}, fmt.Errorf("decode handoff header: %w", err)
 	}
 	if header.SessionID == "" {
 		unix.Close(fd)
-		return "", -1, errors.New("handoff header missing session_id")
+		return receivedSeccompListenerHandoff{}, errors.New("handoff header missing session_id")
 	}
-	return header.SessionID, fd, nil
+	return receivedSeccompListenerHandoff{
+		sessionID:     header.SessionID,
+		fd:            fd,
+		observation:   observation,
+		authorization: authorization,
+	}, nil
+}
+
+func closeSeccompHandoffRights(oob []byte) {
+	scms, err := unix.ParseSocketControlMessage(oob)
+	if err != nil {
+		return
+	}
+	for i := range scms {
+		fds, err := unix.ParseUnixRights(&scms[i])
+		if err != nil {
+			continue
+		}
+		for _, fd := range fds {
+			_ = unix.Close(fd)
+		}
+	}
 }
 
 func sendSeccompHandoffResponse(conn *net.UnixConn, ok bool, errMsg string) error {
@@ -220,7 +276,7 @@ func sendSeccompHandoffResponse(conn *net.UnixConn, ok bool, errMsg string) erro
 // is cancelled or the listener errors out — most commonly because the
 // governed process tree exited, closing the last reference to the seccomp
 // filter the notifications were flowing from.
-func superviseSeccompListener(ctx context.Context, fd int, sessionID string, cgroupID uint64, d *daemon, log *slog.Logger) {
+func superviseSeccompListener(ctx context.Context, fd int, sessionID string, registrationGeneration, cgroupID uint64, d *daemon, log *slog.Logger) {
 	// Unblock a pending RecvSeccompNotif on shutdown — SECCOMP_IOCTL_NOTIF_RECV
 	// has no context awareness of its own, the same limitation
 	// ringbuf.Reader.Read() has (see daemon_guard_linux.go's runGuardConsumer,
@@ -247,7 +303,17 @@ func superviseSeccompListener(ctx context.Context, fd int, sessionID string, cgr
 			log.Info("seccomp listener closed, stopping supervisor", "session_id", sessionID, "error", err)
 			return
 		}
+		d.seccompSessionMu.RLock()
+		if _, err := d.registry.ActiveSessionGeneration(sessionID, registrationGeneration); err != nil {
+			if sendErr := kernelcapture.SendSeccompNotifResp(fd, notif.ID, -1, int32(unix.EPERM), false); sendErr != nil {
+				log.Warn("seccomp notif send (stale registration deny)", "session_id", sessionID, "error", sendErr)
+			}
+			d.seccompSessionMu.RUnlock()
+			log.Warn("seccomp listener registration ended or was replaced", "session_id", sessionID, "registration_generation", registrationGeneration, "error", err)
+			return
+		}
 		d.handleSeccompConnectNotif(fd, notif, sessionID, cgroupID, log)
+		d.seccompSessionMu.RUnlock()
 	}
 }
 
