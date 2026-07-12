@@ -740,6 +740,15 @@ governed command. Stderr prints a message, a usage line, and placeholder-only
 value or local paths. Omitting `--mission` uses the built-in default mission
 text and is not rejected.
 
+If `--home` is supplied as an empty or whitespace-only string, `ardur run`
+exits `2` without generating keys, creating a Mission Passport, or launching the
+governed command. Stderr prints a message, a usage line, and placeholder-only
+`Next steps:` guidance such as
+`ardur run --home <ardur-home> --mission <mission> -- <command>` and
+`ardur run -- <command>`; the remediation text never echoes the raw `--home`
+value or local paths. Omitting `--home` uses an ephemeral Ardur home that is
+created and cleaned up automatically.
+
 If `--home` points to an existing non-directory (file, socket, symlink-to-file,
 etc.), `ardur run` exits `2` without generating keys, creating a Mission
 Passport, or launching the governed command. Stderr prints a message, a usage
