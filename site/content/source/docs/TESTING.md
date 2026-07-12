@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "f8d2c5baa4ae790be7e0f3fdfe68d35081f52a157e41d6b63653583900ea0d89"
+source_sha256: "d909610cc24d34c84a59fbd5bbc4492f89fa860d3483e7f73efef1df8eb1cbc0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -64,17 +64,17 @@ relevant pull requests and offers manual Linux stress dispatch; it is not
 scheduled. See the
 [benchmark guide](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/) for interpretation.
 
-When changing the independent AuditBench artifact pipeline, run:
+When changing the AuditBench evaluation-protocol artifact pipeline, run:
 
 ```bash
-make bench-independent-test
+make bench-protocol-test
 ```
 
 This exercises strict and duplicate-name JSON parsing, raw-capture replay,
 oracle/evidence separation, blind annotator roles, bundle provenance,
 disagreement adjudication, protocol and corpus sealing, symlink/path/drift
 rejection, held-out coverage, and tri-state score metrics. The test fixtures are
-pipeline fixtures, not independently labeled benchmark evidence.
+pipeline fixtures, not evidence from an externally governed annotation study.
 
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.

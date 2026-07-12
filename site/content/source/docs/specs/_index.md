@@ -21,7 +21,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ardur-drp-implementation-interop-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-implementation-interop-v0.1/)
 - [`ardur-drp-mapping-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-mapping-v0.1/)
 - [`ardur-drp-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/)
-- [`auditbench-independent-evaluation-v0.1.md`](/__ardur_internal__/source/docs/specs/auditbench-independent-evaluation-v0.1/)
+- [`auditbench-evaluation-protocol-v0.1.md`](/__ardur_internal__/source/docs/specs/auditbench-evaluation-protocol-v0.1/)
 - [`auditbench-pilot-protocol-v0.1.md`](/__ardur_internal__/source/docs/specs/auditbench-pilot-protocol-v0.1/)
 - [`conformance-profiles-v0.1.md`](/__ardur_internal__/source/docs/specs/conformance-profiles-v0.1/)
 - [`delegation-grant-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/delegation-grant-profile-v0.1/)

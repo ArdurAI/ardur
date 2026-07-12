@@ -1,7 +1,9 @@
-# Reproducing the AuditBench Evaluation
+# Reproducing AuditBench Harness Fixtures
 
-This document describes how to reproduce the benchmark evaluation results
-on a clean clone of this repository.
+This document describes how to reproduce the deterministic AuditBench harness
+fixtures on a clean clone of this repository. These runs exercise engineering
+contracts; they are not a completed independent evaluation or real annotation
+study.
 
 ## What runs now (Workstream B1)
 
@@ -79,21 +81,21 @@ and error paths for missing files.
 
 ## What is NOT yet runnable (Workstream B2)
 
-The publicly described Ardur headline corpus (**independently human-labeled
-scenarios drawn from real agentic-AI traces**) is **not bundled in this
-repository**. This is intentional: the corpus carries privacy-sensitive
-information and requires independent labeling to avoid ground-truth leakage
-into the evaluators.
+The planned Ardur headline corpus (**externally human-labeled scenarios drawn
+from real agentic-AI traces**) is **not bundled in this repository**. This is
+intentional: the corpus carries privacy-sensitive information and requires an
+externally governed collection and labeling process to avoid ground-truth
+leakage into the evaluators.
 
 The versioned engineering pipeline for that future corpus is implemented under
 `go/benchmark/independent` with three commands:
 
 - `auditbench-oracle` strictly normalizes a raw capture into full-oracle and
   projected-evidence views;
-- `auditbench-label` creates one-view blind bundles and requires independent
-  annotation/adjudication evidence;
-- `auditbench-score` seals the frozen study and verifies held-out tri-state
-  scoring against that exact seal.
+- `auditbench-label` creates one-view blind bundles and enforces declared role
+  separation over submitted identity strings;
+- `auditbench-score` creates a local content-integrity seal and verifies
+  held-out tri-state scoring against that exact artifact graph.
 
 Run its hostile pipeline tests with:
 
@@ -102,9 +104,10 @@ cd go && go test -race -count=1 ./benchmark/independent ./cmd/auditbench-oracle 
 ```
 
 See
-[`docs/specs/auditbench-independent-evaluation-v0.1.md`](docs/specs/auditbench-independent-evaluation-v0.1.md)
+[`docs/specs/auditbench-evaluation-protocol-v0.1.md`](docs/specs/auditbench-evaluation-protocol-v0.1.md)
 for the artifact contract and proof boundary. Passing these tests proves the
-pipeline, not the existence of independent labels or a headline corpus.
+pipeline and local content integrity, not annotator identity, evaluator
+independence, external registration, or a headline corpus.
 
 The following items remain gated on the separately-labeled corpus:
 

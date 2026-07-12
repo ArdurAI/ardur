@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "ef74ee0d6b15b22eb010660cad3aaef3af6cba44d890f798a8ed873084b6b7ba"
+source_sha256: "8b9acaa95d338641cd7194118435e4714bef78d786cbc2fcde81f417f3b26339"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -129,7 +129,7 @@ complete sensor coverage.
   observe-only Linux foundation: binary hashes and argv/interpreter signals,
   maintained corpus thresholds, and cross-platform launch sources
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
-- independent AuditBench annotation collection and headline scoring; the strict capture/blind-label/seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
+- externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 
 ## What We Still Need To Resolve
 
@@ -144,7 +144,7 @@ complete sensor coverage.
 - full deployment material for cluster, identity, and receipt storage paths
 - the full public docs spine (the current set is the public-safe subset)
 - benchmark corpora and independently reproduced cross-host performance claims beyond the public local harness
-- independent AuditBench human annotations, privacy-approved real-agent traces, external preregistration, and held-out headline results
+- externally governed AuditBench human annotations, privacy-approved real-agent traces, external preregistration, and held-out headline results
 - internal planning, lane, and session artifacts
 - Trusted Execution Environment (TEE) attestation as a general hardware-rooted production claim — see `docs/known-limitations.md`
 

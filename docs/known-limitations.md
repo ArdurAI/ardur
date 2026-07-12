@@ -70,12 +70,14 @@ facts so the runtime API can be reproduced offline. It is not raw RFC 3161
 proof, independent implementation interoperability, IETF conformance, or
 current revocation evidence. Those evidence obligations remain issue #180.
 
-The independent AuditBench pipeline can content-seal captures, blind bundles,
-annotations, splits, and results, but the repository does not yet contain an
-independently labeled headline corpus. It cannot authenticate human annotator
-independence, verify an external registration service, or replace the gated
-privacy and consent review for real-agent traces. Current in-repo benchmark
-scenarios remain deterministic harness fixtures.
+The AuditBench evaluation protocol can create a local content-integrity seal
+over captures, blind bundles, annotations, splits, and results, but no real
+annotation study has been run. Annotator and adjudicator IDs are self-asserted
+identity strings: the pipeline does not authenticate annotators and does not
+demonstrate evaluator independence. It also cannot verify an external
+registration service or replace the gated privacy and consent review for
+real-agent traces. Current in-repo benchmark scenarios remain deterministic
+harness fixtures.
 
 Governance telemetry export is a detached, verified projection of the receipt
 journal. It does not prove the journal is complete, re-check revocation by

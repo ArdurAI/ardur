@@ -112,7 +112,7 @@ complete sensor coverage.
   observe-only Linux foundation: binary hashes and argv/interpreter signals,
   maintained corpus thresholds, and cross-platform launch sources
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
-- independent AuditBench annotation collection and headline scoring; the strict capture/blind-label/seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
+- externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 
 ## What We Still Need To Resolve
 
@@ -127,7 +127,7 @@ complete sensor coverage.
 - full deployment material for cluster, identity, and receipt storage paths
 - the full public docs spine (the current set is the public-safe subset)
 - benchmark corpora and independently reproduced cross-host performance claims beyond the public local harness
-- independent AuditBench human annotations, privacy-approved real-agent traces, external preregistration, and held-out headline results
+- externally governed AuditBench human annotations, privacy-approved real-agent traces, external preregistration, and held-out headline results
 - internal planning, lane, and session artifacts
 - Trusted Execution Environment (TEE) attestation as a general hardware-rooted production claim — see `docs/known-limitations.md`
 
