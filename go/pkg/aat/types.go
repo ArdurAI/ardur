@@ -131,7 +131,8 @@ type ToolMap map[string]ArgumentConstraintMap
 
 // ArgumentConstraintMap maps an argument name to its governing constraint.
 //
-// Closed-world semantics apply when the map is non-empty (AAT §3.3).
+// An empty map authorizes the tool without argument restrictions. Closed-world
+// semantics apply when the map is non-empty (AAT §3.3).
 type ArgumentConstraintMap map[string]*Constraint
 
 // Constraint is the wire-format union for all core AAT argument constraints

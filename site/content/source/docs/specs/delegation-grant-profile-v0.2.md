@@ -2,7 +2,7 @@
 title: "Ardur Delegation Grant Profile v0.2 for AAT Draft-01"
 description: "This document defines the Ardur profile identifier"
 source_path: "docs/specs/delegation-grant-profile-v0.2.md"
-source_sha256: "5ed89a67c7a498b2f2548f8146061fd6b19b88c0e7aea6a288cbe611bf17183c"
+source_sha256: "eb963c7c05e04844394f21fffa755a421abb6bf649501757b221b4d56855907c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -72,6 +72,20 @@ The supported draft-01 core constraint types are `exact`, `range`, `one_of`,
 The draft-00 `pattern`, `regex`, `cel`, and `not` types are rejected under this
 profile. They are not treated as draft-01 core constraints and no extension
 registry is enabled by v0.2.
+
+Constraint-map shape follows draft-01 Sections 3.3 and 7 exactly:
+
+- a tool mapped to `{}` authorizes that tool without argument restrictions;
+- a non-empty constraint map is closed-world: every invocation argument MUST
+  be named and every named constraint MUST have a matching argument;
+- a child MAY add any argument-key set beneath an empty parent map, which
+  narrows previously unrestricted authority; and
+- beneath a non-empty parent map, the child MUST preserve the exact argument
+  keys and may only narrow their constraints.
+
+`{}` is therefore a deliberate wildcard boundary, not a deny-by-default empty
+schema. Issuers that need a closed argument shape with unrestricted values MUST
+list every permitted argument with an explicit `wildcard` constraint.
 
 ## 5. Audience-Bound Proof of Possession
 

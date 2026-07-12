@@ -56,6 +56,20 @@ The draft-00 `pattern`, `regex`, `cel`, and `not` types are rejected under this
 profile. They are not treated as draft-01 core constraints and no extension
 registry is enabled by v0.2.
 
+Constraint-map shape follows draft-01 Sections 3.3 and 7 exactly:
+
+- a tool mapped to `{}` authorizes that tool without argument restrictions;
+- a non-empty constraint map is closed-world: every invocation argument MUST
+  be named and every named constraint MUST have a matching argument;
+- a child MAY add any argument-key set beneath an empty parent map, which
+  narrows previously unrestricted authority; and
+- beneath a non-empty parent map, the child MUST preserve the exact argument
+  keys and may only narrow their constraints.
+
+`{}` is therefore a deliberate wildcard boundary, not a deny-by-default empty
+schema. Issuers that need a closed argument shape with unrestricted values MUST
+list every permitted argument with an explicit `wildcard` constraint.
+
 ## 5. Audience-Bound Proof of Possession
 
 The v0.2 proof-of-possession JWT MUST contain a non-empty `aat_aud`. The

@@ -564,6 +564,47 @@ func TestEmptyIntermediateCapabilityIsValidBottomElement(t *testing.T) {
 	}
 }
 
+func TestEmptyToolConstraintMapAuthorizesArbitraryArguments(t *testing.T) {
+	leaf := &Token{
+		TokenType:     AATTypeExecution,
+		Authorization: simpleAuthorization(wildcardToolMap("read_file")),
+	}
+	args := map[string]interface{}{
+		"path":       "/data/report.pdf",
+		"audit_mode": true,
+	}
+	if err := verifyLeafInvocation(leaf, "read_file", args); err != nil {
+		t.Fatalf("empty tool constraint map rejected unrestricted arguments: %v", err)
+	}
+
+	constrainedLeaf := &Token{
+		TokenType: AATTypeExecution,
+		Authorization: simpleAuthorization(ToolMap{
+			"read_file": {
+				"path": {ConstraintType: ConstraintTypeWildcard},
+			},
+		}),
+	}
+	if err := verifyLeafInvocation(constrainedLeaf, "read_file", args); !errors.Is(err, ErrDenyStep6BLeafUnknownArgument) {
+		t.Fatalf("non-empty tool constraint map error = %v, want unknown-argument denial", err)
+	}
+}
+
+func TestEmptyParentConstraintMapMayBeNarrowedByChild(t *testing.T) {
+	parent := &Token{Authorization: simpleAuthorization(wildcardToolMap("read_file"))}
+	child := &Token{Authorization: simpleAuthorization(ToolMap{
+		"read_file": {
+			"path": {ConstraintType: ConstraintTypeExact, Value: "/data/report.pdf"},
+		},
+	})}
+	if err := verifyCapabilityMonotonicity(parent, child); err != nil {
+		t.Fatalf("child constraints below unrestricted parent rejected: %v", err)
+	}
+	if err := verifyCapabilityMonotonicity(child, parent); !errors.Is(err, ErrDenyStep4Q2ArgumentShape) {
+		t.Fatalf("constraint removal below non-empty parent error = %v, want shape denial", err)
+	}
+}
+
 func TestDuplicateToolIdentifierWireIsRejected(t *testing.T) {
 	anchorPublic, anchorPrivate := newKeyPair()
 	holderPublic, _ := newKeyPair()
