@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8c3af753655eb0917726c4346d1c27b3ad52b60e1b203a05f0e32015326a6fcc"
+source_sha256: "17e8b18547dd9b50dbec283c6e562606d1cdb17d7cc591247ba720845e2db9d3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -24,6 +24,9 @@ All notable changes to Ardur will be documented in this file.
 ### Security
 - Serialize the Linux daemon's BPF policy-map handle lifetime so startup,
   health, in-flight mutations, tier withdrawal, and close cannot race
+- Make the Linux cgroup-ownership verifier independently fail closed when a
+  non-root handshake has no resolvable peer PID, preserving the upstream
+  `SO_PEERCRED` identity gate as defense in depth
 - Pin Biscuit holder verification to a server-owned issuer key, JWT-SVID trust
   bundle, and audience; require configured binding on every presentation; and
   reject caller-supplied roots plus non-`jwt-svid` bundle keys

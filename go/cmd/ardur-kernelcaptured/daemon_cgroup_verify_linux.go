@@ -71,9 +71,9 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	peerPID := handshake.Authorization.PID
 	rootPID := reg.RootPID
 	// register_session validation already requires root_pid != 0 and
-	// cgroup_id != 0; peerPID comes from SO_PEERCRED. If either is missing
-	// there is nothing to bind — let the registry's own validation speak.
-	if peerPID == 0 || rootPID == 0 {
+	// cgroup_id != 0. If rootPID is missing there is no claim to inspect; let
+	// the registry's own validation reject the malformed request.
+	if rootPID == 0 {
 		return nil
 	}
 	// A root (uid 0) peer is already fully privileged on the host — it can move
@@ -88,17 +88,22 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	if handshake.Authorization.UID == 0 {
 		return nil
 	}
-	// Confirm the peer itself is visible in the daemon's /proc view. If it is
-	// not (an unusual cross-PID-namespace deployment where the daemon cannot
-	// see client PIDs at all), we cannot establish ancestry either way — skip
-	// rather than reject and break such a deployment, but say so loudly. Since
-	// resolving root_pid's cgroup below relies on the same /proc visibility, a
-	// daemon that can't see the peer generally can't see root_pid either, so
-	// both checks are skipped together here.
+	// peerPID comes from SO_PEERCRED and is translated into the receiver's PID
+	// namespace. A zero/unavailable value cannot bind this socket peer to the
+	// claimed process tree, so UID authorization alone is insufficient.
+	if peerPID == 0 {
+		log.Warn("register_session rejected: peer pid unavailable for cgroup ownership verification",
+			"root_pid", rootPID, "cgroup_id", reg.CgroupID)
+		return fmt.Errorf("peer pid is unavailable in the daemon pid namespace; cannot verify ownership of root_pid %d and cgroup_id %d", rootPID, reg.CgroupID)
+	}
+	// Confirm the peer itself is visible in the daemon's /proc view. /proc is
+	// tied to the PID namespace that mounted it; if lookup fails, ancestry and
+	// ownership cannot be established. Failing open here would restore the
+	// cross-workload enforcement path closed by issue #119.
 	if _, err := os.Stat("/proc/" + strconv.FormatUint(uint64(peerPID), 10)); err != nil {
-		log.Warn("register_session cgroup ownership check skipped: peer pid not visible in /proc (cross-namespace daemon?)",
-			"peer_pid", peerPID, "root_pid", rootPID)
-		return nil
+		log.Warn("register_session rejected: peer pid not visible for cgroup ownership verification",
+			"peer_pid", peerPID, "root_pid", rootPID, "cgroup_id", reg.CgroupID, "error", err)
+		return fmt.Errorf("peer pid %d is not visible in the daemon /proc view (%w); cannot verify ownership of root_pid %d and cgroup_id %d", peerPID, err, rootPID, reg.CgroupID)
 	}
 
 	// Check 1: ancestry. The peer registering its own process is trivially a
