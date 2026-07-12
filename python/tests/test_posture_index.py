@@ -16,7 +16,7 @@ def _issue_mission(tmp_path: Path, *, allowed_tools: list[str], forbidden_tools:
         mission="exercise posture index fixtures",
         allowed_tools=allowed_tools,
         forbidden_tools=forbidden_tools,
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
     )

@@ -35,6 +35,59 @@ def _write_valid_mission_file(path) -> None:
     )
 
 
+def test_issue_explicit_unrestricted_scope_is_signed_and_warned(tmp_path, capsys):
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "explicit-unrestricted",
+            "--mission",
+            "operator explicitly permits every resource",
+            "--allowed-tools",
+            "Read",
+            "--resource-scope",
+            "**",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert payload["claims"]["resource_scope"] == ["**"]
+    assert payload["warnings"] == [
+        "resource_scope explicitly permits all resources via the sole '**' pattern"
+    ]
+
+
+def test_issue_rejects_unrestricted_sentinel_mixed_with_bounded_scope(
+    tmp_path, capsys
+):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "ambiguous-scope",
+            "--mission",
+            "reject two sources of scope intent",
+            "--allowed-tools",
+            "Read",
+            "--resource-scope",
+            "**",
+            "/workspace/*",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["condition"] == "issue_resource_scope_invalid"
+    assert "must be the only resource_scope pattern" in payload["detail"]
+    assert not keys_dir.exists()
+
+
 def _relative_tree_entries(root) -> list[str]:
     entries = []
     for path in root.rglob("*"):

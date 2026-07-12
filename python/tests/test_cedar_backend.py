@@ -260,7 +260,7 @@ class TestProxyEndToEnd:
         policy = 'permit(principal, action, resource);'
         mission = MissionPassport(
             agent_id="cedar-e2e-1", mission="do work",
-            allowed_tools=["read_file"], resource_scope=[],
+            allowed_tools=["read_file"], resource_scope=["**"],
             max_tool_calls=10,
             additional_policies=[_spec(policy, label="security_team")],
         )
@@ -282,7 +282,7 @@ class TestProxyEndToEnd:
 forbid(principal, action == Action::"send_email", resource);'''
         mission = MissionPassport(
             agent_id="cedar-e2e-2", mission="send report",
-            allowed_tools=["send_email"], resource_scope=[],
+            allowed_tools=["send_email"], resource_scope=["**"],
             max_tool_calls=10,
             additional_policies=[_spec(policy, label="security_team")],
         )
@@ -302,7 +302,7 @@ forbid(principal, action == Action::"send_email", resource);'''
         spec["policy_sha256"] = "0" * 64  # wrong hash
         mission = MissionPassport(
             agent_id="cedar-e2e-3", mission="x",
-            allowed_tools=["read_file"], resource_scope=[],
+            allowed_tools=["read_file"], resource_scope=["**"],
             max_tool_calls=10, additional_policies=[spec],
         )
         token = issue_passport(mission, private_key, ttl_s=60)

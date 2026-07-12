@@ -68,7 +68,7 @@ class TestProxyApprovalIntegration:
             mission="approval fatigue demo",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=200,
             max_duration_s=600,
         )
@@ -109,7 +109,7 @@ class TestProxyApprovalIntegration:
             mission="needs operator",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=10,
             max_duration_s=60,
         )
@@ -139,7 +139,7 @@ class TestProxyApprovalIntegration:
             mission="needs operator",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=10,
             max_duration_s=60,
         )

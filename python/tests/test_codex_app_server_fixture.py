@@ -29,7 +29,7 @@ def _issue_codex_passport(
         mission="exercise Codex app-server local host-event fixture",
         allowed_tools=allowed_tools or ["*"],
         forbidden_tools=forbidden_tools or [],
-        resource_scope=resource_scope or [],
+        resource_scope=["**"] if resource_scope is None else resource_scope,
         allowed_side_effect_classes=allowed_side_effect_classes or [],
         max_tool_calls=20,
         max_duration_s=600,

@@ -97,7 +97,7 @@ def test_proxy_violation_then_insufficient_evidence(
         mission="m",
         allowed_tools=[MEMORY_WRITE_TOOL, MEMORY_READ_TOOL],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=300,
     )
@@ -143,7 +143,7 @@ def test_proxy_write_read_success(tmp_path, public_key, private_key, session_key
         mission="m",
         allowed_tools=[MEMORY_WRITE_TOOL, MEMORY_READ_TOOL],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=300,
     )
@@ -193,7 +193,7 @@ class TestMemoryStoreSignerBinding:
             mission="m",
             allowed_tools=[MEMORY_WRITE_TOOL, MEMORY_READ_TOOL],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=20,
             max_duration_s=300,
         )
@@ -286,7 +286,7 @@ class TestApprovalPolicyAbsenceContract:
             mission="m",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=5,
             max_duration_s=60,
         )
@@ -320,7 +320,7 @@ class TestApprovalPolicyAbsenceContract:
             mission="m",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=5,
             max_duration_s=60,
         )

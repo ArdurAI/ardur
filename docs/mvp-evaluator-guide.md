@@ -119,7 +119,7 @@ HEALTH_RESPONSE="$(curl_public "$PROXY_URL/health")"
 test "$(printf '%s' "$HEALTH_RESPONSE" | json_value status)" = "ok"
 echo "health=ok"
 
-MISSION_PAYLOAD='{"mission":{"agent_id":"evaluator-guide","mission":"evaluate the governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"max_tool_calls":4}}'
+MISSION_PAYLOAD='{"mission":{"agent_id":"evaluator-guide","mission":"evaluate the governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"resource_scope":["**"],"max_tool_calls":4}}'
 ISSUE_RESPONSE="$(post_json /issue "$MISSION_PAYLOAD")"
 PASSPORT="$(printf '%s' "$ISSUE_RESPONSE" | json_string token)"
 echo "issue=passport-created"

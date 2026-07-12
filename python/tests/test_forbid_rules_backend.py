@@ -285,7 +285,7 @@ class TestProxyEndToEnd:
         ]
         mission = MissionPassport(
             agent_id="fr-e2e-1", mission="send report",
-            allowed_tools=["send_email"], resource_scope=[],
+            allowed_tools=["send_email"], resource_scope=["**"],
             max_tool_calls=10,
             additional_policies=[_spec_for_rules(rules)],
         )
@@ -310,7 +310,7 @@ class TestProxyEndToEnd:
         ]
         mission = MissionPassport(
             agent_id="fr-e2e-2", mission="read",
-            allowed_tools=["read_file"], resource_scope=[],
+            allowed_tools=["read_file"], resource_scope=["**"],
             max_tool_calls=10,
             additional_policies=[_spec_for_rules(rules)],
         )
@@ -399,7 +399,7 @@ class TestTripleCompositionIntegration:
 
         mission = MissionPassport(
             agent_id="triple-1", mission="do work",
-            allowed_tools=["read_file"], resource_scope=[],
+            allowed_tools=["read_file"], resource_scope=["**"],
             max_tool_calls=10,
             additional_policies=[cedar_spec, forbid_spec],
         )
@@ -429,7 +429,7 @@ class TestTripleCompositionIntegration:
 
         mission = MissionPassport(
             agent_id="triple-2", mission="do work",
-            allowed_tools=["read_file"], resource_scope=[],
+            allowed_tools=["read_file"], resource_scope=["**"],
             max_tool_calls=10,
             additional_policies=[cedar_spec, forbid_spec],
         )

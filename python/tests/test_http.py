@@ -621,6 +621,26 @@ class TestHTTPAuthAndValidation:
         assert status == 400
         assert body == {"error": "mission must be a JSON object"}
 
+    def test_issue_explicit_unrestricted_scope_is_warned(self, http_proxy):
+        base, _ = http_proxy
+        status, body = _post(
+            base + "/issue",
+            {
+                "mission": {
+                    "agent_id": "explicit-unrestricted-http",
+                    "mission": "permit all resources intentionally",
+                    "allowed_tools": ["read"],
+                    "resource_scope": ["**"],
+                }
+            },
+        )
+
+        assert status == 200
+        assert body["claims"]["resource_scope"] == ["**"]
+        assert body["warnings"] == [
+            "resource_scope explicitly permits all resources via the sole '**' pattern"
+        ]
+
     def test_issue_with_lineage_budgets_fails_phase1_deferred(self, http_proxy):
         base, _ = http_proxy
         status, body = _post(
@@ -909,7 +929,7 @@ def _issue_aat_md(private_key, *, mission_id: str) -> str:
         mission="authoritative AAT HTTP mission",
         allowed_tools=["read"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=3,
         max_duration_s=300,
         delegation_allowed=True,

@@ -23,6 +23,13 @@ DEFAULT_ISSUER = "vibap-governance-proxy"
 DEFAULT_AUDIENCE = "vibap-proxy"
 DELEGATION_CHAIN_CLAIM = "delegation_chain"
 MAX_DELEGATION_DEPTH = 16
+UNRESTRICTED_RESOURCE_SCOPE_PATTERN = "**"
+
+
+def resource_scope_is_explicitly_unrestricted(scope: list[str]) -> bool:
+    """Return whether ``scope`` is the sole explicit unrestricted sentinel."""
+
+    return scope == [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
 
 # Bounded-iat skew window applied to every JWT we verify (passport, AAT,
 # Mission Declaration, status list, and receipt).
@@ -300,12 +307,20 @@ class MissionPassport:
         # Validate/normalize cwd at construction time so an invalid passport
         # can never be issued. Empty string → None; relative → ValueError.
         self.cwd = _normalize_cwd(self.cwd)
+        if (
+            UNRESTRICTED_RESOURCE_SCOPE_PATTERN in self.resource_scope
+            and not resource_scope_is_explicitly_unrestricted(self.resource_scope)
+        ):
+            raise ValueError(
+                "unrestricted '**' must be the only resource_scope pattern"
+            )
 
     # Phase-3.1b M-3 (external-review-G F6): canonical set of keys this constructor
     # understands. Anything outside this set is a typo (e.g. `resourc_scope`
     # missing the `e`) that previously was silently dropped, causing the
-    # mistyped field to default (often to an empty list = unrestricted).
-    # Raise instead so operators see the typo at load time. The set
+    # mistyped field to default. Empty scope now denies resource authority,
+    # but silently discarding a declared policy field is still unsafe and
+    # misleading. Raise instead so operators see the typo at load time. The set
     # includes every dataclass field + mission-file metadata keys that
     # `_ttl_from_payload` understands (`ttl_s`, `issued_at`, `expires_at`)
     # and the legacy `budget` dict shape that exposes nested
@@ -331,7 +346,8 @@ class MissionPassport:
     def from_dict(cls, data: dict[str, Any]) -> "MissionPassport":
         # Phase-3.1b M-3 (external-review-G F6): reject unknown fields so a typo
         # like `resourc_scope` (missing `e`) surfaces at construction
-        # time instead of silently producing an unrestricted passport.
+        # time instead of silently replacing the intended resource policy with
+        # the empty deny-all default.
         # The canonical key set is `_KNOWN_FIELDS`; anything else is a
         # typo or an unversioned schema extension — either way we fail
         # closed and let the caller decide.
@@ -997,11 +1013,12 @@ def derive_child_passport(
                         parent_budget_ceiling). The proxy passes
                         ``parent_reserved_for_descendants`` from live reserved budget;
                         the signed claim ``reserved_budget_share`` audits the tree.
-      - resource_scope: if child_resource_scope provided, it must be a subset of
-                        parent's (no new patterns); if the parent is unrestricted
-                        (`[]`), any explicit child scope is a valid narrowing.
-                        A restricted parent MAY NOT be widened back to `[]`.
-                        If not provided, inherit parent's verbatim.
+      - resource_scope: an empty scope grants no resource authority; ``["**"]``
+                        is the explicit unrestricted sentinel. An unrestricted
+                        parent may delegate any valid narrower scope. A bounded
+                        or empty parent may delegate ``[]`` (deny all), while a
+                        bounded child otherwise remains an exact pattern subset.
+                        If not provided, inherit parent's scope verbatim.
       - cwd: if ``child_cwd`` is ``None``, child inherits parent's ``cwd``
              verbatim. If the parent has no ``cwd``, the child MAY NOT
              introduce one (cwd can only be inherited or narrowed, never
@@ -1069,24 +1086,30 @@ def derive_child_passport(
         candidates.append(int(child_max_tool_calls))
     child_budget = min(candidates)
 
-    # Resource scope narrowing: child must request a subset of parent's patterns,
-    # or inherit verbatim. We compare by string equality — pattern-level set
-    # subset would require a glob-language intersector we don't have today.
+    # Resource scope narrowing. Empty means no resource authority; ["**"] is
+    # the sole explicit unrestricted sentinel. Bounded pattern comparison stays
+    # exact because a safe glob-language intersector is outside this boundary.
     parent_scope = list(parent.get("resource_scope", []))
     if child_resource_scope is not None:
         child_scope_set = set(child_resource_scope)
-        if not parent_scope:
-            final_scope = sorted(child_scope_set)
+        requested_scope = sorted(child_scope_set)
+        if (
+            UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope
+            and not resource_scope_is_explicitly_unrestricted(requested_scope)
+        ):
+            raise PermissionError(
+                "unrestricted '**' must be the only child_resource_scope pattern"
+            )
+        if not requested_scope:
+            final_scope = []
+        elif resource_scope_is_explicitly_unrestricted(parent_scope):
+            final_scope = requested_scope
         else:
-            if not child_scope_set:
-                raise PermissionError(
-                    "child_resource_scope cannot widen a restricted parent scope to unrestricted"
-                )
             parent_scope_set = set(parent_scope)
             new_patterns = child_scope_set - parent_scope_set
             if new_patterns:
                 raise PermissionError(f"scope escalation (resources): {sorted(new_patterns)}")
-            final_scope = sorted(child_scope_set)
+            final_scope = requested_scope
     else:
         final_scope = parent_scope
 

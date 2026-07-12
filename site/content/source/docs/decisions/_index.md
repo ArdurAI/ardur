@@ -23,4 +23,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ADR-020-persisted-session-reverification-on-load.md`](/__ardur_internal__/source/docs/decisions/adr-020-persisted-session-reverification-on-load/)
 - [`ADR-021-kb-jwt-server-challenged-nonce.md`](/__ardur_internal__/source/docs/decisions/adr-021-kb-jwt-server-challenged-nonce/)
 - [`ADR-022-operator-telemetry-spiffe-mtls.md`](/__ardur_internal__/source/docs/decisions/adr-022-operator-telemetry-spiffe-mtls/)
+- [`ADR-023-explicit-resource-scope-authority.md`](/__ardur_internal__/source/docs/decisions/adr-023-explicit-resource-scope-authority/)
 - [`README.md`](/__ardur_internal__/source/docs/decisions/readme/)

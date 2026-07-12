@@ -18,6 +18,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 020 | [Persisted-session reverification on load](./ADR-020-persisted-session-reverification-on-load.md) | Proposed | 2026-04-21 |
 | 021 | [KB-JWT server-challenged nonce](./ADR-021-kb-jwt-server-challenged-nonce.md) | Proposed | 2026-04-21 |
 | 022 | [SPIFFE mTLS identity for operator telemetry](./ADR-022-operator-telemetry-spiffe-mtls.md) | Accepted | 2026-07-11 |
+| 023 | [Explicit resource-scope authority](./ADR-023-explicit-resource-scope-authority.md) | Accepted | 2026-07-12 |
 
 ## Conventions
 

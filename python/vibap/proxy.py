@@ -93,6 +93,7 @@ from .passport import (
     DEFAULT_HOME,
     MAX_DELEGATION_DEPTH,
     MissionPassport,
+    UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
     _ensure_default_home_dir,
     delegation_chain_entries,
     derive_child_passport,
@@ -127,6 +128,17 @@ _PASSPORT_STATE_SCHEMA_VERSION = 1
 _SESSION_RECEIPT_INTEGRITY_VERSION = 1
 LIFECYCLE_ATTESTATION_SCHEMA = "ardur.lifecycle.attestation.v1"
 LineageEdge = tuple[str | None, str | None]
+
+
+def _warn_explicit_unrestricted_resource_scope(claims: Mapping[str, Any]) -> None:
+    if claims.get("resource_scope") != [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]:
+        return
+    logger.warning(
+        "session credential explicitly grants unrestricted resource_scope via "
+        "the sole '**' pattern (jti=%s, agent_id=%s)",
+        claims.get("jti", "unknown"),
+        claims.get("sub", "unknown"),
+    )
 
 # B.2 fail-closed precondition (PLAN E.8). Declared telemetry fields MUST be
 # present and non-empty in the tool-call arguments dict or the verifier returns
@@ -927,10 +939,11 @@ def _check_resource_scope(
     """Verify every resource-like value in `arguments` matches at least one glob in
     `resource_scope`. Returns (ok, reason).
 
-    If `resource_scope` is empty, returns (True, "") for backwards compatibility
-    with passports that don't declare scope. Matching is case-sensitive
-    (fnmatchcase) because real-world paths/URLs are case-sensitive on Linux, S3,
-    GCS, etc.
+    An empty ``resource_scope`` grants no resource authority: resource-bearing
+    arguments are denied while arguments with no resource candidates may pass.
+    The sole ``"**"`` pattern is the explicit unrestricted form. Matching is
+    case-sensitive (fnmatchcase) because real-world paths/URLs are case-sensitive
+    on Linux, S3, GCS, etc.
 
     The optional ``cwd`` is a passport-declared anchor used to resolve
     *relative* candidate values. When a candidate token does not match any
@@ -972,11 +985,9 @@ def _check_resource_scope(
     opens it. Callers must disclose that residual boundary rather than treating
     a PERMIT as kernel-enforced containment.
     """
-    if not resource_scope:
-        # No scope declared — legacy "unrestricted" semantics. PERMIT.
-        return True, ""
+    scope_missing = not resource_scope
     patterns = [p for p in resource_scope if isinstance(p, str) and p]
-    if not patterns:
+    if not patterns and not scope_missing:
         # Phase-3.1b M-2 (external-review-G F4): scope WAS declared but every entry
         # was invalid (None / non-string / empty string). Pre-3.1b this
         # silently devolved to "unrestricted" — the same PERMIT path as
@@ -991,6 +1002,11 @@ def _check_resource_scope(
             "(all entries were None / non-string / empty) — "
             "fix the passport's resource_scope field"
         )
+    if UNRESTRICTED_RESOURCE_SCOPE_PATTERN in patterns and (
+        patterns != [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
+        or len(resource_scope) != 1
+    ):
+        return False, "unrestricted '**' must be the only resource_scope pattern"
 
     # NFC-normalize scope patterns once per call. Memoized here rather than
     # at module import time so operators can ship passports authored on
@@ -1127,6 +1143,11 @@ def _check_resource_scope(
         # denying. The tokenizer is the single point that decides what
         # counts as a resource reference.
         for token in tokens:
+            if scope_missing:
+                return False, (
+                    "resource_scope is missing or empty; declare at least one "
+                    "pattern or use ['**'] to explicitly allow all resources"
+                )
             normalized, error_reason = _sanitize_value(token)
             if error_reason is not None:
                 return False, (
@@ -2735,6 +2756,7 @@ class GovernanceProxy:
         Phase 3.3m → 3.3o (K2 / Round 11 I6 + cryptographer review #07).
         """
         claims = self.verify_passport_token(passport_token)
+        _warn_explicit_unrestricted_resource_scope(claims)
 
         # K2 (I6): full Proof of Possession — key binding + KB-JWT.
         # Cryptographer review #07 identified that key binding alone
@@ -3159,6 +3181,8 @@ class GovernanceProxy:
                 # ``None`` means the mission is unknown to the store;
                 # fall through to whatever the credential carries.
                 claims["additional_policies"] = list(stored_policies)
+
+        _warn_explicit_unrestricted_resource_scope(claims)
 
         # The "passport_token" field for the session stores the base64
         # Biscuit string — so persisted sessions round-trip, and audit
@@ -5385,7 +5409,15 @@ def serve_proxy(
                     mission = MissionPassport.from_dict(mission_payload)
                     token = issue_passport(mission, private_key, ttl_s=payload.get("ttl_s"))
                     claims = verify_passport(token, proxy.public_key)
-                    self._send_json(200, {"token": token, "claims": claims})
+                    response: dict[str, Any] = {"token": token, "claims": claims}
+                    if mission.resource_scope == [
+                        UNRESTRICTED_RESOURCE_SCOPE_PATTERN
+                    ]:
+                        response["warnings"] = [
+                            "resource_scope explicitly permits all resources via "
+                            "the sole '**' pattern"
+                        ]
+                    self._send_json(200, response)
                     return
 
                 if path == "/verify":

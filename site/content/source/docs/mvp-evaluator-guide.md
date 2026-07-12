@@ -2,7 +2,7 @@
 title: "Ardur MVP Evaluator Guide"
 description: "Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:"
 source_path: "docs/mvp-evaluator-guide.md"
-source_sha256: "5d3e2ce1e861c87d1fe0cef4a01bcd775a93f3e9231e36a6c7db96c9e2d0c788"
+source_sha256: "6f96a6f592cb74634e596913957e6b13b1864fd06ccf4e62b41b82f829faaf75"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -136,7 +136,7 @@ HEALTH_RESPONSE="$(curl_public "$PROXY_URL/health")"
 test "$(printf '%s' "$HEALTH_RESPONSE" | json_value status)" = "ok"
 echo "health=ok"
 
-MISSION_PAYLOAD='{"mission":{"agent_id":"evaluator-guide","mission":"evaluate the governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"max_tool_calls":4}}'
+MISSION_PAYLOAD='{"mission":{"agent_id":"evaluator-guide","mission":"evaluate the governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"resource_scope":["**"],"max_tool_calls":4}}'
 ISSUE_RESPONSE="$(post_json /issue "$MISSION_PAYLOAD")"
 PASSPORT="$(printf '%s' "$ISSUE_RESPONSE" | json_string token)"
 echo "issue=passport-created"

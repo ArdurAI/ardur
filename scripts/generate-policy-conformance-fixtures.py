@@ -66,7 +66,7 @@ def _claims(
         "mission": f"Run public policy conformance scenario {scenario_id}",
         "allowed_tools": allowed_tools,
         "forbidden_tools": forbidden_tools or [],
-        "resource_scope": [],
+        "resource_scope": ["**"],
         "max_tool_calls": max_tool_calls,
         "max_duration_s": 600,
         "delegation_allowed": delegation_allowed,

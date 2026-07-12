@@ -120,7 +120,7 @@ def _run_case(
         mission="composition-test",
         allowed_tools=[tool_name],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=10,
         max_duration_s=60,
         additional_policies=[_spec(pd) for pd in extra_decisions],
@@ -269,7 +269,7 @@ class TestCompositionEquivalence:
             mission="budget-composition",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=1,
             max_duration_s=60,
         )

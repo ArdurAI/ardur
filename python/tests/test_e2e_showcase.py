@@ -876,6 +876,7 @@ class TestDelegationLayer:
             agent_id="parent-3",
             mission="scope enforcement test",
             allowed_tools=["read_file", "write_file", "analyze"],
+            resource_scope=["**"],
             max_tool_calls=20,
             delegation_allowed=True,
             max_delegation_depth=1,
@@ -926,6 +927,7 @@ class TestDelegationLayer:
             agent_id="parent-indep",
             mission="parent independence test",
             allowed_tools=["read_file", "write_file"],
+            resource_scope=["**"],
             max_tool_calls=10,
             delegation_allowed=True,
             max_delegation_depth=1,
@@ -1238,6 +1240,7 @@ class TestPolicyBackendLayer:
             agent_id="backend-agent",
             mission="multi-backend composition test",
             allowed_tools=["read_file", "write_file"],
+            resource_scope=["**"],
             max_tool_calls=10,
             max_duration_s=120,
         )
@@ -1410,6 +1413,7 @@ class TestAdvancedFeatures:
                     agent_id=f"concurrent-{label}",
                     mission=f"concurrent test {label}",
                     allowed_tools=["read_file"],
+                    resource_scope=["**"],
                     max_tool_calls=3,
                     max_duration_s=60,
                 )

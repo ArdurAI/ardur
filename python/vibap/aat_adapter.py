@@ -31,7 +31,14 @@ from .mission import (
     mission_is_revoked,
     parse_mission_ref,
 )
-from .passport import ALGORITHM, MissionPassport, assert_iat_in_window, verify_pop
+from .passport import (
+    ALGORITHM,
+    MissionPassport,
+    UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
+    assert_iat_in_window,
+    resource_scope_is_explicitly_unrestricted,
+    verify_pop,
+)
 
 AAT_AUTHORIZATION_DETAIL_TYPE = "attenuating_agent_token"
 AAT_CREDENTIAL_FORMAT = "aat-compatible-jwt"
@@ -292,11 +299,19 @@ def _extract_resource_scope(
     ):
         raise PermissionError("AAT grant resource_scope must be a string array")
     requested = set(raw_scope)
-    if mission_scope:
+    requested_scope = sorted(requested)
+    if (
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope
+        and not resource_scope_is_explicitly_unrestricted(requested_scope)
+    ):
+        raise PermissionError(
+            "unrestricted '**' must be the only AAT grant resource_scope pattern"
+        )
+    if not resource_scope_is_explicitly_unrestricted(mission_scope):
         widened = sorted(requested - set(mission_scope))
         if widened:
             raise PermissionError(f"AAT grant widens mission resource_scope: {widened}")
-    return sorted(requested)
+    return requested_scope
 
 
 def _assert_child_grant_narrows_parent(

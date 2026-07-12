@@ -464,7 +464,7 @@ def main():
             mission="build Task Tracker CLI",
             allowed_tools=["read_file", "write_file", "list_directory", "search_files"],
             forbidden_tools=["delete_file", "execute_shell"],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=200,
             max_duration_s=1800,
         )

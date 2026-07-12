@@ -729,6 +729,7 @@ def _apply_kernel_policy(
     *,
     session_id: str,
     passport: "MissionPassport",
+    kernel_resource_scope: list[str],
     correlation: kc.CorrelationResult,
     enforce: bool,
     seccomp_plan: SeccompShimPlan,
@@ -753,6 +754,11 @@ def _apply_kernel_policy(
     ``biscuit-python``, a ``[dev]`` extra) so a plain ``ardur run`` never pays
     for kernel-enforcement machinery it isn't using.
 
+    ``kernel_resource_scope`` is deliberately separate from the signed
+    passport claim. For an explicit ``--no-resource-scope`` run the passport
+    records ``["**"]`` for honest user-space authority while kernel lowering
+    receives ``[]`` so the network-only seccomp plan remains file-op-free.
+
     ``seccomp_plan`` is threaded in from ``run_governed`` (it was resolved
     before the agent was even spawned, so the launch command could be
     wrapped in time — see :class:`SeccompShimPlan`) rather than re-detected
@@ -772,7 +778,7 @@ def _apply_kernel_policy(
         allowed_side_effect_classes=passport.allowed_side_effect_classes,
         forbidden_tools=passport.forbidden_tools,
         allowed_tools=passport.allowed_tools,
-        resource_scope=passport.resource_scope,
+        resource_scope=kernel_resource_scope,
         enforce_mode=ENFORCE_MODE_ENFORCE if enforce else ENFORCE_MODE_PERMISSIVE,
     )
     tier2_ops = list(plan.tier2_ops)
@@ -927,7 +933,8 @@ def run_governed(
     absolute path prefix for BPF lowering. It cannot be combined with
     ``no_resource_scope``.
 
-    ``no_resource_scope`` skips the default cwd-based file resource_scope
+    ``no_resource_scope`` explicitly grants unrestricted resources to the
+    user-space proxy while skipping the default cwd-based file resource_scope
     (``path_allow``/``OP_FILE_READ``+``OP_FILE_WRITE``), which every mission
     otherwise gets unconditionally. It exists because the seccomp fallback
     tier (plan E4) can only ever enforce ``OP_NET_CONNECT`` — a mission that
@@ -939,7 +946,12 @@ def run_governed(
     rather than always taking that path. Leaving it False (the default)
     preserves every existing caller's behavior unchanged.
     """
-    from .passport import MissionPassport, generate_keypair, issue_passport
+    from .passport import (
+        MissionPassport,
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
+        generate_keypair,
+        issue_passport,
+    )
 
     if not command:
         raise ValueError("ardur run requires a command to govern")
@@ -970,7 +982,11 @@ def run_governed(
         mission=mission_text,
         allowed_tools=list(allowed_tools or []),
         forbidden_tools=list(forbidden_tools or []),
-        resource_scope=scope_patterns,
+        resource_scope=(
+            [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
+            if no_resource_scope
+            else scope_patterns
+        ),
         cwd=str(work_dir),
         max_tool_calls=max_tool_calls,
         max_duration_s=max_duration_s,
@@ -1011,6 +1027,11 @@ def run_governed(
     daemon_registered = False
     proc: subprocess.Popen[bytes] | None = None
     notes: list[str] = []
+    if no_resource_scope:
+        notes.append(
+            "explicitly unrestricted resource scope: the signed passport permits "
+            "all resources via the sole '**' pattern"
+        )
     # Pre-initialized so the finally block has a safe value even if an
     # exception is raised before kernel correlation is attempted below.
     correlation = kc.CorrelationResult(available=False, reason="run did not reach kernel correlation")
@@ -1154,6 +1175,7 @@ def run_governed(
             kernel_policy = _apply_kernel_policy(
                 session_id=session_id,
                 passport=passport,
+                kernel_resource_scope=scope_patterns,
                 correlation=correlation,
                 enforce=enforce,
                 seccomp_plan=seccomp_plan,
