@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "79c39206e9d9bc2a1f40d06beac3d29099d072a3f65a41046c7101a1f3b2858e"
+source_sha256: "9bfd0924d40d0d3fdc928d3b359c6951a2fcd3754f84ff2dd8be49790aea7f7a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Revoke path and network allowlist entries dropped by a BPF-LSM policy update
+  before publishing its managed-generation gate, and abort the update if a
+  stale entry cannot be removed
 - Scan inline tool `inputSchema` and legacy `parameters` description annotations
   for instruction injection without treating instance defaults/examples as
   schemas or exposing unsafe schema-member names

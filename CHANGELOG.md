@@ -5,6 +5,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Revoke path and network allowlist entries dropped by a BPF-LSM policy update
+  before publishing its managed-generation gate, and abort the update if a
+  stale entry cannot be removed
 - Scan inline tool `inputSchema` and legacy `parameters` description annotations
   for instruction injection without treating instance defaults/examples as
   schemas or exposing unsafe schema-member names

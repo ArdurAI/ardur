@@ -895,6 +895,27 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 		}
 	}
 
+	// cgroup_file_allow and cgroup_net_allow are shared across operation-policy
+	// generations. Revoke entries dropped by this update BEFORE ApplyPolicyMaps
+	// publishes the new cgroup_managed gate; pruning them after the gate leaves a
+	// live over-permit interval where the new generation still accepts an entry
+	// it revoked. A delete failure is fail-closed: leave the old generation
+	// active (possibly with fewer allowed targets) and report the failed update.
+	// The seccomp/degraded paths have no BPF allowlist state to prune.
+	if d.getActiveTier() == daemonTierBPFLSM {
+		stalePaths, staleNets := d.staleSharedAllowlistEntries(ap.SessionID, ap.PathAllow, ap.NetAllow)
+		if len(stalePaths) > 0 || len(staleNets) > 0 {
+			if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, record.CgroupID, stalePaths, staleNets); err != nil {
+				if len(applied.BootstrapFiles) > 0 {
+					_ = kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, record.CgroupID, applied.BootstrapFiles)
+				}
+				d.log.Error("revoke stale allowlist entries before policy generation flip",
+					"session_id", ap.SessionID, "cgroup_id", record.CgroupID, "error", err)
+				return errResp(fmt.Sprintf("revoke stale allowlist entries before policy generation flip: %v", err))
+			}
+		}
+	}
+
 	if err := kernelcapture.ApplyPolicyMaps(d.policyMaps, record.CgroupID, applied); err != nil {
 		if len(applied.BootstrapFiles) > 0 {
 			_ = kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, record.CgroupID, applied.BootstrapFiles)
@@ -940,11 +961,11 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 		return errResp(fmt.Sprintf("apply policy maps: %v", err))
 	}
 
-	// Revoke any allowlist entries this session had that the new policy drops,
-	// and record the new set. Runs only on the BPF-write success path (the
-	// degraded/seccomp returns above never reach the cgroup_file_allow /
-	// cgroup_net_allow maps). Under applyMu, so serialized with other applies.
-	d.pruneAndRecordAllowlists(ap.SessionID, record.CgroupID, record.RootPID, ap.PathAllow, ap.NetAllow, applied.BootstrapFiles, len(applied.BootstrapReadAllow) > 0 || ap.ControlPlaneEndpoint != nil, ap.ControlPlaneEndpoint)
+	// Shared path/net entries were revoked before the generation flip. Clean up
+	// the remaining generation-bound runtime exceptions and record the new set.
+	// Runs only on the BPF-write success path; under applyMu, so serialized with
+	// every other apply/remove transition.
+	d.pruneRuntimeAndRecordAllowlists(ap.SessionID, record.CgroupID, record.RootPID, ap.PathAllow, ap.NetAllow, applied.BootstrapFiles, len(applied.BootstrapReadAllow) > 0 || ap.ControlPlaneEndpoint != nil, ap.ControlPlaneEndpoint)
 
 	d.log.Info("policy applied",
 		"session_id", ap.SessionID,
@@ -965,35 +986,52 @@ func (d *daemon) handleApplyPolicy(req kernelcapture.DaemonProtocolRequest, hand
 	}
 }
 
-// pruneAndRecordAllowlists deletes the path/net allowlist entries this session
-// previously wrote that are absent from the new set (revoking them from the BPF
-// maps, which — unlike op_policy — are not double-buffered and would otherwise
-// keep a dropped path/host allowed), then records the new set. Caller holds
-// applyMu; this briefly takes mu for the appliedAllow map.
-func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, rootPID uint32, newPaths, newNets []string, bootstrapFiles []kernelcapture.BootstrapFile, trustedRoot bool, controlPlane *kernelcapture.DaemonControlPlaneEndpoint) {
+// staleSharedAllowlistEntries returns path/net entries written by the previous
+// successful apply that the requested policy drops. Caller holds applyMu, so
+// the appliedAllow record cannot change while this plan is used.
+func (d *daemon) staleSharedAllowlistEntries(sessionID string, newPaths, newNets []string) ([]string, []string) {
+	newPathSet := stringSet(newPaths)
+	newNetSet := stringSet(newNets)
+
+	d.mu.RLock()
+	prev := d.appliedAllow[sessionID]
+	d.mu.RUnlock()
+	if prev == nil {
+		return nil, nil
+	}
+
+	var stalePaths, staleNets []string
+	for path := range prev.paths {
+		if _, keep := newPathSet[path]; !keep {
+			stalePaths = append(stalePaths, path)
+		}
+	}
+	for network := range prev.nets {
+		if _, keep := newNetSet[network]; !keep {
+			staleNets = append(staleNets, network)
+		}
+	}
+	return stalePaths, staleNets
+}
+
+// pruneRuntimeAndRecordAllowlists deletes stale bootstrap/control-plane
+// exceptions whose BPF lookups are already bound to cgroup_managed.generation,
+// then records the new path/net/runtime set. Shared path/net revocations happen
+// before ApplyPolicyMaps so they cannot outlive the generation flip. Caller
+// holds applyMu; this briefly takes mu for the appliedAllow map.
+func (d *daemon) pruneRuntimeAndRecordAllowlists(sessionID string, cgroupID uint64, rootPID uint32, newPaths, newNets []string, bootstrapFiles []kernelcapture.BootstrapFile, trustedRoot bool, controlPlane *kernelcapture.DaemonControlPlaneEndpoint) {
 	newPathSet := stringSet(newPaths)
 	newNetSet := stringSet(newNets)
 	newBootstrapFiles := bootstrapFileMap(bootstrapFiles)
 
-	d.mu.Lock()
+	d.mu.RLock()
 	prev := d.appliedAllow[sessionID]
-	d.mu.Unlock()
+	d.mu.RUnlock()
 
-	var stalePaths, staleNets []string
 	var staleBootstrapFiles []kernelcapture.BootstrapFile
 	var staleControl *kernelcapture.DaemonControlPlaneEndpoint
 	deleteTrustedRoot := false
 	if prev != nil {
-		for p := range prev.paths {
-			if _, keep := newPathSet[p]; !keep {
-				stalePaths = append(stalePaths, p)
-			}
-		}
-		for n := range prev.nets {
-			if _, keep := newNetSet[n]; !keep {
-				staleNets = append(staleNets, n)
-			}
-		}
 		for object, file := range prev.bootstrapFiles {
 			if _, keep := newBootstrapFiles[object]; !keep {
 				staleBootstrapFiles = append(staleBootstrapFiles, file)
@@ -1004,12 +1042,6 @@ func (d *daemon) pruneAndRecordAllowlists(sessionID string, cgroupID uint64, roo
 			staleControl = &copy
 		}
 		deleteTrustedRoot = prev.trustedRoot && (!trustedRoot || prev.rootPID != rootPID)
-	}
-	if len(stalePaths) > 0 || len(staleNets) > 0 {
-		if err := kernelcapture.DeleteAllowlistEntries(d.policyMaps, cgroupID, stalePaths, staleNets); err != nil {
-			d.log.Warn("prune stale allowlist entries on re-apply",
-				"session_id", sessionID, "cgroup_id", cgroupID, "error", err)
-		}
 	}
 	if len(staleBootstrapFiles) > 0 {
 		if err := kernelcapture.DeleteBootstrapFileEntries(d.policyMaps, cgroupID, staleBootstrapFiles); err != nil {
