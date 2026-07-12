@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import socket
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,20 @@ DAEMON_TIMEOUT_MS_ENV_VAR = "ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS"
 _DEFAULT_DAEMON_TIMEOUT_MS = 5.0
 _DEFAULT_SOCKET_BASENAME = "claude-code-hook-daemon.sock"
 _DEFAULT_SOCKET_DIRNAME = "daemon"
+
+
+class _DaemonDispatchOutcome(Enum):
+    DISABLED = "disabled"
+    UNAVAILABLE = "unavailable"
+    TIMED_OUT = "timed_out"
+    INVALID_RESPONSE = "invalid_response"
+    SUCCEEDED = "succeeded"
+
+
+@dataclass(frozen=True)
+class _DaemonDispatchResult:
+    output: dict[str, Any] | None
+    outcome: _DaemonDispatchOutcome
 
 
 def _vibap_home_dir() -> Path:
@@ -127,19 +143,19 @@ def extract_valid_pre_tool_use_output(response: dict[str, Any]) -> dict[str, Any
     return dict(output)
 
 
-def dispatch_pre_tool_use(
+def _dispatch_pre_tool_use_with_result(
     hook_input: dict[str, Any],
     *,
     keys_dir: Path | None = None,
-) -> dict[str, Any] | None:
-    """Try daemon-backed PreToolUse handling.
+) -> _DaemonDispatchResult:
+    """Try daemon-backed PreToolUse handling and retain the fallback reason.
 
-    Returns a hook output dict when daemon dispatch succeeds.
-    Returns None when daemon mode is disabled, unavailable, or yields an
-    invalid response so callers can safely fall back to local handling.
+    The structured result is internal observability for tests and diagnostics;
+    callers should continue to use :func:`dispatch_pre_tool_use` so daemon
+    failures remain a transparent local-fallback boundary.
     """
     if not daemon_enabled():
-        return None
+        return _DaemonDispatchResult(None, _DaemonDispatchOutcome.DISABLED)
 
     payload = {
         "phase": "pre",
@@ -155,7 +171,29 @@ def dispatch_pre_tool_use(
             conn.connect(str(socket_path))
             _write_json_line(conn, payload)
             response = _read_json_line(conn)
-    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, OSError, ValueError, TypeError, json.JSONDecodeError):
-        return None
+    except TimeoutError:
+        return _DaemonDispatchResult(None, _DaemonDispatchOutcome.TIMED_OUT)
+    except OSError:
+        return _DaemonDispatchResult(None, _DaemonDispatchOutcome.UNAVAILABLE)
+    except (ValueError, TypeError):
+        return _DaemonDispatchResult(None, _DaemonDispatchOutcome.INVALID_RESPONSE)
 
-    return extract_valid_pre_tool_use_output(response)
+    output = extract_valid_pre_tool_use_output(response)
+    if output is None:
+        return _DaemonDispatchResult(None, _DaemonDispatchOutcome.INVALID_RESPONSE)
+    return _DaemonDispatchResult(output, _DaemonDispatchOutcome.SUCCEEDED)
+
+
+def dispatch_pre_tool_use(
+    hook_input: dict[str, Any],
+    *,
+    keys_dir: Path | None = None,
+) -> dict[str, Any] | None:
+    """Try daemon-backed PreToolUse handling with transparent local fallback.
+
+    Returns a hook output dict when daemon dispatch succeeds. Returns ``None``
+    when daemon mode is disabled, unavailable, timed out, or yields an invalid
+    response so callers can safely fall back to local handling.
+    """
+
+    return _dispatch_pre_tool_use_with_result(hook_input, keys_dir=keys_dir).output

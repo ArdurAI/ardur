@@ -102,64 +102,33 @@ if [ "$daemon_enabled" -eq 1 ] && [ "$native_attempted" -eq 0 ]; then
     # unavailable. Keep this helper out of the top-level wrapper parse path to
     # minimize healthy native-fast-path startup overhead.
     daemon_response="$(
-      HOOK_INPUT="$hook_input" "$daemon_python" -c '
+      HOOK_INPUT="$hook_input" \
+      ARDUR_CC_HOOK_DAEMON_SOCKET="$daemon_socket" \
+      ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS="$daemon_timeout_ms" \
+      "$daemon_python" -c '
 import json
 import os
-import socket
 import sys
 
-from vibap.claude_code_daemon import extract_valid_pre_tool_use_output
+from vibap.claude_code_daemon_client import dispatch_pre_tool_use
 
-
-def _timeout_seconds() -> float:
-    raw = os.environ.get("ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS", "").strip()
-    if not raw:
-        return 0.005
-    try:
-        return max(0.001, float(raw) / 1000.0)
-    except ValueError:
-        return 0.005
-
-
-socket_path = sys.argv[1]
 raw_input = os.environ.get("HOOK_INPUT", "")
 if not raw_input:
     raise SystemExit(1)
 
-request = raw_input if raw_input.endswith("\n") else raw_input + "\n"
-with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-    conn.settimeout(_timeout_seconds())
-    conn.connect(socket_path)
-    conn.sendall(request.encode("utf-8"))
-
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = conn.recv(8192)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > 1_000_000:
-            raise ValueError("daemon response exceeded max_bytes")
-        if b"\n" in chunk:
-            break
-
-raw_response = b"".join(chunks)
-line = raw_response.splitlines()[0] if raw_response else b""
-if not line:
+try:
+    hook_input = json.loads(raw_input)
+except (TypeError, ValueError):
+    raise SystemExit(1)
+if not isinstance(hook_input, dict):
     raise SystemExit(1)
 
-response = json.loads(line.decode("utf-8"))
-if not isinstance(response, dict):
-    raise SystemExit(1)
-
-output = extract_valid_pre_tool_use_output(response)
+output = dispatch_pre_tool_use(hook_input)
 if output is None:
     raise SystemExit(1)
 
 sys.stdout.write(json.dumps(output, separators=(",", ":")) + "\n")
-' "$daemon_socket" 2>/dev/null || true
+' 2>/dev/null || true
     )"
     if [ -n "$daemon_response" ]; then
       printf '%s\n' "$daemon_response"
