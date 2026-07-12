@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
@@ -123,29 +124,14 @@ func TestHealthReflectsTrueTier_AfterGuardConsumerDeath(t *testing.T) {
 	d.fs = newStubFS()
 
 	// Simulate a successful guard load: policyMaps populated, tier live.
-	d.policyMaps = kernelcapture.PolicyMaps{
-		CgroupOpPolicy:           &fakeHealthPolicyMap{},
-		CgroupPathAllow:          &fakeHealthPolicyMap{},
-		CgroupFileAllow:          &fakeHealthPolicyMap{},
-		CgroupBootstrapFileAllow: &fakeHealthPolicyMap{},
-		BootstrapFileObservation: &fakeHealthPolicyMap{},
-		CgroupControlPlaneAllow:  &fakeHealthPolicyMap{},
-		CgroupTrustedRoot:        &fakeHealthPolicyMap{},
-		CgroupNetAllow:           &fakeHealthPolicyMap{},
-		CgroupManaged:            &fakeHealthPolicyMap{},
-		KillSwitch:               &fakeHealthPolicyMap{},
-	}
-	d.setActiveTier(daemonTierBPFLSM)
+	d.activatePolicyMaps(readyHealthPolicyMaps())
 
 	before := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
 	if before.EnforcementTier != kernelcapture.EnforcementTierBPFLSM {
 		t.Fatalf("precondition: EnforcementTier = %q, want %q", before.EnforcementTier, kernelcapture.EnforcementTierBPFLSM)
 	}
 
-	// The guard consumer dies mid-run: its defer clears policyMaps (mirrors
-	// runGuardConsumer's defer in daemon_guard_linux.go), and the goroutine
-	// that awaited it calls degradeGuardTier -- exactly what main() now does.
-	d.policyMaps = kernelcapture.PolicyMaps{}
+	// The guard consumer dies mid-run and atomically withdraws the tier/maps.
 	d.degradeGuardTier(errors.New("guard died"), d.log)
 
 	after := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
@@ -170,7 +156,7 @@ func TestActiveTier_ConcurrentReadWriteIsRaceFree(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			d.setActiveTier(daemonTierBPFLSM)
+			d.activatePolicyMaps(readyHealthPolicyMaps())
 			d.degradeGuardTier(errors.New("flap"), d.log)
 		}
 	}()
@@ -180,4 +166,68 @@ func TestActiveTier_ConcurrentReadWriteIsRaceFree(t *testing.T) {
 		_ = d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
 	}
 	<-done
+}
+
+func TestDegradeGuardTierWaitsForPolicyMapUsers(t *testing.T) {
+	d := newTestDaemon(t)
+	d.fs = newStubFS()
+	d.activatePolicyMaps(readyHealthPolicyMaps())
+
+	d.applyMu.Lock()
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		d.degradeGuardTier(errors.New("guard died"), d.log)
+		close(done)
+	}()
+	<-started
+
+	completedBeforeMapUser := false
+	select {
+	case <-done:
+		completedBeforeMapUser = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	d.applyMu.Unlock()
+
+	if completedBeforeMapUser {
+		t.Fatal("guard degradation completed while a policy-map user still held applyMu")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("guard degradation did not complete after the policy-map user released applyMu")
+	}
+	if kernelcapture.PolicyMapsReady(d.policyMaps) {
+		t.Fatal("policy maps remained reachable after guard degradation")
+	}
+}
+
+func TestLateGuardCannotReplaceCommittedSeccompTier(t *testing.T) {
+	d := newTestDaemon(t)
+	if !d.activateSeccompTier() {
+		t.Fatal("seccomp fallback did not win an unclaimed startup tier")
+	}
+	if d.activatePolicyMaps(readyHealthPolicyMaps()) {
+		t.Fatal("late BPF guard replaced an already committed seccomp tier")
+	}
+	if got := d.enforcementTier(); got != daemonTierSeccomp {
+		t.Fatalf("enforcement tier = %q, want %q", got, daemonTierSeccomp)
+	}
+	if kernelcapture.PolicyMapsReady(d.policyMaps) {
+		t.Fatal("rejected late guard still published policy maps")
+	}
+}
+
+func TestIncompletePolicyMapsCannotActivateBPFLSM(t *testing.T) {
+	d := newTestDaemon(t)
+	if d.activatePolicyMaps(kernelcapture.PolicyMaps{
+		CgroupOpPolicy: &fakeHealthPolicyMap{},
+	}) {
+		t.Fatal("incomplete policy-map set activated BPF-LSM")
+	}
+	if got := d.enforcementTier(); got != daemonTierNone {
+		t.Fatalf("enforcement tier = %q, want %q", got, daemonTierNone)
+	}
 }

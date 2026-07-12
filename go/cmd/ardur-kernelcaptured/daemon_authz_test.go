@@ -154,7 +154,7 @@ func TestHandleApplyPolicy_ReapplyRevokesDroppedAllowlist(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, h := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 	registerTestSession(t, d, "ses-prune", 5500)
 	owner := testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy)
 
@@ -195,7 +195,7 @@ func TestHandleApplyPolicy_ConcurrentAppliesSerialized(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
 	maps, h := countingPolicyMaps()
-	d.policyMaps = maps
+	d.activatePolicyMaps(maps)
 	registerTestSession(t, d, "ses-conc", 6600)
 	owner := testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy)
 

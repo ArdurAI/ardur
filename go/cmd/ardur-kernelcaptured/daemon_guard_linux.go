@@ -29,11 +29,9 @@ package main
 // kernel state instead of dropping it — see that function's doc comment.
 //
 // Fail-open on mid-run death (issue #121): if this function returns while the
-// daemon is still running (main()'s ctx not yet cancelled) — whether from a
-// real error or a clean ringbuf close caused by something other than our own
-// shutdown watcher below — the caller in main() calls d.degradeGuardTier so
-// activeTier (and therefore every health response) stops claiming bpf_lsm the
-// moment nothing is actually attached anymore.
+// daemon is still running (main()'s ctx not yet cancelled), its lifecycle
+// defer withdraws activeTier and policyMaps before closing the handles and
+// records the degradation.
 
 import (
 	"context"
@@ -66,7 +64,7 @@ const tamperAuditInterval = 15 * time.Second
 // blocks on it (with a timeout) to make the BPF-LSM-vs-seccomp tier decision
 // (plan E4) without guessing from preflight alone, since preflight can pass
 // while the actual load still fails for reasons preflight doesn't check.
-func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready chan<- error) error {
+func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready chan<- error) (retErr error) {
 	// Preflight: check BTF and BPF-LSM availability.
 	preflightReport := kernelcapture.InspectBPFLSMPreflight()
 	for _, f := range preflightReport.Findings {
@@ -88,8 +86,11 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 		return err
 	}
 	defer func() {
-		// Clear policy maps reference so subsequent apply_policy calls fail safely.
-		d.policyMaps = kernelcapture.PolicyMaps{}
+		if ctx.Err() == nil {
+			d.degradeGuardTier(retErr, log)
+		} else {
+			d.deactivatePolicyMaps()
+		}
 		handles.Close()
 	}()
 	if err := kernelcapture.ClearBootstrapFileObservations(handles); err != nil {
@@ -98,8 +99,14 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 		return err
 	}
 
-	// Expose maps to the daemon for apply_policy calls.
-	d.policyMaps = kernelcapture.PolicyMapsFromHandles(handles)
+	// Publish maps and the live tier atomically before reporting readiness. A
+	// startup timeout may already have committed seccomp; a late guard must not
+	// overwrite that decision.
+	if !d.activatePolicyMaps(kernelcapture.PolicyMapsFromHandles(handles)) {
+		err = fmt.Errorf("BPF-LSM guard loaded after another enforcement tier was selected")
+		ready <- err
+		return err
+	}
 
 	log.Info("BPF-LSM process_guard loaded",
 		"hooks", "bprm_check_security, lsm.s/file_open, socket_connect",

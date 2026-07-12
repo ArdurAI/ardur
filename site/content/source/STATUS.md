@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "123f185c432b1a3ebd401b476ed3a8056d8b4b4222f5f48f5915b9e1c3d92763"
+source_sha256: "ef74ee0d6b15b22eb010660cad3aaef3af6cba44d890f798a8ed873084b6b7ba"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -52,6 +52,14 @@ basename but not its parent path and does not collect argv, hashes, uid,
 environment, or file content. It does not attest or enforce. Issue #67 remains
 in progress for stronger fingerprints and corpus-backed precision/recall
 thresholds.
+
+The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
+`bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
+health-tier read, withdrawal, and close boundary uses the same mutex; teardown
+withdraws the tier and map reachability only after in-flight users drain, then
+closes the handles. A readiness timeout commits seccomp under the same lock, so
+a late BPF load cannot replace the selected fallback. Mid-run guard loss still
+degrades honestly to `none`; automatic BPF-to-seccomp failover is not claimed.
 
 The Python Biscuit session path now accepts JWT-SVID holder binding only from
 server-owned Biscuit issuer-key, trust-bundle, and audience configuration. A

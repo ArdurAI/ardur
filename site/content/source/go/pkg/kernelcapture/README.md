@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "f83814739062741077d660559fda5f9f790effea17e8dc2bbcabd941616379d7"
+source_sha256: "122f3d1e4b502f42bb056ac16e954d1ca22a5b17836b5a280a0eb5ed57f0bd5b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -285,7 +285,9 @@ It rejects repository-controlled privileged paths when repository-root validatio
 ## Concurrency contract
 
 - `Correlator` is goroutine-safe and supports concurrent receipt registration and event correlation.
-- Race-safety is covered by `go test -race ./pkg/kernelcapture`.
+- Race-safety is covered by `go test -race ./...` on Linux, including daemon
+  policy-map publication, tier selection, in-flight use, withdrawal, and close
+  ordering.
 
 ## Current MVP claim boundary
 

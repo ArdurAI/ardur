@@ -5,6 +5,8 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Serialize the Linux daemon's BPF policy-map handle lifetime so startup,
+  health, in-flight mutations, tier withdrawal, and close cannot race
 - Pin Biscuit holder verification to a server-owned issuer key, JWT-SVID trust
   bundle, and audience; require configured binding on every presentation; and
   reject caller-supplied roots plus non-`jwt-svid` bundle keys
@@ -41,6 +43,8 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Prevent torn `PolicyMaps` reads and use-after-close during BPF-LSM guard
+  startup, degradation, and shutdown; reject late guards after seccomp fallback
 - Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the
   Biscuit holder claim; `svid_bound=true` now requires pinned-root verification
 - Enforce cumulative direct-hook tool-call budgets from verified receipt chains

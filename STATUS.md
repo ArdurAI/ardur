@@ -36,6 +36,14 @@ environment, or file content. It does not attest or enforce. Issue #67 remains
 in progress for stronger fingerprints and corpus-backed precision/recall
 thresholds.
 
+The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
+`bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
+health-tier read, withdrawal, and close boundary uses the same mutex; teardown
+withdraws the tier and map reachability only after in-flight users drain, then
+closes the handles. A readiness timeout commits seccomp under the same lock, so
+a late BPF load cannot replace the selected fallback. Mid-run guard loss still
+degrades honestly to `none`; automatic BPF-to-seccomp failover is not claimed.
+
 The Python Biscuit session path now accepts JWT-SVID holder binding only from
 server-owned Biscuit issuer-key, trust-bundle, and audience configuration. A
 configured binding is mandatory for every Biscuit presentation; per-call
