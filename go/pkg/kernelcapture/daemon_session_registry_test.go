@@ -37,7 +37,7 @@ func TestDaemonSessionRegistryRegistersStatusesAndEndsSession(t *testing.T) {
 	if record.SessionID != "session-1" || record.MissionID != "mission-1" || record.TraceID != "trace-1" {
 		t.Fatalf("record identity = %#v", record)
 	}
-	if record.RootPID != 1234 || record.PIDNamespaceID != 42 || record.CgroupID != 99 {
+	if record.RootPID != 1234 || record.RootProcessStartTimeTicks != 800001 || record.PIDNamespaceID != 42 || record.CgroupID != 99 {
 		t.Fatalf("record process identity = %#v", record)
 	}
 	if len(record.EventClasses) != 1 || record.EventClasses[0] != DaemonProtocolEventProcessLifecycle {
@@ -243,6 +243,155 @@ func TestDaemonSessionRegistryRejectsEndSessionBySamePIDDifferentProcessStartTim
 	ended := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest("session-end-pid-reuse"), owner)
 	if !ended.OK || ended.Status != DaemonSessionStatusEnded {
 		t.Fatalf("owner end response = %#v", ended)
+	}
+}
+
+func TestDaemonSessionRegistryDelegatesOnlyToRegisteredRootProcessIdentity(t *testing.T) {
+	t.Parallel()
+
+	registry := NewDaemonSessionRegistry()
+	owner := daemonSessionRegistryTestHandshake("session-delegated-root")
+	register := daemonRegisterSessionRequest("session-delegated-root", 7777, 60)
+	register.RegisterSession.RootProcessStartTimeTicks = 700001
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("register response = %#v", response)
+	}
+
+	observation := DaemonSocketPeerObservation{
+		Credentials: DaemonObservedPeerCredentials{
+			UID:                   owner.Authorization.UID,
+			GID:                   owner.Authorization.GID,
+			PID:                   7777,
+			ProcessStartTimeTicks: 700001,
+		},
+		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+		SocketPath:       "/run/ardur/kernelcapture/seccomp.sock",
+	}
+	authorization := DaemonPeerAuthorization{
+		Verdict:               DaemonPeerAuthorizationVerdictAllow,
+		Reason:                "observed peer uid is explicitly allowed",
+		UID:                   observation.Credentials.UID,
+		GID:                   observation.Credentials.GID,
+		PID:                   observation.Credentials.PID,
+		ProcessStartTimeTicks: observation.Credentials.ProcessStartTimeTicks,
+		Matched:               "uid",
+	}
+	if _, err := registry.ActiveSessionForDelegatedRootPeer("session-delegated-root", observation, authorization); err != nil {
+		t.Fatalf("registered delegated root peer rejected: %v", err)
+	}
+	setIDObservation := observation
+	setIDObservation.Credentials.UID = 0
+	setIDObservation.Credentials.GID = 0
+	setIDAuthorization := authorization
+	setIDAuthorization.UID = 0
+	setIDAuthorization.GID = 0
+	setIDAuthorization.Reason = "set-ID root process is independently allowed"
+	if _, err := registry.ActiveSessionForDelegatedRootPeer("session-delegated-root", setIDObservation, setIDAuthorization); err != nil {
+		t.Fatalf("independently authorized set-ID root peer rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*DaemonSocketPeerObservation, *DaemonPeerAuthorization)
+	}{
+		{name: "sibling pid", mutate: func(obs *DaemonSocketPeerObservation, auth *DaemonPeerAuthorization) {
+			obs.Credentials.PID++
+			auth.PID++
+		}},
+		{name: "reused root pid", mutate: func(obs *DaemonSocketPeerObservation, auth *DaemonPeerAuthorization) {
+			obs.Credentials.ProcessStartTimeTicks++
+			auth.ProcessStartTimeTicks++
+		}},
+		{name: "different credential source", mutate: func(obs *DaemonSocketPeerObservation, _ *DaemonPeerAuthorization) {
+			obs.CredentialSource = "client_claim"
+		}},
+		{name: "observation authorization mismatch", mutate: func(_ *DaemonSocketPeerObservation, auth *DaemonPeerAuthorization) {
+			auth.PID++
+		}},
+		{name: "denied authorization", mutate: func(_ *DaemonSocketPeerObservation, auth *DaemonPeerAuthorization) {
+			auth.Verdict = DaemonPeerAuthorizationVerdictDeny
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changedObservation := observation
+			changedAuthorization := authorization
+			tc.mutate(&changedObservation, &changedAuthorization)
+			if _, err := registry.ActiveSessionForDelegatedRootPeer("session-delegated-root", changedObservation, changedAuthorization); err == nil {
+				t.Fatal("different delegated root identity accepted")
+			}
+		})
+	}
+}
+
+func TestDaemonSessionRegistryDelegatedRootRevalidationRejectsReplacementRegistration(t *testing.T) {
+	t.Parallel()
+
+	registry := NewDaemonSessionRegistry()
+	owner := daemonSessionRegistryTestHandshake("session-replaced-during-handoff")
+	register := daemonRegisterSessionRequest("session-replaced-during-handoff", 7777, 60)
+	register.RegisterSession.RootProcessStartTimeTicks = 700001
+	register.RegisterSession.CgroupID = 9001
+	if response := registry.HandleAuthorizedRequest(context.Background(), register, owner); !response.OK {
+		t.Fatalf("initial register response = %#v", response)
+	}
+
+	observation := DaemonSocketPeerObservation{
+		Credentials: DaemonObservedPeerCredentials{
+			UID:                   owner.Authorization.UID,
+			GID:                   owner.Authorization.GID,
+			PID:                   7777,
+			ProcessStartTimeTicks: 700001,
+		},
+		CredentialSource: DaemonPeerCredentialSourceLinuxSOPeerCred,
+		SocketPath:       "/run/ardur/kernelcapture/seccomp.sock",
+	}
+	authorization := DaemonPeerAuthorization{
+		Verdict:               DaemonPeerAuthorizationVerdictAllow,
+		UID:                   observation.Credentials.UID,
+		GID:                   observation.Credentials.GID,
+		PID:                   observation.Credentials.PID,
+		ProcessStartTimeTicks: observation.Credentials.ProcessStartTimeTicks,
+		Matched:               "uid",
+	}
+	first, err := registry.ActiveSessionForDelegatedRootPeer(register.RegisterSession.SessionID, observation, authorization)
+	if err != nil {
+		t.Fatalf("initial delegated root lookup: %v", err)
+	}
+	if first.RegistrationGeneration == 0 {
+		t.Fatal("initial registration generation is zero")
+	}
+
+	if response := registry.HandleAuthorizedRequest(context.Background(), daemonEndSessionRequest(register.RegisterSession.SessionID), owner); !response.OK {
+		t.Fatalf("end initial registration response = %#v", response)
+	}
+	replacement := daemonRegisterSessionRequest(register.RegisterSession.SessionID, 7777, 60)
+	replacement.RegisterSession.RootProcessStartTimeTicks = 700001
+	replacement.RegisterSession.CgroupID = 9002
+	if response := registry.HandleAuthorizedRequest(context.Background(), replacement, owner); !response.OK {
+		t.Fatalf("replacement register response = %#v", response)
+	}
+	second, err := registry.ActiveSessionForDelegatedRootPeer(replacement.RegisterSession.SessionID, observation, authorization)
+	if err != nil {
+		t.Fatalf("replacement delegated root lookup: %v", err)
+	}
+	if second.RegistrationGeneration == first.RegistrationGeneration {
+		t.Fatalf("replacement registration generation = %d, want distinct from %d", second.RegistrationGeneration, first.RegistrationGeneration)
+	}
+	if second.CgroupID == first.CgroupID {
+		t.Fatalf("replacement cgroup = %d, want distinct from stale cgroup %d", second.CgroupID, first.CgroupID)
+	}
+
+	if _, err := registry.ActiveSessionForDelegatedRootPeerGeneration(replacement.RegisterSession.SessionID, observation, authorization, first.RegistrationGeneration); err == nil {
+		t.Fatal("stale handoff generation accepted replacement registration")
+	}
+	if _, err := registry.ActiveSessionForDelegatedRootPeerGeneration(replacement.RegisterSession.SessionID, observation, authorization, second.RegistrationGeneration); err != nil {
+		t.Fatalf("current handoff generation rejected: %v", err)
+	}
+	if _, err := registry.ActiveSessionGeneration(replacement.RegisterSession.SessionID, first.RegistrationGeneration); err == nil {
+		t.Fatal("stale long-lived work generation accepted replacement registration")
+	}
+	if _, err := registry.ActiveSessionGeneration(replacement.RegisterSession.SessionID, second.RegistrationGeneration); err != nil {
+		t.Fatalf("current long-lived work generation rejected: %v", err)
 	}
 }
 
@@ -475,11 +624,12 @@ func daemonRegisterSessionRequest(sessionID string, rootPID uint32, ttlSeconds i
 		ProtocolVersion: DaemonProtocolVersion,
 		Method:          DaemonProtocolMethodRegisterSession,
 		RegisterSession: &DaemonRegisterSessionRequest{
-			SessionID:    sessionID,
-			RootPID:      rootPID,
-			CgroupID:     9001,
-			EventClasses: []string{DaemonProtocolEventProcessLifecycle},
-			TTLSeconds:   ttlSeconds,
+			SessionID:                 sessionID,
+			RootPID:                   rootPID,
+			RootProcessStartTimeTicks: 800001,
+			CgroupID:                  9001,
+			EventClasses:              []string{DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:                ttlSeconds,
 		},
 	}
 }

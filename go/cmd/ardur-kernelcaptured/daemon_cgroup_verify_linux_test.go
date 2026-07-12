@@ -39,6 +39,11 @@ func regReq(rootPID uint32, cgroupID uint64) *kernelcapture.DaemonRegisterSessio
 	return &kernelcapture.DaemonRegisterSessionRequest{SessionID: "s", RootPID: rootPID, CgroupID: cgroupID}
 }
 
+func verifyRegisterSessionCgroupErr(handshake kernelcapture.DaemonProtocolPeerHandshake, reg *kernelcapture.DaemonRegisterSessionRequest) error {
+	_, err := verifyRegisterSessionCgroup(handshake, reg, quietLogger())
+	return err
+}
+
 // spawnTestChild starts a real, short-lived child of the current test process
 // (guaranteeing genuine PID ancestry, the same relationship a launcher has to
 // the agent it Popen()s) and returns its PID. Killed and reaped on cleanup.
@@ -107,7 +112,7 @@ func TestResolveCgroupID_UnknownPidErrors(t *testing.T) {
 // (12345) because nothing checked it; it now must supply the real value.
 func TestVerifyRegisterSessionCgroup_SelfIsOwned(t *testing.T) {
 	self := uint32(os.Getpid())
-	if err := verifyRegisterSessionCgroup(hsWithPID(self), regReq(self, selfCgroupID(t)), quietLogger()); err != nil {
+	if err := verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(self, selfCgroupID(t))); err != nil {
 		t.Fatalf("self-registration with the real cgroup_id should be owned, got: %v", err)
 	}
 }
@@ -119,7 +124,7 @@ func TestVerifyRegisterSessionCgroup_SelfIsOwned(t *testing.T) {
 func TestVerifyRegisterSessionCgroup_SelfWithWrongCgroupRejected(t *testing.T) {
 	self := uint32(os.Getpid())
 	wrong := selfCgroupID(t) + 1 // guaranteed != the real value by construction
-	err := verifyRegisterSessionCgroup(hsWithPID(self), regReq(self, wrong), quietLogger())
+	err := verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(self, wrong))
 	if err == nil {
 		t.Fatal("self-registration claiming a cgroup_id that is not the pid's real cgroup should be rejected")
 	}
@@ -130,7 +135,7 @@ func TestVerifyRegisterSessionCgroup_NonDescendantRejected(t *testing.T) {
 	// pid 1 (init) exists but is not a descendant of the test process — a peer
 	// naming a process it did not spawn must be rejected, before cgroup
 	// ownership is even considered.
-	if err := verifyRegisterSessionCgroup(hsWithPID(self), regReq(1, 12345), quietLogger()); err == nil {
+	if err := verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(1, 12345)); err == nil {
 		t.Fatal("registering pid 1 (not a descendant of the peer) should be rejected")
 	}
 }
@@ -138,7 +143,7 @@ func TestVerifyRegisterSessionCgroup_NonDescendantRejected(t *testing.T) {
 func TestVerifyRegisterSessionCgroup_BogusRootRejected(t *testing.T) {
 	self := uint32(os.Getpid())
 	// A pid that is not a live process cannot be verified — reject.
-	if err := verifyRegisterSessionCgroup(hsWithPID(self), regReq(1<<30, 12345), quietLogger()); err == nil {
+	if err := verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(1<<30, 12345)); err == nil {
 		t.Fatal("registering a non-existent root_pid should be rejected")
 	}
 }
@@ -147,7 +152,7 @@ func TestVerifyRegisterSessionCgroup_PeerNotVisibleRejected(t *testing.T) {
 	// If the peer itself is not visible in /proc, neither ancestry nor cgroup
 	// ownership can be established. Accepting the registration would restore
 	// the cross-workload enforcement path closed by issue #119, so fail closed.
-	err := verifyRegisterSessionCgroup(hsWithPID(1<<30), regReq(1, 12345), quietLogger())
+	err := verifyRegisterSessionCgroupErr(hsWithPID(1<<30), regReq(1, 12345))
 	if err == nil {
 		t.Fatal("unresolvable non-root peer should be rejected, not granted enforce rights")
 	}
@@ -160,7 +165,7 @@ func TestVerifyRegisterSessionCgroup_PeerPIDUnavailableRejected(t *testing.T) {
 	// Cross-namespace peer-credential translation can yield no usable PID in
 	// the receiver's namespace. UID authorization alone cannot bind that peer
 	// to root_pid or cgroup_id, so an unavailable PID must also fail closed.
-	err := verifyRegisterSessionCgroup(hsWithPID(0), regReq(1, 12345), quietLogger())
+	err := verifyRegisterSessionCgroupErr(hsWithPID(0), regReq(1, 12345))
 	if err == nil {
 		t.Fatal("non-root peer without a usable peer pid should be rejected")
 	}
@@ -200,7 +205,7 @@ func TestHandleAuthorizedRequest_PeerNotVisibleDoesNotRegisterSession(t *testing
 func TestVerifyRegisterSessionCgroup_RootPeerSkips(t *testing.T) {
 	// A root peer is already fully privileged; both checks are skipped for it
 	// (a non-root peer with the same args is rejected — see above).
-	if err := verifyRegisterSessionCgroup(hsRootWithPID(uint32(os.Getpid())), regReq(1, 12345), quietLogger()); err != nil {
+	if err := verifyRegisterSessionCgroupErr(hsRootWithPID(uint32(os.Getpid())), regReq(1, 12345)); err != nil {
 		t.Fatalf("root peer should skip both checks, got: %v", err)
 	}
 }
@@ -230,7 +235,7 @@ func TestVerifyRegisterSessionCgroup_Issue119PocRejected(t *testing.T) {
 
 	// This is the exact call shape from the #119 report: ancestry passes
 	// (child really was spawned by self), cgroup_id does not match reality.
-	err = verifyRegisterSessionCgroup(hsWithPID(self), regReq(child, victimCgroupID), quietLogger())
+	err = verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(child, victimCgroupID))
 	if err == nil {
 		t.Fatal("#119 PoC: register_session{root_pid: own child, cgroup_id: victim} " +
 			"was accepted (OK=true) — the cgroup-ownership gap is NOT closed")
@@ -253,7 +258,7 @@ func TestVerifyRegisterSessionCgroup_Issue119PocAcceptedWithCorrectCgroup(t *tes
 		t.Fatalf("resolveCgroupID(child): %v", err)
 	}
 
-	if err := verifyRegisterSessionCgroup(hsWithPID(self), regReq(child, realCgroup), quietLogger()); err != nil {
+	if err := verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(child, realCgroup)); err != nil {
 		t.Fatalf("registering a spawned child with its REAL cgroup_id should be accepted, got: %v", err)
 	}
 }
@@ -308,7 +313,7 @@ func TestVerifyRegisterSessionCgroup_LegitAdoptFlowAccepted(t *testing.T) {
 	}
 
 	self := uint32(os.Getpid())
-	if err := verifyRegisterSessionCgroup(hsWithPID(self), regReq(child, resolvedCgroupID), quietLogger()); err != nil {
+	if err := verifyRegisterSessionCgroupErr(hsWithPID(self), regReq(child, resolvedCgroupID)); err != nil {
 		t.Fatalf("legit adopt-then-register flow should be accepted, got: %v", err)
 	}
 }

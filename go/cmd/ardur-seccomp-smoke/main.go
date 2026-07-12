@@ -42,6 +42,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -101,7 +102,7 @@ func runProbe(addr string) {
 	fmt.Printf("OTHER_ERROR:%v\n", err)
 }
 
-func run(daemonBin, shimBin string) error {
+func run(daemonBin, shimBin string) (runErr error) {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve own executable path (needed to re-exec as the connect probe): %w", err)
@@ -134,6 +135,15 @@ func run(daemonBin, shimBin string) error {
 		return fmt.Errorf("create daemon log file: %w", err)
 	}
 	defer daemonLog.Close()
+	defer func() {
+		if runErr == nil {
+			return
+		}
+		_ = daemonLog.Sync()
+		if data, err := os.ReadFile(daemonLog.Name()); err == nil {
+			fmt.Fprintf(os.Stderr, "--- ardur-kernelcaptured log ---\n%s\n--- end daemon log ---\n", data)
+		}
+	}()
 
 	daemonCmd := exec.Command(daemonBin,
 		"--socket", sockPath,
@@ -173,41 +183,9 @@ func run(daemonBin, shimBin string) error {
 	}
 	fmt.Println("daemon started, seccomp tier active")
 
-	const sessionID = "seccomp-smoke"
-	if err := daemonCall(sockPath, kernelcapture.DaemonProtocolRequest{
-		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
-		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
-		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
-			SessionID:    sessionID,
-			RootPID:      1,
-			CgroupID:     1,
-			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
-			TTLSeconds:   300,
-		},
-	}); err != nil {
-		return fmt.Errorf("register_session: %w", err)
-	}
-
 	const allowedIP = "127.0.0.2"
-	if err := daemonCall(sockPath, kernelcapture.DaemonProtocolRequest{
-		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
-		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
-		ApplyPolicy: &kernelcapture.DaemonApplyPolicyRequest{
-			SessionID:   sessionID,
-			Generation:  1,
-			EnforceMode: kernelcapture.BpfEnforceModeEnforce,
-			OpPolicies: []kernelcapture.DaemonOpPolicy{
-				{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
-			},
-			NetAllow: []string{allowedIP + "/32"},
-		},
-	}); err != nil {
-		return fmt.Errorf("apply_policy: %w", err)
-	}
-	fmt.Println("policy applied: allow only " + allowedIP + "/32")
-
 	deniedTarget := "127.0.0.3:19999" // not in the allowlist
-	deniedOut, err := runShimProbe(shimBin, seccompSockPath, sessionID, self, deniedTarget)
+	deniedOut, err := runShimProbe(sockPath, shimBin, seccompSockPath, "seccomp-smoke-denied", self, deniedTarget, allowedIP)
 	if err != nil {
 		return fmt.Errorf("run shim against denied target: %w", err)
 	}
@@ -217,14 +195,14 @@ func run(daemonBin, shimBin string) error {
 	fmt.Println("denied target correctly got EPERM:", deniedOut)
 
 	allowedTarget := allowedIP + ":19999" // in the allowlist, nothing listening
-	allowedOut, err := runShimProbe(shimBin, seccompSockPath, sessionID, self, allowedTarget)
+	allowedOut, err := runShimProbe(sockPath, shimBin, seccompSockPath, "seccomp-smoke-allowed", self, allowedTarget, allowedIP)
 	if err != nil {
 		return fmt.Errorf("run shim against allowed target: %w", err)
 	}
-	if allowedOut == "ERRNO:1:operation not permitted" {
-		return fmt.Errorf("allowed target %s: probe got EPERM, want the syscall to reach the kernel's real connect handling", allowedTarget)
+	if allowedOut != "ERRNO:111:connection refused" {
+		return fmt.Errorf("allowed target %s: probe reported %q, want ECONNREFUSED proving the syscall reached the kernel", allowedTarget, allowedOut)
 	}
-	fmt.Println("allowed target correctly reached the kernel (not EPERM):", allowedOut)
+	fmt.Println("allowed target correctly reached the kernel with ECONNREFUSED:", allowedOut)
 
 	return nil
 }
@@ -309,21 +287,72 @@ func daemonRequest(sockPath string, req kernelcapture.DaemonProtocolRequest) (ke
 	return resp, nil
 }
 
-// runShimProbe runs shimBin against self (re-exec'd via --probe-connect
-// target) under sessionID's seccomp policy, and returns the probe's single
-// line of stdout output.
-func runShimProbe(shimBin, seccompSockPath, sessionID, self, target string) (string, error) {
+// runShimProbe starts the real shim behind its production ready-file gate,
+// registers that live child PID as the session root, applies the policy, and
+// only then releases the shim to transfer its real listener and exec the
+// connect probe. One session per probe keeps the delegated root identity exact.
+func runShimProbe(daemonSockPath, shimBin, seccompSockPath, sessionID, self, target, allowedIP string) (string, error) {
+	readyFile := filepath.Join(filepath.Dir(seccompSockPath), sessionID+".ready")
+	defer os.Remove(readyFile)
 	cmd := exec.Command(shimBin,
 		"--session-id", sessionID,
 		"--seccomp-socket", seccompSockPath,
+		"--ready-file", readyFile,
 		"--",
 		self, "--probe-connect", target,
 	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%w (output: %s)", err, string(out))
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start shim: %w", err)
 	}
-	line := string(out)
+	defer func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+	if err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID: sessionID,
+			RootPID:   uint32(cmd.Process.Pid),
+			// This CI smoke runs as root and exercises the seccomp tier, which is
+			// process/filter scoped rather than cgroup enforced. Use the live root
+			// PID as a unique non-zero registry key so the two independent probe
+			// sessions cannot collide on the old placeholder cgroup_id=1.
+			CgroupID:     uint64(cmd.Process.Pid),
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   300,
+		},
+	}); err != nil {
+		return "", fmt.Errorf("register_session: %w", err)
+	}
+	if err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+		ApplyPolicy: &kernelcapture.DaemonApplyPolicyRequest{
+			SessionID:   sessionID,
+			Generation:  1,
+			EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+			OpPolicies: []kernelcapture.DaemonOpPolicy{
+				{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+			},
+			NetAllow: []string{allowedIP + "/32"},
+		},
+	}); err != nil {
+		return "", fmt.Errorf("apply_policy: %w", err)
+	}
+	if err := os.WriteFile(readyFile, []byte("ready\n"), 0o600); err != nil {
+		return "", fmt.Errorf("release shim ready gate: %w", err)
+	}
+	err := cmd.Wait()
+	if err != nil {
+		return "", fmt.Errorf("%w (output: %s)", err, output.String())
+	}
+	line := output.String()
 	for len(line) > 0 && (line[len(line)-1] == '\n' || line[len(line)-1] == '\r') {
 		line = line[:len(line)-1]
 	}

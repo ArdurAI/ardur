@@ -18,3 +18,15 @@ func TestObserveLinuxUnixPeerCredentialsUnsupportedPlatformsFailClosed(t *testin
 		t.Fatalf("expected ErrDaemonPeerCredentialRetrieval, got %v", err)
 	}
 }
+
+func TestObserveLinuxProcessStartTimeTicksUnsupportedPlatformsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	_, err := ObserveLinuxProcessStartTimeTicks(1)
+	if err == nil {
+		t.Fatalf("expected unsupported-platform error")
+	}
+	if !errors.Is(err, ErrDaemonPeerCredentialRetrieval) {
+		t.Fatalf("expected ErrDaemonPeerCredentialRetrieval, got %v", err)
+	}
+}

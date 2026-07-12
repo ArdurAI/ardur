@@ -465,7 +465,7 @@ func TestHandleAuthorizedRequest_SessionStatusReportsSeccompListenerAttached(t *
 		t.Error("SeccompListenerAttached = true before any listener registered, want false")
 	}
 
-	if !d.registerSeccompListener("seccomp-status-session", func() {}) {
+	if !d.registerSeccompListener("seccomp-status-session", 1, func() {}) {
 		t.Fatal("registerSeccompListener: expected first registration to succeed")
 	}
 
@@ -477,7 +477,7 @@ func TestHandleAuthorizedRequest_SessionStatusReportsSeccompListenerAttached(t *
 		t.Error("SeccompListenerAttached = false while a listener is registered, want true")
 	}
 
-	d.unregisterSeccompListener("seccomp-status-session")
+	d.unregisterSeccompListener("seccomp-status-session", 1)
 
 	after := d.handleAuthorizedRequest(context.Background(), statusReq, handshake)
 	if !after.OK {
@@ -494,7 +494,7 @@ func TestHandleAuthorizedRequest_SessionStatusReportsSeccompListenerAttached(t *
 // some session somewhere does have a listener attached.
 func TestHandleAuthorizedRequest_HealthNeverReportsSeccompListenerAttached(t *testing.T) {
 	d := newTestDaemon(t)
-	if !d.registerSeccompListener("some-other-session", func() {}) {
+	if !d.registerSeccompListener("some-other-session", 1, func() {}) {
 		t.Fatal("registerSeccompListener: expected first registration to succeed")
 	}
 

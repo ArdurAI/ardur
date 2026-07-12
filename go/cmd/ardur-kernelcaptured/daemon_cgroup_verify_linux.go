@@ -65,28 +65,34 @@ import (
 // racing process table can never spin the handler. A launcher-spawned agent is
 // a direct child (1 hop); the generous bound tolerates intervening wrapper
 // processes without ever being unbounded.
-const maxCgroupAncestryHops = 64
+const (
+	maxCgroupAncestryHops                       = 64
+	registerSessionRootProcessStartTimeRequired = true
+)
 
-func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHandshake, reg *kernelcapture.DaemonRegisterSessionRequest, log *slog.Logger) error {
+func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHandshake, reg *kernelcapture.DaemonRegisterSessionRequest, log *slog.Logger) (uint64, error) {
 	peerPID := handshake.Authorization.PID
 	rootPID := reg.RootPID
 	// register_session validation already requires root_pid != 0 and
 	// cgroup_id != 0. If rootPID is missing there is no claim to inspect; let
 	// the registry's own validation reject the malformed request.
 	if rootPID == 0 {
-		return nil
+		return 0, nil
+	}
+	rootStartBefore, err := kernelcapture.ObserveLinuxProcessStartTimeTicks(rootPID)
+	if err != nil {
+		return 0, fmt.Errorf("root_pid %d process identity could not be observed before ownership verification: %w", rootPID, err)
 	}
 	// A root (uid 0) peer is already fully privileged on the host — it can move
 	// any process between cgroups directly, so neither check below adds anything
 	// against it. Both checks exist to constrain a NON-root allowed peer (the
 	// sandboxed-workload threat) from binding a session to a cgroup/process tree
-	// it does not own. Skipping root also lets tiers that register a placeholder
-	// root_pid (the seccomp tier enforces per-shim'd-process, not by cgroup, and
-	// its smoke registers root_pid=1, whose real cgroup is the hierarchy root —
-	// never a session's claimed leaf cgroup) work when the daemon and client are
-	// root. Per-session ownership on apply_policy still applies to every peer.
+	// it does not own. Root still has to name a live root_pid above: its
+	// daemon-observed start identity is what later authenticates a delegated
+	// seccomp listener handoff. Per-session ownership on apply_policy still
+	// applies to every peer.
 	if handshake.Authorization.UID == 0 {
-		return nil
+		return rootStartBefore, nil
 	}
 	// peerPID comes from SO_PEERCRED and is translated into the receiver's PID
 	// namespace. A zero/unavailable value cannot bind this socket peer to the
@@ -94,7 +100,7 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	if peerPID == 0 {
 		log.Warn("register_session rejected: peer pid unavailable for cgroup ownership verification",
 			"root_pid", rootPID, "cgroup_id", reg.CgroupID)
-		return fmt.Errorf("peer pid is unavailable in the daemon pid namespace; cannot verify ownership of root_pid %d and cgroup_id %d", rootPID, reg.CgroupID)
+		return 0, fmt.Errorf("peer pid is unavailable in the daemon pid namespace; cannot verify ownership of root_pid %d and cgroup_id %d", rootPID, reg.CgroupID)
 	}
 	// Confirm the peer itself is visible in the daemon's /proc view. /proc is
 	// tied to the PID namespace that mounted it; if lookup fails, ancestry and
@@ -103,14 +109,14 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	if _, err := os.Stat("/proc/" + strconv.FormatUint(uint64(peerPID), 10)); err != nil {
 		log.Warn("register_session rejected: peer pid not visible for cgroup ownership verification",
 			"peer_pid", peerPID, "root_pid", rootPID, "cgroup_id", reg.CgroupID, "error", err)
-		return fmt.Errorf("peer pid %d is not visible in the daemon /proc view (%w); cannot verify ownership of root_pid %d and cgroup_id %d", peerPID, err, rootPID, reg.CgroupID)
+		return 0, fmt.Errorf("peer pid %d is not visible in the daemon /proc view (%w); cannot verify ownership of root_pid %d and cgroup_id %d", peerPID, err, rootPID, reg.CgroupID)
 	}
 
 	// Check 1: ancestry. The peer registering its own process is trivially a
 	// (zero-hop) descendant; anything else must be found by walking parents.
 	if rootPID != peerPID {
 		if err := verifyCgroupAncestry(rootPID, peerPID); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
@@ -122,14 +128,21 @@ func verifyRegisterSessionCgroup(handshake kernelcapture.DaemonProtocolPeerHands
 	if reg.CgroupID != 0 {
 		resolved, err := resolveCgroupID(rootPID)
 		if err != nil {
-			return fmt.Errorf("root_pid %d cgroup could not be resolved (%v); a peer may only register a cgroup_id its root_pid actually occupies", rootPID, err)
+			return 0, fmt.Errorf("root_pid %d cgroup could not be resolved (%v); a peer may only register a cgroup_id its root_pid actually occupies", rootPID, err)
 		}
 		if resolved != reg.CgroupID {
-			return fmt.Errorf("root_pid %d is in cgroup %d, not the claimed cgroup_id %d; a peer may only register a cgroup_id its root_pid actually occupies", rootPID, resolved, reg.CgroupID)
+			return 0, fmt.Errorf("root_pid %d is in cgroup %d, not the claimed cgroup_id %d; a peer may only register a cgroup_id its root_pid actually occupies", rootPID, resolved, reg.CgroupID)
 		}
 	}
 
-	return nil
+	rootStartAfter, err := kernelcapture.ObserveLinuxProcessStartTimeTicks(rootPID)
+	if err != nil {
+		return 0, fmt.Errorf("root_pid %d process identity could not be observed after ownership verification: %w", rootPID, err)
+	}
+	if rootStartAfter != rootStartBefore {
+		return 0, fmt.Errorf("root_pid %d process identity changed during ownership verification: before=%d after=%d", rootPID, rootStartBefore, rootStartAfter)
+	}
+	return rootStartAfter, nil
 }
 
 // verifyCgroupAncestry walks rootPID's parent chain looking for peerPID.

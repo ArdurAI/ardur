@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "17e8b18547dd9b50dbec283c6e562606d1cdb17d7cc591247ba720845e2db9d3"
+source_sha256: "260f8866016abcb956db38cd9ecd87bdd8f6a15dcdc0a5eedca44ccb080a0e1f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Bind each seccomp listener handoff to the registered root process's
+  daemon-observed PID/start-time identity instead of accepting any peer on the
+  daemon-wide UID/GID allowlist
 - Serialize the Linux daemon's BPF policy-map handle lifetime so startup,
   health, in-flight mutations, tier withdrawal, and close cannot race
 - Make the Linux cgroup-ownership verifier independently fail closed when a
