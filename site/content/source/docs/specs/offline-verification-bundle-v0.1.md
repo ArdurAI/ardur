@@ -2,7 +2,7 @@
 title: "Offline Verification Bundle v0.1"
 description: "Status: implemented public profile for independently runnable Ardur receipt"
 source_path: "docs/specs/offline-verification-bundle-v0.1.md"
-source_sha256: "826f0a03a7bec30eab878ffee4fd459241dd24d5b610498662aef314b663b3ab"
+source_sha256: "c20b82ec81133d8a0d278d1d8fb840928385a25f08ccc38fc9265bce9b0bf732"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -114,14 +114,29 @@ An implementation conforming to this profile MUST:
    supplied log key;
 8. verify each receiver state and signature using the separately supplied
    receiver key where required;
-9. fail the complete operation on the first invalid or missing required item;
-   and
-10. report `verification_mode: offline` and `revocation_checked: false`.
+9. when the verifier supplies a maximum bundle age, reject a latest signed
+   receipt `iat` outside that age or the configured future-clock-skew
+   allowance;
+10. fail the complete operation on the first invalid or missing required item;
+    and
+11. report `verification_mode: offline`, `revocation_checked: false`, whether
+    signed receipt age was checked, and that one-time replay was not checked.
 
 Archival verification does not reject a receipt merely because its short
 runtime `exp` window elapsed. `--verify-expiry` opts into that additional
 runtime-time check. Signatures, schemas, parent linkage, registration delay,
 receiver delay, and signed chronology remain enforced in either mode.
+
+By default, offline verification is retrospective audit verification: it does
+not enforce receipt age or one-time presentation. A verifier consuming a
+bundle near authorization time can supply `--max-bundle-age-s`. The verifier
+then compares its current clock with the latest signed receipt `iat` and allows
+at most `--freshness-clock-skew-s` seconds of future clock skew (default 60).
+Both bounds are inclusive and non-negative. This is an age-bound freshness
+anchor, not a nonce or replay cache: the same bundle can still be presented
+more than once inside the accepted window. A consumer requiring one-time use
+MUST add verifier-issued nonce binding or a persistent replay cache outside
+this profile.
 
 No verification step in this profile performs a network request. This is an
 implementation property, not a claim that the host process is sandboxed from
@@ -190,8 +205,14 @@ ardur verify evidence.json \
   --receipt-public-key receipt-public.pem \
   --transparency-log-key log-public.pem \
   --receiver-public-key receiver-public.pem \
+  --max-bundle-age-s 300 \
+  --freshness-clock-skew-s 60 \
   --html-report report.html
 ```
+
+Omit the two freshness options for retrospective audit verification. Supplying
+`--freshness-clock-skew-s` without `--max-bundle-age-s` fails closed rather
+than silently claiming a freshness check.
 
 Explicit legacy downgrade:
 
@@ -216,12 +237,14 @@ ardur offline-verification-fixture --output ./offline-fixture
 Stable failure categories include malformed/oversized input, duplicate JSON
 keys, unsupported schema, invalid receipt chain, missing or substituted
 sidecars, invalid inclusion proof, invalid receiver signature, missing trust
-root, timestamp regression, and unsafe output path.
+root, timestamp regression, invalid freshness policy, a stale or excessively
+future-dated latest receipt, and unsafe output path.
 
 Verification of a presented chain does not prove that the presenter supplied
 every action, an unsuppressed chain tail, or an honest receiver. One valid
 signed checkpoint does not prove log consistency across views. Offline mode
-cannot discover revocation published after the evidence was assembled.
+cannot discover revocation published after the evidence was assembled. An
+accepted maximum age does not prove one-time presentation inside that window.
 
 ## 10. Primary References
 
@@ -230,3 +253,6 @@ cannot discover revocation published after the evidence was assembled.
 - [Delegation Receipt Protocol draft-10, offline verification](https://datatracker.ietf.org/doc/draft-nelson-agent-delegation-receipts/10/)
 - [OWASP Cross Site Scripting Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
 - [RFC 8785: JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html)
+- [RFC 7519: JSON Web Token `iat` and `jti` claims](https://www.rfc-editor.org/rfc/rfc7519.html#section-4.1.6)
+- [RFC 9683: Remote Attestation Procedures Architecture, freshness](https://www.rfc-editor.org/rfc/rfc9683.html#section-10.2)
+- [NIST SP 800-63C-4: assertion replay protection](https://pages.nist.gov/800-63-4/sp800-63c.html#replay)

@@ -504,6 +504,76 @@ def _validate_claim_sequence(claims: list[dict[str, Any]]) -> None:
             )
 
 
+def _bundle_freshness_report(
+    claims: list[dict[str, Any]],
+    *,
+    verified_at: int,
+    max_bundle_age_s: int | None,
+    freshness_clock_skew_s: int | None,
+) -> dict[str, Any]:
+    if max_bundle_age_s is not None and (
+        isinstance(max_bundle_age_s, bool)
+        or not isinstance(max_bundle_age_s, int)
+        or max_bundle_age_s < 0
+    ):
+        raise OfflineVerificationError(
+            "freshness_policy_invalid",
+            "max bundle age must be a non-negative integer or omitted",
+        )
+
+    latest_iat = int(claims[-1]["iat"])
+    if max_bundle_age_s is None:
+        if freshness_clock_skew_s is not None:
+            raise OfflineVerificationError(
+                "freshness_policy_invalid",
+                "freshness clock skew requires a maximum bundle age",
+            )
+        return {
+            "age_checked": False,
+            "max_age_s": None,
+            "allowed_future_skew_s": None,
+            "latest_receipt_iat": latest_iat,
+            "age_s": None,
+            "one_time_replay_checked": False,
+        }
+
+    allowed_future_skew_s = (
+        60 if freshness_clock_skew_s is None else freshness_clock_skew_s
+    )
+    if (
+        isinstance(allowed_future_skew_s, bool)
+        or not isinstance(allowed_future_skew_s, int)
+        or allowed_future_skew_s < 0
+    ):
+        raise OfflineVerificationError(
+            "freshness_policy_invalid",
+            "freshness clock skew must be a non-negative integer",
+        )
+
+    last_index = len(claims) - 1
+    if latest_iat > verified_at + allowed_future_skew_s:
+        raise OfflineVerificationError(
+            "bundle_freshness_future",
+            "latest receipt issuance time exceeds the verifier freshness clock-skew allowance",
+            index=last_index,
+        )
+    age_s = max(0, verified_at - latest_iat)
+    if age_s > max_bundle_age_s:
+        raise OfflineVerificationError(
+            "bundle_freshness_stale",
+            "latest receipt exceeds the verifier-supplied maximum bundle age",
+            index=last_index,
+        )
+    return {
+        "age_checked": True,
+        "max_age_s": max_bundle_age_s,
+        "allowed_future_skew_s": allowed_future_skew_s,
+        "latest_receipt_iat": latest_iat,
+        "age_s": age_s,
+        "one_time_replay_checked": False,
+    }
+
+
 def verify_offline_input(
     offline_input: OfflineInput,
     *,
@@ -515,10 +585,18 @@ def verify_offline_input(
     max_registration_delay_s: int | None = 86_400,
     max_attestation_delay_s: int = 300,
     receiver_clock_skew_s: int = 60,
+    max_bundle_age_s: int | None = None,
+    freshness_clock_skew_s: int | None = None,
     redact: bool = True,
     include_correlation_fields: bool = False,
 ) -> dict[str, Any]:
-    """Verify a loaded bundle without network access and return an explorer report."""
+    """Verify a loaded bundle without network access and return an explorer report.
+
+    The default is retrospective audit verification: receipt age and one-time
+    replay are not enforced. Set ``max_bundle_age_s`` to reject a latest signed
+    receipt outside a verifier-clock age/skew window. That age bound does not
+    prevent repeated presentation inside the accepted window.
+    """
 
     if offline_input.kind == "journal" and not chain_only:
         raise OfflineVerificationError(
@@ -649,6 +727,13 @@ def verify_offline_input(
             )
         timeline.append(timeline_item)
 
+    verified_at = int(time.time())
+    freshness = _bundle_freshness_report(
+        claims,
+        verified_at=verified_at,
+        max_bundle_age_s=max_bundle_age_s,
+        freshness_clock_skew_s=freshness_clock_skew_s,
+    )
     result = "verified" if full_evidence else "verified_chain_only"
     report: dict[str, Any] = {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -656,6 +741,7 @@ def verify_offline_input(
         "result": result,
         "verification_mode": "offline",
         "revocation_checked": False,
+        "freshness": freshness,
         "assurance_profile": FULL_EVIDENCE_PROFILE
         if full_evidence
         else CHAIN_ONLY_PROFILE,
@@ -711,10 +797,15 @@ def verify_offline_input(
         "limitations": [
             "offline verification did not query a revocation registry",
             "a receipt revoked after signing may remain cryptographically valid offline",
+            (
+                "age-bounded freshness does not prevent repeated presentation inside the accepted window"
+                if freshness["age_checked"]
+                else "offline verification did not enforce receipt age or one-time replay"
+            ),
             "valid signatures do not prove receiver correctness, action-set completeness, or non-collusion",
             "grant changes alone do not prove scope containment without the signed grant artifacts",
         ],
-        "verified_at": int(time.time()),
+        "verified_at": verified_at,
     }
     return _redact_value(report) if redact else report
 
@@ -738,11 +829,16 @@ def render_cli_report(report: Mapping[str, Any]) -> str:
     """Render the bounded chronological explorer as plain text."""
 
     summary = report["summary"]
+    freshness = report["freshness"]
     lines = [
         f"Ardur offline verification: {str(report['result']).upper()}",
         (
             f"Mode: offline | revocation checked: false | assurance: "
             f"{report['assurance_profile']} | redacted: {str(report['redaction']['enabled']).lower()}"
+        ),
+        (
+            f"Freshness age checked: {str(freshness['age_checked']).lower()} | "
+            "one-time replay checked: false"
         ),
         (
             f"Receipts: {summary['receipt_count']} | PERMIT: {summary['permit_count']} | "
@@ -756,6 +852,15 @@ def render_cli_report(report: Mapping[str, Any]) -> str:
         ),
         "Timeline:",
     ]
+    if freshness["age_checked"]:
+        lines.insert(
+            3,
+            (
+                f"Freshness age: {freshness['age_s']}s | maximum: "
+                f"{freshness['max_age_s']}s | allowed future skew: "
+                f"{freshness['allowed_future_skew_s']}s"
+            ),
+        )
     for item in report["timeline"]:
         authority = item["authority"]
         lines.append(
@@ -809,6 +914,14 @@ def render_html_report(report: Mapping[str, Any]) -> str:
         return html.escape(_display(value), quote=True)
 
     summary = report["summary"]
+    freshness = report["freshness"]
+    freshness_notice = (
+        f"Signed receipt age was checked: {freshness['age_s']}s against a "
+        f"{freshness['max_age_s']}s maximum with "
+        f"{freshness['allowed_future_skew_s']}s allowed future clock skew. "
+        if freshness["age_checked"]
+        else "Signed receipt age was not checked. "
+    )
     rows: list[str] = []
     for item in report["timeline"]:
         authority = item["authority"]
@@ -873,7 +986,7 @@ def render_html_report(report: Mapping[str, Any]) -> str:
     <p>{esc(str(report["result"]).upper())} | {esc(report["assurance_profile"])}</p>
   </header>
   <main>
-    <p class="notice">Offline mode. Revocation was not checked. Evidence-derived values are redacted by default and HTML-escaped at this rendering sink.</p>
+    <p class="notice">Offline mode. Revocation was not checked. {esc(freshness_notice)} One-time replay was not checked. Evidence-derived values are redacted by default and HTML-escaped at this rendering sink.</p>
     <section class="summary" aria-label="Verification summary">
       <div class="metric"><strong>{summary["receipt_count"]}</strong><br>Receipts</div>
       <div class="metric"><strong>{summary["permit_count"]}</strong><br>PERMIT</div>

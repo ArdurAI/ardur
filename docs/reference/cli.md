@@ -216,6 +216,8 @@ ardur verify EVIDENCE.json
              --receipt-public-key FILE
              --transparency-log-key FILE
              --receiver-public-key FILE
+             [--max-bundle-age-s SECONDS]
+             [--freshness-clock-skew-s SECONDS]
              [--html-report FILE] [--json]
              [--unsafe-show-sensitive]
 
@@ -242,6 +244,17 @@ self-attested envelope because successful enforcement prevented receiver
 dispatch. Output states `verification_mode: offline` and
 `revocation_checked: false`, fingerprints all trust roots, and discloses stale-
 revocation and completeness limits.
+
+The default is retrospective audit verification: signed receipt age and
+one-time replay are not checked. `--max-bundle-age-s SECONDS` opts into an
+inclusive verifier-clock age limit over the latest signed receipt `iat`.
+`--freshness-clock-skew-s SECONDS` controls the allowed future skew and
+defaults to 60 when the age limit is enabled. Both values must be non-negative,
+and supplying the skew option without the age option fails closed. Reports
+always state whether age was checked and that one-time replay was not checked.
+An age limit narrows replay exposure but does not prevent repeated presentation
+inside the accepted window; use a verifier-issued nonce or persistent replay
+cache when one-time authorization is required.
 
 Raw JSONL receipt journals require `--chain-only`. The result is
 `verified_chain_only`; removing sidecars cannot silently produce a full
