@@ -31,3 +31,15 @@ def test_provider_free_personal_firewall_demo_is_verified_and_private(
     assert result["temporary_state_removed"] is True
     assert str(tmp_path) not in json.dumps(result, sort_keys=True)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_personal_firewall_demo_human_output_uses_safe_fixed_details(tmp_path, capsys):
+    run_personal_firewall_demo(temp_parent=tmp_path, emit=True)
+
+    output = capsys.readouterr().out
+    assert "synthetic-demo-value" not in output
+    assert (
+        "DENY  secret-like argument: matched the personal secret-like argument policy"
+        in output
+    )
+    assert str(tmp_path) not in output

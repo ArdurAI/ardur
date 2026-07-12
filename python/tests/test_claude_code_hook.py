@@ -203,7 +203,7 @@ def test_direct_hook_fails_closed_for_malformed_additional_policies_claim(
 
 
 def test_direct_hook_fails_closed_for_oversized_budget_chain(tmp_path, monkeypatch):
-    import vibap.claude_code_hook as hook
+    from vibap import claude_code_hook as hook
 
     token = _issue_wildcard_test_passport(tmp_path)
     chain_dir = tmp_path / "chains"
@@ -227,6 +227,67 @@ def test_direct_hook_fails_closed_for_oversized_budget_chain(tmp_path, monkeypat
     assert _deny_reason(output) == (
         "ardur: blocked - signed receipt chain is unavailable or invalid"
     )
+
+
+def test_direct_hook_reuses_verified_state_and_detects_same_size_tamper(
+    tmp_path, monkeypatch
+):
+    from vibap import claude_code_hook as hook
+    from vibap import receipt
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    chain_dir = tmp_path / "chains"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "cached-budget-chain")
+
+    first = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "one.txt")},
+            suffix="cached-one",
+        ),
+        keys_dir=tmp_path,
+    )
+    assert first["continue"] is True
+
+    verify_calls = 0
+    original_verify_chain = receipt.verify_chain
+
+    def counted_verify_chain(*args, **kwargs):
+        nonlocal verify_calls
+        verify_calls += 1
+        return original_verify_chain(*args, **kwargs)
+
+    monkeypatch.setattr(receipt, "verify_chain", counted_verify_chain)
+    second = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "two.txt")},
+            suffix="cached-two",
+        ),
+        keys_dir=tmp_path,
+    )
+    assert second["continue"] is True
+    assert verify_calls == 0
+
+    receipt_file = chain_dir / "cached-budget-chain" / "receipts.jsonl"
+    raw = receipt_file.read_bytes()
+    replacement = b"f" if raw[:1] != b"f" else b"e"
+    receipt_file.write_bytes(replacement + raw[1:])
+
+    tampered = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "three.txt")},
+            suffix="cached-three",
+        ),
+        keys_dir=tmp_path,
+    )
+    assert _deny_reason(tampered) == (
+        "ardur: blocked - signed receipt chain is unavailable or invalid"
+    )
+    assert verify_calls == 1
 
 
 def _issue_wildcard_test_passport(

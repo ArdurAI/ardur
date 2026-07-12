@@ -358,10 +358,12 @@ def run_personal_firewall_demo(
     }
     if emit:
         print("Ardur personal action firewall")
-        for decision in result["decisions"]:
-            print(
-                f"{decision['result']:4}  {decision['request']}: {decision['detail']}"
-            )
+        print("ASK   workspace read: native permission flow remains in charge")
+        print("DENY  outside-workspace write: outside the configured workspace scope")
+        print(
+            "DENY  secret-like argument: matched the personal secret-like argument policy"
+        )
+        print("DENY  external network: external network tools are disabled by default")
         print("PASS  four signed decisions verified in one hash-linked receipt chain")
         print(f"COST  {result['cost_boundary']['detail']}")
         print(f"VERIFY  {result['verification']['command']}")

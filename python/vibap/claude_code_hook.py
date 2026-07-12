@@ -17,6 +17,7 @@ import os
 import re
 import stat
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -45,6 +46,7 @@ CLAUDE_CODE_VISIBILITY_FULL = "full"
 HOOK_INPUT_MAX_CHARS = 1024 * 1024
 HOOK_STATE_MAX_BYTES = 16 * 1024 * 1024
 HOOK_STATE_MAX_RECEIPTS = 8192
+HOOK_SESSION_CACHE_MAX_ENTRIES = 128
 _SAFE_TRACE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 
 
@@ -118,6 +120,18 @@ class ChainState:
         return self.trace_dir / SUBAGENT_REGISTRY_FILENAME
 
 
+@dataclass
+class _VerifiedSessionCacheEntry:
+    passport_digest: str
+    chain_hasher: Any
+    chain_size: int
+    tool_call_count: int
+    by_class: dict[str, int]
+
+
+_VERIFIED_SESSION_CACHE: "OrderedDict[str, _VerifiedSessionCacheEntry]" = OrderedDict()
+
+
 def resolve_chain_state(*, trace_id: str) -> ChainState:
     base = Path(os.environ.get(CHAIN_DIR_ENV_VAR, str(DEFAULT_CHAIN_DIR))).expanduser()
     safe_trace_id = _normalize_trace_id(trace_id)
@@ -155,12 +169,19 @@ def append_receipt(state: ChainState, signed_jwt: str) -> None:
         _append_receipt_unlocked(state, signed_jwt)
 
 
-def _append_receipt_unlocked(state: ChainState, signed_jwt: str) -> None:
+def _append_receipt_unlocked(
+    state: ChainState,
+    signed_jwt: str,
+    *,
+    receipt_obj: Any | None = None,
+) -> None:
     with open(state.file, "a", encoding="utf-8") as f:
         f.write(signed_jwt.strip() + "\n")
     from .transparency import queue_receipt_anchor_best_effort
 
     queue_receipt_anchor_best_effort(signed_jwt, state.file)
+    if receipt_obj is not None:
+        _advance_verified_session_cache_unlocked(state, signed_jwt, receipt_obj)
 
 
 def _append_subagent_event_unlocked(state: ChainState, record: Mapping[str, Any]) -> None:
@@ -624,9 +645,10 @@ def _verified_pretool_session_state_unlocked(
     public_key: Any,
     passport_claims: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Rebuild cumulative hook budget state from the verified receipt chain."""
+    """Return cumulative state from a verified chain, caching daemon hot paths."""
     from .receipt import verify_chain
 
+    raw = b""
     tokens = []
     try:
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -643,6 +665,24 @@ def _verified_pretool_session_state_unlocked(
         tokens = [line.strip() for line in raw.decode("utf-8").splitlines() if line.strip()]
         if len(tokens) > HOOK_STATE_MAX_RECEIPTS:
             raise ValueError("Claude Code receipt chain has too many receipts")
+
+    passport_digest = _hook_session_passport_digest(public_key, passport_claims)
+    chain_hasher = hashlib.sha256(raw)
+    cache_key = str(state.file.resolve(strict=False))
+    cached = _VERIFIED_SESSION_CACHE.get(cache_key)
+    if (
+        cached is not None
+        and cached.passport_digest == passport_digest
+        and cached.chain_size == len(raw)
+        and cached.chain_hasher.digest() == chain_hasher.digest()
+    ):
+        _VERIFIED_SESSION_CACHE.move_to_end(cache_key)
+        return _hook_session_state(
+            passport_claims=passport_claims,
+            tool_call_count=cached.tool_call_count,
+            by_class=cached.by_class,
+        )
+
     receipt_claims = verify_chain(tokens, public_key, verify_expiry=False) if tokens else []
     permitted_pre = [
         claim
@@ -654,17 +694,88 @@ def _verified_pretool_session_state_unlocked(
     for claim in permitted_pre:
         side_effect = str(claim.get("side_effect_class", "none"))
         by_class[side_effect] = by_class.get(side_effect, 0) + 1
+    _VERIFIED_SESSION_CACHE[cache_key] = _VerifiedSessionCacheEntry(
+        passport_digest=passport_digest,
+        chain_hasher=chain_hasher,
+        chain_size=len(raw),
+        tool_call_count=len(permitted_pre),
+        by_class=dict(by_class),
+    )
+    _VERIFIED_SESSION_CACHE.move_to_end(cache_key)
+    while len(_VERIFIED_SESSION_CACHE) > HOOK_SESSION_CACHE_MAX_ENTRIES:
+        _VERIFIED_SESSION_CACHE.popitem(last=False)
+    return _hook_session_state(
+        passport_claims=passport_claims,
+        tool_call_count=len(permitted_pre),
+        by_class=by_class,
+    )
+
+
+def _hook_session_passport_digest(
+    public_key: Any,
+    passport_claims: Mapping[str, Any],
+) -> str:
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    claims = json.dumps(
+        dict(passport_claims),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    key = public_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+    return hashlib.sha256(key + b"\x00" + claims).hexdigest()
+
+
+def _hook_session_state(
+    *,
+    passport_claims: Mapping[str, Any],
+    tool_call_count: int,
+    by_class: Mapping[str, int],
+) -> dict[str, Any]:
     try:
         issued_at = float(passport_claims.get("iat", time.time()))
     except (TypeError, ValueError):
         issued_at = time.time()
     return {
-        "tool_call_count": len(permitted_pre),
-        "tool_call_count_by_class": by_class,
-        "side_effect_counts": by_class,
+        "tool_call_count": tool_call_count,
+        "tool_call_count_by_class": dict(by_class),
+        "side_effect_counts": dict(by_class),
         "delegated_budget_reserved": 0,
         "elapsed_s": max(0.0, time.time() - issued_at),
     }
+
+
+def _advance_verified_session_cache_unlocked(
+    state: ChainState,
+    signed_jwt: str,
+    receipt_obj: Any,
+) -> None:
+    cache_key = str(state.file.resolve(strict=False))
+    cached = _VERIFIED_SESSION_CACHE.get(cache_key)
+    if cached is None:
+        return
+
+    line = (signed_jwt.strip() + "\n").encode("utf-8")
+    chain_hasher = cached.chain_hasher.copy()
+    chain_hasher.update(line)
+    tool_call_count = cached.tool_call_count
+    by_class = dict(cached.by_class)
+    if (
+        str(getattr(receipt_obj, "step_id", "")).endswith(":pre")
+        and getattr(receipt_obj, "verdict", "") == "compliant"
+    ):
+        tool_call_count += 1
+        side_effect = str(getattr(receipt_obj, "side_effect_class", "none"))
+        by_class[side_effect] = by_class.get(side_effect, 0) + 1
+    _VERIFIED_SESSION_CACHE[cache_key] = _VerifiedSessionCacheEntry(
+        passport_digest=cached.passport_digest,
+        chain_hasher=chain_hasher,
+        chain_size=cached.chain_size + len(line),
+        tool_call_count=tool_call_count,
+        by_class=by_class,
+    )
+    _VERIFIED_SESSION_CACHE.move_to_end(cache_key)
 
 
 def _hook_budget_evidence(
@@ -802,7 +913,7 @@ def _emit_chained_receipt_unlocked(
         record = dict(subagent_record)
         record["receipt_id"] = receipt_obj.receipt_id
         _append_subagent_event_unlocked(state, record)
-    _append_receipt_unlocked(state, signed)
+    _append_receipt_unlocked(state, signed, receipt_obj=receipt_obj)
     return receipt_obj
 
 
@@ -1019,7 +1130,7 @@ def handle_post_tool_use(
         )
         receipt_obj.result_hash = _result_hash(tool_response)
         signed = sign_receipt(receipt_obj, private_key)
-        _append_receipt_unlocked(state, signed)
+        _append_receipt_unlocked(state, signed, receipt_obj=receipt_obj)
     return {"continue": True}
 
 
