@@ -16,34 +16,59 @@ import (
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
 
-// countingPolicyMap is a minimal policyMapReadWriter that records how many
-// Put/Delete calls it received. Lookup always reports "not found" so
-// nextPolicySlot falls back to slot 0 (slot mechanics are covered elsewhere).
-// Its counters are plain ints on purpose: with the daemon's applyMu absent,
-// concurrent apply_policy would write them unsynchronized and `go test -race`
-// would flag it — making the concurrency test non-vacuous.
+// countingPolicyMap is a minimal policyMapReadWriter that records Put/Delete
+// counts and can optionally trace call order or inject a delete failure. Lookup
+// always reports "not found" so nextPolicySlot falls back to slot 0 (slot
+// mechanics are covered elsewhere). Its counters are plain ints on purpose:
+// with the daemon's applyMu absent, concurrent apply_policy would write them
+// unsynchronized and `go test -race` would flag it — making the concurrency
+// test non-vacuous.
 type countingPolicyMap struct {
-	puts    int
-	deletes int
+	name      string
+	events    *[]string
+	puts      int
+	deletes   int
+	deleteErr error
 }
 
 var errCountingNotFound = errors.New("key does not exist")
 
-func (m *countingPolicyMap) Put(_, _ interface{}) error    { m.puts++; return nil }
-func (m *countingPolicyMap) Delete(_ interface{}) error    { m.deletes++; return nil }
+func (m *countingPolicyMap) Put(_, _ interface{}) error {
+	m.puts++
+	if m.events != nil {
+		*m.events = append(*m.events, "put:"+m.name)
+	}
+	return nil
+}
+
+func (m *countingPolicyMap) Delete(_ interface{}) error {
+	m.deletes++
+	if m.events != nil {
+		*m.events = append(*m.events, "delete:"+m.name)
+	}
+	return m.deleteErr
+}
+
 func (m *countingPolicyMap) Lookup(_, _ interface{}) error { return errCountingNotFound }
 
 func countingPolicyMaps() (kernelcapture.PolicyMaps, map[string]*countingPolicyMap) {
-	op := &countingPolicyMap{}
-	path := &countingPolicyMap{}
-	file := &countingPolicyMap{}
-	bootstrapFile := &countingPolicyMap{}
-	bootstrapObservation := &countingPolicyMap{}
-	control := &countingPolicyMap{}
-	trustedRoot := &countingPolicyMap{}
-	net := &countingPolicyMap{}
-	managed := &countingPolicyMap{}
-	kill := &countingPolicyMap{}
+	return countingPolicyMapsWithEvents(nil)
+}
+
+func countingPolicyMapsWithEvents(events *[]string) (kernelcapture.PolicyMaps, map[string]*countingPolicyMap) {
+	newMap := func(name string) *countingPolicyMap {
+		return &countingPolicyMap{name: name, events: events}
+	}
+	op := newMap("op")
+	path := newMap("path")
+	file := newMap("file")
+	bootstrapFile := newMap("bootstrap_file")
+	bootstrapObservation := newMap("bootstrap_observation")
+	control := newMap("control")
+	trustedRoot := newMap("trusted_root")
+	net := newMap("net")
+	managed := newMap("managed")
+	kill := newMap("kill")
 	return kernelcapture.PolicyMaps{
 		CgroupOpPolicy:           op,
 		CgroupPathAllow:          path,
@@ -153,16 +178,21 @@ func TestHandleSetKillSwitch_RequiresRootAdmin(t *testing.T) {
 func TestHandleApplyPolicy_ReapplyRevokesDroppedAllowlist(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
-	maps, h := countingPolicyMaps()
+	var events []string
+	maps, h := countingPolicyMapsWithEvents(&events)
 	d.activatePolicyMaps(maps)
 	registerTestSession(t, d, "ses-prune", 5500)
 	owner := testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy)
 
-	apply := func(gen kernelcapture.BpfPolicyGeneration, paths []string) {
+	apply := func(gen kernelcapture.BpfPolicyGeneration, paths, nets []string) {
 		ap := &kernelcapture.DaemonApplyPolicyRequest{
 			SessionID: "ses-prune", Generation: gen, EnforceMode: kernelcapture.BpfEnforceModeEnforce,
-			OpPolicies: []kernelcapture.DaemonOpPolicy{{Op: kernelcapture.BpfOpFileRead, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce}},
-			PathAllow:  paths,
+			OpPolicies: []kernelcapture.DaemonOpPolicy{
+				{Op: kernelcapture.BpfOpFileRead, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+				{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+			},
+			PathAllow: paths,
+			NetAllow:  nets,
 		}
 		resp := d.handleApplyPolicy(kernelcapture.DaemonProtocolRequest{
 			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
@@ -174,11 +204,30 @@ func TestHandleApplyPolicy_ReapplyRevokesDroppedAllowlist(t *testing.T) {
 		}
 	}
 
-	apply(1, []string{"/tmp/a", "/tmp/b"})
-	before := h["file"].deletes
-	apply(2, []string{"/tmp/a"}) // drops /tmp/b
-	if got := h["file"].deletes - before; got != 1 {
+	apply(1, []string{"/tmp/a", "/tmp/b"}, []string{"10.0.0.0/8", "192.0.2.0/24"})
+	beforeFile := h["file"].deletes
+	beforeNet := h["net"].deletes
+	events = nil
+	apply(2, []string{"/tmp/a"}, []string{"10.0.0.0/8"}) // drops /tmp/b and 192.0.2.0/24
+	if got := h["file"].deletes - beforeFile; got != 1 {
 		t.Fatalf("re-apply dropping /tmp/b: file-allow deletes = %d, want 1 (the dropped entry must be revoked)", got)
+	}
+	if got := h["net"].deletes - beforeNet; got != 1 {
+		t.Fatalf("re-apply dropping 192.0.2.0/24: net-allow deletes = %d, want 1 (the dropped entry must be revoked)", got)
+	}
+	fileDeleteIndex, netDeleteIndex, gateIndex := -1, -1, -1
+	for i, event := range events {
+		switch event {
+		case "delete:file":
+			fileDeleteIndex = i
+		case "delete:net":
+			netDeleteIndex = i
+		case "put:managed":
+			gateIndex = i
+		}
+	}
+	if fileDeleteIndex < 0 || netDeleteIndex < 0 || gateIndex < 0 || fileDeleteIndex >= gateIndex || netDeleteIndex >= gateIndex {
+		t.Fatalf("re-apply event order = %v, want stale file/net deletes before managed generation gate", events)
 	}
 
 	// Session end must release the remaining allowlist entry too.
@@ -186,6 +235,63 @@ func TestHandleApplyPolicy_ReapplyRevokesDroppedAllowlist(t *testing.T) {
 	d.onSessionEnded("ses-prune")
 	if h["file"].deletes <= endDeletes {
 		t.Fatalf("session end: file-allow deletes did not increase (remaining allowlist entry not released)")
+	}
+}
+
+func TestHandleApplyPolicy_StaleAllowlistDeleteFailurePreventsGenerationFlip(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mapName  string
+		oldPaths []string
+		newPaths []string
+		oldNets  []string
+		newNets  []string
+	}{
+		{name: "file hash", mapName: "file", oldPaths: []string{"/tmp/a", "/tmp/b"}, newPaths: []string{"/tmp/a"}},
+		{name: "network LPM", mapName: "net", oldNets: []string{"10.0.0.0/8", "192.0.2.0/24"}, newNets: []string{"10.0.0.0/8"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := newTestDaemon(t)
+			maps, h := countingPolicyMaps()
+			d.activatePolicyMaps(maps)
+			sessionID := "ses-prune-fail-" + tc.mapName
+			registerTestSession(t, d, sessionID, 5501)
+			owner := testPeerHandshake("", kernelcapture.DaemonProtocolMethodApplyPolicy)
+
+			apply := func(gen kernelcapture.BpfPolicyGeneration, paths, nets []string) kernelcapture.DaemonProtocolResponse {
+				return d.handleApplyPolicy(kernelcapture.DaemonProtocolRequest{
+					ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+					Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+					ApplyPolicy: &kernelcapture.DaemonApplyPolicyRequest{
+						SessionID: sessionID, Generation: gen, EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+						OpPolicies: []kernelcapture.DaemonOpPolicy{
+							{Op: kernelcapture.BpfOpFileRead, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+							{Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce},
+						},
+						PathAllow: paths,
+						NetAllow:  nets,
+					},
+				}, owner)
+			}
+
+			if resp := apply(1, tc.oldPaths, tc.oldNets); !resp.OK {
+				t.Fatalf("initial apply: %+v", resp)
+			}
+			managedPuts := h["managed"].puts
+			h[tc.mapName].deleteErr = errors.New("injected stale-entry delete failure")
+
+			resp := apply(2, tc.newPaths, tc.newNets)
+			if resp.OK {
+				t.Fatalf("re-apply with failed stale revocation returned OK: %+v", resp)
+			}
+			if !strings.Contains(resp.Error, "revoke stale allowlist") {
+				t.Fatalf("re-apply error = %q, want stale-revocation context", resp.Error)
+			}
+			if h["managed"].puts != managedPuts {
+				t.Fatalf("managed gate puts = %d, want %d after failed stale revocation", h["managed"].puts, managedPuts)
+			}
+		})
 	}
 }
 

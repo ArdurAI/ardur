@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "e5e4003b98713343970d2d4d42420e844e580de142f13e9de190c35a2f61fb42"
+source_sha256: "ac37d68a586ad225f30a3aaacf8b0ac9ca82a468178f9d6f6cacd5404bdeeada"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -135,6 +135,28 @@ so an old complete pin generation cannot be paired with a new userspace ABI.
 Any observation, map update, cgroup migration, policy application, or ptrace
 transition failure kills the still-stopped target instead of releasing an
 ungoverned process.
+
+## BPF-LSM policy publication
+
+The daemon serializes policy-map mutations and writes a complete operation
+policy into the inactive `cgroup_op_policy` slot. The path and network
+allowlist maps are shared rather than slot-keyed, so a policy update first
+computes entries present in the last successful apply but absent from the new
+request. It must delete all of those stale entries before publishing the new
+`cgroup_managed` generation and active slot. A failed delete rejects the update
+without flipping the managed gate; the prior generation remains active and may
+be more restrictive if some stale deletes already succeeded. This is an
+intentional fail-closed availability trade-off.
+
+After successful pre-revocation, the daemon writes the requested shared
+allowlist entries and flips `cgroup_managed` last. Therefore an entry revoked
+by the new generation cannot remain effective after that generation becomes
+active. Shared allowlist additions can become visible before the final gate
+write when the prior generation already uses the same allowlist action; the
+update sequence does not claim a general transaction across independent BPF
+maps. Bootstrap-file, trusted-root, and control-plane exceptions carry an
+explicit generation and are cleaned after the flip because stale generations
+are already rejected in the BPF lookup path.
 
 ## Process lifecycle cgroup filter
 
