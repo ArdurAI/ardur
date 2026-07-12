@@ -2872,20 +2872,17 @@ def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daem
             socket_parent.rmdir()
 
 
-def test_wrapper_stalled_daemon_socket_respects_millisecond_timeout(tmp_path):
+def test_stalled_daemon_socket_reports_configured_timeout_outcome(monkeypatch):
     import os
     import socket
-    import subprocess
-    import sys
     import threading
-    import time
     import uuid
 
-    token, _ = _issue_test_passport(tmp_path)
-    repo_root = Path(__file__).resolve().parents[2]
-    wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
+    from vibap import claude_code_daemon_client as daemon_client_module
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-stall-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-daemon-client-stall-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2898,24 +2895,18 @@ def test_wrapper_stalled_daemon_socket_respects_millisecond_timeout(tmp_path):
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
                 server.bind(str(socket_path))
-                server.listen(2)
-                # Wrapper invocation includes shell + Python startup overhead;
-                # keep accept timeout comfortably above typical client latency.
+                server.listen(1)
                 server.settimeout(_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
                 ready.set()
-                while observed["requests"] < 1:
-                    try:
-                        conn, _ = server.accept()
-                    except TimeoutError:
-                        break
-                    with conn:
-                        _ = conn.recv(8192)
-                        observed["requests"] += 1
-                        if observed["requests"] == 1:
-                            # Simulate a daemon that stalls before sending a line.
-                            release.wait(timeout=2)
-                        else:
-                            conn.sendall(b'{"ok":false,"error":"unexpected second daemon attempt"}\\n')
+                conn, _ = server.accept()
+                with conn:
+                    _ = conn.recv(8192)
+                    observed["requests"] += 1
+                    # Keep the real connection open without a response. The
+                    # client must report its configured socket timeout before
+                    # the server is released; no subprocess wall clock is part
+                    # of the decisive assertion.
+                    release.wait(timeout=_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
         except Exception as exc:  # pragma: no cover - surfaced via assertion
             failures.append(exc)
 
@@ -2923,68 +2914,29 @@ def test_wrapper_stalled_daemon_socket_respects_millisecond_timeout(tmp_path):
     thread.start()
 
     try:
-        assert ready.wait(timeout=2)
-        env = {**os.environ}
-        env["ARDUR_MISSION_PASSPORT"] = token
-        env["VIBAP_HOME"] = str(tmp_path)
-        env["VIBAP_KEYS_DIR"] = str(tmp_path)
-        env["ARDUR_CC_HOOK_DIR"] = str(tmp_path / "chain")
-        env["ARDUR_CC_HOOK_DAEMON"] = "1"
-        env["ARDUR_CC_HOOK_DAEMON_SOCKET"] = str(socket_path)
-        env["ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS"] = "50"
-        env["ARDUR_HOOK_PYTHON"] = sys.executable
-        env["PYTHONPATH"] = (
-            str(repo_root / "python")
-            if not env.get("PYTHONPATH")
-            else str(repo_root / "python") + os.pathsep + env["PYTHONPATH"]
-        )
+        assert ready.wait(timeout=_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
+        monkeypatch.setenv("ARDUR_CC_HOOK_DAEMON", "1")
+        monkeypatch.setenv("ARDUR_CC_HOOK_DAEMON_SOCKET", str(socket_path))
+        monkeypatch.setenv("ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS", "50")
 
-        hook_input = json.dumps(
+        result = daemon_client_module._dispatch_pre_tool_use_with_result(
             {
-                "session_id": "wrapper-stall-session",
+                "session_id": "daemon-client-stall-session",
                 "hook_event_name": "PreToolUse",
                 "tool_name": "Read",
-                "tool_input": {"file_path": "/tmp/wrapper-stall.txt"},
-                "tool_use_id": "wrapper-stall-call",
-            }
+                "tool_input": {"file_path": "/tmp/daemon-client-stall.txt"},
+                "tool_use_id": "daemon-client-stall-call",
+            },
         )
-
-        baseline_env = {**env, "ARDUR_CC_HOOK_DAEMON": "0"}
-        baseline_started = time.perf_counter()
-        baseline_result = subprocess.run(
-            [str(wrapper)],
-            input=hook_input,
-            capture_output=True,
-            text=True,
-            env=baseline_env,
-            check=False,
-        )
-        baseline_elapsed_ms = (time.perf_counter() - baseline_started) * 1000.0
-        assert baseline_result.returncode == 0, baseline_result.stderr
-
-        started = time.perf_counter()
-        result = subprocess.run(
-            [str(wrapper)],
-            input=hook_input,
-            capture_output=True,
-            text=True,
-            env=env,
-            check=False,
-        )
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
 
         release.set()
-        thread.join(timeout=3)
+        thread.join(timeout=_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
 
         assert not failures
+        assert not thread.is_alive()
         assert observed["requests"] == 1
-        assert result.returncode == 0, result.stderr
-        output = json.loads(result.stdout)
-        assert output.get("continue") is True
-        assert elapsed_ms < baseline_elapsed_ms + 1000, (
-            "stalled daemon fallback added too much overhead: "
-            f"baseline={baseline_elapsed_ms:.2f}ms stalled={elapsed_ms:.2f}ms"
-        )
+        assert result.output is None
+        assert result.outcome is daemon_client_module._DaemonDispatchOutcome.TIMED_OUT
     finally:
         release.set()
         if socket_path.exists():
