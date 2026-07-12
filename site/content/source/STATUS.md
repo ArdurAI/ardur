@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "8b9acaa95d338641cd7194118435e4714bef78d786cbc2fcde81f417f3b26339"
+source_sha256: "ebe183636e9211490ad55f7b51531a6b718b3e7423dec15091ef22708b9d455f"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -83,6 +83,9 @@ policy source/rule labels, reason codes, budget state, and bounded risk
 classifications. It never exports raw prompts, tool arguments, targets, paths,
 or policy-reason prose by default. This is a one-shot connector, not a hosted
 collector, SIEM, dashboard, delivery guarantee, or vendor-specific integration.
+Actor and verifier IDs are signature-covered receipt claims; the exporter does
+not validate a SPIFFE SVID or bind the receipt signer to workload identity, and
+reports that boundary in JSONL and OTLP.
 
 The Linux governance-overhead harness now provides a schema-validated PR smoke
 and manual stress profile. It measures configured governance paths and optional

@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "966e4b1084f8450b48664ee3fb96595fa28242b2f30f6b6178684c550d518286"
+source_sha256: "e99064d08af648d5ff650b288f8a84b8c1be2ab9c3a820d0a88c6874de351153"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -104,6 +104,11 @@ signed evidence chain. OTLP retry is deliberately left to operator-controlled
 collection; reruns can duplicate records, so sinks should deduplicate on
 `ardur.receipt.id`. Vendor-specific SIEM, LLM-observability, and EDR
 connectors remain separate work.
+
+The projected `actor` and `verifier_id` values are signed receipt claims. The
+detached exporter does not validate an SVID or bind the receipt signing key to
+a SPIFFE workload identity, even when either string begins with `spiffe://`.
+Machine-readable JSONL and OTLP fields report this assurance boundary.
 
 ## Product limits
 

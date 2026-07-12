@@ -111,6 +111,10 @@ and excludes raw prompts, tool arguments, targets, paths, and policy-reason
 prose. Collector credentials can be supplied through the standard
 `OTEL_EXPORTER_OTLP*_HEADERS` environment variables.
 
+Actor and verifier IDs are signature-covered receipt claims. The exporter does
+not validate a SPIFFE SVID or bind the receipt signing key to workload identity;
+JSONL and OTLP output disclose that boundary explicitly.
+
 Run the Linux governance-overhead smoke contract from a source checkout:
 
 ```bash

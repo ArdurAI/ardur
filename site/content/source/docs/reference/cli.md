@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "7b8eb7acb83931e1e5f935064b1d369a95763725c9aba831d6fa34c43a2bcdbc"
+source_sha256: "90062a80450cb289eb83dc2fd1bc927c78c8364a664cd5bc38f3a7a302190642"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -381,6 +381,11 @@ model input/output are never exported. Signed digests, receipt/parent IDs,
 actor/verifier/grant IDs, tri-state outcomes, rule/source labels, reason codes,
 budget state, and risk classifications remain. `--output` uses atomic mode
 `0600` writes and rejects symlink targets.
+
+The actor and verifier IDs are signed receipt claims, not independently
+authenticated SPIFFE workloads. Every event and OTLP projection reports that
+the identity strings are signature-covered and that SPIFFE workload identity
+was not verified. A `spiffe://` prefix alone does not upgrade that assurance.
 
 See [Governance Telemetry v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) and its
 [golden event](/__ardur_internal__/repo/docs/specs/conformance/governance-telemetry-v0.1/events.jsonl).

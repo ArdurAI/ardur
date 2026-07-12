@@ -153,6 +153,8 @@ def verified_governance_events(
             "verification": {
                 "receipt_signature_valid": True,
                 "chain_link_valid": True,
+                "identity_claims_signed": True,
+                "spiffe_workload_identity_verified": False,
                 "mode": "verified_chain_only",
                 "source_sha256": source_sha256,
             },
@@ -274,6 +276,12 @@ def _event_attributes(event: Mapping[str, Any]) -> dict[str, Any]:
         "ardur.raw_content_exported": False,
         "ardur.verification.receipt_signature_valid": True,
         "ardur.verification.chain_link_valid": True,
+        "ardur.verification.identity_claims_signed": event["verification"][
+            "identity_claims_signed"
+        ],
+        "ardur.verification.spiffe_workload_identity_verified": event[
+            "verification"
+        ]["spiffe_workload_identity_verified"],
         "ardur.source.sha256": event["verification"]["source_sha256"],
     }
 

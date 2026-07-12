@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "fb1e7413963f946bc28dc657804c0ba860d6009d2079252bd2f2b2e19254bc47"
+source_sha256: "0a48e07a21ab40fc4ca976c4f4fb2d003efb77730ee0d7238777256454843e65"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -127,6 +127,10 @@ loopback. The exporter verifies signatures and chain linkage before projection
 and excludes raw prompts, tool arguments, targets, paths, and policy-reason
 prose. Collector credentials can be supplied through the standard
 `OTEL_EXPORTER_OTLP*_HEADERS` environment variables.
+
+Actor and verifier IDs are signature-covered receipt claims. The exporter does
+not validate a SPIFFE SVID or bind the receipt signing key to workload identity;
+JSONL and OTLP output disclose that boundary explicitly.
 
 Run the Linux governance-overhead smoke contract from a source checkout:
 

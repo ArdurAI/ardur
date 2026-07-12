@@ -205,6 +205,8 @@
       "required": [
         "receipt_signature_valid",
         "chain_link_valid",
+        "identity_claims_signed",
+        "spiffe_workload_identity_verified",
         "mode",
         "source_sha256"
       ],
@@ -214,6 +216,14 @@
         },
         "chain_link_valid": {
           "const": true
+        },
+        "identity_claims_signed": {
+          "const": true,
+          "description": "The actor and verifier_id strings were covered by the verified receipt signature."
+        },
+        "spiffe_workload_identity_verified": {
+          "const": false,
+          "description": "The detached exporter did not validate an SVID or bind the receipt signer to a SPIFFE workload identity."
         },
         "mode": {
           "const": "verified_chain_only"
