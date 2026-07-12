@@ -177,6 +177,8 @@ def _build_server_tls(proxy, private_key, port, tls_cert, tls_key, *, api_token=
     import signal as _signal
     _signal.signal = lambda *_a, **_kw: None
 
+    previous_rate = os.environ.get("ARDUR_RATE_LIMIT_RPS")
+    previous_burst = os.environ.get("ARDUR_RATE_LIMIT_BURST")
     os.environ["ARDUR_RATE_LIMIT_RPS"] = rate_rps
     os.environ["ARDUR_RATE_LIMIT_BURST"] = rate_burst
 
@@ -193,23 +195,33 @@ def _build_server_tls(proxy, private_key, port, tls_cert, tls_key, *, api_token=
             api_token=api_token,
         )
 
-    t = threading.Thread(target=run, daemon=True)
-    t.start()
-    base = f"https://127.0.0.1:{port}"
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            req = urllib.request.Request(base + "/health")
-            with urllib.request.urlopen(req, timeout=1, context=ctx) as resp:
-                if resp.status == 200:
-                    break
-        except Exception:
-            time.sleep(0.1)
-    else:
-        raise RuntimeError("TLS proxy never became healthy")
+    try:
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        base = f"https://127.0.0.1:{port}"
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(base + "/health")
+                with urllib.request.urlopen(req, timeout=1, context=ctx) as resp:
+                    if resp.status == 200:
+                        break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("TLS proxy never became healthy")
+    finally:
+        if previous_rate is None:
+            os.environ.pop("ARDUR_RATE_LIMIT_RPS", None)
+        else:
+            os.environ["ARDUR_RATE_LIMIT_RPS"] = previous_rate
+        if previous_burst is None:
+            os.environ.pop("ARDUR_RATE_LIMIT_BURST", None)
+        else:
+            os.environ["ARDUR_RATE_LIMIT_BURST"] = previous_burst
     return t, base
 
 
@@ -322,10 +334,7 @@ class TestArdurComprehensive:
         )
 
         port = _free_port()
-        t, base = _build_server_tls(
-            proxy, private_key, port, tls_cert, tls_key,
-            rate_rps="10", rate_burst="50",
-        )
+        t, base = _build_server_tls(proxy, private_key, port, tls_cert, tls_key)
 
         env_info = {
             "tls_fingerprint": tls_fingerprint,
@@ -383,11 +392,18 @@ class TestArdurComprehensive:
             time.sleep(0.5)
 
             # Scenario 8 — Rate Limit Flooding
+            _rate_limit_thread, rate_limit_base = _build_server_tls(
+                proxy,
+                private_key,
+                _free_port(),
+                tls_cert,
+                tls_key,
+                rate_rps="0.001",
+                rate_burst="1",
+            )
             _run_scenario(report, "08_rate_limit_flooding", lambda: (
-                _verify_rate_limiting(base)
+                _verify_rate_limiting(rate_limit_base)
             ))
-            # let the rate-limit token bucket refill before remaining scenarios
-            time.sleep(3)
 
             # Scenario 9 — Metrics Verification
             _run_scenario(report, "09_metrics", lambda: (
@@ -1094,9 +1110,11 @@ def _verify_kill_switch(base, proxy, private_key):
 
 
 def _verify_rate_limiting(base):
-    # Flood POST /verify — need to exceed burst (50) to trigger 429
+    # This dedicated TLS listener has a one-token burst and refills one token
+    # per 1,000 seconds. The second request therefore cannot depend on host or
+    # TLS throughput to observe the production HTTP rate-limit response.
     rate_limited = 0
-    for _ in range(70):
+    for _ in range(3):
         status, body, headers = _post_tls(base, "/verify", {"token": "invalid"})
         if status == 429:
             rate_limited += 1
