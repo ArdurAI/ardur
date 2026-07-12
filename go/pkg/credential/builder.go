@@ -77,7 +77,8 @@ func (b *Builder) WithTTL(ttl time.Duration) *Builder {
 }
 
 // WithIdentity sets Layer 1 (Identity) claims.
-// spiffeID and ownerID are required; a2aCardRef is optional.
+// spiffeID and ownerID are required; a2aCardRef is optional. ownerID is
+// configured attribution and is always emitted with self-asserted assurance.
 func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
 	if spiffeID == "" {
 		b.err = fmt.Errorf("identity: spiffe_id is required")
@@ -88,9 +89,10 @@ func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
 		return b
 	}
 	b.identity = &IdentityClaims{
-		SPIFFEID:   spiffeID,
-		OwnerID:    ownerID,
-		A2ACardRef: a2aCardRef,
+		SPIFFEID:         spiffeID,
+		OwnerID:          ownerID,
+		OwnerIDAssurance: OwnerIDAssuranceSelfAsserted,
+		A2ACardRef:       a2aCardRef,
 	}
 	return b
 }

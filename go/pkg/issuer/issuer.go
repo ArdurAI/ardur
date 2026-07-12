@@ -36,7 +36,7 @@ type ComplianceLevel string
 
 const (
 	LevelCore     ComplianceLevel = "core"     // L1: self-attested identity + intent + trust
-	LevelVerified ComplianceLevel = "verified" // L2: SPIFFE + Sigstore + Cedar verified
+	LevelVerified ComplianceLevel = "verified" // L2: workload SPIFFE ID + Sigstore + Cedar verified; owner attribution is not
 	LevelEnforced ComplianceLevel = "enforced" // L3: Full stack with eBPF + network enforcement
 )
 
@@ -119,11 +119,11 @@ func (iss *Issuer) MaxComplianceLevel() ComplianceLevel {
 // computeActualCompliance determines the compliance level based on
 // what was actually verified during issuance, not just what providers
 // are configured.
-func computeActualCompliance(identityFromSPIRE bool, provenanceVerified bool, policyCompiled bool, profileRetrieved bool, trustScored bool) ComplianceLevel {
-	if identityFromSPIRE && provenanceVerified && policyCompiled && profileRetrieved && trustScored {
+func computeActualCompliance(workloadIdentityFromSPIRE bool, provenanceVerified bool, policyCompiled bool, profileRetrieved bool, trustScored bool) ComplianceLevel {
+	if workloadIdentityFromSPIRE && provenanceVerified && policyCompiled && profileRetrieved && trustScored {
 		return LevelEnforced
 	}
-	if identityFromSPIRE && provenanceVerified && policyCompiled {
+	if workloadIdentityFromSPIRE && provenanceVerified && policyCompiled {
 		return LevelVerified
 	}
 	return LevelCore
@@ -134,7 +134,7 @@ func computeActualCompliance(identityFromSPIRE bool, provenanceVerified bool, po
 type IssueRequest struct {
 	// Layer 1: Identity (required for L2+; for L1, provide SPIFFEID/OwnerID directly)
 	SPIFFEID   string // Direct SPIFFE ID (used if no IdentityProvider)
-	OwnerID    string // Direct owner ID (used if no IdentityProvider)
+	OwnerID    string // Direct self-asserted owner attribution (used if no IdentityProvider)
 	A2ACardRef string
 
 	// Layer 2: Provenance (optional)
@@ -186,11 +186,11 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 		score    *trust.TrustScore
 
 		// Track what was actually verified for compliance level
-		identityFromSPIRE  bool
-		provenanceVerified bool
-		policyCompiled     bool
-		profileRetrieved   bool
-		trustScored        bool
+		workloadIdentityFromSPIRE bool
+		provenanceVerified        bool
+		policyCompiled            bool
+		profileRetrieved          bool
+		trustScored               bool
 	)
 
 	// --- Layer 1: Identity ---
@@ -200,9 +200,9 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 			return nil, fmt.Errorf("layer 1 (identity): %w", err)
 		}
 		agentID = identity.SPIFFEID
-		ownerID = identity.OwnerID
+		ownerID = identity.OwnerID.String()
 		a2aRef = identity.A2ACardRef
-		identityFromSPIRE = true
+		workloadIdentityFromSPIRE = true
 	} else {
 		if req.SPIFFEID == "" || req.OwnerID == "" {
 			return nil, fmt.Errorf("layer 1 (identity): SPIFFEID and OwnerID required when no IdentityProvider")
@@ -340,7 +340,7 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 	result := &IssueResult{
 		Credential:      cred,
 		Encoded:         encoded,
-		ComplianceLevel: computeActualCompliance(identityFromSPIRE, provenanceVerified, policyCompiled, profileRetrieved, trustScored),
+		ComplianceLevel: computeActualCompliance(workloadIdentityFromSPIRE, provenanceVerified, policyCompiled, profileRetrieved, trustScored),
 	}
 
 	// --- Transparency Log ---

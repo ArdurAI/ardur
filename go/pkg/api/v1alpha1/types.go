@@ -90,7 +90,8 @@ type IdentitySpec struct {
 	// +optional
 	SPIFFEID string `json:"spiffeID,omitempty"`
 
-	// OwnerID is the SPIFFE ID of the deploying human or service account.
+	// OwnerID is SPIFFE-formatted deployer attribution. It is self-asserted;
+	// UseSpire authenticates the workload SVID, not this ownership relation.
 	OwnerID string `json:"ownerID"`
 
 	// A2ACardRef is a URL to the agent's A2A Agent Card.

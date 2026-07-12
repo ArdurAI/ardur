@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "8d2ea5341693cee5f9332c85a90989fccb33fdc979db465102594237d52caa8c"
+source_sha256: "a45c6e678053c608ac13c30d6ddc3771d27a2f9039d8769e5b3ec89f5e793eec"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -279,6 +279,14 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, draft-00 DG v0.1 plus the versioned draft-01 DG v0.2 JWT AAT profile | independent AAT interoperability, OPA, and broader Biscuit datalog examples |
 | **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for operator telemetry; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
 | **Receipts sink**    | local JSON / stdout receipts; verified redacted governance JSONL; OTLP/HTTP JSON traces and logs; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | production collector deployment/auth/retention examples, checkpoint witnessing/consistency monitoring, vendor-specific sinks, broader durable storage examples, and integrated multi-artifact chain verification |
+
+In the Go credential identity layer, SPIRE authenticates the workload
+`spiffe_id`; the configured deployer `owner_id` is signed attribution, not an
+authenticated owner binding. New credentials state
+`owner_id_assurance: "self_asserted"`, and verifiers reject missing or stronger
+unimplemented assurance values. [ADR-024](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/)
+records the boundary and the proof required before a verified owner state can
+exist.
 
 If you'd use an integration that isn't listed, file an [integration request](https://github.com/ArdurAI/ardur/issues/new?template=integration_request.yml) — it's the strongest signal we have for prioritisation.
 

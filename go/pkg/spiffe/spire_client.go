@@ -14,7 +14,7 @@ import (
 var (
 	ErrClosed        = errors.New("identity provider is closed")
 	ErrInvalidSPIFFE = errors.New("invalid SPIFFE ID")
-	ErrNoOwnerID     = errors.New("owner_id is required for dual-identity binding")
+	ErrNoOwnerID     = errors.New("owner_id is required as self-asserted attribution")
 )
 
 // SPIREClient implements IdentityProvider using the SPIRE Workload API.
@@ -25,10 +25,9 @@ type SPIREClient struct {
 	mu     sync.RWMutex
 	closed bool
 
-	// ownerID is the deployer's SPIFFE ID, passed at construction time.
-	// In Phase 5, this will be validated against SPIRE registration entries
-	// by the admission webhook.
-	ownerID string
+	// ownerID is self-asserted deployer attribution passed at construction.
+	// SPIRE authenticates the workload SVID, not this ownership relation.
+	ownerID UnverifiedOwnerID
 
 	// a2aCardRef is the optional A2A Agent Card URL.
 	a2aCardRef string
@@ -40,7 +39,8 @@ type SPIREClientOptions struct {
 	// If empty, the SPIFFE_ENDPOINT_SOCKET env var is used.
 	AgentSocketPath string
 
-	// OwnerID is the SPIFFE ID of the deployer (required).
+	// OwnerID is required SPIFFE-formatted deployer attribution. It is
+	// self-asserted and is not verified by the SPIRE Workload API.
 	OwnerID string
 
 	// A2ACardRef is the optional A2A Agent Card URL.
@@ -52,7 +52,7 @@ type SPIREClientOptions struct {
 // Pass a context with timeout to avoid blocking indefinitely if the agent is down.
 func NewSPIREClient(ctx context.Context, opts SPIREClientOptions) (*SPIREClient, error) {
 	if opts.OwnerID == "" {
-		return nil, fmt.Errorf("owner_id is required for dual-identity binding")
+		return nil, ErrNoOwnerID
 	}
 	if _, _, err := ValidateSPIFFEID(opts.OwnerID); err != nil {
 		return nil, fmt.Errorf("invalid owner_id: %w", err)
@@ -74,7 +74,7 @@ func NewSPIREClient(ctx context.Context, opts SPIREClientOptions) (*SPIREClient,
 
 	return &SPIREClient{
 		source:     source,
-		ownerID:    opts.OwnerID,
+		ownerID:    UnverifiedOwnerID(opts.OwnerID),
 		a2aCardRef: opts.A2ACardRef,
 	}, nil
 }

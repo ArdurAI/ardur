@@ -73,6 +73,17 @@ func TestBuilderMinimal(t *testing.T) {
 	if cred.Claims.Identity == nil {
 		t.Fatal("Identity layer is nil")
 	}
+	identityJSON, err := json.Marshal(cred.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshal identity claims: %v", err)
+	}
+	var identityFields map[string]any
+	if err := json.Unmarshal(identityJSON, &identityFields); err != nil {
+		t.Fatalf("decode identity claims: %v", err)
+	}
+	if got := identityFields["owner_id_assurance"]; got != "self_asserted" {
+		t.Fatalf("owner_id_assurance = %v, want self_asserted", got)
+	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("Intent layer is nil")
 	}
@@ -81,6 +92,40 @@ func TestBuilderMinimal(t *testing.T) {
 	}
 	if cred.Claims.Trust.AuthorizationTier != TierFull {
 		t.Errorf("Trust tier = %q, want %q (score 85)", cred.Claims.Trust.AuthorizationTier, TierFull)
+	}
+}
+
+func TestVerifyRejectsUnsupportedOwnerIDAssurance(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		assurance OwnerIDAssurance
+	}{
+		{name: "missing", assurance: ""},
+		{name: "fabricated verified", assurance: "verified"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			key := testSigningKey(t)
+			cred, err := testBuilder(t).Build(key)
+			if err != nil {
+				t.Fatalf("Build() error: %v", err)
+			}
+			cred.Claims.Identity.OwnerIDAssurance = tt.assurance
+
+			encoded, err := Encode(cred, key)
+			if err != nil {
+				t.Fatalf("Encode() error: %v", err)
+			}
+			result, err := Verify(encoded, key.PublicKey, nil)
+			if err != nil {
+				t.Fatalf("Verify() error: %v", err)
+			}
+			if result.Valid {
+				t.Fatalf("unsupported owner assurance %q was accepted", tt.assurance)
+			}
+			if got := strings.Join(result.Errors, "; "); !strings.Contains(got, "owner_id_assurance") {
+				t.Fatalf("verification errors = %q, want owner_id_assurance failure", got)
+			}
+		})
 	}
 }
 
@@ -328,6 +373,8 @@ func TestEncodeDecodeRoundtrip(t *testing.T) {
 	}
 	if decoded.Claims.Identity == nil {
 		t.Error("decoded Identity is nil")
+	} else if decoded.Claims.Identity.OwnerIDAssurance != OwnerIDAssuranceSelfAsserted {
+		t.Errorf("decoded owner assurance = %q, want %q", decoded.Claims.Identity.OwnerIDAssurance, OwnerIDAssuranceSelfAsserted)
 	}
 	if decoded.Claims.Intent == nil {
 		t.Error("decoded Intent is nil")

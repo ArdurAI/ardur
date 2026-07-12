@@ -14,6 +14,19 @@ import (
 	"time"
 )
 
+// UnverifiedOwnerID is a deployer attribution supplied by configuration.
+//
+// A SPIFFE Workload API response authenticates the workload SPIFFE ID in its
+// SVID. It does not authenticate a second owner/deployer relationship. Keeping
+// the owner in a named type forces callers to make that weaker assurance
+// explicit instead of treating it as another SPIRE-verified identity.
+type UnverifiedOwnerID string
+
+// String returns the configured attribution without upgrading its assurance.
+func (id UnverifiedOwnerID) String() string {
+	return string(id)
+}
+
 // AgentIdentity holds the resolved identity information for a VIBAP agent.
 // This is the output of IdentityProvider.FetchIdentity and feeds directly
 // into the IdentityClaims of a VIBAP credential (Layer 1).
@@ -21,10 +34,9 @@ type AgentIdentity struct {
 	// SPIFFE ID of this agent instance (e.g., spiffe://ardur.dev/agent/weather-bot/instance-abc)
 	SPIFFEID string
 
-	// SPIFFE ID of the deployer (human or service account).
-	// In Phase 2 this is passed as a parameter and validated for format;
-	// in Phase 5 the admission webhook verifies it against SPIRE registration entries.
-	OwnerID string
+	// Self-asserted SPIFFE-formatted deployer attribution. The Workload API does
+	// not prove that this identity owns or approved the workload.
+	OwnerID UnverifiedOwnerID
 
 	// Trust domain the agent belongs to (e.g., "ardur.dev")
 	TrustDomain string

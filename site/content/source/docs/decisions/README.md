@@ -2,7 +2,7 @@
 title: "Architecture Decision Records"
 description: "ADRs document load-bearing design decisions behind Ardur's runtime, protocol, and deployment shape. Each record captures the context, the decision, and the trade-offs known at the "
 source_path: "docs/decisions/README.md"
-source_sha256: "db7d801231726b68c526a01df381de0b6b2de83a457848d18adffd17b1c92954"
+source_sha256: "ac671dc3a874361f53095034047281169bb03271cac1cc071113bfb00b6ce65d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -36,6 +36,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 021 | [KB-JWT server-challenged nonce](/__ardur_internal__/source/docs/decisions/adr-021-kb-jwt-server-challenged-nonce/) | Proposed | 2026-04-21 |
 | 022 | [SPIFFE mTLS identity for operator telemetry](/__ardur_internal__/source/docs/decisions/adr-022-operator-telemetry-spiffe-mtls/) | Accepted | 2026-07-11 |
 | 023 | [Explicit resource-scope authority](/__ardur_internal__/source/docs/decisions/adr-023-explicit-resource-scope-authority/) | Accepted | 2026-07-12 |
+| 024 | [Self-asserted owner identity assurance](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/) | Accepted | 2026-07-12 |
 
 ## Conventions
 
