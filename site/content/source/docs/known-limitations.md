@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "e99064d08af648d5ff650b288f8a84b8c1be2ab9c3a820d0a88c6874de351153"
+source_sha256: "12c3bd4b2f90ec65e0f4f6d13937515ef0f1e6937d0dfd88607ea4b1c1624de8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -21,8 +21,13 @@ This page distinguishes documented product boundaries from implementation bugs.
 
 ## Research and foundation surfaces not yet broad runtime claims
 
-- semantic judging is advisory unless a specific runtime policy path consumes
-  its verdict
+- semantic judging and behavioral fingerprinting are library-only prototypes:
+  neither is wired into `python/vibap/proxy.py`, so their outputs are not
+  authoritative governance verdicts
+- the semantic judge returns `UNSURE` on exceptions; behavioral fingerprinting
+  defaults to `policy="fail_open"`, where a definite `FAIL` rejects but
+  `UNSURE` proceeds. A custom enforcement integration must deliberately choose
+  `policy="fail_closed"` and accept its provider-availability trade-off
 - behavioral templates are the intended deterministic direction, but broad
   marketing claims still require template coverage and L5 evidence
 - streaming reconciliation and active revocation primitives exist, but broader

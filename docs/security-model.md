@@ -42,6 +42,22 @@ design-only are now enforced as of the 2026-05-19 hardening round
 No additional verifier layers are required for MIC-State or MIC-Evidence
 conformance.
 
+## Advisory AI controls (not proxy gates)
+
+`python/vibap/semantic_judge.py` and
+`python/vibap/behavioral_fingerprint.py` are experimental library surfaces,
+not reference-proxy gates. Neither module is imported by
+`python/vibap/proxy.py`. Their environment variables permit provider-backed
+object construction for an explicit caller; setting them does not activate an
+authoritative enforcement path.
+
+The semantic judge converts provider, parsing, and runtime exceptions into an
+advisory `UNSURE`. The fingerprint helper defaults to `policy="fail_open"`:
+raw `FAIL` rejects, while raw `UNSURE` proceeds with its diagnostic preserved.
+A custom caller can choose `policy="fail_closed"`, which rejects every result
+other than `OK`, but must own the resulting provider-availability, latency, and
+cost risks. See the [Advisory AI Controls reference](reference/advisory-ai-controls.md).
+
 ## Threats in scope
 
 - prompt injection causing out-of-scope tool use
