@@ -27,13 +27,14 @@ audit, [`docs/known-limitations.md`](docs/known-limitations.md) for the
 caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 
 An opt-in Linux `ardur-kernelcaptured --agent-recognition` preview now admits
-exec events whose exact 15-byte-or-shorter Linux `comm` matches the embedded
-`claude`, `codex`, `gemini`, or `kimi` registry. It reports low-confidence,
-observe-only candidates and never writes an unrouted candidate into governed
-session evidence. It does not collect argv, paths, hashes, uid, environment, or
-file content, and it does not attest or enforce. Issue #67 remains in progress
-for multi-signal fingerprints, interpreter/script detection, and corpus-backed
-precision/recall thresholds.
+exec events whose exact 15-byte-or-shorter Linux `comm` or bounded
+successful-exec basename matches the embedded `claude`, `codex`, `gemini`, or
+`kimi` registry. It reports low-confidence, observe-only candidates and never
+writes an unrouted candidate into governed session evidence. It emits the
+basename but not its parent path and does not collect argv, hashes, uid,
+environment, or file content. It does not attest or enforce. Issue #67 remains
+in progress for stronger fingerprints and corpus-backed precision/recall
+thresholds.
 
 The offline `ardur evidence correlate` command can now verify a receipt journal
 and compare it with operator-supplied normalized, Tetragon, or Falco JSONL. It
@@ -90,8 +91,8 @@ complete sensor coverage.
 - broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
-- completion of agent recognition issue #67 beyond the exact-`comm`,
-  observe-only Linux foundation: binary hashes, argv/interpreter signals,
+- completion of agent recognition issue #67 beyond the exact-name,
+  observe-only Linux foundation: binary hashes and argv/interpreter signals,
   maintained corpus thresholds, and cross-platform launch sources
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - independent AuditBench annotation collection and headline scoring; the strict capture/blind-label/seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures

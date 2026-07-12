@@ -26,17 +26,17 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - capture loss / consumer lag => degraded `insufficient_evidence`
   - daemon restart gap => unknown `insufficient_evidence`
 - Includes a Linux-only Phase 2 eBPF MVP smoke path that:
-  - loads the embedded `sched/sched_process_exec` + `sched/sched_process_exit` eBPF tracepoint programs.
+  - loads the embedded raw `sched_process_exec` + `sched/sched_process_exit` eBPF programs.
   - reads scoped process exec+exit lifecycle samples from a ringbuf.
   - runs deterministic root and child commands.
   - projects the observed exec and exit events through the same correlator.
-- Includes an opt-in exact-`comm` agent-recognition foundation:
+- Includes an opt-in exact-name agent-recognition foundation:
   - validates and digests an embedded, release-bound four-agent registry;
-  - applies operator allow/deny overrides before installing at most 64 exact
-    names in the BPF prefilter;
+  - applies operator allow/deny overrides before installing separate bounded
+    Linux `comm` and successful-exec basename maps in the BPF prefilter;
   - emits recognized exec candidates without weakening cgroup-scoped lifecycle
     capture, while dropping noncandidate host execs and all host-wide exits;
-  - labels basename-only matches low-confidence and observe-only, with no
+  - labels exact-name matches low-confidence and observe-only, with no
     attestation, policy selection, process adoption, or enforcement.
 - Includes a local-only dry-run daemon custody scaffold and read-only preflight
   inspector for the root-owned config/state/socket/bpffs boundary, plus bounded
@@ -82,9 +82,9 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
 
 1. `RunLinuxEBPFExecSmoke` (Linux only, privileged/gated)
    - Loads the generated eBPF object with `github.com/cilium/ebpf`.
-   - Attaches `sched/sched_process_exec` and `sched/sched_process_exit` through tracefs/debugfs.
-   - Emits metadata-only lifecycle events: PID, PPID, TID, PID namespace id, cgroup id, monotonic timestamp, `comm`, and `exit_code` on exit events.
-   - Does not collect argv, env, file contents, network destinations, or raw command payloads.
+   - Attaches successful exec through the raw `sched_process_exec` tracepoint and exit through `sched/sched_process_exit`.
+   - Emits metadata-only lifecycle events: PID, PPID, TID, PID namespace id, cgroup id, monotonic timestamp, `comm`, bounded executable basename on recognized execs, and `exit_code` on exit events.
+   - Does not collect argv, full executable paths, env, file contents, network destinations, or raw command payloads.
 
 2. `RingbufProcessSource` (Linux only)
    - Uses `github.com/cilium/ebpf` ringbuf reader.

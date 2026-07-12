@@ -196,6 +196,7 @@ func TestDecodeRingbufRecordExitIncludesExitCode(t *testing.T) {
 	exitCode := int32(-13)
 	binary.LittleEndian.PutUint32(raw[40:44], uint32(exitCode))
 	copy(raw[44:60], []byte("python3"))
+	copy(raw[60:124], []byte("agent.py"))
 
 	evt, err := decodeRingbufRecord(raw)
 	if err != nil {
@@ -221,6 +222,9 @@ func TestDecodeRingbufRecordExitIncludesExitCode(t *testing.T) {
 	}
 	if evt.Comm != "python3" {
 		t.Fatalf("comm = %q, want python3", evt.Comm)
+	}
+	if evt.ExecutableBasename != "agent.py" {
+		t.Fatalf("executable_basename = %q, want agent.py", evt.ExecutableBasename)
 	}
 }
 

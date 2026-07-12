@@ -22,7 +22,7 @@ func TestProcessExecAllowedCgroupsCapacityMatchesSessionRegistry(t *testing.T) {
 	}
 }
 
-func TestProcessExecRecognitionMapIsBoundedToLinuxCommKeys(t *testing.T) {
+func TestProcessExecRecognitionMapsUseBoundedExactNameKeys(t *testing.T) {
 	spec, err := loadProcessExec()
 	if err != nil {
 		t.Fatalf("load process-exec collection spec: %v", err)
@@ -37,6 +37,16 @@ func TestProcessExecRecognitionMapIsBoundedToLinuxCommKeys(t *testing.T) {
 	if got, want := recognition.KeySize, uint32(16); got != want {
 		t.Fatalf("recognition_comms key size = %d, want %d", got, want)
 	}
+	basenames := spec.Maps[processExecMapRecognitionExecutableBasenames]
+	if basenames == nil {
+		t.Fatal("process-exec collection spec is missing recognition_executable_basenames")
+	}
+	if got, want := int(basenames.MaxEntries), processExecRecognitionBasenameMax; got != want {
+		t.Fatalf("recognition_executable_basenames max entries = %d, want %d", got, want)
+	}
+	if got, want := basenames.KeySize, uint32(64); got != want {
+		t.Fatalf("recognition_executable_basenames key size = %d, want %d", got, want)
+	}
 	if spec.Maps[processExecMapRecognitionControl] == nil {
 		t.Fatal("process-exec collection spec is missing recognition_control")
 	}
@@ -47,18 +57,20 @@ func TestNormalizePinnedEBPFPathsDerivesLifecycleMapSiblings(t *testing.T) {
 		EventsMapPath: "/sys/fs/bpf/ardur/custom_events",
 	})
 	wants := map[string]string{
-		"DroppedEventsMapPath":      "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
-		"FilterControlMapPath":      "/sys/fs/bpf/ardur/process_lifecycle_filter_control",
-		"AllowedCgroupsMapPath":     "/sys/fs/bpf/ardur/process_lifecycle_allowed_cgroups",
-		"RecognitionControlMapPath": "/sys/fs/bpf/ardur/process_recognition_filter_control",
-		"RecognitionCommsMapPath":   "/sys/fs/bpf/ardur/process_recognition_comms",
+		"DroppedEventsMapPath":                  "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
+		"FilterControlMapPath":                  "/sys/fs/bpf/ardur/process_lifecycle_filter_control",
+		"AllowedCgroupsMapPath":                 "/sys/fs/bpf/ardur/process_lifecycle_allowed_cgroups",
+		"RecognitionControlMapPath":             "/sys/fs/bpf/ardur/process_recognition_filter_control",
+		"RecognitionCommsMapPath":               "/sys/fs/bpf/ardur/process_recognition_comms",
+		"RecognitionExecutableBasenamesMapPath": "/sys/fs/bpf/ardur/process_recognition_executable_basenames",
 	}
 	gots := map[string]string{
-		"DroppedEventsMapPath":      paths.DroppedEventsMapPath,
-		"FilterControlMapPath":      paths.FilterControlMapPath,
-		"AllowedCgroupsMapPath":     paths.AllowedCgroupsMapPath,
-		"RecognitionControlMapPath": paths.RecognitionControlMapPath,
-		"RecognitionCommsMapPath":   paths.RecognitionCommsMapPath,
+		"DroppedEventsMapPath":                  paths.DroppedEventsMapPath,
+		"FilterControlMapPath":                  paths.FilterControlMapPath,
+		"AllowedCgroupsMapPath":                 paths.AllowedCgroupsMapPath,
+		"RecognitionControlMapPath":             paths.RecognitionControlMapPath,
+		"RecognitionCommsMapPath":               paths.RecognitionCommsMapPath,
+		"RecognitionExecutableBasenamesMapPath": paths.RecognitionExecutableBasenamesMapPath,
 	}
 	for field, want := range wants {
 		if got := gots[field]; got != want {
@@ -70,14 +82,15 @@ func TestNormalizePinnedEBPFPathsDerivesLifecycleMapSiblings(t *testing.T) {
 func TestRemovePinnedProcessExecStateRemovesCompleteAndPartialSets(t *testing.T) {
 	dir := t.TempDir()
 	paths := PinnedEBPFPaths{
-		ExecLinkPath:              filepath.Join(dir, "exec"),
-		ExitLinkPath:              filepath.Join(dir, "exit"),
-		EventsMapPath:             filepath.Join(dir, "events"),
-		DroppedEventsMapPath:      filepath.Join(dir, "dropped"),
-		FilterControlMapPath:      filepath.Join(dir, "filter_control"),
-		AllowedCgroupsMapPath:     filepath.Join(dir, "allowed_cgroups"),
-		RecognitionControlMapPath: filepath.Join(dir, "recognition_control"),
-		RecognitionCommsMapPath:   filepath.Join(dir, "recognition_comms"),
+		ExecLinkPath:                          filepath.Join(dir, "exec"),
+		ExitLinkPath:                          filepath.Join(dir, "exit"),
+		EventsMapPath:                         filepath.Join(dir, "events"),
+		DroppedEventsMapPath:                  filepath.Join(dir, "dropped"),
+		FilterControlMapPath:                  filepath.Join(dir, "filter_control"),
+		AllowedCgroupsMapPath:                 filepath.Join(dir, "allowed_cgroups"),
+		RecognitionControlMapPath:             filepath.Join(dir, "recognition_control"),
+		RecognitionCommsMapPath:               filepath.Join(dir, "recognition_comms"),
+		RecognitionExecutableBasenamesMapPath: filepath.Join(dir, "recognition_executable_basenames"),
 	}
 	for _, path := range pinnedProcessExecPaths(paths) {
 		if err := os.WriteFile(path, []byte("pin"), 0o600); err != nil {

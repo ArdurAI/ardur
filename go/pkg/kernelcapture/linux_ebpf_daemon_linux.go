@@ -30,12 +30,13 @@ type ProcessExecEBPFHandles struct {
 	droppedEventsMap *ebpf.Map
 	// filterControlMap and allowedCgroupsMap are set only when reusing the
 	// pinned producer-filter maps. Fresh loads own the same maps through objs.
-	filterControlMap      *ebpf.Map
-	allowedCgroupsMap     *ebpf.Map
-	recognitionControlMap *ebpf.Map
-	recognitionCommsMap   *ebpf.Map
-	pinningErr            error
-	reader                *ringbuf.Reader
+	filterControlMap                  *ebpf.Map
+	allowedCgroupsMap                 *ebpf.Map
+	recognitionControlMap             *ebpf.Map
+	recognitionCommsMap               *ebpf.Map
+	recognitionExecutableBasenamesMap *ebpf.Map
+	pinningErr                        error
+	reader                            *ringbuf.Reader
 }
 
 // Reader returns the ringbuf.Reader for consuming process lifecycle events.
@@ -99,6 +100,9 @@ func (h *ProcessExecEBPFHandles) Close() {
 	if h.recognitionControlMap != nil {
 		_ = h.recognitionControlMap.Close()
 	}
+	if h.recognitionExecutableBasenamesMap != nil {
+		_ = h.recognitionExecutableBasenamesMap.Close()
+	}
 	if h.exitTP != nil {
 		_ = h.exitTP.Close()
 	}
@@ -109,8 +113,8 @@ func (h *ProcessExecEBPFHandles) Close() {
 }
 
 // LoadAndAttachProcessExecEBPF loads the embedded CO-RE process-exec eBPF
-// program, attaches the sched/sched_process_exec and sched/sched_process_exit
-// tracepoints, and returns a handle that owns the ringbuf reader.
+// program, attaches raw sched_process_exec and sched/sched_process_exit, and
+// returns a handle that owns the ringbuf reader.
 //
 // The caller must call Close on the returned handle when done.
 //
@@ -125,10 +129,10 @@ func LoadAndAttachProcessExecEBPF() (*ProcessExecEBPFHandles, error) {
 	}
 
 	var err error
-	h.execTP, err = link.Tracepoint("sched", "sched_process_exec", h.objs.HandleSchedProcessExec, nil)
+	h.execTP, err = attachProcessExecProgram(h.objs.HandleSchedProcessExec)
 	if err != nil {
 		h.objs.Close()
-		return nil, fmt.Errorf("attach sched/sched_process_exec: %w", err)
+		return nil, fmt.Errorf("attach raw sched_process_exec: %w", err)
 	}
 
 	h.exitTP, err = link.Tracepoint("sched", "sched_process_exit", h.objs.HandleSchedProcessExit, nil)
@@ -147,6 +151,13 @@ func LoadAndAttachProcessExecEBPF() (*ProcessExecEBPFHandles, error) {
 	}
 
 	return h, nil
+}
+
+func attachProcessExecProgram(program *ebpf.Program) (link.Link, error) {
+	return link.AttachRawTracepoint(link.RawTracepointOptions{
+		Name:    "sched_process_exec",
+		Program: program,
+	})
 }
 
 // NewRingbufProcessSourceFromRingbufReader creates a RingbufProcessSource from
@@ -180,10 +191,13 @@ type PinnedEBPFPaths struct {
 	FilterControlMapPath string
 	// AllowedCgroupsMapPath is the daemon-managed process lifecycle cgroup set.
 	AllowedCgroupsMapPath string
-	// RecognitionControlMapPath enables the exact-comm candidate prefilter.
+	// RecognitionControlMapPath enables exact-name candidate prefiltering.
 	RecognitionControlMapPath string
 	// RecognitionCommsMapPath stores release-bound exact Linux comm keys.
 	RecognitionCommsMapPath string
+	// RecognitionExecutableBasenamesMapPath stores bounded successful-exec
+	// filename basenames without retaining their parent paths.
+	RecognitionExecutableBasenamesMapPath string
 }
 
 // DefaultPinnedEBPFPaths returns the standard bpffs pin paths under the
@@ -191,14 +205,15 @@ type PinnedEBPFPaths struct {
 // drop-counter paths match the map paths recorded by BuildDaemonCustodyPlan.
 func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 	return PinnedEBPFPaths{
-		ExecLinkPath:              "/sys/fs/bpf/ardur/exec_tp_link",
-		ExitLinkPath:              "/sys/fs/bpf/ardur/exit_tp_link",
-		EventsMapPath:             "/sys/fs/bpf/ardur/process_lifecycle_events",
-		DroppedEventsMapPath:      "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
-		FilterControlMapPath:      "/sys/fs/bpf/ardur/process_lifecycle_filter_control",
-		AllowedCgroupsMapPath:     "/sys/fs/bpf/ardur/process_lifecycle_allowed_cgroups",
-		RecognitionControlMapPath: "/sys/fs/bpf/ardur/process_recognition_filter_control",
-		RecognitionCommsMapPath:   "/sys/fs/bpf/ardur/process_recognition_comms",
+		ExecLinkPath:                          "/sys/fs/bpf/ardur/exec_tp_link",
+		ExitLinkPath:                          "/sys/fs/bpf/ardur/exit_tp_link",
+		EventsMapPath:                         "/sys/fs/bpf/ardur/process_lifecycle_events",
+		DroppedEventsMapPath:                  "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
+		FilterControlMapPath:                  "/sys/fs/bpf/ardur/process_lifecycle_filter_control",
+		AllowedCgroupsMapPath:                 "/sys/fs/bpf/ardur/process_lifecycle_allowed_cgroups",
+		RecognitionControlMapPath:             "/sys/fs/bpf/ardur/process_recognition_filter_control",
+		RecognitionCommsMapPath:               "/sys/fs/bpf/ardur/process_recognition_comms",
+		RecognitionExecutableBasenamesMapPath: "/sys/fs/bpf/ardur/process_recognition_executable_basenames",
 	}
 }
 
@@ -207,12 +222,12 @@ func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 //
 // On first start (no pinned state at paths): loads and attaches the eBPF
 // program as usual, then pins both tracepoint links, the ringbuf map, the
-// monotonic producer-drop counter, and both producer-filter maps to bpffs. The
+// monotonic producer-drop counter, and all producer-filter maps to bpffs. The
 // pins keep the links — and thus the attached programs — alive in the kernel
 // even after the daemon exits, and keep their complete map generation reachable
 // across daemon lifetimes.
 //
-// On restart (both pinned links and all six pinned maps exist at paths):
+// On restart (both pinned links and all seven pinned maps exist at paths):
 // loads the pinned links back without re-attaching, which avoids a brief
 // window where the tracepoints are detached, and loads the pinned map to open
 // a new reader bound to the exact map the still-attached programs write into.
@@ -233,7 +248,7 @@ func DefaultPinnedEBPFPaths() PinnedEBPFPaths {
 func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPFHandles, error) {
 	paths = normalizePinnedEBPFPaths(paths)
 	// ── Try to reuse one complete pinned generation ───────────────────────
-	if execLink, exitLink, eventsMap, droppedEventsMap, filterControlMap, allowedCgroupsMap, recognitionControlMap, recognitionCommsMap, ok := tryLoadPinnedState(paths); ok {
+	if execLink, exitLink, eventsMap, droppedEventsMap, filterControlMap, allowedCgroupsMap, recognitionControlMap, recognitionCommsMap, recognitionExecutableBasenamesMap, ok := tryLoadPinnedState(paths); ok {
 		// The links are alive — the eBPF programs are still attached in the
 		// kernel and writing into eventsMap. Open a reader bound to that
 		// same map so restart doesn't lose the events the programs emit.
@@ -243,6 +258,7 @@ func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPF
 			_ = filterControlMap.Close()
 			_ = recognitionCommsMap.Close()
 			_ = recognitionControlMap.Close()
+			_ = recognitionExecutableBasenamesMap.Close()
 			_ = droppedEventsMap.Close()
 			_ = eventsMap.Close()
 			_ = exitLink.Close()
@@ -250,15 +266,16 @@ func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPF
 			return nil, fmt.Errorf("open ringbuf reader (pinned restart): %w", err)
 		}
 		return &ProcessExecEBPFHandles{
-			execTP:                execLink,
-			exitTP:                exitLink,
-			eventsMap:             eventsMap,
-			droppedEventsMap:      droppedEventsMap,
-			filterControlMap:      filterControlMap,
-			allowedCgroupsMap:     allowedCgroupsMap,
-			recognitionControlMap: recognitionControlMap,
-			recognitionCommsMap:   recognitionCommsMap,
-			reader:                reader,
+			execTP:                            execLink,
+			exitTP:                            exitLink,
+			eventsMap:                         eventsMap,
+			droppedEventsMap:                  droppedEventsMap,
+			filterControlMap:                  filterControlMap,
+			allowedCgroupsMap:                 allowedCgroupsMap,
+			recognitionControlMap:             recognitionControlMap,
+			recognitionCommsMap:               recognitionCommsMap,
+			recognitionExecutableBasenamesMap: recognitionExecutableBasenamesMap,
+			reader:                            reader,
 		}, nil
 	}
 	if err := removePinnedProcessExecState(paths); err != nil {
@@ -278,31 +295,31 @@ func LoadAndAttachProcessExecEBPFPinned(paths PinnedEBPFPaths) (*ProcessExecEBPF
 	return h, nil
 }
 
-// tryLoadPinnedState attempts to load both tracepoint links and all six maps
-// from bpffs. An older six-pin generation is intentionally incomplete and is
+// tryLoadPinnedState attempts to load both tracepoint links and all seven maps
+// from bpffs. An older eight-pin generation is intentionally incomplete and is
 // replaced before a fresh attach.
-func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, eventsMap, droppedEventsMap, filterControlMap, allowedCgroupsMap, recognitionControlMap, recognitionCommsMap *ebpf.Map, ok bool) {
+func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, eventsMap, droppedEventsMap, filterControlMap, allowedCgroupsMap, recognitionControlMap, recognitionCommsMap, recognitionExecutableBasenamesMap *ebpf.Map, ok bool) {
 	execLink, err := link.LoadPinnedLink(paths.ExecLinkPath, nil)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	exitLink, err = link.LoadPinnedLink(paths.ExitLinkPath, nil)
 	if err != nil {
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	eventsMap, err = ebpf.LoadPinnedMap(paths.EventsMapPath, nil)
 	if err != nil {
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	droppedEventsMap, err = ebpf.LoadPinnedMap(paths.DroppedEventsMapPath, nil)
 	if err != nil {
 		_ = eventsMap.Close()
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	filterControlMap, err = ebpf.LoadPinnedMap(paths.FilterControlMapPath, nil)
 	if err != nil {
@@ -310,7 +327,7 @@ func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, ev
 		_ = eventsMap.Close()
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	allowedCgroupsMap, err = ebpf.LoadPinnedMap(paths.AllowedCgroupsMapPath, nil)
 	if err != nil {
@@ -319,7 +336,7 @@ func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, ev
 		_ = eventsMap.Close()
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	recognitionControlMap, err = ebpf.LoadPinnedMap(paths.RecognitionControlMapPath, nil)
 	if err != nil {
@@ -329,7 +346,7 @@ func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, ev
 		_ = eventsMap.Close()
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
 	recognitionCommsMap, err = ebpf.LoadPinnedMap(paths.RecognitionCommsMapPath, nil)
 	if err != nil {
@@ -340,9 +357,21 @@ func tryLoadPinnedState(paths PinnedEBPFPaths) (execLink, exitLink link.Link, ev
 		_ = eventsMap.Close()
 		_ = exitLink.Close()
 		_ = execLink.Close()
-		return nil, nil, nil, nil, nil, nil, nil, nil, false
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
 	}
-	return execLink, exitLink, eventsMap, droppedEventsMap, filterControlMap, allowedCgroupsMap, recognitionControlMap, recognitionCommsMap, true
+	recognitionExecutableBasenamesMap, err = ebpf.LoadPinnedMap(paths.RecognitionExecutableBasenamesMapPath, nil)
+	if err != nil {
+		_ = recognitionCommsMap.Close()
+		_ = recognitionControlMap.Close()
+		_ = allowedCgroupsMap.Close()
+		_ = filterControlMap.Close()
+		_ = droppedEventsMap.Close()
+		_ = eventsMap.Close()
+		_ = exitLink.Close()
+		_ = execLink.Close()
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, false
+	}
+	return execLink, exitLink, eventsMap, droppedEventsMap, filterControlMap, allowedCgroupsMap, recognitionControlMap, recognitionCommsMap, recognitionExecutableBasenamesMap, true
 }
 
 func normalizePinnedEBPFPaths(paths PinnedEBPFPaths) PinnedEBPFPaths {
@@ -360,6 +389,9 @@ func normalizePinnedEBPFPaths(paths PinnedEBPFPaths) PinnedEBPFPaths {
 	}
 	if paths.RecognitionCommsMapPath == "" && paths.EventsMapPath != "" {
 		paths.RecognitionCommsMapPath = filepath.Join(filepath.Dir(paths.EventsMapPath), "process_recognition_comms")
+	}
+	if paths.RecognitionExecutableBasenamesMapPath == "" && paths.EventsMapPath != "" {
+		paths.RecognitionExecutableBasenamesMapPath = filepath.Join(filepath.Dir(paths.EventsMapPath), "process_recognition_executable_basenames")
 	}
 	return paths
 }
@@ -382,6 +414,7 @@ func pinProcessExecState(h *ProcessExecEBPFHandles, paths PinnedEBPFPaths) error
 		{paths.AllowedCgroupsMapPath, h.objs.AllowedCgroups.Pin},
 		{paths.RecognitionControlMapPath, h.objs.RecognitionControl.Pin},
 		{paths.RecognitionCommsMapPath, h.objs.RecognitionComms.Pin},
+		{paths.RecognitionExecutableBasenamesMapPath, h.objs.RecognitionExecutableBasenames.Pin},
 	}
 	for _, item := range pins {
 		if err := item.pin(item.path); err != nil {
@@ -412,5 +445,6 @@ func pinnedProcessExecPaths(paths PinnedEBPFPaths) []string {
 		paths.AllowedCgroupsMapPath,
 		paths.RecognitionControlMapPath,
 		paths.RecognitionCommsMapPath,
+		paths.RecognitionExecutableBasenamesMapPath,
 	}
 }

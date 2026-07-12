@@ -15,7 +15,7 @@ type lifecycleCgroupFilter interface {
 	AllowLifecycleCgroup(uint64) error
 	RemoveLifecycleCgroup(uint64) error
 	ClearLifecycleCgroups() error
-	ConfigureAgentRecognitionComms([]string) error
+	ConfigureAgentRecognitionNames([]string, []string) error
 }
 
 // lifecycleFilterManager serializes producer-filter state independently of
@@ -34,8 +34,9 @@ type lifecycleFilterManager struct {
 	sessions   map[string]uint64
 	owners     map[uint64]string
 
-	recognitionComms []string
-	recognitionErr   error
+	recognitionComms               []string
+	recognitionExecutableBasenames []string
+	recognitionErr                 error
 }
 
 func newLifecycleFilterManager() *lifecycleFilterManager {
@@ -72,8 +73,8 @@ func (m *lifecycleFilterManager) install(controller lifecycleCgroupFilter) error
 		return m.resolveInstallFailureLocked(controller, fmt.Errorf("enable lifecycle cgroup filter after reconciliation: %w", err))
 	}
 	m.recognitionErr = nil
-	if err := controller.ConfigureAgentRecognitionComms(m.recognitionComms); err != nil {
-		cleanupErr := controller.ConfigureAgentRecognitionComms(nil)
+	if err := controller.ConfigureAgentRecognitionNames(m.recognitionComms, m.recognitionExecutableBasenames); err != nil {
+		cleanupErr := controller.ConfigureAgentRecognitionNames(nil, nil)
 		m.recognitionErr = errors.Join(fmt.Errorf("configure agent recognition prefilter: %w", err), cleanupErr)
 	}
 
@@ -84,10 +85,10 @@ func (m *lifecycleFilterManager) install(controller lifecycleCgroupFilter) error
 	return nil
 }
 
-// setAgentRecognitionComms stores the exact comm prefilter selected before
+// setAgentRecognitionNames stores the exact-name prefilter selected before
 // producer startup. Runtime mutation is intentionally unsupported so the
 // classifier and kernel map cannot silently drift apart.
-func (m *lifecycleFilterManager) setAgentRecognitionComms(comms []string) error {
+func (m *lifecycleFilterManager) setAgentRecognitionNames(comms, executableBasenames []string) error {
 	if m == nil {
 		return fmt.Errorf("lifecycle filter manager is required")
 	}
@@ -97,6 +98,7 @@ func (m *lifecycleFilterManager) setAgentRecognitionComms(comms []string) error 
 		return fmt.Errorf("agent recognition prefilter is already installed")
 	}
 	m.recognitionComms = append([]string(nil), comms...)
+	m.recognitionExecutableBasenames = append([]string(nil), executableBasenames...)
 	return nil
 }
 
@@ -213,7 +215,7 @@ func (m *lifecycleFilterManager) detach(controller lifecycleCgroupFilter) error 
 	disableErr := controller.SetLifecycleCgroupFilterEnabled(false)
 	clearErr := controller.ClearLifecycleCgroups()
 	enableErr := controller.SetLifecycleCgroupFilterEnabled(true)
-	recognitionErr := controller.ConfigureAgentRecognitionComms(nil)
+	recognitionErr := controller.ConfigureAgentRecognitionNames(nil, nil)
 	m.controller = nil
 	m.recognitionErr = nil
 	return errors.Join(disableErr, clearErr, enableErr, recognitionErr)

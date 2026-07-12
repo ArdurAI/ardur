@@ -17,6 +17,9 @@
 #define ARDUR_FILTER_ENABLED 1
 #define ARDUR_ALLOWED_CGROUPS_MAX 4096
 #define ARDUR_RECOGNITION_COMMS_MAX 64
+#define ARDUR_RECOGNITION_BASENAMES_MAX 64
+#define ARDUR_EXECUTABLE_BASENAME_LEN 64
+#define ARDUR_EXEC_FILENAME_READ_LEN 256
 
 struct ns_common {
     unsigned int inum;
@@ -37,6 +40,10 @@ struct task_struct {
     int exit_code;
 } __attribute__((preserve_access_index));
 
+struct linux_binprm {
+    const char *filename;
+} __attribute__((preserve_access_index));
+
 struct ardur_process_event {
     __u8 event_type;
     __u8 _pad0[7];
@@ -48,10 +55,15 @@ struct ardur_process_event {
     __u64 cgroup_id;
     __s32 exit_code;
     char comm[16];
+    char executable_basename[ARDUR_EXECUTABLE_BASENAME_LEN];
 };
 
 struct ardur_comm_key {
     char comm[16];
+};
+
+struct ardur_executable_basename_key {
+    char name[ARDUR_EXECUTABLE_BASENAME_LEN];
 };
 
 struct {
@@ -97,6 +109,13 @@ struct {
     __type(value, __u8);
 } recognition_comms SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, ARDUR_RECOGNITION_BASENAMES_MAX);
+    __type(key, struct ardur_executable_basename_key);
+    __type(value, __u8);
+} recognition_executable_basenames SEC(".maps");
+
 static __always_inline int cgroup_allowed(__u64 cgroup_id) {
     __u32 control_key = ARDUR_FILTER_CONTROL_KEY;
     __u8 *filter_enabled;
@@ -114,23 +133,67 @@ static __always_inline int cgroup_allowed(__u64 cgroup_id) {
     return allowed != 0;
 }
 
-static __always_inline int recognition_allowed(__u8 event_type, struct ardur_comm_key *comm) {
+static __always_inline int recognition_enabled(void) {
     __u32 control_key = ARDUR_FILTER_CONTROL_KEY;
     __u8 *recognition_enabled;
-    __u8 *recognized;
 
-    if (event_type != ARDUR_EVENT_EXEC) {
-        return 0;
-    }
     recognition_enabled = bpf_map_lookup_elem(&recognition_control, &control_key);
-    if (!recognition_enabled || *recognition_enabled != ARDUR_FILTER_ENABLED) {
-        return 0;
-    }
-    recognized = bpf_map_lookup_elem(&recognition_comms, comm);
-    return recognized != 0;
+    return recognition_enabled && *recognition_enabled == ARDUR_FILTER_ENABLED;
 }
 
-static __always_inline int submit_process_event(__u8 event_type) {
+static __always_inline int comm_recognition_allowed(struct ardur_comm_key *comm) {
+    return bpf_map_lookup_elem(&recognition_comms, comm) != 0;
+}
+
+static __always_inline int basename_recognition_allowed(struct ardur_executable_basename_key *basename) {
+    return basename && bpf_map_lookup_elem(&recognition_executable_basenames, basename) != 0;
+}
+
+static __always_inline int read_executable_basename(struct linux_binprm *bprm,
+                                                     struct ardur_executable_basename_key *basename) {
+    const char *filename;
+    char path[ARDUR_EXEC_FILENAME_READ_LEN] = {};
+    long path_len;
+    int basename_start = 0;
+    int scan_start = 0;
+
+    if (!bprm || !basename) {
+        return 0;
+    }
+    filename = BPF_CORE_READ(bprm, filename);
+    if (!filename) {
+        return 0;
+    }
+    path_len = bpf_probe_read_kernel_str(path, sizeof(path), filename);
+    if (path_len <= 1 || path_len >= sizeof(path)) {
+        return 0;
+    }
+    if (path_len > ARDUR_EXECUTABLE_BASENAME_LEN) {
+        scan_start = path_len - ARDUR_EXECUTABLE_BASENAME_LEN;
+    }
+#pragma unroll
+    for (int i = 0; i < ARDUR_EXECUTABLE_BASENAME_LEN; i++) {
+        int path_index = scan_start + i;
+        if (path_index >= path_len - 1) {
+            break;
+        }
+        if (path[path_index] == '/') {
+            basename_start = path_index + 1;
+        }
+    }
+    if (basename_start >= path_len - 1) {
+        return 0;
+    }
+    long basename_len = bpf_probe_read_kernel_str(
+        basename->name,
+        sizeof(basename->name),
+        filename + basename_start);
+    return basename_len > 1 && basename_len < sizeof(basename->name);
+}
+
+static __always_inline int submit_process_event(
+    __u8 event_type,
+    struct ardur_executable_basename_key *executable_basename) {
     struct ardur_process_event *event;
     struct ardur_comm_key comm = {};
     __u32 zero = 0;
@@ -144,7 +207,10 @@ static __always_inline int submit_process_event(__u8 event_type) {
 
     cgroup_id = bpf_get_current_cgroup_id();
     bpf_get_current_comm(&comm.comm, sizeof(comm.comm));
-    if (!cgroup_allowed(cgroup_id) && !recognition_allowed(event_type, &comm)) {
+    if (!cgroup_allowed(cgroup_id) &&
+        (event_type != ARDUR_EVENT_EXEC || !recognition_enabled() ||
+         (!comm_recognition_allowed(&comm) &&
+          !basename_recognition_allowed(executable_basename)))) {
         return 0;
     }
 
@@ -166,6 +232,11 @@ static __always_inline int submit_process_event(__u8 event_type) {
     event->tid = (__u32)pid_tgid;
     event->cgroup_id = cgroup_id;
     __builtin_memcpy(event->comm, comm.comm, sizeof(event->comm));
+    if (executable_basename) {
+        __builtin_memcpy(event->executable_basename,
+                         executable_basename->name,
+                         sizeof(event->executable_basename));
+    }
 
     task = (struct task_struct *)bpf_get_current_task_btf();
     if (task) {
@@ -189,14 +260,23 @@ static __always_inline int submit_process_event(__u8 event_type) {
     return 0;
 }
 
-SEC("tracepoint/sched/sched_process_exec")
-int handle_sched_process_exec(void *ctx) {
-    return submit_process_event(ARDUR_EVENT_EXEC);
+SEC("raw_tracepoint/sched_process_exec")
+int handle_sched_process_exec(struct bpf_raw_tracepoint_args *ctx) {
+    struct ardur_executable_basename_key basename = {};
+    struct ardur_executable_basename_key *basename_ptr = 0;
+
+    if (recognition_enabled()) {
+        struct linux_binprm *bprm = (struct linux_binprm *)ctx->args[2];
+        if (read_executable_basename(bprm, &basename)) {
+            basename_ptr = &basename;
+        }
+    }
+    return submit_process_event(ARDUR_EVENT_EXEC, basename_ptr);
 }
 
 SEC("tracepoint/sched/sched_process_exit")
 int handle_sched_process_exit(void *ctx) {
-    return submit_process_event(ARDUR_EVENT_EXIT);
+    return submit_process_event(ARDUR_EVENT_EXIT, 0);
 }
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";

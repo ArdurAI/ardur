@@ -12,12 +12,13 @@ import (
 )
 
 type fakeLifecycleCgroupFilter struct {
-	mu               sync.Mutex
-	ops              []string
-	allowed          map[uint64]struct{}
-	enabled          bool
-	fail             map[string]error
-	recognitionComms []string
+	mu                             sync.Mutex
+	ops                            []string
+	allowed                        map[uint64]struct{}
+	enabled                        bool
+	fail                           map[string]error
+	recognitionComms               []string
+	recognitionExecutableBasenames []string
 }
 
 func newFakeLifecycleCgroupFilter() *fakeLifecycleCgroupFilter {
@@ -75,14 +76,15 @@ func (f *fakeLifecycleCgroupFilter) ClearLifecycleCgroups() error {
 	return nil
 }
 
-func (f *fakeLifecycleCgroupFilter) ConfigureAgentRecognitionComms(comms []string) error {
+func (f *fakeLifecycleCgroupFilter) ConfigureAgentRecognitionNames(comms, executableBasenames []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	op := "recognition:" + strings.Join(comms, ",")
+	op := "recognition:" + strings.Join(comms, ",") + ";" + strings.Join(executableBasenames, ",")
 	if err := f.record(op); err != nil {
 		return err
 	}
 	f.recognitionComms = append([]string(nil), comms...)
+	f.recognitionExecutableBasenames = append([]string(nil), executableBasenames...)
 	return nil
 }
 
@@ -95,7 +97,7 @@ func TestLifecycleFilterInstallKeepsIdleProducerQuiet(t *testing.T) {
 	if !filter.enabled || len(filter.allowed) != 0 {
 		t.Fatalf("idle filter enabled=%t allowed=%v, want enabled empty", filter.enabled, filter.allowed)
 	}
-	wantOps := []string{"enabled:false", "clear", "enabled:true", "recognition:"}
+	wantOps := []string{"enabled:false", "clear", "enabled:true", "recognition:;"}
 	if !reflect.DeepEqual(filter.ops, wantOps) {
 		t.Fatalf("install operations = %v, want %v", filter.ops, wantOps)
 	}
@@ -103,15 +105,15 @@ func TestLifecycleFilterInstallKeepsIdleProducerQuiet(t *testing.T) {
 
 func TestLifecycleFilterInstallsRecognitionWithoutWeakeningCgroupScope(t *testing.T) {
 	manager := newLifecycleFilterManager()
-	if err := manager.setAgentRecognitionComms([]string{"claude", "codex"}); err != nil {
+	if err := manager.setAgentRecognitionNames([]string{"claude", "codex"}, []string{"claude", "codex"}); err != nil {
 		t.Fatal(err)
 	}
 	filter := newFakeLifecycleCgroupFilter()
 	if err := manager.install(filter); err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if !filter.enabled || !reflect.DeepEqual(filter.recognitionComms, []string{"claude", "codex"}) {
-		t.Fatalf("installed state enabled=%t recognition=%v", filter.enabled, filter.recognitionComms)
+	if !filter.enabled || !reflect.DeepEqual(filter.recognitionComms, []string{"claude", "codex"}) || !reflect.DeepEqual(filter.recognitionExecutableBasenames, []string{"claude", "codex"}) {
+		t.Fatalf("installed state enabled=%t comms=%v basenames=%v", filter.enabled, filter.recognitionComms, filter.recognitionExecutableBasenames)
 	}
 	if err := manager.agentRecognitionError(); err != nil {
 		t.Fatalf("recognition status: %v", err)
@@ -120,11 +122,11 @@ func TestLifecycleFilterInstallsRecognitionWithoutWeakeningCgroupScope(t *testin
 
 func TestLifecycleFilterRecognitionFailureKeepsScopedProducerSafe(t *testing.T) {
 	manager := newLifecycleFilterManager()
-	if err := manager.setAgentRecognitionComms([]string{"claude"}); err != nil {
+	if err := manager.setAgentRecognitionNames([]string{"claude"}, []string{"claude"}); err != nil {
 		t.Fatal(err)
 	}
 	filter := newFakeLifecycleCgroupFilter()
-	filter.fail["recognition:claude"] = errors.New("recognition map unavailable")
+	filter.fail["recognition:claude;claude"] = errors.New("recognition map unavailable")
 	if err := manager.install(filter); err != nil {
 		t.Fatalf("optional recognition failure broke lifecycle install: %v", err)
 	}
@@ -252,5 +254,8 @@ func TestLifecycleFilterDetachLeavesPinnedProducerQuiet(t *testing.T) {
 	}
 	if len(filter.recognitionComms) != 0 {
 		t.Fatalf("detached recognition prefilter = %v, want empty", filter.recognitionComms)
+	}
+	if len(filter.recognitionExecutableBasenames) != 0 {
+		t.Fatalf("detached recognition basename prefilter = %v, want empty", filter.recognitionExecutableBasenames)
 	}
 }

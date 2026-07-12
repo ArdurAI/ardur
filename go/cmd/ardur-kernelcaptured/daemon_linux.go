@@ -65,7 +65,7 @@ func runWatchdog(ctx context.Context, interval time.Duration, log *slog.Logger) 
 // cancelled.
 //
 // Claim boundary: loads the process-exec eBPF objects embedded in the binary,
-// attaches sched/sched_process_exec and sched/sched_process_exit, reads events
+// attaches raw sched_process_exec and sched/sched_process_exit, reads events
 // from the BPF ringbuf, and routes them to registered sessions. Pins the
 // tracepoint links and ringbuf map under the ardur-owned bpffs namespace
 // (kernelcapture.DefaultPinnedEBPFPaths) so a daemon restart reuses the
@@ -110,7 +110,7 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 	defer d.setLifecycleDropCounter(nil)
 
 	log.Info("eBPF tracepoints attached",
-		"exec", "sched/sched_process_exec",
+		"exec", "raw/sched_process_exec",
 		"exit", "sched/sched_process_exit",
 	)
 

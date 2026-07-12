@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -14,10 +16,11 @@ func TestEmbeddedAgentRecognizerCorpus(t *testing.T) {
 		t.Fatalf("read corpus: %v", err)
 	}
 	var corpus []struct {
-		Name              string `json:"name"`
-		Comm              string `json:"comm"`
-		ExpectedStatus    string `json:"expected_status"`
-		ExpectedAgentType string `json:"expected_agent_type"`
+		Name               string `json:"name"`
+		Comm               string `json:"comm"`
+		ExecutableBasename string `json:"executable_basename"`
+		ExpectedStatus     string `json:"expected_status"`
+		ExpectedAgentType  string `json:"expected_agent_type"`
 	}
 	if err := json.Unmarshal(raw, &corpus); err != nil {
 		t.Fatalf("decode corpus: %v", err)
@@ -28,7 +31,7 @@ func TestEmbeddedAgentRecognizerCorpus(t *testing.T) {
 	}
 	for _, item := range corpus {
 		t.Run(item.Name, func(t *testing.T) {
-			result := recognizer.Classify(AgentRecognitionInput{Comm: item.Comm})
+			result := recognizer.Classify(AgentRecognitionInput{Comm: item.Comm, ExecutableBasename: item.ExecutableBasename})
 			if result.Status != item.ExpectedStatus || result.AgentType != item.ExpectedAgentType {
 				t.Fatalf("classify(%q) = status %q type %q, want %q %q", item.Comm, result.Status, result.AgentType, item.ExpectedStatus, item.ExpectedAgentType)
 			}
@@ -39,7 +42,7 @@ func TestEmbeddedAgentRecognizerCorpus(t *testing.T) {
 	}
 }
 
-func TestAgentRecognizerConfidenceRequiresAgreeingSignals(t *testing.T) {
+func TestAgentRecognizerExactNamesRemainLowConfidence(t *testing.T) {
 	recognizer, err := NewEmbeddedAgentRecognizer(AgentRecognizerOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -48,9 +51,9 @@ func TestAgentRecognizerConfidenceRequiresAgreeingSignals(t *testing.T) {
 	if low.Confidence != AgentRecognitionConfidenceLow {
 		t.Fatalf("comm-only confidence = %q, want low", low.Confidence)
 	}
-	medium := recognizer.Classify(AgentRecognitionInput{Comm: "claude", ExecutableBasename: "claude"})
-	if medium.Confidence != AgentRecognitionConfidenceMedium || !reflect.DeepEqual(medium.MatchedSignalKinds, []string{"comm", "executable_basename"}) {
-		t.Fatalf("agreeing signal result = %+v", medium)
+	agreeing := recognizer.Classify(AgentRecognitionInput{Comm: "claude", ExecutableBasename: "claude"})
+	if agreeing.Confidence != AgentRecognitionConfidenceLow || !reflect.DeepEqual(agreeing.MatchedSignalKinds, []string{"comm", "executable_basename"}) {
+		t.Fatalf("agreeing exact-name result = %+v", agreeing)
 	}
 	ambiguous := recognizer.Classify(AgentRecognitionInput{Comm: "claude", ExecutableBasename: "codex"})
 	if ambiguous.Status != AgentRecognitionStatusAmbiguous || ambiguous.AgentType != "" || len(ambiguous.MatchedRuleIDs) != 2 {
@@ -61,7 +64,7 @@ func TestAgentRecognizerConfidenceRequiresAgreeingSignals(t *testing.T) {
 func TestAgentRecognizerAggregatesMultipleRulesForOneAgentType(t *testing.T) {
 	recognizer, err := NewAgentRecognizer("registry.v1", []AgentRecognitionRule{
 		{RuleID: "rule.claude.comm", AgentType: "claude_code", ExactComms: []string{"claude"}},
-		{RuleID: "rule.claude.alias", AgentType: "claude_code", ExactComms: []string{"claude-code"}},
+		{RuleID: "rule.claude.alias", AgentType: "claude_code", ExactExecutableBasenames: []string{"claude-code"}},
 	}, AgentRecognizerOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +73,7 @@ func TestAgentRecognizerAggregatesMultipleRulesForOneAgentType(t *testing.T) {
 	if result.Status != AgentRecognitionStatusRecognized || result.AgentType != "claude_code" {
 		t.Fatalf("same-class rules produced conflicting result: %+v", result)
 	}
-	if result.Confidence != AgentRecognitionConfidenceMedium || !reflect.DeepEqual(result.MatchedRuleIDs, []string{"rule.claude.alias", "rule.claude.comm"}) {
+	if result.Confidence != AgentRecognitionConfidenceLow || !reflect.DeepEqual(result.MatchedRuleIDs, []string{"rule.claude.alias", "rule.claude.comm"}) {
 		t.Fatalf("same-class evidence was not aggregated: %+v", result)
 	}
 }
@@ -93,12 +96,12 @@ func TestAgentRecognizerOverridesApplyBeforePrefilter(t *testing.T) {
 
 func TestAgentRegistryDigestIsOrderIndependent(t *testing.T) {
 	rulesA := []AgentRecognitionRule{
-		{RuleID: "rule.b", AgentType: "type_b", ExactComms: []string{"beta", "b"}},
+		{RuleID: "rule.b", AgentType: "type_b", ExactComms: []string{"beta", "b"}, ExactExecutableBasenames: []string{"beta-cli", "b-cli"}},
 		{RuleID: "rule.a", AgentType: "type_a", ExactComms: []string{"alpha"}},
 	}
 	rulesB := []AgentRecognitionRule{
 		{RuleID: "rule.a", AgentType: "type_a", ExactComms: []string{"alpha"}},
-		{RuleID: "rule.b", AgentType: "type_b", ExactComms: []string{"b", "beta"}},
+		{RuleID: "rule.b", AgentType: "type_b", ExactComms: []string{"b", "beta"}, ExactExecutableBasenames: []string{"b-cli", "beta-cli"}},
 	}
 	a, err := NewAgentRecognizer("registry.v1", rulesA, AgentRecognizerOptions{})
 	if err != nil {
@@ -125,7 +128,8 @@ func TestAgentRecognizerRejectsCollidingOrOversizedComms(t *testing.T) {
 				{RuleID: "rule.b", AgentType: "type_b", ExactComms: []string{"same"}},
 			},
 		},
-		{name: "oversized", rules: []AgentRecognitionRule{{RuleID: "rule.a", AgentType: "type_a", ExactComms: []string{"sixteen-byte-name"}}}},
+		{name: "oversized comm", rules: []AgentRecognitionRule{{RuleID: "rule.a", AgentType: "type_a", ExactComms: []string{"sixteen-byte-name"}}}},
+		{name: "oversized basename", rules: []AgentRecognitionRule{{RuleID: "rule.a", AgentType: "type_a", ExactExecutableBasenames: []string{strings.Repeat("a", 64)}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,5 +165,19 @@ func TestAgentRecognizerRejectsRegistryLargerThanKernelPrefilter(t *testing.T) {
 	}
 	if _, err := NewAgentRecognizer("registry.v1", rules, AgentRecognizerOptions{}); err == nil {
 		t.Fatal("oversized prefilter registry unexpectedly accepted")
+	}
+}
+
+func TestAgentRecognizerExecutableBasenamePrefilterHonorsOverrides(t *testing.T) {
+	recognizer, err := NewEmbeddedAgentRecognizer(AgentRecognizerOptions{DenyAgentTypes: []string{"codex_cli"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(recognizer.PrefilterExecutableBasenames(), "codex") {
+		t.Fatalf("denied basename remained in prefilter: %v", recognizer.PrefilterExecutableBasenames())
+	}
+	result := recognizer.Classify(AgentRecognitionInput{Comm: "node", ExecutableBasename: "codex"})
+	if result.Status != AgentRecognitionStatusUnknown {
+		t.Fatalf("denied script-backed candidate result = %+v", result)
 	}
 }

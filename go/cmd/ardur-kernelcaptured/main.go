@@ -11,7 +11,7 @@
 //
 // Claim boundary for Slice 1:
 //   - Starts and serves the socket control plane.
-//   - On Linux: loads the process-exec eBPF program, attaches sched/sched_process_exec
+//   - On Linux: loads the process-exec eBPF program, attaches raw sched_process_exec
 //     and sched/sched_process_exit tracepoints, routes events to registered sessions,
 //     and appends SyntheticKernelReceipts to per-session JSONL evidence logs.
 //   - On non-Linux: control plane only; eBPF consumer is unavailable.
@@ -318,7 +318,7 @@ func (d *daemon) enableAgentRecognition(opts kernelcapture.AgentRecognizerOption
 	if err != nil {
 		return err
 	}
-	if err := d.lifecycleFilter.setAgentRecognitionComms(recognizer.PrefilterComms()); err != nil {
+	if err := d.lifecycleFilter.setAgentRecognitionNames(recognizer.PrefilterComms(), recognizer.PrefilterExecutableBasenames()); err != nil {
 		return err
 	}
 	d.agentRecognitionMu.Lock()
@@ -344,7 +344,7 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 	if recognizer == nil {
 		return
 	}
-	result := recognizer.Classify(kernelcapture.AgentRecognitionInput{Comm: evt.Comm})
+	result := recognizer.Classify(kernelcapture.AgentRecognitionInput{Comm: evt.Comm, ExecutableBasename: evt.ExecutableBasename})
 	if result.Status == kernelcapture.AgentRecognitionStatusUnknown {
 		return
 	}
@@ -362,6 +362,7 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 		"ppid", evt.PPID,
 		"cgroup", evt.CgroupID,
 		"comm", evt.Comm,
+		"executable_basename", evt.ExecutableBasename,
 	)
 	if observer != nil {
 		observer(evt, result)

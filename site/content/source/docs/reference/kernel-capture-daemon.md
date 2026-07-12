@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "62076f52d8538415f5201b3b0fc70d35472a13bf776766bcae9fe7354f6a544f"
+source_sha256: "059f077769377f17ca3c6355d1bd8720cfc1c25c56d50c2eb94ac7fc5c511029"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -165,11 +165,13 @@ Start the Linux daemon with recognition explicitly enabled:
 ardur-kernelcaptured --agent-recognition
 ```
 
-The embedded registry currently contains four release-bound exact Linux
-`comm` values: `claude` (`claude_code`), `codex` (`codex_cli`), `gemini`
-(`gemini_cli`), and `kimi` (`kimi_cli`). The BPF producer checks those names in
-a 64-entry hash map and emits matching exec events alongside the unchanged
-cgroup-scoped lifecycle feed. Nonmatching host execs and all host-wide exit
+The embedded registry currently contains four release-bound exact Linux names:
+`claude` (`claude_code`), `codex` (`codex_cli`), `gemini` (`gemini_cli`), and
+`kimi` (`kimi_cli`). The BPF producer checks `comm` and the basename derived
+from the successful exec filename in separate 64-entry hash maps, then emits
+matching exec events alongside the unchanged cgroup-scoped lifecycle feed.
+This catches script-backed launchers without treating generic `node` or
+`python` activity as an agent. Nonmatching host execs and all host-wide exit
 events are dropped before ringbuf reservation. The registry is versioned and
 SHA-256-digested; the digest is integrity metadata for the embedded rules, not
 a signature or software-provenance assertion.
@@ -185,23 +187,24 @@ ardur-kernelcaptured --agent-recognition \
 Deny takes precedence over allow. Unknown class names fail startup, override
 flags require `--agent-recognition`, and recognition cannot be combined with
 `--no-ringbuf`. Every daemon start disables and clears any inherited
-recognition map before installing the selected names. If optional recognition
+recognition maps before installing the selected names. If optional recognition
 configuration fails, the classifier is disabled while normal cgroup-scoped
 lifecycle capture remains active. Clean detach disables and clears recognition
 so pinned tracepoints do not keep emitting candidates without a consumer.
 
-The daemon classifies only bounded process metadata already present in the
-lifecycle event and logs a recognized candidate before session routing. An
-unrouted candidate is not appended to a session evidence log. Exact-name-only
+The successful-exec hook reads at most 255 path bytes, derives and emits only a
+62-byte-or-shorter basename, and ignores truncated or oversized names. It never
+emits the parent path. The daemon classifies only bounded process metadata in
+the lifecycle event and logs a recognized candidate before session routing.
+An unrouted candidate is not appended to a session evidence log. Exact-name
 evidence has `confidence=low`,
 `identity_assurance=heuristic_process_metadata`, and
-`governance_action=observe_only`. No argv, executable path, binary hash, uid,
-environment, or file content is collected by this preview. It does not issue a
-passport, adopt a process, select policy, or enforce an action. A process can
-reuse one of these names, while interpreter-backed installs can appear as
-`node` or another generic runtime; both false positives and false negatives
-therefore remain possible. Issue #67 remains open for the multi-signal corpus
-and precision/recall gate.
+`governance_action=observe_only`. No argv, full executable path, binary hash,
+uid, environment, or file content is collected by this preview. It does not
+issue a passport, adopt a process, select policy, or enforce an action. Any
+process can reuse one of these names, and unlisted launch shapes remain false
+negatives. Issue #67 remains open for stronger fingerprints and the measured
+precision/recall gate.
 
 ## Lifecycle capture loss
 

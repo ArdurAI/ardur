@@ -12,7 +12,7 @@ import (
 
 const (
 	AgentRecognitionSchema           = "ardur.agent_recognition.v0.1"
-	EmbeddedAgentRegistryVersion     = "ardur.embedded-agent-registry.2026-07-11.v1"
+	EmbeddedAgentRegistryVersion     = "ardur.embedded-agent-registry.2026-07-11.v2"
 	AgentRecognitionStatusRecognized = "recognized"
 	AgentRecognitionStatusUnknown    = "unknown"
 	AgentRecognitionStatusAmbiguous  = "ambiguous"
@@ -22,9 +22,11 @@ const (
 )
 
 const (
-	maxAgentRecognitionCommBytes = 15
-	maxAgentRecognitionRules     = 64
-	maxAgentRecognitionComms     = 64
+	maxAgentRecognitionCommBytes               = 15
+	maxAgentRecognitionExecutableBasenameBytes = 62
+	maxAgentRecognitionRules                   = 64
+	maxAgentRecognitionComms                   = 64
+	maxAgentRecognitionExecutableBasenames     = 64
 )
 
 var agentRecognitionIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -32,9 +34,10 @@ var agentRecognitionIdentifier = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$
 // AgentRecognitionRule is one release-bound executable-name fingerprint.
 // ExactComms are Linux task comm values and therefore must fit in 15 bytes.
 type AgentRecognitionRule struct {
-	RuleID     string   `json:"rule_id"`
-	AgentType  string   `json:"agent_type"`
-	ExactComms []string `json:"exact_comms"`
+	RuleID                   string   `json:"rule_id"`
+	AgentType                string   `json:"agent_type"`
+	ExactComms               []string `json:"exact_comms,omitempty"`
+	ExactExecutableBasenames []string `json:"exact_executable_basenames,omitempty"`
 }
 
 // AgentRecognizerOptions applies root/operator-owned class overrides before
@@ -68,11 +71,13 @@ type AgentRecognitionResult struct {
 
 // AgentRecognizer is immutable after construction and safe for concurrent use.
 type AgentRecognizer struct {
-	version        string
-	digest         string
-	rules          []AgentRecognitionRule
-	commIndex      map[string]int
-	prefilterComms []string
+	version                      string
+	digest                       string
+	rules                        []AgentRecognitionRule
+	commIndex                    map[string]int
+	executableBasenameIndex      map[string]int
+	prefilterComms               []string
+	prefilterExecutableBasenames []string
 }
 
 type agentRecognitionCandidate struct {
@@ -85,10 +90,10 @@ type agentRecognitionCandidate struct {
 // signature or software-provenance claim.
 func NewEmbeddedAgentRecognizer(opts AgentRecognizerOptions) (*AgentRecognizer, error) {
 	return NewAgentRecognizer(EmbeddedAgentRegistryVersion, []AgentRecognitionRule{
-		{RuleID: "agent.claude_code.exact_comm", AgentType: "claude_code", ExactComms: []string{"claude"}},
-		{RuleID: "agent.codex_cli.exact_comm", AgentType: "codex_cli", ExactComms: []string{"codex"}},
-		{RuleID: "agent.gemini_cli.exact_comm", AgentType: "gemini_cli", ExactComms: []string{"gemini"}},
-		{RuleID: "agent.kimi_cli.exact_comm", AgentType: "kimi_cli", ExactComms: []string{"kimi"}},
+		{RuleID: "agent.claude_code.exact_name", AgentType: "claude_code", ExactComms: []string{"claude"}, ExactExecutableBasenames: []string{"claude"}},
+		{RuleID: "agent.codex_cli.exact_name", AgentType: "codex_cli", ExactComms: []string{"codex"}, ExactExecutableBasenames: []string{"codex"}},
+		{RuleID: "agent.gemini_cli.exact_name", AgentType: "gemini_cli", ExactComms: []string{"gemini"}, ExactExecutableBasenames: []string{"gemini"}},
+		{RuleID: "agent.kimi_cli.exact_name", AgentType: "kimi_cli", ExactComms: []string{"kimi"}, ExactExecutableBasenames: []string{"kimi"}},
 	}, opts)
 }
 
@@ -115,6 +120,7 @@ func NewAgentRecognizer(version string, rules []AgentRecognitionRule, opts Agent
 	knownTypes := make(map[string]struct{}, len(rules))
 	knownRuleIDs := make(map[string]struct{}, len(rules))
 	allComms := make(map[string]string)
+	allExecutableBasenames := make(map[string]string)
 	for i, rule := range rules {
 		rule.RuleID = strings.TrimSpace(rule.RuleID)
 		rule.AgentType = strings.TrimSpace(rule.AgentType)
@@ -126,13 +132,16 @@ func NewAgentRecognizer(version string, rules []AgentRecognitionRule, opts Agent
 		}
 		knownRuleIDs[rule.RuleID] = struct{}{}
 		knownTypes[rule.AgentType] = struct{}{}
-		if len(rule.ExactComms) == 0 || len(rule.ExactComms) > 16 {
-			return nil, fmt.Errorf("agent recognition rule %q must contain 1..16 exact comms", rule.RuleID)
+		if len(rule.ExactComms) > 16 || len(rule.ExactExecutableBasenames) > 16 {
+			return nil, fmt.Errorf("agent recognition rule %q exceeds 16 names for one signal", rule.RuleID)
+		}
+		if len(rule.ExactComms) == 0 && len(rule.ExactExecutableBasenames) == 0 {
+			return nil, fmt.Errorf("agent recognition rule %q must contain at least one exact name", rule.RuleID)
 		}
 		comms := make([]string, 0, len(rule.ExactComms))
 		seen := make(map[string]struct{}, len(rule.ExactComms))
 		for _, raw := range rule.ExactComms {
-			comm, ok := normalizeAgentExecutableName(raw)
+			comm, ok := normalizeAgentComm(raw)
 			if !ok {
 				return nil, fmt.Errorf("agent recognition rule %q contains an invalid comm", rule.RuleID)
 			}
@@ -148,10 +157,33 @@ func NewAgentRecognizer(version string, rules []AgentRecognitionRule, opts Agent
 		}
 		sort.Strings(comms)
 		rule.ExactComms = comms
+
+		basenames := make([]string, 0, len(rule.ExactExecutableBasenames))
+		seenBasenames := make(map[string]struct{}, len(rule.ExactExecutableBasenames))
+		for _, raw := range rule.ExactExecutableBasenames {
+			basename, ok := normalizeAgentExecutableBasename(raw)
+			if !ok {
+				return nil, fmt.Errorf("agent recognition rule %q contains an invalid executable basename", rule.RuleID)
+			}
+			if _, exists := seenBasenames[basename]; exists {
+				continue
+			}
+			if owner, exists := allExecutableBasenames[basename]; exists {
+				return nil, fmt.Errorf("agent recognition executable basename %q is shared by rules %q and %q", basename, owner, rule.RuleID)
+			}
+			seenBasenames[basename] = struct{}{}
+			allExecutableBasenames[basename] = rule.RuleID
+			basenames = append(basenames, basename)
+		}
+		sort.Strings(basenames)
+		rule.ExactExecutableBasenames = basenames
 		canonical[i] = rule
 	}
 	if len(allComms) > maxAgentRecognitionComms {
 		return nil, fmt.Errorf("agent recognition registry contains %d exact comms, maximum is %d", len(allComms), maxAgentRecognitionComms)
+	}
+	if len(allExecutableBasenames) > maxAgentRecognitionExecutableBasenames {
+		return nil, fmt.Errorf("agent recognition registry contains %d exact executable basenames, maximum is %d", len(allExecutableBasenames), maxAgentRecognitionExecutableBasenames)
 	}
 	sort.Slice(canonical, func(i, j int) bool { return canonical[i].RuleID < canonical[j].RuleID })
 
@@ -177,7 +209,9 @@ func NewAgentRecognizer(version string, rules []AgentRecognitionRule, opts Agent
 
 	activeRules := make([]AgentRecognitionRule, 0, len(canonical))
 	commIndex := make(map[string]int)
+	executableBasenameIndex := make(map[string]int)
 	prefilterComms := make([]string, 0, len(allComms))
+	prefilterExecutableBasenames := make([]string, 0, len(allExecutableBasenames))
 	for _, rule := range canonical {
 		if _, denied := deny[rule.AgentType]; denied {
 			continue
@@ -193,15 +227,31 @@ func NewAgentRecognizer(version string, rules []AgentRecognitionRule, opts Agent
 			commIndex[comm] = index
 			prefilterComms = append(prefilterComms, comm)
 		}
+		for _, basename := range rule.ExactExecutableBasenames {
+			executableBasenameIndex[basename] = index
+			prefilterExecutableBasenames = append(prefilterExecutableBasenames, basename)
+		}
 	}
 	sort.Strings(prefilterComms)
+	sort.Strings(prefilterExecutableBasenames)
 	return &AgentRecognizer{
-		version:        version,
-		digest:         hex.EncodeToString(digestBytes[:]),
-		rules:          activeRules,
-		commIndex:      commIndex,
-		prefilterComms: prefilterComms,
+		version:                      version,
+		digest:                       hex.EncodeToString(digestBytes[:]),
+		rules:                        activeRules,
+		commIndex:                    commIndex,
+		executableBasenameIndex:      executableBasenameIndex,
+		prefilterComms:               prefilterComms,
+		prefilterExecutableBasenames: prefilterExecutableBasenames,
 	}, nil
+}
+
+// PrefilterExecutableBasenames returns a defensive copy suitable for the
+// bounded Linux successful-exec filename map.
+func (r *AgentRecognizer) PrefilterExecutableBasenames() []string {
+	if r == nil {
+		return nil
+	}
+	return append([]string(nil), r.prefilterExecutableBasenames...)
 }
 
 // PrefilterComms returns a defensive copy suitable for the Linux BPF map.
@@ -212,8 +262,8 @@ func (r *AgentRecognizer) PrefilterComms() []string {
 	return append([]string(nil), r.prefilterComms...)
 }
 
-// Classify matches bounded names. Two agreeing independent name signals raise
-// confidence to medium; name-only evidence can never be high confidence.
+// Classify matches bounded names. Exact process names remain low-confidence
+// even when both fields agree because one executable can control both values.
 func (r *AgentRecognizer) Classify(input AgentRecognitionInput) AgentRecognitionResult {
 	result := AgentRecognitionResult{
 		SchemaVersion:     AgentRecognitionSchema,
@@ -230,8 +280,8 @@ func (r *AgentRecognizer) Classify(input AgentRecognitionInput) AgentRecognition
 	result.RegistrySHA256 = r.digest
 
 	candidates := make(map[string]*agentRecognitionCandidate)
-	r.matchSignal(candidates, "comm", input.Comm)
-	r.matchSignal(candidates, "executable_basename", input.ExecutableBasename)
+	r.matchSignal(candidates, r.commIndex, normalizeAgentComm, "comm", input.Comm)
+	r.matchSignal(candidates, r.executableBasenameIndex, normalizeAgentExecutableBasename, "executable_basename", input.ExecutableBasename)
 	if len(candidates) == 0 {
 		return result
 	}
@@ -259,18 +309,15 @@ func (r *AgentRecognizer) Classify(input AgentRecognitionInput) AgentRecognition
 	}
 	sort.Strings(result.MatchedSignalKinds)
 	result.Confidence = AgentRecognitionConfidenceLow
-	if len(result.MatchedSignalKinds) > 1 {
-		result.Confidence = AgentRecognitionConfidenceMedium
-	}
 	return result
 }
 
-func (r *AgentRecognizer) matchSignal(candidates map[string]*agentRecognitionCandidate, kind, raw string) {
-	name, ok := normalizeAgentExecutableName(raw)
+func (r *AgentRecognizer) matchSignal(candidates map[string]*agentRecognitionCandidate, indexByName map[string]int, normalize func(string) (string, bool), kind, raw string) {
+	name, ok := normalize(raw)
 	if !ok {
 		return
 	}
-	index, ok := r.commIndex[name]
+	index, ok := indexByName[name]
 	if !ok {
 		return
 	}
@@ -287,9 +334,17 @@ func (r *AgentRecognizer) matchSignal(candidates map[string]*agentRecognitionCan
 	candidate.signalKinds[kind] = struct{}{}
 }
 
-func normalizeAgentExecutableName(raw string) (string, bool) {
+func normalizeAgentComm(raw string) (string, bool) {
+	return normalizeAgentExecutableName(raw, maxAgentRecognitionCommBytes)
+}
+
+func normalizeAgentExecutableBasename(raw string) (string, bool) {
+	return normalizeAgentExecutableName(raw, maxAgentRecognitionExecutableBasenameBytes)
+}
+
+func normalizeAgentExecutableName(raw string, maxBytes int) (string, bool) {
 	name := strings.TrimSpace(raw)
-	if name == "" || len(name) > maxAgentRecognitionCommBytes || strings.ContainsAny(name, "/\\\x00") {
+	if name == "" || len(name) > maxBytes || strings.ContainsAny(name, "/\\\x00") {
 		return "", false
 	}
 	for _, ch := range name {

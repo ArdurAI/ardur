@@ -261,6 +261,40 @@ func TestLinuxEBPFCgroupFilterPositiveSmoke(t *testing.T) {
 	)
 }
 
+func TestLinuxEBPFAgentRecognitionSmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF agent-recognition smoke")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := RunLinuxEBPFAgentRecognitionSmoke(ctx, 10*time.Second)
+	if err != nil {
+		t.Fatalf("RunLinuxEBPFAgentRecognitionSmoke failed: %v", err)
+	}
+	if result.Platform != "linux" || !result.BTFAvailable {
+		t.Fatalf("unexpected platform evidence: platform=%q btf=%t", result.Platform, result.BTFAvailable)
+	}
+	if result.AttachedTracepoint != linuxEBPFExecTracepoint {
+		t.Fatalf("tracepoint = %q, want %q", result.AttachedTracepoint, linuxEBPFExecTracepoint)
+	}
+	if result.Event.Type != ProcessEventExec || result.Event.ExecutableBasename != "codex" {
+		t.Fatalf("event = %+v, want script-backed codex exec", result.Event)
+	}
+	if !result.NegativeTimedOut || result.UnexpectedNegativeEvent {
+		t.Fatalf("hard negative evidence = timeout %t unexpected event %t", result.NegativeTimedOut, result.UnexpectedNegativeEvent)
+	}
+	t.Logf("kernel=%s basename=%q comm=%q pid=%d negative=%q negative_pid=%d negative_timeout=%t",
+		result.KernelRelease,
+		result.Event.ExecutableBasename,
+		result.Event.Comm,
+		result.Event.PID,
+		result.NegativeCommand,
+		result.NegativePID,
+		result.NegativeTimedOut,
+	)
+}
+
 func TestLinuxEBPFCgroupFilterNegativeSmoke(t *testing.T) {
 	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
 		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF cgroup-filter smoke")
