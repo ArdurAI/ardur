@@ -241,11 +241,22 @@ def test_full_bundle_verifies_offline_and_reports_signed_narrowing(
 
     monkeypatch.setattr(socket, "create_connection", network_forbidden)
     report = _verify(fixture)
+    replayed = _verify(fixture)
 
     assert report["valid"] is True
+    assert replayed["valid"] is True
     assert report["result"] == "verified"
     assert report["verification_mode"] == "offline"
     assert report["revocation_checked"] is False
+    assert report["freshness"] == {
+        "age_checked": False,
+        "max_age_s": None,
+        "allowed_future_skew_s": None,
+        "latest_receipt_iat": 1_800_000_020,
+        "age_s": None,
+        "one_time_replay_checked": False,
+    }
+    assert "offline verification did not enforce receipt age or one-time replay" in report["limitations"]
     assert report["summary"] == {
         "receipt_count": 3,
         "permit_count": 2,
@@ -264,6 +275,85 @@ def test_full_bundle_verifies_offline_and_reports_signed_narrowing(
     assert len(report["trust_roots"]) == 3
 
 
+def test_opt_in_bundle_age_accepts_boundary_and_rejects_stale_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    latest_iat = 1_800_000_020
+    monkeypatch.setattr(offline.time, "time", lambda: latest_iat + 300)
+
+    report = _verify(
+        fixture,
+        max_bundle_age_s=300,
+        freshness_clock_skew_s=60,
+    )
+
+    assert report["valid"] is True
+    assert report["freshness"] == {
+        "age_checked": True,
+        "max_age_s": 300,
+        "allowed_future_skew_s": 60,
+        "latest_receipt_iat": latest_iat,
+        "age_s": 300,
+        "one_time_replay_checked": False,
+    }
+    assert "age-bounded freshness does not prevent repeated presentation inside the accepted window" in report["limitations"]
+    rendered = render_cli_report(report)
+    assert "Freshness age checked: true | one-time replay checked: false" in rendered
+    assert "Freshness age: 300s | maximum: 300s | allowed future skew: 60s" in rendered
+
+    monkeypatch.setattr(offline.time, "time", lambda: latest_iat + 301)
+    with pytest.raises(OfflineVerificationError) as caught:
+        _verify(
+            fixture,
+            max_bundle_age_s=300,
+            freshness_clock_skew_s=60,
+        )
+    assert caught.value.code == "bundle_freshness_stale"
+    assert caught.value.index == 2
+
+
+def test_opt_in_bundle_age_bounds_future_clock_skew(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    latest_iat = 1_800_000_020
+    monkeypatch.setattr(offline.time, "time", lambda: latest_iat - 60)
+    report = _verify(
+        fixture,
+        max_bundle_age_s=300,
+        freshness_clock_skew_s=60,
+    )
+    assert report["freshness"]["age_s"] == 0
+
+    monkeypatch.setattr(offline.time, "time", lambda: latest_iat - 61)
+    with pytest.raises(OfflineVerificationError) as caught:
+        _verify(
+            fixture,
+            max_bundle_age_s=300,
+            freshness_clock_skew_s=60,
+        )
+    assert caught.value.code == "bundle_freshness_future"
+    assert caught.value.index == 2
+
+
+@pytest.mark.parametrize(
+    ("max_age", "clock_skew"),
+    [(-1, 60), (True, 60), (None, 60), (300, -1), (300, True)],
+)
+def test_bundle_freshness_policy_rejects_invalid_bounds(
+    tmp_path: Path, max_age: Any, clock_skew: Any
+) -> None:
+    fixture = _fixture(tmp_path)
+    with pytest.raises(OfflineVerificationError) as caught:
+        _verify(
+            fixture,
+            max_bundle_age_s=max_age,
+            freshness_clock_skew_s=clock_skew,
+        )
+    assert caught.value.code == "freshness_policy_invalid"
+
+
 def test_default_cli_and_html_reports_redact_and_escape(tmp_path: Path) -> None:
     fixture = _fixture(tmp_path)
     report = _verify(fixture)
@@ -280,6 +370,8 @@ def test_default_cli_and_html_reports_redact_and_escape(tmp_path: Path) -> None:
     assert "<script" not in rendered.lower()
     assert "connect-src 'none'" in rendered
     assert "signed_cost=cost_usd=0.001, token_count=100" in cli
+    assert "Freshness age checked: false | one-time replay checked: false" in cli
+    assert "Signed receipt age was not checked. One-time replay was not checked." in rendered
     assert report["timeline"][0]["evidence"]["transparency"]["anchor_id"] in cli
     assert report["timeline"][0]["evidence"]["receiver"]["attestation_id"] in cli
     assert "cost_usd=0.001, token_count=100" in rendered
@@ -418,6 +510,67 @@ def test_cli_full_bundle_json_report(
     assert report["valid"] is True
     assert report["summary"]["receipt_count"] == 3
     assert report["redaction"]["enabled"] is True
+
+
+def test_cli_full_bundle_enforces_opt_in_freshness_policy(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path)
+    keys = _write_public_keys(fixture, tmp_path)
+    monkeypatch.setattr(offline.time, "time", lambda: 1_800_000_320)
+
+    assert (
+        cli_main(
+            [
+                "verify",
+                str(fixture["path"]),
+                "--receipt-public-key",
+                str(keys["receipt"]),
+                "--transparency-log-key",
+                str(keys["log"]),
+                "--receiver-public-key",
+                str(keys["receiver"]),
+                "--max-bundle-age-s",
+                "300",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert report["freshness"] == {
+        "age_checked": True,
+        "max_age_s": 300,
+        "allowed_future_skew_s": 60,
+        "latest_receipt_iat": 1_800_000_020,
+        "age_s": 300,
+        "one_time_replay_checked": False,
+    }
+
+
+def test_cli_freshness_clock_skew_requires_max_bundle_age(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = _fixture(tmp_path)
+    keys = _write_public_keys(fixture, tmp_path)
+
+    assert (
+        cli_main(
+            [
+                "verify",
+                str(fixture["path"]),
+                "--receipt-public-key",
+                str(keys["receipt"]),
+                "--freshness-clock-skew-s",
+                "60",
+            ]
+        )
+        == 1
+    )
+    failure = json.loads(capsys.readouterr().out)
+    assert failure["error"] == "offline_freshness_policy_invalid"
 
 
 def test_cli_full_bundle_requires_external_log_and_receiver_keys(
@@ -652,6 +805,21 @@ def test_cli_rejects_mode_specific_options_instead_of_ignoring_them(
 ) -> None:
     assert (
         cli_main(["verify", "--token", "header.payload.signature", "--chain-only"]) == 1
+    )
+    failure = json.loads(capsys.readouterr().out)
+    assert failure["error"] == "verify_option_invalid"
+
+    assert (
+        cli_main(
+            [
+                "verify",
+                "--token",
+                "header.payload.signature",
+                "--max-bundle-age-s",
+                "300",
+            ]
+        )
+        == 1
     )
     failure = json.loads(capsys.readouterr().out)
     assert failure["error"] == "verify_option_invalid"

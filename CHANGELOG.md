@@ -5,6 +5,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Add an opt-in verifier-clock maximum-age policy for offline evidence bundles,
+  bound future-dated receipts by explicit skew, and report that age checks do
+  not provide one-time replay protection
 - Revoke path and network allowlist entries dropped by a BPF-LSM policy update
   before publishing its managed-generation gate, and abort the update if a
   stale entry cannot be removed

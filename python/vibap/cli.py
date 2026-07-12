@@ -1541,6 +1541,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
             args.verify_expiry,
             args.html_report is not None,
             args.unsafe_show_sensitive,
+            args.max_bundle_age_s is not None,
+            args.freshness_clock_skew_s is not None,
         )
     ):
         _print_json(
@@ -1731,6 +1733,25 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             }
         )
         return 1
+    invalid_max_age = args.max_bundle_age_s is not None and args.max_bundle_age_s < 0
+    invalid_freshness_skew = (
+        args.freshness_clock_skew_s is not None and args.freshness_clock_skew_s < 0
+    )
+    freshness_skew_without_age = (
+        args.freshness_clock_skew_s is not None and args.max_bundle_age_s is None
+    )
+    if invalid_max_age or invalid_freshness_skew or freshness_skew_without_age:
+        _print_json(
+            {
+                "valid": False,
+                "error": "offline_freshness_policy_invalid",
+                "message": (
+                    "--max-bundle-age-s must be zero or greater; "
+                    "--freshness-clock-skew-s requires it and must also be zero or greater."
+                ),
+            }
+        )
+        return 1
     try:
         receipt_public_key = (
             _load_p256_public_key(args.receipt_public_key, label="receipt public key")
@@ -1757,6 +1778,8 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             max_registration_delay_s=args.max_registration_delay_s,
             max_attestation_delay_s=args.max_attestation_delay_s,
             receiver_clock_skew_s=args.receiver_clock_skew_s,
+            max_bundle_age_s=args.max_bundle_age_s,
+            freshness_clock_skew_s=args.freshness_clock_skew_s,
             redact=not args.unsafe_show_sensitive,
         )
         if args.html_report is not None:
@@ -5018,6 +5041,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=60,
         help="allowed receiver clock skew relative to the receipt",
+    )
+    verify.add_argument(
+        "--max-bundle-age-s",
+        type=int,
+        help="reject a bundle whose latest signed receipt is older than this many seconds",
+    )
+    verify.add_argument(
+        "--freshness-clock-skew-s",
+        type=int,
+        help="allowed future clock skew for --max-bundle-age-s (default: 60)",
     )
     verify.add_argument(
         "--chain-only",

@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "74e21f7cdd351a2216d92845ff12353b186fe9db25b07cfc9e63a7ce44b71929"
+source_sha256: "7b8eb7acb83931e1e5f935064b1d369a95763725c9aba831d6fa34c43a2bcdbc"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -233,6 +233,8 @@ ardur verify EVIDENCE.json
              --receipt-public-key FILE
              --transparency-log-key FILE
              --receiver-public-key FILE
+             [--max-bundle-age-s SECONDS]
+             [--freshness-clock-skew-s SECONDS]
              [--html-report FILE] [--json]
              [--unsafe-show-sensitive]
 
@@ -259,6 +261,17 @@ self-attested envelope because successful enforcement prevented receiver
 dispatch. Output states `verification_mode: offline` and
 `revocation_checked: false`, fingerprints all trust roots, and discloses stale-
 revocation and completeness limits.
+
+The default is retrospective audit verification: signed receipt age and
+one-time replay are not checked. `--max-bundle-age-s SECONDS` opts into an
+inclusive verifier-clock age limit over the latest signed receipt `iat`.
+`--freshness-clock-skew-s SECONDS` controls the allowed future skew and
+defaults to 60 when the age limit is enabled. Both values must be non-negative,
+and supplying the skew option without the age option fails closed. Reports
+always state whether age was checked and that one-time replay was not checked.
+An age limit narrows replay exposure but does not prevent repeated presentation
+inside the accepted window; use a verifier-issued nonce or persistent replay
+cache when one-time authorization is required.
 
 Raw JSONL receipt journals require `--chain-only`. The result is
 `verified_chain_only`; removing sidecars cannot silently produce a full
