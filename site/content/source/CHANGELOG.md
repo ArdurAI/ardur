@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "260f8866016abcb956db38cd9ecd87bdd8f6a15dcdc0a5eedca44ccb080a0e1f"
+source_sha256: "79c39206e9d9bc2a1f40d06beac3d29099d072a3f65a41046c7101a1f3b2858e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Scan inline tool `inputSchema` and legacy `parameters` description annotations
+  for instruction injection without treating instance defaults/examples as
+  schemas or exposing unsafe schema-member names
 - Bind each seccomp listener handoff to the registered root process's
   daemon-observed PID/start-time identity instead of accepting any peer on the
   daemon-wide UID/GID allowlist

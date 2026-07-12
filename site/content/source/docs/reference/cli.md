@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "65370e89259e3b45b8d1aae206869f4af1c006f5173f62cd4db69e2f557b957d"
+source_sha256: "74e21f7cdd351a2216d92845ff12353b186fe9db25b07cfc9e63a7ce44b71929"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1449,7 +1449,9 @@ It includes a verdict, severity counts, redacted evidence, remediation, and a
 deny-oriented capability-token/policy skeleton. Markdown contains the same
 operator-facing findings. Reports never include the input path, literal
 environment values, raw descriptions, full command arguments, or endpoint
-URLs.
+URLs. `TS010` checks tool-level descriptions plus inline JSON Schema
+description annotations under `inputSchema` and legacy `parameters`; unsafe
+schema-member names in evidence paths are replaced by their SHA-256.
 
 CI can select the lowest failing severity. Exit `0` means analysis completed
 without reaching that threshold, exit `2` means analysis completed and reached
@@ -1466,7 +1468,9 @@ ardur preflight tool-server \
 `--output` uses an atomic owner-only file writer and prints a compact JSON
 status envelope instead of the report. Input failures return stable conditions
 such as `config_missing`, `config_malformed`, `config_duplicate_key`, and
-`server_collection_missing` without echoing local paths or file contents.
+`server_collection_missing` without echoing local paths or file contents. A
+non-string inline schema description fails with
+`tool_schema_description_invalid`.
 
 Supported v0.1 shapes are top-level `mcpServers`, VS Code-style `servers`, and
 static `{name, tools}` manifests. A per-server `includeTools` list can seed a
