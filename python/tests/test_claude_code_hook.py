@@ -54,6 +54,242 @@ def _deny_reason(output: dict) -> str:
     return hook_output["permissionDecisionReason"]
 
 
+def _pre_hook_input(*, tool_name: str, tool_input: dict[str, Any], suffix: str) -> dict[str, Any]:
+    return {
+        "session_id": "personal-firewall-test",
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool_name,
+        "tool_use_id": f"tool-{suffix}",
+        "tool_input": tool_input,
+    }
+
+
+def test_direct_hook_enforces_cumulative_signed_tool_call_budget(tmp_path, monkeypatch):
+    from vibap.claude_code_hook import handle_pre_tool_use
+    from vibap.claude_code_report import build_claude_code_report
+
+    keys = tmp_path / "keys"
+    private_key, _public_key = generate_keypair(keys_dir=keys)
+    mission = MissionPassport(
+        agent_id="personal-budget",
+        mission="enforce one governed action",
+        allowed_tools=["Read"],
+        resource_scope=[str(tmp_path), f"{tmp_path}/*"],
+        cwd=str(tmp_path),
+        max_tool_calls=1,
+        max_duration_s=600,
+    )
+    token = issue_passport(mission, private_key, ttl_s=600)
+    chain_dir = tmp_path / "chains"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "personal-budget")
+
+    first = handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "one.txt")},
+            suffix="one",
+        ),
+        keys_dir=keys,
+    )
+    second = handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "two.txt")},
+            suffix="two",
+        ),
+        keys_dir=keys,
+    )
+
+    assert first["continue"] is True
+    assert "budget exceeded: 1/1 tool calls used" in _deny_reason(second)
+    report = build_claude_code_report(chain_dir=chain_dir, keys_dir=keys)
+    assert report["totals"]["verdicts"] == {"compliant": 1, "violation": 1}
+    assert report["chains"][0]["actions"][0]["budget_remaining"] == {"tool_calls": 0}
+    assert report["chains"][0]["actions"][1]["explanation"] == (
+        "blocked because the signed session action budget is exhausted"
+    )
+
+
+def test_direct_hook_composes_signed_forbid_rules_policy(tmp_path, monkeypatch):
+    from vibap.claude_code_hook import handle_pre_tool_use
+    from vibap.claude_code_report import build_claude_code_report
+
+    rules = [
+        {
+            "id": "personal_secret_like_argument",
+            "forbid_when": {"arg_contains": ["api_key="]},
+        }
+    ]
+    canonical = json.dumps(rules, sort_keys=True, separators=(",", ":"))
+    policy = {
+        "backend": "forbid_rules",
+        "label": "profile-forbid-rules",
+        "policy_inline": "",
+        "policy_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "data_inline": rules,
+    }
+    keys = tmp_path / "keys"
+    private_key, _public_key = generate_keypair(keys_dir=keys)
+    mission = MissionPassport(
+        agent_id="personal-secret",
+        mission="deny secret-like action arguments",
+        allowed_tools=["Write"],
+        resource_scope=[str(tmp_path), f"{tmp_path}/*"],
+        cwd=str(tmp_path),
+        max_tool_calls=10,
+        max_duration_s=600,
+        additional_policies=[policy],
+    )
+    token = issue_passport(mission, private_key, ttl_s=600)
+    chain_dir = tmp_path / "chains"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "personal-secret")
+
+    output = handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Write",
+            tool_input={
+                "file_path": str(tmp_path / "config.txt"),
+                "content": "api_key=synthetic-value",
+            },
+            suffix="secret",
+        ),
+        keys_dir=keys,
+    )
+
+    assert "personal_secret_like_argument" in _deny_reason(output)
+    report = build_claude_code_report(chain_dir=chain_dir, keys_dir=keys)
+    assert report["chains"][0]["actions"][0]["policies"] == [
+        {"backend": "native", "decision": "Allow"},
+        {
+            "backend": "forbid_rules",
+            "decision": "Deny",
+            "rule_id": "personal_secret_like_argument",
+        },
+    ]
+    assert report["chains"][0]["actions"][0]["applied_rule"] == (
+        "personal_secret_like_argument"
+    )
+
+
+def test_direct_hook_fails_closed_for_malformed_additional_policies_claim(
+    tmp_path, monkeypatch
+):
+    from vibap.claude_code_hook import handle_pre_tool_use
+
+    token = _issue_wildcard_test_passport(
+        tmp_path,
+        extra_claims={"additional_policies": "not-a-policy-list"},
+    )
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chains"))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "malformed-policies")
+
+    output = handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "README.md")},
+            suffix="malformed-policy",
+        ),
+        keys_dir=tmp_path,
+    )
+
+    assert "unknown policy backend: invalid_additional_policies" in _deny_reason(
+        output
+    )
+
+
+def test_direct_hook_fails_closed_for_oversized_budget_chain(tmp_path, monkeypatch):
+    from vibap import claude_code_hook as hook
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    chain_dir = tmp_path / "chains"
+    receipt_file = chain_dir / "oversized-budget-chain" / "receipts.jsonl"
+    receipt_file.parent.mkdir(parents=True)
+    receipt_file.write_bytes(b"x" * 17)
+    monkeypatch.setattr(hook, "HOOK_STATE_MAX_BYTES", 16)
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "oversized-budget-chain")
+
+    output = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "README.md")},
+            suffix="oversized-chain",
+        ),
+        keys_dir=tmp_path,
+    )
+
+    assert _deny_reason(output) == (
+        "ardur: blocked - signed receipt chain is unavailable or invalid"
+    )
+
+
+def test_direct_hook_reuses_verified_state_and_detects_same_size_tamper(
+    tmp_path, monkeypatch
+):
+    from vibap import claude_code_hook as hook
+    from vibap import receipt
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    chain_dir = tmp_path / "chains"
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "cached-budget-chain")
+
+    first = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "one.txt")},
+            suffix="cached-one",
+        ),
+        keys_dir=tmp_path,
+    )
+    assert first["continue"] is True
+
+    verify_calls = 0
+    original_verify_chain = receipt.verify_chain
+
+    def counted_verify_chain(*args, **kwargs):
+        nonlocal verify_calls
+        verify_calls += 1
+        return original_verify_chain(*args, **kwargs)
+
+    monkeypatch.setattr(receipt, "verify_chain", counted_verify_chain)
+    second = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "two.txt")},
+            suffix="cached-two",
+        ),
+        keys_dir=tmp_path,
+    )
+    assert second["continue"] is True
+    assert verify_calls == 0
+
+    receipt_file = chain_dir / "cached-budget-chain" / "receipts.jsonl"
+    raw = receipt_file.read_bytes()
+    replacement = b"f" if raw[:1] != b"f" else b"e"
+    receipt_file.write_bytes(replacement + raw[1:])
+
+    tampered = hook.handle_pre_tool_use(
+        _pre_hook_input(
+            tool_name="Read",
+            tool_input={"file_path": str(tmp_path / "three.txt")},
+            suffix="cached-three",
+        ),
+        keys_dir=tmp_path,
+    )
+    assert _deny_reason(tampered) == (
+        "ardur: blocked - signed receipt chain is unavailable or invalid"
+    )
+    assert verify_calls == 1
+
+
 def _issue_wildcard_test_passport(
     tmp_path: Path,
     *,

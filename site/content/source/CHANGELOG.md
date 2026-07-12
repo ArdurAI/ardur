@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "81c2404a27135ac0f37702a957b240fcaabbcf47955ed68dd7b52e1250d69f50"
+source_sha256: "a6f092694200269a62cce11351ee9e9df61f674f963a4df0bbb7b4509f445aa8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,6 +30,8 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Personal action-firewall profile and one-command provider-free ASK/DENY proof
+- Readable Claude Code action summaries with signed action-budget evidence
 - Execution Receipt v0.2 schema, embedded package copy, and canonical golden fixture
 - Comprehensive E2E showcase test suite (28 tests, 7 layers)
 - Live adversarial scoreboard and continuous harness
@@ -49,6 +51,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Enforce cumulative direct-hook tool-call budgets from verified receipt chains
+- Compose mission-declared policy backends in the direct Claude Code hook
+- Canonicalize persisted forbid-rule hashes and key them by actual mission ID
 - CI baseline repair after AskUserQuestion landing
 - Claude AskUserQuestion hash handling
 - Gemini hook contract aligned with CLI 0.44.1

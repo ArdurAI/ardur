@@ -38,6 +38,7 @@ from .passport import (
     KeyDirectoryError,
     MissionPassport,
     _ensure_default_home_dir,
+    derive_mission_id,
     generate_keypair,
     load_existing_private_key,
     load_existing_public_key,
@@ -61,6 +62,11 @@ from .personal_hub import (
     setup_personal,
     status_response_with_next_steps,
     uninstall_personal,
+)
+from .personal_firewall import (
+    MAX_DEMO_SECONDS as PERSONAL_FIREWALL_MAX_DEMO_SECONDS,
+    PersonalFirewallDemoError,
+    run_personal_firewall_demo,
 )
 from .claude_code_report import build_claude_code_report
 from .claude_code_hook import main as claude_code_hook_main
@@ -2294,6 +2300,22 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     )
     print(f"Per-child attribution: {report['coverage']['per_child_attribution']}")
     print(f"Attribution: {report['coverage']['attribution']}")
+    actions = [action for chain in report["chains"] for action in chain.get("actions", [])]
+    if actions:
+        print("Actions:")
+        for action in actions[-20:]:
+            request = action["request"]
+            remaining = action.get("budget_remaining", {}).get("tool_calls")
+            budget_text = f"; {remaining} governed calls remain" if remaining is not None else ""
+            print(
+                f"- {action['verdict'].upper()} {request['tool']} "
+                f"({request['action_class']}/{request['side_effect_class']}): "
+                f"{action['explanation']}{budget_text}"
+            )
+        if len(actions) > 20:
+            print(f"  Showing the latest 20 of {len(actions)} signed actions.")
+    print(f"Cost boundary: {report['cost_boundary']['detail']}")
+    print(f"Verify later: {report['verification']['command']}")
     _print_report_next_steps(report)
     return 0
 
@@ -3401,7 +3423,43 @@ def cmd_personal_native_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_personal_firewall_demo(args: argparse.Namespace) -> int:
+    try:
+        result = run_personal_firewall_demo(
+            timeout_s=args.timeout_s,
+            temp_parent=args.temp_parent.expanduser().resolve() if args.temp_parent else None,
+            emit=not args.json,
+        )
+    except PersonalFirewallDemoError as exc:
+        failure = {
+            "ok": False,
+            "error": "personal_firewall_demo_failed",
+            "condition": "personal_firewall_demo_failed",
+            "message": str(exc),
+            "next_steps": [
+                {
+                    "action": "retry_local_demo",
+                    "command": "ardur personal-firewall demo",
+                    "detail": "Retry the provider-free local proof with the default temporary directory.",
+                }
+            ],
+        }
+        if args.json:
+            _print_json(failure)
+        else:
+            print(f"FAIL  {failure['message']}")
+        return 1
+    if args.json:
+        _print_json(result)
+    return 0
+
+
 CLAUDE_CODE_PROTECT_MODES = {
+    "personal-firewall": {
+        "mission": "Local personal action firewall for Claude Code.",
+        "allowed_tools": ["Read", "Glob", "Grep", "Edit", "MultiEdit", "Write"],
+        "forbidden_tools": ["Bash", "WebFetch", "WebSearch"],
+    },
     "safe-coding": {
         "mission": "Safe Claude Code work inside the selected folder.",
         "allowed_tools": ["Read", "Glob", "Grep", "Edit", "MultiEdit", "Write"],
@@ -3978,6 +4036,10 @@ def _resolve_protect_policies(
     """Build additional_policies from CLI flags + profile."""
     policies: list[dict[str, object]] = []
 
+    def forbid_rules_sha256(rules: object) -> str:
+        canonical = json.dumps(rules, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
     # Reject empty/whitespace-only policy path arguments before Path()
     # normalises them to the current working directory. ``type=str`` on the
     # parser keeps the raw value so an empty/whitespace input can be detected
@@ -4016,9 +4078,7 @@ def _resolve_protect_policies(
             "backend": "forbid_rules",
             "label": "cli-forbid-rules",
             "policy_inline": "",
-            "policy_sha256": hashlib.sha256(
-                json.dumps(rules, sort_keys=True).encode()
-            ).hexdigest(),
+            "policy_sha256": forbid_rules_sha256(rules),
             "data_inline": rules,
         })
     if cedar_policy_raw is not None:
@@ -4042,9 +4102,7 @@ def _resolve_protect_policies(
             "backend": "forbid_rules",
             "label": "profile-forbid-rules",
             "policy_inline": "",
-            "policy_sha256": hashlib.sha256(
-                json.dumps(profile.forbid_rules, sort_keys=True).encode()
-            ).hexdigest(),
+            "policy_sha256": forbid_rules_sha256(profile.forbid_rules),
             "data_inline": profile.forbid_rules,
         })
     if profile and profile.cedar_policy:
@@ -4607,16 +4665,24 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         cwd=str(scope),
         max_tool_calls=max_tool_calls,
         max_duration_s=max_duration_s,
+        additional_policies=additional_policies,
     )
     token = issue_passport(mission, private_key, ttl_s=args.ttl_s or max_duration_s)
+    claims = verify_passport(token, public_key)
     # Seed additional policies (Cedar / forbid_rules) into the persistent
     # store so the proxy picks them up at session-start time. Policies are
     # resolved from CLI flags first, then from the profile.
     if additional_policies:
         from vibap.backed_policy_store import FileBackedPolicyStore
         store = FileBackedPolicyStore(home)
-        store.put_policies(mission_id=args.agent_id, policies=additional_policies)
-    claims = verify_passport(token, public_key)
+        store.put_policies(
+            mission_id=str(
+                claims.get("mission_id")
+                or mission.mission_id
+                or derive_mission_id(mission.agent_id, mission.mission)
+            ),
+            policies=additional_policies,
+        )
     active_passport = home / "active_mission.jwt"
     _write_private_text(active_passport, token + "\n")
     hook_python = home / "claude-code-hook-python"
@@ -5494,6 +5560,32 @@ def build_parser() -> argparse.ArgumentParser:
         default="chrome",
     )
     personal_native_manifest.set_defaults(func=cmd_personal_native_manifest)
+
+    personal_firewall = subparsers.add_parser(
+        "personal-firewall",
+        help="run and inspect the conservative local personal action firewall",
+    )
+    personal_firewall_subparsers = personal_firewall.add_subparsers(
+        dest="personal_firewall_command",
+        required=True,
+    )
+    personal_firewall_demo = personal_firewall_subparsers.add_parser(
+        "demo",
+        help="run a provider-free ASK/DENY and signed-receipt proof",
+    )
+    personal_firewall_demo.add_argument(
+        "--timeout-s",
+        type=float,
+        default=PERSONAL_FIREWALL_MAX_DEMO_SECONDS,
+        help="overall demo deadline in seconds (maximum 60)",
+    )
+    personal_firewall_demo.add_argument(
+        "--temp-parent",
+        type=Path,
+        help="existing directory that receives temporary demo state",
+    )
+    personal_firewall_demo.add_argument("--json", action="store_true")
+    personal_firewall_demo.set_defaults(func=cmd_personal_firewall_demo)
 
     profile = subparsers.add_parser(
         "profile",

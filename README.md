@@ -133,6 +133,11 @@ Start with the source-checkout walkthrough in
 [`docs/guides/claude-code-mvp-quickstart.md`](docs/guides/claude-code-mvp-quickstart.md).
 It gives three bounded paths:
 
+- a **personal action-firewall proof** using `ardur personal-firewall demo`;
+  it shows one local `ASK` outcome (Claude Code's normal permission flow stays
+  in charge), three pre-dispatch denials for outside-workspace, secret-like,
+  and network requests, and four verified signed receipt summaries without an
+  API key or retained demo state;
 - a **60-second deliberate deny proof** using
   `python3 scripts/run-claude-deny-demo.py`; it exercises the real local hook
   adapter, verifies a signed violation receipt, checks an unchanged canary, and
@@ -147,6 +152,10 @@ That guide also separates **Works now**, **Not claimed**, and **Coming soon**
 to clearly mark the boundary between shipped, deferred, and in-progress
 capabilities — package-manager release status, provider-hidden behavior,
 and subprocess/kernel/network side-effect gaps.
+
+The personal mode enforces a signed governed-tool-call budget. It does not
+claim a dollar-denominated cost cap unless an adapter supplies trusted signed
+cost telemetry.
 
 After a run, use the
 [`Phase 1 Demo Packet`](docs/guides/phase1-demo-packet.md) to assemble a bounded

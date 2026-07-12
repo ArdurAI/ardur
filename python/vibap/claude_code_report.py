@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,6 +11,9 @@ from typing import Any, Mapping
 from .passport import DEFAULT_HOME, load_public_key
 from .receipt import verify_chain
 from .shareable_redaction import path_aliases, redact_local_paths
+
+
+_RULE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 def _counter_dict(values: list[str]) -> dict[str, int]:
@@ -208,6 +212,56 @@ def _merge_attribution_mode(modes: list[str]) -> str:
     return "exact"
 
 
+def _action_summary(claim: Mapping[str, Any]) -> dict[str, Any]:
+    verdict = str(claim.get("verdict", ""))
+    public_reason = str(claim.get("public_denial_reason", "") or "")
+    step_id = str(claim.get("step_id", ""))
+    phase = "pre" if step_id.endswith(":pre") else "post" if step_id.endswith(":post") else "other"
+    if phase == "post":
+        explanation = "recorded a post-action result observation"
+    elif verdict == "compliant":
+        explanation = "allowed by configured policy; the agent's normal permission flow remains in charge"
+    elif public_reason == "budget_exhausted":
+        explanation = "blocked because the signed session action budget is exhausted"
+    elif public_reason:
+        explanation = f"blocked by configured policy ({public_reason})"
+    else:
+        explanation = "blocked because the receipt did not prove a compliant action"
+    policies: list[dict[str, str]] = []
+    applied_rule = "session_action_budget" if public_reason == "budget_exhausted" else "configured_policy"
+    for item in claim.get("policy_decisions", []):
+        if not isinstance(item, Mapping):
+            continue
+        summary = {
+            "backend": str(item.get("backend", "unknown")),
+            "decision": str(item.get("decision", "unknown")),
+        }
+        if summary["backend"] == "forbid_rules":
+            candidate = str(item.get("reason", "")).split("(", 1)[0]
+            if _RULE_ID_RE.fullmatch(candidate):
+                summary["rule_id"] = candidate
+                if summary["decision"] == "Deny":
+                    applied_rule = candidate
+        policies.append(summary)
+    return {
+        "receipt_id": str(claim.get("receipt_id", "")),
+        "timestamp": str(claim.get("timestamp", "")),
+        "phase": phase,
+        "request": {
+            "tool": str(claim.get("tool", "")),
+            "action_class": str(claim.get("action_class", "")),
+            "resource_family": str(claim.get("resource_family", "")),
+            "side_effect_class": str(claim.get("side_effect_class", "")),
+        },
+        "verdict": verdict,
+        "explanation": explanation,
+        "applied_rule": applied_rule,
+        "policies": policies,
+        "budget_delta": dict(claim.get("budget_delta", {}) or {}),
+        "budget_remaining": dict(claim.get("budget_remaining", {}) or {}),
+    }
+
+
 def _chain_report(
     *,
     trace_id: str,
@@ -290,6 +344,7 @@ def _chain_report(
         "verdicts": _counter_dict([str(claim.get("verdict", "")) for claim in claims]),
         "action_classes": _counter_dict([str(claim.get("action_class", "")) for claim in claims]),
         "side_effect_classes": _counter_dict([str(claim.get("side_effect_class", "")) for claim in claims]),
+        "actions": [_action_summary(claim) for claim in claims],
         "dispatches": dispatches,
         "dispatch_launches": dispatch_launches,
         "dispatch_observations": dispatch_observations,
@@ -364,6 +419,18 @@ def build_claude_code_report(
         "chain_dir": str(resolved_chain_dir),
         "keys_dir": str(resolved_keys_dir),
         "chain_verification": {"ok": True, "verify_expiry": verify_expiry},
+        "verification": {
+            "command": "ardur claude-code-report --home <ardur-home>",
+            "detail": "Re-run the local report to verify signatures and hash links for every receipt chain.",
+        },
+        "cost_boundary": {
+            "enforced_unit": "governed tool calls",
+            "monetary_cost": "unavailable_without_signed_adapter_data",
+            "detail": (
+                "The signed action budget is enforced locally. A dollar-denominated "
+                "cap requires trusted cost telemetry from the provider adapter."
+            ),
+        },
         "chain_count": len(chains),
         "receipt_count": len(all_claims),
         "next_steps": _empty_report_next_steps() if not all_claims else [],

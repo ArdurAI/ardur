@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "5180404253589a247c27037c7a464412a00fb5353ecfc30bf363e461e7896e31"
+source_sha256: "bff2fac947020d545f0d8e5da64c0a150b1455679ba57d4321a09a57525593d4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -55,6 +55,18 @@ ardur verify --token <token-from-issue-output>
 
 That walks through key generation, mission compilation, ES256-signed passport
 issuance, and verification - all local, no LLM calls.
+
+Run the conservative personal action-firewall proof with one command:
+
+```bash
+ardur personal-firewall demo
+```
+
+The provider-free demo preserves the agent's normal permission prompt for a
+safe workspace read, denies outside-workspace writes, secret-like arguments,
+and external network access, then verifies the signed receipt chain. Its
+session cap is measured in governed tool calls; monetary cost remains unknown
+unless an adapter supplies trusted signed cost telemetry.
 
 Every durable receipt sink also queues an idempotent local transparency-anchor
 sidecar. Network submission is a separate `ardur anchor` operation, and

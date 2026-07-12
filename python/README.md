@@ -39,6 +39,18 @@ ardur verify --token <token-from-issue-output>
 That walks through key generation, mission compilation, ES256-signed passport
 issuance, and verification - all local, no LLM calls.
 
+Run the conservative personal action-firewall proof with one command:
+
+```bash
+ardur personal-firewall demo
+```
+
+The provider-free demo preserves the agent's normal permission prompt for a
+safe workspace read, denies outside-workspace writes, secret-like arguments,
+and external network access, then verifies the signed receipt chain. Its
+session cap is measured in governed tool calls; monetary cost remains unknown
+unless an adapter supplies trusted signed cost telemetry.
+
 Every durable receipt sink also queues an idempotent local transparency-anchor
 sidecar. Network submission is a separate `ardur anchor` operation, and
 `ardur verify --anchor-bundle ...` verifies completed proofs offline with an

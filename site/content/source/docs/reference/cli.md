@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "dccfda4ce594c09a9875a9443b38b39de8848f73bb11e6f75c25165d462e9071"
+source_sha256: "8222b6ae0a95db22894d11884d795fa920928cb9b18cb0d50f4601dfb8171beb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -875,6 +875,28 @@ before a manifest is emitted with the same output shape and `error`/`condition:
 validation only; it does not prove browser-store deployment, Native Messaging
 installation, live provider/API behavior, or release readiness.
 
+### `ardur personal-firewall demo`
+
+Run a provider-free local proof of the conservative personal action firewall.
+
+```text
+ardur personal-firewall demo [--timeout-s SECONDS]
+                             [--temp-parent DIR] [--json]
+```
+
+The command creates only temporary local profile, key, project, and receipt
+state. It proves four pre-action decisions: a workspace read remains subject to
+the agent's native permission flow (`ASK`), while an outside-workspace write, a
+secret-like argument, and external network access are denied. It then verifies
+the four signed receipts as one hash-linked chain and removes temporary state.
+
+The JSON result includes readable decisions, receipt counts, verification
+guidance, and an explicit cost boundary. The enforced session budget is measured
+in governed tool calls. `monetary_cost` is
+`unavailable_without_signed_adapter_data`; the command does not contact a
+provider or claim a dollar-denominated cap, universal secret detection, kernel
+enforcement, or visibility into provider-hidden behavior.
+
 ### `ardur profile init`
 
 Write a starter `ARDUR.md` profile from a built-in template.
@@ -884,7 +906,8 @@ ardur profile init --template TEMPLATE
                    [--path PATH] [--force] [--json]
 ```
 
-Templates: `read-only`, `safe-coding`. Default path: `./ARDUR.md`.
+Templates: `personal-firewall`, `read-only`, `safe-coding`. Default path:
+`./ARDUR.md`.
 
 Empty, whitespace-only, or traversal-escaping paths are rejected **before any
 filesystem operation**. `ardur profile init` rejects paths that are empty,
@@ -941,7 +964,7 @@ exact `claude` invocation that pairs the plugin with the active passport.
 
 ```text
 ardur protect claude-code [--scope DIR] [--profile PATH]
-                          [--mode read-only|safe-coding]
+                          [--mode personal-firewall|read-only|safe-coding]
                           [--json] [--home DIR] [--plugin-dir DIR]
                           [--keys-dir DIR] [--agent-id ID]
                           [--mission TEXT]
@@ -1147,6 +1170,13 @@ ardur claude-code-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
 
 `--verify-expiry` also enforces short receipt expiry windows during chain
 verification (off by default so reports work on archived chains).
+
+Each chain includes a redacted `actions` list with the requested tool/action
+class, allow or deny verdict, policy backends, stable rule identifiers, signed
+tool-call budget delta, and remaining action budget. Human output prints the
+latest 20 summaries and a placeholder-only verification command. The report
+does not expose raw policy-reason prose or tool arguments, and it does not claim
+a monetary cost when the adapter supplied no trusted signed cost data.
 
 When no local Claude Code hook receipts are present, the JSON report includes a
 `next_steps` array and the human output prints a concise "Next steps" section:

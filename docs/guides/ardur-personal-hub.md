@@ -16,6 +16,18 @@ pip install -e python/
 ardur --version
 ```
 
+See the personal safety boundary locally before configuring a provider:
+
+```bash
+ardur personal-firewall demo
+```
+
+The command uses temporary local fixtures only. It shows an `ASK` result for a
+safe workspace read without bypassing Claude Code's normal permission flow,
+then denies an outside-workspace write, a secret-like argument, and external
+network access. It verifies four signed, hash-linked receipts and removes all
+temporary state.
+
 Create a simple guardrail file:
 
 ```bash
@@ -68,16 +80,25 @@ complete release artifact.
 
 ## Options Users Can Choose
 
+- `personal-firewall`: allows reads and edits inside the protected folder,
+  denies shell and external network tools, blocks common secret-like argument
+  markers, and caps the signed session at 40 governed tool calls.
 - `read-only`: review code without editing files or running commands.
 - `safe-coding`: edit files inside the protected folder, but block shell
   commands.
 - `ARDUR.md`: plain Markdown profile for the same settings, suitable for
   non-technical users.
 - Advanced CLI flags: `ardur protect claude-code --scope . --mode read-only`
-  and `ardur protect claude-code --scope . --mode safe-coding`.
+  and `ardur protect claude-code --scope . --mode personal-firewall`.
 
 The Markdown profile compiles into the same Mission Passport and receipt path
 as advanced CLI setup. No policy capability is removed.
+
+The personal session cap is an action budget, not a provider-billing estimate.
+A dollar-denominated cap requires trusted signed cost telemetry from the
+provider adapter. Secret markers are conservative patterns, not universal data
+loss prevention, and allowed actions still pass through the agent's native
+permission flow.
 
 For source installs, `pip install -e python/` installs Ardur's required Python
 dependencies from `python/pyproject.toml`. The development Homebrew formula is
