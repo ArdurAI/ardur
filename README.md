@@ -150,7 +150,10 @@ It gives three bounded paths:
   it shows one local `ASK` outcome (Claude Code's normal permission flow stays
   in charge), three pre-dispatch denials for outside-workspace, secret-like,
   and network requests, and four verified signed receipt summaries without an
-  API key or retained demo state;
+  API key or retained demo state. Absolute local scope paths are canonicalized
+  before a permit so a symlinked path cannot redirect outside the workspace;
+  this hook-only check does not prove hard-link identity or prevent a path from
+  changing between the decision and the tool's later filesystem operation;
 - a **60-second deliberate deny proof** using
   `python3 scripts/run-claude-deny-demo.py`; it exercises the real local hook
   adapter, verifies a signed violation receipt, checks an unchanged canary, and

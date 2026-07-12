@@ -882,6 +882,13 @@ the agent's native permission flow (`ASK`), while an outside-workspace write, a
 secret-like argument, and external network access are denied. It then verifies
 the four signed receipts as one hash-linked chain and removes temporary state.
 
+For absolute local scope roots, the pre-dispatch resource check canonicalizes
+the candidate and scope root before permitting the action. This rejects an
+in-workspace symbolic-link path that resolves outside the protected folder,
+including a symbolic-link parent of a not-yet-created output. The hook does not
+perform the eventual filesystem operation, so hard-link aliases and a path
+component changed after the check remain outside this evidence boundary.
+
 The JSON result includes readable decisions, receipt counts, verification
 guidance, and an explicit cost boundary. The enforced session budget is measured
 in governed tool calls. `monetary_cost` is

@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "ebbf908d76d9586cf8c8b6d6e397d44b1b35ad9c10c7e8f2ac13b469aa9ab4d9"
+source_sha256: "e6f03443561870522c580dcb95d8f9a799c3189cbaea3e8ebc64eff4cae3cb69"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -167,7 +167,10 @@ It gives three bounded paths:
   it shows one local `ASK` outcome (Claude Code's normal permission flow stays
   in charge), three pre-dispatch denials for outside-workspace, secret-like,
   and network requests, and four verified signed receipt summaries without an
-  API key or retained demo state;
+  API key or retained demo state. Absolute local scope paths are canonicalized
+  before a permit so a symlinked path cannot redirect outside the workspace;
+  this hook-only check does not prove hard-link identity or prevent a path from
+  changing between the decision and the tool's later filesystem operation;
 - a **60-second deliberate deny proof** using
   `python3 scripts/run-claude-deny-demo.py`; it exercises the real local hook
   adapter, verifies a signed violation receipt, checks an unchanged canary, and

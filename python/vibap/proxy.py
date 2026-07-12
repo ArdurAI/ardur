@@ -959,6 +959,18 @@ def _check_resource_scope(
        any relative pattern → strip leading ``/``). Coerced forms still go
        through escape-check via re-sanitization so coercion can never mask
        traversal.
+    4. **Local filesystem canonicalization** — after a lexical match, absolute
+       POSIX candidates matched by a simple absolute scope root (an exact path
+       or ``ROOT/*``) are resolved with ``realpath`` and compared with the
+       resolved root. This rejects existing and dangling symlink-parent escapes
+       while leaving URL, Windows-path, and intentionally generic glob
+       semantics unchanged.
+
+    Canonical pathname comparison is a pre-dispatch check, not an inode-bound
+    filesystem operation. It cannot distinguish hard-link aliases or prevent a
+    path component from being swapped after this check and before the tool
+    opens it. Callers must disclose that residual boundary rather than treating
+    a PERMIT as kernel-enforced containment.
     """
     if not resource_scope:
         # No scope declared — legacy "unrestricted" semantics. PERMIT.
@@ -1008,6 +1020,80 @@ def _check_resource_scope(
     def _matches_any(candidate: str) -> bool:
         return any(fnmatch.fnmatchcase(candidate, pat) for pat in nfc_patterns)
 
+    def _simple_local_scope_pattern(pattern: str) -> tuple[str, bool] | None:
+        """Return ``(root, includes_descendants)`` for canonicalizable patterns.
+
+        Scope values also support URLs, Windows paths, relative strings, and
+        arbitrary globs. ``realpath`` is meaningful only for absolute local
+        POSIX roots, so canonical enforcement is deliberately limited to the
+        exact-root and ``ROOT/*`` shapes emitted by the personal-firewall and
+        governed-run setup paths.
+        """
+
+        if not pattern.startswith("/") or _URL_SCHEME_RE.match(pattern):
+            return None
+        includes_descendants = pattern == "/*" or pattern.endswith("/*")
+        root = pattern[:-2] if includes_descendants else pattern
+        root = root or "/"
+        if any(char in root for char in "*?["):
+            return None
+        return root, includes_descendants
+
+    def _canonical_local_path(path: str) -> str:
+        """Resolve links while allowing only genuinely missing path suffixes.
+
+        ``realpath`` without ``strict`` can also suppress permission, loop, and
+        non-directory errors, potentially returning a path that still contains
+        links. Strict resolution fails closed on those conditions. A missing
+        output is expected for write tools, so only ``FileNotFoundError`` gets
+        the non-strict fallback that resolves every existing prefix.
+        """
+
+        try:
+            return os.path.realpath(path, strict=True)
+        except FileNotFoundError:
+            return os.path.realpath(path)
+
+    local_scope_patterns = [
+        (pattern, parsed)
+        for pattern in nfc_patterns
+        if (parsed := _simple_local_scope_pattern(pattern)) is not None
+    ]
+    resolved_scope_roots: dict[str, str] = {}
+
+    def _resolved_local_match(candidate: str) -> tuple[bool, str | None]:
+        """Re-check a lexical local-path match against canonical scope roots."""
+
+        if not candidate.startswith("/") or _URL_SCHEME_RE.match(candidate):
+            return True, None
+        matched_local_patterns = [
+            (pattern, parsed)
+            for pattern, parsed in local_scope_patterns
+            if fnmatch.fnmatchcase(candidate, pattern)
+        ]
+        if not matched_local_patterns:
+            return True, None
+        try:
+            resolved_candidate = _canonical_local_path(candidate)
+        except (OSError, ValueError) as exc:
+            return False, f"canonical path resolution failed: {exc}"
+
+        for _pattern, (root, includes_descendants) in matched_local_patterns:
+            resolved_root = resolved_scope_roots.get(root)
+            if resolved_root is None:
+                try:
+                    resolved_root = _canonical_local_path(root)
+                except (OSError, ValueError) as exc:
+                    return False, f"scope root resolution failed: {exc}"
+                resolved_scope_roots[root] = resolved_root
+            if resolved_candidate == resolved_root:
+                return True, None
+            if includes_descendants and resolved_candidate.startswith(
+                resolved_root.rstrip("/") + "/"
+            ):
+                return True, None
+        return False, "resolves outside resource_scope after canonical path checking"
+
     def _preview(s: str) -> str:
         return s if len(s) <= 120 else s[:117] + "..."
 
@@ -1047,23 +1133,26 @@ def _check_resource_scope(
                     f"resource '{_preview(token)}' rejected: {error_reason}"
                 )
 
-            if _matches_any(normalized):
-                continue
-
             token_is_absolute = (
                 normalized.startswith("/")
                 or bool(_URL_SCHEME_RE.match(normalized))
                 or bool(_WINDOWS_DRIVE_RE.match(normalized))
             )
 
-            matched = False
+            matched_candidate: str | None = (
+                normalized if _matches_any(normalized) else None
+            )
 
             # cwd resolution (C8): if a cwd is declared and the candidate is
             # relative, resolve against cwd and re-sanitize. We run the join
             # through _sanitize_value so a '..' in the candidate cannot
             # silently escape cwd (posixpath.join('/workspace', '../etc')
             # would normalize to '/etc' without the check).
-            if cwd_anchor is not None and not token_is_absolute:
+            if (
+                matched_candidate is None
+                and cwd_anchor is not None
+                and not token_is_absolute
+            ):
                 joined_raw = posixpath.join(cwd_anchor, normalized)
                 joined, join_err = _sanitize_value(joined_raw)
                 if join_err is None:
@@ -1073,7 +1162,7 @@ def _check_resource_scope(
                     # depth against any future helper change.
                     if joined == cwd_anchor or joined.startswith(cwd_anchor.rstrip("/") + "/"):
                         if _matches_any(joined):
-                            matched = True
+                            matched_candidate = joined
 
             # Fallback: two-way absolute/relative coercion (partial CC-2 fix).
             # Claude Code and similar clients sometimes send './in_scope/file'
@@ -1082,22 +1171,33 @@ def _check_resource_scope(
             # original value (already denied above) cannot sneak through,
             # and more importantly the sanitizer's invariants hold on the
             # shape we're actually matching.
-            if not matched and not token_is_absolute and any_absolute:
+            if matched_candidate is None and not token_is_absolute and any_absolute:
                 coerced_raw = "/" + normalized
                 coerced, coerce_err = _sanitize_value(coerced_raw)
                 if coerce_err is None and _matches_any(coerced):
-                    matched = True
+                    matched_candidate = coerced
 
-            if not matched and token_is_absolute and any_relative and normalized.startswith("/"):
+            if (
+                matched_candidate is None
+                and token_is_absolute
+                and any_relative
+                and normalized.startswith("/")
+            ):
                 coerced_raw = normalized.lstrip("/")
                 if coerced_raw:
                     coerced, coerce_err = _sanitize_value(coerced_raw)
                     if coerce_err is None and _matches_any(coerced):
-                        matched = True
+                        matched_candidate = coerced
 
-            if not matched:
+            if matched_candidate is None:
                 return False, (
                     f"resource '{_preview(token)}' is outside resource_scope {patterns}"
+                )
+
+            resolved_ok, resolved_reason = _resolved_local_match(matched_candidate)
+            if not resolved_ok:
+                return False, (
+                    f"resource '{_preview(token)}' rejected: {resolved_reason}"
                 )
 
     if exhausted["v"]:

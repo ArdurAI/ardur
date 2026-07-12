@@ -29,6 +29,9 @@ def test_provider_free_personal_firewall_demo_is_verified_and_private(
         "unavailable_without_signed_adapter_data"
     )
     assert result["temporary_state_removed"] is True
+    assert "canonical path checking" in result["evidence_boundary"]
+    assert "hard-link aliases" in result["evidence_boundary"]
+    assert "post-check filesystem races" in result["evidence_boundary"]
     assert str(tmp_path) not in json.dumps(result, sort_keys=True)
     assert list(tmp_path.iterdir()) == []
 
