@@ -88,9 +88,17 @@ func runGuardConsumer(ctx context.Context, d *daemon, log *slog.Logger, ready ch
 	defer func() {
 		if ctx.Err() == nil {
 			d.degradeGuardTier(retErr, log)
-		} else {
-			d.deactivatePolicyMaps()
+			handles.Close()
+			return
 		}
+		if !d.waitForControlHandlerDrain() {
+			// A non-cooperative handler outlived the bounded server drain. Keep
+			// policyMaps and their backing handles live until process exit instead
+			// of explicitly closing them underneath that goroutine.
+			log.Error("control handlers did not drain; leaving BPF guard handles to process-exit cleanup")
+			return
+		}
+		d.deactivatePolicyMaps()
 		handles.Close()
 	}()
 	if err := kernelcapture.ClearBootstrapFileObservations(handles); err != nil {

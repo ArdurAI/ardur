@@ -54,6 +54,7 @@ const (
 	defaultStateDir          = "/var/lib/ardur/kernelcapture/state"
 	defaultSocketMode        = fs.FileMode(0o660)
 	KernelReceiptSchema      = "ardur.kernel.receipt.v1"
+	evidenceAppendShardCount = 256
 )
 
 // KernelReceiptEntry is the JSONL record appended to
@@ -68,11 +69,14 @@ type KernelReceiptEntry struct {
 }
 
 // sessionRoute owns mutable process-tree routing state for one session. Its
-// identity and correlator are immutable after publication. A successful
-// lockIfMatches leaves mu locked so the caller can hold a route lease through
-// correlation and evidence append; callers must invoke unlock afterward.
+// identity and correlator are immutable after publication. appendMu points at a
+// stable daemon-owned shard shared by replacement generations of the same
+// session ID. A successful lockIfMatches holds appendMu and mu: callers release
+// mu after correlation, retain appendMu through the evidence append, then
+// release appendMu. Retirement only takes mu, so a slow fsync cannot hold d.mu.
 type sessionRoute struct {
 	mu               sync.Mutex
+	appendMu         *sync.Mutex
 	sessionID        string
 	scope            *kernelcapture.ProcessTreeScope
 	correlator       *kernelcapture.Correlator
@@ -82,6 +86,7 @@ type sessionRoute struct {
 
 func newSessionRoute(sessionID string, scope *kernelcapture.ProcessTreeScope, correlator *kernelcapture.Correlator, gap *kernelcapture.ObservabilityGapAccumulator) *sessionRoute {
 	return &sessionRoute{
+		appendMu:         &sync.Mutex{},
 		sessionID:        sessionID,
 		scope:            scope,
 		correlator:       correlator,
@@ -94,9 +99,11 @@ func (r *sessionRoute) lockIfMatches(evt *kernelcapture.ProcessEvent) bool {
 	if r == nil || evt == nil {
 		return false
 	}
+	r.appendMu.Lock()
 	r.mu.Lock()
 	if !r.active || r.scope == nil || !r.scope.MatchesAndTrack(*evt) {
 		r.mu.Unlock()
+		r.appendMu.Unlock()
 		return false
 	}
 	evt.SessionID = r.sessionID
@@ -106,6 +113,19 @@ func (r *sessionRoute) lockIfMatches(evt *kernelcapture.ProcessEvent) bool {
 func (r *sessionRoute) unlock() {
 	if r != nil {
 		r.mu.Unlock()
+		r.appendMu.Unlock()
+	}
+}
+
+func (r *sessionRoute) releaseRouteForAppend() {
+	if r != nil {
+		r.mu.Unlock()
+	}
+}
+
+func (r *sessionRoute) finishAppend() {
+	if r != nil {
+		r.appendMu.Unlock()
 	}
 }
 
@@ -121,13 +141,19 @@ type daemon struct {
 	// route pointers; mutable ProcessTreeScope state is protected by each
 	// route's own mutex. fallbackRoutes is copy-on-write and contains only
 	// zero-cgroup test/replay scopes, since nonzero scopes reject cgroup escape.
-	// Lock order is lifecycleDropMu -> mu -> sessionRoute.mu.
+	// Lock order is lifecycleDropMu -> mu -> sessionRoute.mu. Event routing uses
+	// evidenceAppendMu shard -> sessionRoute.mu and never acquires d.mu while the
+	// append shard is held.
 	mu             sync.RWMutex
 	cgroupIndex    map[uint64]string
 	treeScopes     map[string]*kernelcapture.ProcessTreeScope
 	correlators    map[string]*kernelcapture.Correlator
 	routeIndex     map[string]*sessionRoute
 	fallbackRoutes []*sessionRoute
+	// evidenceAppendMu serializes per-session evidence ordering without holding
+	// route.mu through filesystem sync. Fixed shards avoid an unbounded lock map;
+	// collisions may serialize unrelated sessions but never block d.mu.
+	evidenceAppendMu [evidenceAppendShardCount]sync.Mutex
 
 	// enforce_events state, maintained under mu (session-scoped) plus two
 	// daemon-lifetime singletons for events that cannot be attributed to any
@@ -163,6 +189,13 @@ type daemon struct {
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
+
+	// The guard teardown waits for the control server to either drain every
+	// accepted handler or report that its bounded drain expired. When a drain
+	// expires, explicit map/handle teardown is skipped and process exit owns
+	// cleanup, avoiding a user-space use-after-close against a stuck handler.
+	controlHandlersDrained <-chan struct{}
+	controlServerDone      <-chan struct{}
 
 	// policyMaps holds the writable BPF map handles for the process_guard
 	// enforcement program. On non-Linux platforms PolicyMaps is a zero struct and
@@ -685,6 +718,35 @@ func (d *daemon) deactivatePolicyMaps() bool {
 	}
 	d.policyMaps = kernelcapture.PolicyMaps{}
 	return wasActive
+}
+
+func (d *daemon) setControlHandlerDrain(drained, serveDone <-chan struct{}) {
+	d.controlHandlersDrained = drained
+	d.controlServerDone = serveDone
+}
+
+// waitForControlHandlerDrain blocks guard teardown until the control server has
+// drained every accepted handler. If Serve reaches its bounded drain deadline,
+// serveDone closes while drained remains open and this returns false. The caller
+// must then leave live handles to process-exit cleanup rather than closing them
+// underneath a handler that may still be using policyMaps.
+func (d *daemon) waitForControlHandlerDrain() bool {
+	if d == nil || d.controlHandlersDrained == nil {
+		return true
+	}
+	select {
+	case <-d.controlHandlersDrained:
+		return true
+	case <-d.controlServerDone:
+		// Both channels may become ready together. Prefer proof of an actual drain
+		// over the server-return signal before declaring teardown unsafe.
+		select {
+		case <-d.controlHandlersDrained:
+			return true
+		default:
+			return false
+		}
+	}
 }
 
 // getActiveTier returns the current activeTier under mu. See activeTier's
@@ -1305,6 +1367,7 @@ func (d *daemon) publishSessionRouteLocked(route *sessionRoute) {
 		return
 	}
 	d.retireSessionRouteLocked(route.sessionID)
+	route.appendMu = d.evidenceAppendMutex(route.sessionID)
 	if d.routeIndex == nil {
 		d.routeIndex = make(map[string]*sessionRoute)
 	}
@@ -1317,9 +1380,27 @@ func (d *daemon) publishSessionRouteLocked(route *sessionRoute) {
 	}
 }
 
+func (d *daemon) evidenceAppendMutex(sessionID string) *sync.Mutex {
+	// FNV-1a is sufficient for lock striping: this is not an identity or security
+	// hash. The same session ID deterministically reaches the same shard across
+	// route replacement, preserving already-correlated evidence order.
+	const (
+		offset64 = uint64(14695981039346656037)
+		prime64  = uint64(1099511628211)
+	)
+	hash := offset64
+	for index := range len(sessionID) {
+		hash ^= uint64(sessionID[index])
+		hash *= prime64
+	}
+	return &d.evidenceAppendMu[hash%evidenceAppendShardCount]
+}
+
 // retireSessionRouteLocked marks one route inactive and removes it from future
 // lookups while d.mu is held. Taking route.mu waits for an already-matched
-// event to finish correlation and evidence append before teardown continues.
+// event to finish mutable correlation before teardown continues. Evidence append
+// ordering is retained separately by the stable append shard and never blocks
+// this d.mu-held retirement path.
 func (d *daemon) retireSessionRouteLocked(sessionID string) {
 	route := d.routeIndex[sessionID]
 	if route == nil {
@@ -1342,8 +1423,9 @@ func (d *daemon) retireSessionRouteLocked(sessionID string) {
 	d.fallbackRoutes = next
 }
 
-// lockRouteEvent finds and locks the route for evt. A non-nil result owns the
-// route mutex; the caller must invoke route.unlock().
+// lockRouteEvent finds and locks the route for evt. A non-nil result owns both
+// its append shard and route mutex; the caller must either invoke route.unlock()
+// or releaseRouteForAppend followed by finishAppend.
 func (d *daemon) lockRouteEvent(evt *kernelcapture.ProcessEvent) *sessionRoute {
 	if evt == nil {
 		return nil
@@ -1377,7 +1459,8 @@ func (d *daemon) lockRouteEvent(evt *kernelcapture.ProcessEvent) *sessionRoute {
 }
 
 // routeEvent is the lookup-only test seam. Production event processing uses
-// lockRouteEvent directly and holds the route lease through evidence append.
+// lockRouteEvent directly, releases route.mu after correlation, and retains
+// only the append shard through evidence persistence.
 func (d *daemon) routeEvent(evt *kernelcapture.ProcessEvent) (string, *kernelcapture.Correlator) {
 	route := d.lockRouteEvent(evt)
 	if route == nil {
@@ -1527,8 +1610,8 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 	if route == nil {
 		return
 	}
-	defer route.unlock()
 	if route.correlator == nil {
+		route.unlock()
 		return
 	}
 	sid, correlator := route.sessionID, route.correlator
@@ -1537,6 +1620,12 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 	if route.observabilityGap != nil {
 		route.observabilityGap.RecordEffect(receipt)
 	}
+	// Correlation and mutable process-tree tracking are complete. Keep only the
+	// stable append shard while writing evidence so session retirement can mark
+	// the route inactive without holding d.mu behind a disk sync. Replacement
+	// generations share this shard and therefore cannot overtake this append.
+	route.releaseRouteForAppend()
+	defer route.finishAppend()
 
 	d.log.Debug("kernel event",
 		"session_id", sid,
@@ -2051,6 +2140,7 @@ func main() {
 		log.Error("bind control socket", "socket", *socketPath, "error", err)
 		os.Exit(1)
 	}
+	d.setControlHandlerDrain(svr.HandlersDrained(), svr.ServeDone())
 	log.Info("control socket listening", "socket", svr.SocketPath())
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -2065,8 +2155,12 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := svr.Serve(ctx); err != nil && ctx.Err() == nil {
-			log.Error("control socket serve", "error", err)
+		if err := svr.Serve(ctx); err != nil {
+			if errors.Is(err, kernelcapture.ErrDaemonSocketServerShutdownTimeout) {
+				log.Error("control socket handler drain timed out; explicit guard teardown will be skipped", "error", err)
+			} else if ctx.Err() == nil {
+				log.Error("control socket serve", "error", err)
+			}
 		}
 	}()
 

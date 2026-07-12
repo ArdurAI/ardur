@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +52,34 @@ func (s *stubEvidenceFS) AppendFile(path string, data []byte, _ fs.FileMode) err
 	}
 	s.appends[path] = append(s.appends[path], data...)
 	return nil
+}
+
+type blockingEvidenceFS struct {
+	*stubEvidenceFS
+	appendCalls   atomic.Int32
+	firstEntered  chan struct{}
+	secondEntered chan struct{}
+	releaseFirst  chan struct{}
+}
+
+func newBlockingEvidenceFS() *blockingEvidenceFS {
+	return &blockingEvidenceFS{
+		stubEvidenceFS: newStubFS(),
+		firstEntered:   make(chan struct{}),
+		secondEntered:  make(chan struct{}),
+		releaseFirst:   make(chan struct{}),
+	}
+}
+
+func (s *blockingEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) error {
+	switch s.appendCalls.Add(1) {
+	case 1:
+		close(s.firstEntered)
+		<-s.releaseFirst
+	case 2:
+		close(s.secondEntered)
+	}
+	return s.stubEvidenceFS.AppendFile(path, data, perm)
 }
 
 // newTestDaemon returns a daemon wired with an in-memory (stub) filesystem.
@@ -681,6 +711,116 @@ func TestSessionRouteRetirementWaitsForMatchedEvent(t *testing.T) {
 	if sid, correlator := d.routeEvent(&probe); sid != "" || correlator != nil {
 		t.Fatalf("retired route matched as (%q, %v)", sid, correlator)
 	}
+}
+
+func TestProcessKernelEventReleasesRouteBeforeEvidenceAppendAndPreservesGenerationOrder(t *testing.T) {
+	d := newTestDaemon(t)
+	fsys := newBlockingEvidenceFS()
+	d.fs = fsys
+	const sessionID = "slow-evidence-session"
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: sessionID, RootPID: 100, CgroupID: 42,
+	}, sessionID)
+
+	firstDone := make(chan struct{})
+	go func() {
+		d.processKernelEvent(kernelcapture.ProcessEvent{PID: 100, CgroupID: 42, Type: kernelcapture.ProcessEventExec})
+		close(firstDone)
+	}()
+	select {
+	case <-fsys.firstEntered:
+	case <-time.After(time.Second):
+		t.Fatal("first event did not reach the evidence append boundary")
+	}
+
+	var releaseOnce sync.Once
+	releaseFirst := func() { releaseOnce.Do(func() { close(fsys.releaseFirst) }) }
+	defer releaseFirst()
+
+	ended := make(chan struct{})
+	go func() {
+		d.onSessionEnded(sessionID)
+		close(ended)
+	}()
+	select {
+	case <-ended:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("session retirement remained blocked by the in-flight evidence append")
+	}
+
+	// A replacement generation may publish while the old generation's append is
+	// still blocked, but it must not overtake that already-correlated evidence.
+	d.onSessionRegistered(&kernelcapture.DaemonRegisterSessionRequest{
+		SessionID: sessionID, RootPID: 200, CgroupID: 42,
+	}, sessionID)
+	secondDone := make(chan struct{})
+	go func() {
+		d.processKernelEvent(kernelcapture.ProcessEvent{PID: 200, CgroupID: 42, Type: kernelcapture.ProcessEventExec})
+		close(secondDone)
+	}()
+	select {
+	case <-fsys.secondEntered:
+		t.Fatal("replacement generation overtook the prior generation's evidence append")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseFirst()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first event did not finish after releasing evidence append")
+	}
+	select {
+	case <-fsys.secondEntered:
+	case <-time.After(time.Second):
+		t.Fatal("replacement event did not reach evidence append after prior generation finished")
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("replacement event did not finish")
+	}
+
+	path := filepath.Join(d.evidenceDir, sessionID, "kernel_receipts.jsonl")
+	fsys.mu.Lock()
+	data := append([]byte(nil), fsys.appends[path]...)
+	fsys.mu.Unlock()
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var first, second KernelReceiptEntry
+	if err := decoder.Decode(&first); err != nil {
+		t.Fatalf("decode first receipt: %v", err)
+	}
+	if err := decoder.Decode(&second); err != nil {
+		t.Fatalf("decode second receipt: %v", err)
+	}
+	if first.Event.PID != 100 || second.Event.PID != 200 {
+		t.Fatalf("receipt order = [%d, %d], want [100, 200]", first.Event.PID, second.Event.PID)
+	}
+}
+
+func TestControlHandlerDrainGatesPolicyTeardown(t *testing.T) {
+	t.Run("actual drain permits teardown", func(t *testing.T) {
+		d := newTestDaemon(t)
+		drained := make(chan struct{})
+		serveDone := make(chan struct{})
+		d.setControlHandlerDrain(drained, serveDone)
+		close(drained)
+		close(serveDone)
+		if !d.waitForControlHandlerDrain() {
+			t.Fatal("completed handler drain was not accepted")
+		}
+	})
+
+	t.Run("server timeout rejects explicit teardown", func(t *testing.T) {
+		d := newTestDaemon(t)
+		drained := make(chan struct{})
+		serveDone := make(chan struct{})
+		d.setControlHandlerDrain(drained, serveDone)
+		close(serveDone)
+		if d.waitForControlHandlerDrain() {
+			t.Fatal("server return without a completed handler drain permitted teardown")
+		}
+	})
 }
 
 func TestProcessKernelEventReleasesRouteWithNilCorrelator(t *testing.T) {
