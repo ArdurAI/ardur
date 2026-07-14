@@ -96,6 +96,7 @@
     "examples/tool-server-preflight/risky-gemini.json": "repo/examples/tool-server-preflight/risky-gemini.json",
     "go/pkg/kernelcapture/testdata/agent-recognition-benchmark-baseline-967ba670.json": "repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-baseline-967ba670.json",
     "go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.1.json": "repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.1.json",
+    "go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-203c101.json": "repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-203c101.json",
     "media/casts/ARDUR-CAP-001-mission-declaration.cast": "repo/media/casts/ARDUR-CAP-001-mission-declaration.cast",
     "media/casts/ARDUR-CAP-002-tool-policy.cast": "repo/media/casts/ARDUR-CAP-002-tool-policy.cast",
     "media/casts/ARDUR-CAP-003-resource-scope.cast": "repo/media/casts/ARDUR-CAP-003-resource-scope.cast",

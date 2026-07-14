@@ -167,8 +167,8 @@ func TestLoadAgentRecognitionBenchmarkReportRejectsUnknownDuplicateTrailingAndSy
 	}
 }
 
-func TestCommittedAgentRecognitionBenchmarkBaselineMatchesBudget(t *testing.T) {
-	report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", "agent-recognition-benchmark-baseline-967ba670.json"))
+func TestCommittedAgentRecognitionBenchmarkEvidenceMatchesBudget(t *testing.T) {
+	report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", "agent-recognition-benchmark-evidence-203c101.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestCommittedAgentRecognitionBenchmarkBaselineMatchesBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SourceSHA != "967ba6702c721a351c9e52e665f16e591ac5d9b6" || report.Gate.Status != AgentRecognitionBenchmarkGateNotRun {
+	if report.SourceSHA != "203c1016dbec3740608e8f1a9a5ce71e90f5de78" || report.Gate.Status != AgentRecognitionBenchmarkGatePass || report.Gate.BudgetSHA256 != "33aec8ad75d09e2831f9c65ad8dbfbe7e86a8fd6ef1e3b2b67c50ffba65fe94f" || len(report.Gate.Violations) != 0 {
 		t.Fatalf("reviewed evidence provenance drifted: source=%q gate=%q", report.SourceSHA, report.Gate.Status)
 	}
 	if budget.EvidenceArtifactSHA256 != report.ArtifactSHA256 {

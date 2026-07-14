@@ -71,7 +71,7 @@ saturation, unavailable fingerprint work, in-flight work, or unexplained
 fingerprint outcomes. Tolerances cover runner variance; they never convert
 loss into a pass.
 
-### Reviewed initial CI baseline
+### Reviewed CI evidence
 
 The initial exact-head x86 evidence is [GitHub Actions run
 29321373911](https://github.com/ArdurAI/ardur/actions/runs/29321373911) for
@@ -92,20 +92,42 @@ in-flight, and unexplained counter was zero.
 | sustained | 0.0947% | 0.1849% | 63.49 ms | 13,552 KiB |
 | storm | 0.5420% | 0.7791% | 208.44 ms | 13,672 KiB |
 
-The initial wall tolerance is 0.5 percentage points. It was selected after
-measurement and is greater than twice the largest observed p95-minus-p50
+Review then identified that Linux `VmHWM` is process-lifetime cumulative, so
+profiles later in an arm could inherit an earlier profile's high-water mark.
+Commit `203c1016dbec3740608e8f1a9a5ce71e90f5de78` resets that watermark before
+each profile and hardens report publication. The corrected-method evidence is
+[GitHub Actions run
+29326060724](https://github.com/ArdurAI/ardur/actions/runs/29326060724). Its
+[raw report](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-203c101.json)
+has artifact digest
+`cd0a5e68b45757886e67d6f546de9e2be4bbf0f48f7fdaa1b9a0acbd279c9d23`,
+passed the prior budget digest `33aec8ad75d09e2831f9c65ad8dbfbe7e86a8fd6ef1e3b2b67c50ffba65fe94f`,
+and is the evidence bound by budget version
+`github-ubuntu-24.04-amd64.203c101.v2`. Its enabled arm again delivered,
+recognized, and fingerprinted all 2,080 expected events with zero loss,
+rejection, unavailable, saturation, in-flight, or unexplained work.
+
+| Profile | Wall p50 | Wall p95 | Enabled daemon CPU p95 | Per-profile peak RSS |
+|---|---:|---:|---:|---:|
+| low | 0.0619% | 0.0852% | 10.72 ms | 13,372 KiB |
+| sustained | 0.0419% | 0.1257% | 44.24 ms | 13,432 KiB |
+| storm | 0.5646% | 0.8334% | 158.63 ms | 13,464 KiB |
+
+The wall tolerance remains 0.5 percentage points. It was selected from the
+initial measurement as greater than twice its largest observed p95-minus-p50
 within-run spread (0.2371 points for storm; twice that is 0.4742), rounded
 upward. CPU allows the
 larger of 30% or 5 ms; 30% is more than twice the largest observed
-p95-normalized within-run range. RSS allows 4,096 KiB, keeping the initial
-ceiling below 18 MiB while allowing Go allocator and shared-runner variation.
-These are conservative first-run regression limits, not an SLO or a universal
+p95-normalized initial-run range. RSS allows 4,096 KiB. The correction retained
+all tolerances unchanged; it did not use the methodology change to widen a
+gate. These are conservative regression limits, not an SLO or a universal
 performance claim. They should be tightened only after additional exact-hosted-
 runner evidence, never loosened to conceal loss.
 
-The public site mirrors both evidence JSON files. After changing either
-fixture, run `python3 site/scripts/sync_source_docs.py` and commit the generated
-artifact copies and routes with the source change.
+The public site mirrors the historical baseline, corrected-method evidence,
+and budget JSON files. After changing any fixture, run
+`python3 site/scripts/sync_source_docs.py` and commit the generated artifact
+copies and routes with the source change.
 
 ## Local real-Linux run
 
