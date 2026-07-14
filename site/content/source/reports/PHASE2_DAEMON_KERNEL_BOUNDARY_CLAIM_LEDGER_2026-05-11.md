@@ -2,7 +2,7 @@
 title: "Phase 2 Daemon/Kernel Boundary Claim Ledger"
 description: "Date: 2026-07-01"
 source_path: "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md"
-source_sha256: "dd4cb70f45d329e166f96424e7c6c47ccb0f4703d8feed7051e9d0c76d5b1610"
+source_sha256: "6b7465dbf359e1614be977c27c71402868d9a37d710fe1cb9ad18346817f9ecc"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -57,7 +57,7 @@ This is an experimental development boundary, not release or production readines
 - `go/pkg/kernelcapture/daemon_accept_loop_plan.go` validates a dry-run accept-loop plan with custody validation, explicit UID/GID allowlists, bounded request bytes, read timeout, bounded concurrency, and non-executed preflight/bind/accept/peer-observation/decode/authorization/dispatch steps.
 - `go/pkg/kernelcapture/launch_wrapper_session.go` defines the launch-wrapper no-execution contract seam and deterministic evidence envelope.
 - `go/pkg/kernelcapture/launch_wrapper_session_test.go` verifies launch-wrapper digest integrity and boundary behavior.
-- `reports/PHASE2_EBPF_MVP_VERIFICATION_2026-05-10.md` records the Linux eBPF MVP verification context and environment limits.
+- `reports/PHASE2_EBPF_MVP_VERIFICATION_2026-05-10.md` recorded the Linux eBPF MVP verification context and environment limits (that companion report was removed during the open-source-release cleanup and is no longer present in this tree).
 
 ## Not claimed
 
