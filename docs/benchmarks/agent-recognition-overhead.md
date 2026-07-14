@@ -71,6 +71,35 @@ saturation, unavailable fingerprint work, in-flight work, or unexplained
 fingerprint outcomes. Tolerances cover runner variance; they never convert
 loss into a pass.
 
+### Reviewed initial CI baseline
+
+The initial exact-head x86 evidence is [GitHub Actions run
+29321373911](https://github.com/ArdurAI/ardur/actions/runs/29321373911) for
+source `967ba6702c721a351c9e52e665f16e591ac5d9b6`. The committed
+[raw report](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-baseline-967ba670.json)
+has artifact digest
+`60ec1e25e89375e323d6b564a91b74283aae3b2995a6878665e1ecdc3a399530`
+and records Linux amd64, kernel `6.17.0-1018-azure`, Go `1.26.5`, and four
+logical CPUs. All 2,080 expected lifecycle events were delivered, recognized,
+and fingerprinted successfully; every loss, rejection, unavailable,
+saturation, in-flight, and unexplained counter was zero.
+
+| Profile | Wall p50 | Wall p95 | Enabled daemon CPU p95 | Peak RSS |
+|---|---:|---:|---:|---:|
+| low | 0.0541% | 0.1328% | 13.45 ms | 13,520 KiB |
+| sustained | 0.0947% | 0.1849% | 63.49 ms | 13,552 KiB |
+| storm | 0.5420% | 0.7791% | 208.44 ms | 13,672 KiB |
+
+The initial wall tolerance is 0.5 percentage points. It was selected after
+measurement and is greater than twice the largest observed p95-minus-p50
+within-run spread (0.4742 points for storm), rounded upward. CPU allows the
+larger of 30% or 5 ms; 30% is more than twice the largest observed
+p95-normalized within-run range. RSS allows 4,096 KiB, keeping the initial
+ceiling below 18 MiB while allowing Go allocator and shared-runner variation.
+These are conservative first-run regression limits, not an SLO or a universal
+performance claim. They should be tightened only after additional exact-hosted-
+runner evidence, never loosened to conceal loss.
+
 ## Local real-Linux run
 
 Build all three exact artifacts from the same checkout:

@@ -86,9 +86,14 @@ jobs:
       - name: Run paired recognition benchmark
         run: |
           set -euo pipefail
-          report_dir="$RUNNER_TEMP/ardur-agent-recognition-benchmark"
+          benchmark_bin="$RUNNER_TEMP/ardur-agent-recognition-benchmark"
+          report_dir="$RUNNER_TEMP/ardur-agent-recognition-benchmark-report"
+          if [ "$benchmark_bin" = "$report_dir" ] || [ -e "$report_dir" ]; then
+            echo "::error::benchmark report path is not isolated"
+            exit 2
+          fi
           args=(
-            "$RUNNER_TEMP/ardur-agent-recognition-benchmark"
+            "$benchmark_bin"
             --daemon-bin "$RUNNER_TEMP/ardur-kernelcaptured"
             --workload-bin "$RUNNER_TEMP/ardur-agent-recognition-workload"
             --source-sha "$SOURCE_SHA"
@@ -115,6 +120,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: agent-recognition-benchmark-${{ env.BENCHMARK_PROFILE }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/ardur-agent-recognition-benchmark/
+          path: ${{ runner.temp }}/ardur-agent-recognition-benchmark-report/
           if-no-files-found: warn
           retention-days: 14

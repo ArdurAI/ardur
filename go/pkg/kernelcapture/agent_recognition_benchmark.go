@@ -395,40 +395,63 @@ func ValidateAgentRecognitionBenchmarkBudget(budget *AgentRecognitionBenchmarkBu
 }
 
 func LoadAgentRecognitionBenchmarkBudget(path string) (*AgentRecognitionBenchmarkBudget, string, error) {
-	linkInfo, err := os.Lstat(path)
-	if err != nil || linkInfo.Mode()&os.ModeSymlink != 0 {
-		return nil, "", fmt.Errorf("%w: benchmark budget must be a non-symlink regular file", ErrAgentRecognitionBenchmark)
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: benchmark budget is unreadable", ErrAgentRecognitionBenchmark)
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linkInfo, info) || info.Size() > maxAgentRecognitionBenchmarkFileBytes {
-		return nil, "", fmt.Errorf("%w: benchmark budget must be a bounded regular file", ErrAgentRecognitionBenchmark)
-	}
-	raw, err := io.ReadAll(io.LimitReader(file, maxAgentRecognitionBenchmarkFileBytes+1))
-	if err != nil || len(raw) > maxAgentRecognitionBenchmarkFileBytes {
-		return nil, "", fmt.Errorf("%w: benchmark budget is unreadable", ErrAgentRecognitionBenchmark)
-	}
 	var budget AgentRecognitionBenchmarkBudget
-	if err := rejectDuplicateJSONKeys(raw); err != nil {
-		return nil, "", fmt.Errorf("%w: benchmark budget JSON contains a duplicate key", ErrAgentRecognitionBenchmark)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&budget); err != nil {
-		return nil, "", fmt.Errorf("%w: benchmark budget JSON is invalid", ErrAgentRecognitionBenchmark)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return nil, "", fmt.Errorf("%w: benchmark budget contains trailing data", ErrAgentRecognitionBenchmark)
+	raw, err := loadAgentRecognitionBenchmarkJSON(path, "budget", &budget)
+	if err != nil {
+		return nil, "", err
 	}
 	if err := ValidateAgentRecognitionBenchmarkBudget(&budget); err != nil {
 		return nil, "", err
 	}
 	digest := sha256.Sum256(raw)
 	return &budget, hex.EncodeToString(digest[:]), nil
+}
+
+// LoadAgentRecognitionBenchmarkReport strictly loads and validates a bounded,
+// non-symlink report file. It is used to keep committed evidence fixtures under
+// the same schema, arithmetic, accounting, and artifact-digest checks as a live
+// benchmark result.
+func LoadAgentRecognitionBenchmarkReport(path string) (*AgentRecognitionBenchmarkReport, error) {
+	var report AgentRecognitionBenchmarkReport
+	if _, err := loadAgentRecognitionBenchmarkJSON(path, "report", &report); err != nil {
+		return nil, err
+	}
+	if err := ValidateAgentRecognitionBenchmarkReport(&report); err != nil {
+		return nil, err
+	}
+	return &report, nil
+}
+
+func loadAgentRecognitionBenchmarkJSON(path, label string, target any) ([]byte, error) {
+	linkInfo, err := os.Lstat(path)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%w: benchmark %s must be a non-symlink regular file", ErrAgentRecognitionBenchmark, label)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: benchmark %s is unreadable", ErrAgentRecognitionBenchmark, label)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linkInfo, info) || info.Size() > maxAgentRecognitionBenchmarkFileBytes {
+		return nil, fmt.Errorf("%w: benchmark %s must be a bounded regular file", ErrAgentRecognitionBenchmark, label)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxAgentRecognitionBenchmarkFileBytes+1))
+	if err != nil || len(raw) > maxAgentRecognitionBenchmarkFileBytes {
+		return nil, fmt.Errorf("%w: benchmark %s is unreadable", ErrAgentRecognitionBenchmark, label)
+	}
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return nil, fmt.Errorf("%w: benchmark %s JSON contains a duplicate key", ErrAgentRecognitionBenchmark, label)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return nil, fmt.Errorf("%w: benchmark %s JSON is invalid", ErrAgentRecognitionBenchmark, label)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("%w: benchmark %s contains trailing data", ErrAgentRecognitionBenchmark, label)
+	}
+	return raw, nil
 }
 
 func NewAgentRecognitionBenchmarkPair(pairIndex int, order string, profile AgentRecognitionBenchmarkProfile, baseline, enabled AgentRecognitionBenchmarkArm) (AgentRecognitionBenchmarkPair, error) {

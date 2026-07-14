@@ -123,6 +123,84 @@ func TestLoadAgentRecognitionBenchmarkBudgetRejectsUnknownDuplicateTrailingAndSy
 	}
 }
 
+func TestLoadAgentRecognitionBenchmarkReportRejectsUnknownDuplicateTrailingAndSymlink(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	valid := filepath.Join(root, "report.json")
+	if err := os.WriteFile(valid, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentRecognitionBenchmarkReport(valid)
+	if err != nil || loaded.ArtifactSHA256 != report.ArtifactSHA256 {
+		t.Fatalf("loaded report=%+v error=%v", loaded, err)
+	}
+
+	for name, hostile := range map[string][]byte{
+		"unknown":   append(raw[:len(raw)-1], []byte(`,"unknown":true}`)...),
+		"duplicate": []byte(`{"schema_version":"ardur.agent_recognition_benchmark_report.v0.1","schema_version":"ardur.agent_recognition_benchmark_report.v0.1"}`),
+		"trailing":  append(append([]byte(nil), raw...), []byte(` {}`)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(root, name+".json")
+			if err := os.WriteFile(path, hostile, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadAgentRecognitionBenchmarkReport(path); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("hostile report error = %v", err)
+			}
+		})
+	}
+
+	link := filepath.Join(root, "report-link.json")
+	if err := os.Symlink(valid, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadAgentRecognitionBenchmarkReport(link); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("symlink report error = %v", err)
+	}
+}
+
+func TestCommittedAgentRecognitionBenchmarkBaselineMatchesBudget(t *testing.T) {
+	report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", "agent-recognition-benchmark-baseline-967ba670.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget, budgetDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SourceSHA != "967ba6702c721a351c9e52e665f16e591ac5d9b6" || report.Gate.Status != AgentRecognitionBenchmarkGateNotRun {
+		t.Fatalf("reviewed evidence provenance drifted: source=%q gate=%q", report.SourceSHA, report.Gate.Status)
+	}
+	if budget.EvidenceArtifactSHA256 != report.ArtifactSHA256 {
+		t.Fatalf("budget evidence digest = %q, want %q", budget.EvidenceArtifactSHA256, report.ArtifactSHA256)
+	}
+	summaries := make(map[string]AgentRecognitionBenchmarkProfileSummary, len(report.Summaries))
+	for _, summary := range report.Summaries {
+		summaries[summary.ProfileName] = summary
+	}
+	for _, profile := range budget.Profiles {
+		summary, ok := summaries[profile.ProfileName]
+		if !ok || !nearlyEqual(profile.EvidenceP50WallOverheadPercent, summary.PairedWallOverheadPercent.P50) ||
+			!nearlyEqual(profile.EvidenceP95WallOverheadPercent, summary.PairedWallOverheadPercent.P95) ||
+			!nearlyEqual(profile.EvidenceP95EnabledDaemonCPUNanoseconds, summary.EnabledDaemonCPUNanoseconds.P95) ||
+			profile.EvidenceMaxEnabledDaemonPeakRSSKiB != summary.MaxEnabledDaemonPeakRSSKiB {
+			t.Fatalf("budget profile %q drifted from reviewed evidence", profile.ProfileName)
+		}
+	}
+	gate := EvaluateAgentRecognitionBenchmarkBudget(report, budget, budgetDigest)
+	if gate.Status != AgentRecognitionBenchmarkGatePass || len(gate.Violations) != 0 {
+		t.Fatalf("reviewed baseline does not pass its bound budget: %+v", gate)
+	}
+}
+
 func validAgentRecognitionBenchmarkReport(t *testing.T) AgentRecognitionBenchmarkReport {
 	t.Helper()
 	profiles := []AgentRecognitionBenchmarkProfile{
