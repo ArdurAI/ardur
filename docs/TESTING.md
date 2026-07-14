@@ -62,11 +62,10 @@ go test -race -count=1 \
 The dedicated `agent-recognition-benchmark` workflow builds the exact PR-head
 daemon, controller, and native workload, then runs one warm-up plus 20 paired
 recognition-off/on samples on a fresh privileged `ubuntu-24.04` runner. It
-uploads the privacy-bounded raw JSON report. The first reviewed baseline has no
-budget gate; once the committed budget exists, CI fails on metric drift, loss,
-rejection, unavailable fingerprint work, missing counters, schema drift, or
-digest mismatch. The larger release profile is manual and never substitutes
-for the required CI profile. See the
+uploads the privacy-bounded raw JSON report and enforces the committed reviewed
+budget. CI fails on metric drift, loss, rejection, unavailable fingerprint
+work, missing counters, schema drift, or digest mismatch. The larger release
+profile is manual and never substitutes for the required CI profile. See the
 [agent-recognition benchmark guide](benchmarks/agent-recognition-overhead.md).
 
 When changing the AuditBench evaluation-protocol artifact pipeline, run:

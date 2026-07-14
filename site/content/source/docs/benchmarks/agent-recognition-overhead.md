@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "b4819b5e03e9b03640e3678484e4c1543cf05d1740f4d2cf0ef41a1967c0ee7d"
+source_sha256: "2d02b222e330e66a1a34d580390e1991d9e5496b26834e93324051569243cfee"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -97,9 +97,11 @@ source `967ba6702c721a351c9e52e665f16e591ac5d9b6`. The committed
 has artifact digest
 `60ec1e25e89375e323d6b564a91b74283aae3b2995a6878665e1ecdc3a399530`
 and records Linux amd64, kernel `6.17.0-1018-azure`, Go `1.26.5`, and four
-logical CPUs. All 2,080 expected lifecycle events were delivered, recognized,
-and fingerprinted successfully; every loss, rejection, unavailable,
-saturation, in-flight, and unexplained counter was zero.
+logical CPUs. Each arm ran 2,080 measured workload executions (4,160 total).
+The recognition-enabled arm delivered, recognized, and fingerprinted all 2,080;
+the recognition-off arm deliberately produced no recognition-filtered capture
+or fingerprint work. Every loss, rejection, unavailable, saturation,
+in-flight, and unexplained counter was zero.
 
 | Profile | Wall p50 | Wall p95 | Enabled daemon CPU p95 | Peak RSS |
 |---|---:|---:|---:|---:|
@@ -109,7 +111,8 @@ saturation, in-flight, and unexplained counter was zero.
 
 The initial wall tolerance is 0.5 percentage points. It was selected after
 measurement and is greater than twice the largest observed p95-minus-p50
-within-run spread (0.4742 points for storm), rounded upward. CPU allows the
+within-run spread (0.2371 points for storm; twice that is 0.4742), rounded
+upward. CPU allows the
 larger of 30% or 5 ms; 30% is more than twice the largest observed
 p95-normalized within-run range. RSS allows 4,096 KiB, keeping the initial
 ceiling below 18 MiB while allowing Go allocator and shared-runner variation.
@@ -179,6 +182,11 @@ the release profile without a longitudinal experiment design.
   harness sums it over the daemon's thread group because Go work is not confined
   to the process leader:
   [Scheduler statistics](https://docs.kernel.org/scheduler/sched-stats.html#proc-pid-schedstat).
+- Linux documents `VmHWM` as peak resident set size and writing `5` to
+  `/proc/PID/clear_refs` as resetting that watermark to current RSS. The
+  harness resets it immediately before each profile so per-profile peaks do
+  not inherit an earlier profile's high-water mark:
+  [proc filesystem](https://docs.kernel.org/next/filesystems/proc.html).
 - Linux documents that `poll(2)` may return `EINTR` when a signal arrives
   before an event. The pidfd exit check retries that transient interruption
   instead of misclassifying it as an unsupported fingerprint target:

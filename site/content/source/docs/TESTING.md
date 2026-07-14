@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "9eee4bfc1fed4957886bc610bf8f1aaaf89448cc6cb51b4e9bb76bca26fb56a7"
+source_sha256: "96b50ba6c61a2dedf0bcda3aee59cc4824d69c193831da0d5a1507d5df1af335"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -79,11 +79,10 @@ go test -race -count=1 \
 The dedicated `agent-recognition-benchmark` workflow builds the exact PR-head
 daemon, controller, and native workload, then runs one warm-up plus 20 paired
 recognition-off/on samples on a fresh privileged `ubuntu-24.04` runner. It
-uploads the privacy-bounded raw JSON report. The first reviewed baseline has no
-budget gate; once the committed budget exists, CI fails on metric drift, loss,
-rejection, unavailable fingerprint work, missing counters, schema drift, or
-digest mismatch. The larger release profile is manual and never substitutes
-for the required CI profile. See the
+uploads the privacy-bounded raw JSON report and enforces the committed reviewed
+budget. CI fails on metric drift, loss, rejection, unavailable fingerprint
+work, missing counters, schema drift, or digest mismatch. The larger release
+profile is manual and never substitutes for the required CI profile. See the
 [agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
 
 When changing the AuditBench evaluation-protocol artifact pipeline, run:

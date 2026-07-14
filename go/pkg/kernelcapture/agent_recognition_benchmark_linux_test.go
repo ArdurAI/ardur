@@ -2,7 +2,11 @@
 
 package kernelcapture
 
-import "testing"
+import (
+	"errors"
+	"os/exec"
+	"testing"
+)
 
 func TestParseSchedstatRuntimeNanoseconds(t *testing.T) {
 	t.Parallel()
@@ -29,5 +33,22 @@ func TestParseSchedstatRuntimeNanoseconds(t *testing.T) {
 				t.Fatalf("parseSchedstatRuntimeNanoseconds() = %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+func TestResetProcessPeakRSSKiB(t *testing.T) {
+	command := exec.Command("/bin/sleep", "5")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	})
+	if err := resetProcessPeakRSSKiB(command.Process.Pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := resetProcessPeakRSSKiB(0); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("invalid PID reset error = %v", err)
 	}
 }

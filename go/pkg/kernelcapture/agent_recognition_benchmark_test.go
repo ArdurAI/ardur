@@ -100,7 +100,7 @@ func TestLoadAgentRecognitionBenchmarkBudgetRejectsUnknownDuplicateTrailingAndSy
 
 	for name, hostile := range map[string][]byte{
 		"unknown":   append(raw[:len(raw)-1], []byte(`,"unknown":true}`)...),
-		"duplicate": []byte(`{"schema_version":"ardur.agent_recognition_benchmark_budget.v0.1","schema_version":"ardur.agent_recognition_benchmark_budget.v0.1"}`),
+		"duplicate": append(raw[:len(raw)-1], []byte(`,"schema_version":"ardur.agent_recognition_benchmark_budget.v0.1"}`)...),
 		"trailing":  append(append([]byte(nil), raw...), []byte(` {}`)...),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestLoadAgentRecognitionBenchmarkReportRejectsUnknownDuplicateTrailingAndSy
 
 	for name, hostile := range map[string][]byte{
 		"unknown":   append(raw[:len(raw)-1], []byte(`,"unknown":true}`)...),
-		"duplicate": []byte(`{"schema_version":"ardur.agent_recognition_benchmark_report.v0.1","schema_version":"ardur.agent_recognition_benchmark_report.v0.1"}`),
+		"duplicate": append(raw[:len(raw)-1], []byte(`,"schema_version":"ardur.agent_recognition_benchmark_report.v0.1"}`)...),
 		"trailing":  append(append([]byte(nil), raw...), []byte(` {}`)...),
 	} {
 		t.Run(name, func(t *testing.T) {

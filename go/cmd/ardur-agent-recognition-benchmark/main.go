@@ -5,12 +5,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
@@ -96,49 +94,12 @@ func writeReport(outputDirectory string, report *kernelcapture.AgentRecognitionB
 	if report == nil {
 		return fmt.Errorf("report is required")
 	}
-	if err := os.MkdirAll(outputDirectory, 0o700); err != nil {
-		return fmt.Errorf("create output directory")
-	}
-	info, err := os.Lstat(outputDirectory)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("output directory must be a non-symlink directory")
-	}
-	if err := os.Chmod(outputDirectory, 0o700); err != nil {
-		return fmt.Errorf("secure output directory")
-	}
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode report")
 	}
 	raw = append(raw, '\n')
-	temporary, err := os.OpenFile(filepath.Join(outputDirectory, ".agent-recognition-benchmark.tmp"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("create report temporary file")
-	}
-	temporaryPath := temporary.Name()
-	removeTemporary := true
-	defer func() {
-		if removeTemporary {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	written, writeErr := temporary.Write(raw)
-	if writeErr != nil || written != len(raw) {
-		_ = temporary.Close()
-		return errors.Join(fmt.Errorf("write report"), writeErr, io.ErrShortWrite)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("sync report")
-	}
-	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close report")
-	}
-	if err := os.Rename(temporaryPath, filepath.Join(outputDirectory, reportFilename)); err != nil {
-		return fmt.Errorf("publish report")
-	}
-	removeTemporary = false
-	return nil
+	return writeBenchmarkReportFile(outputDirectory, raw)
 }
 
 func writeSummary(writer io.Writer, summary commandSummary) {

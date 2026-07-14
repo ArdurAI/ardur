@@ -523,20 +523,21 @@ func (d *daemon) agentRecognitionHealth() *kernelcapture.AgentRecognitionHealth 
 	d.agentRecognitionMu.RLock()
 	recognizer := d.agentRecognizer
 	d.agentRecognitionMu.RUnlock()
-	if recognizer == nil {
-		return nil
-	}
-	metadata := recognizer.Classify(kernelcapture.AgentRecognitionInput{})
-	return &kernelcapture.AgentRecognitionHealth{
-		Enabled:         true,
-		RegistryVersion: metadata.RegistryVersion,
-		RegistrySHA256:  metadata.RegistrySHA256,
+	health := &kernelcapture.AgentRecognitionHealth{
+		Enabled: recognizer != nil,
 		Counters: kernelcapture.AgentRecognitionCounters{
 			CandidatesTotal: d.agentCandidatesTotal.Load(),
 			Recognized:      d.agentRecognizedTotal.Load(),
 			Ambiguous:       d.agentAmbiguousTotal.Load(),
 		},
 	}
+	if recognizer == nil {
+		return health
+	}
+	metadata := recognizer.Classify(kernelcapture.AgentRecognitionInput{})
+	health.RegistryVersion = metadata.RegistryVersion
+	health.RegistrySHA256 = metadata.RegistrySHA256
+	return health
 }
 
 func (d *daemon) lifecycleCaptureHealth() *kernelcapture.DaemonLifecycleCaptureHealth {

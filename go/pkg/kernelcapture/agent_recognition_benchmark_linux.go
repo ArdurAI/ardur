@@ -232,6 +232,9 @@ func runAgentRecognitionBenchmarkArm(ctx context.Context, root string, opts Agen
 		if err != nil {
 			return nil, err
 		}
+		if err := resetProcessPeakRSSKiB(daemon.command.Process.Pid); err != nil {
+			return nil, err
+		}
 		cpuBefore, err := readProcessSchedstatNanoseconds(daemon.command.Process.Pid)
 		if err != nil {
 			return nil, err
@@ -369,8 +372,11 @@ func (d *agentRecognitionBenchmarkDaemon) snapshot(enabled bool, registrySHA256 
 		snapshot.fingerprint = *response.AgentFingerprint
 		snapshot.hasRecognition = true
 		snapshot.hasFingerprint = true
-	} else if response.AgentRecognition != nil || response.AgentFingerprint != nil {
-		return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: baseline daemon unexpectedly enabled recognition", ErrAgentRecognitionBenchmark)
+	} else {
+		if response.AgentRecognition == nil || response.AgentRecognition.Enabled || response.AgentRecognition.RegistryVersion != "" || response.AgentRecognition.RegistrySHA256 != "" || response.AgentFingerprint != nil {
+			return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: baseline daemon recognition health is incomplete or enabled", ErrAgentRecognitionBenchmark)
+		}
+		snapshot.recognition = *response.AgentRecognition
 	}
 	return snapshot, nil
 }
@@ -388,7 +394,11 @@ func (d *agentRecognitionBenchmarkDaemon) waitForAccounting(enabled bool, regist
 				return agentRecognitionBenchmarkSnapshot{}, captureErr
 			}
 			if !enabled {
-				if capture.Delivered == 0 && capture.ProducerDropped == 0 && capture.Malformed == 0 {
+				recognition, recognitionErr := deltaRecognitionCounters(before.recognition.Counters, after.recognition.Counters)
+				if recognitionErr != nil {
+					return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: baseline recognition counter moved backwards", ErrAgentRecognitionBenchmark)
+				}
+				if capture.Delivered == 0 && capture.ProducerDropped == 0 && capture.Malformed == 0 && recognition == (AgentRecognitionCounters{}) {
 					return after, nil
 				}
 				return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: baseline observed recognition-filtered work", ErrAgentRecognitionBenchmark)
@@ -698,6 +708,17 @@ func readProcessPeakRSSKiB(pid int) (uint64, error) {
 		break
 	}
 	return 0, fmt.Errorf("%w: daemon RSS metric is malformed", ErrAgentRecognitionBenchmark)
+}
+
+func resetProcessPeakRSSKiB(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("%w: daemon PID is invalid for peak RSS reset", ErrAgentRecognitionBenchmark)
+	}
+	path := filepath.Join("/proc", strconv.Itoa(pid), "clear_refs")
+	if err := os.WriteFile(path, []byte("5\n"), 0); err != nil {
+		return fmt.Errorf("%w: reset daemon peak RSS watermark", ErrAgentRecognitionBenchmark)
+	}
+	return nil
 }
 
 func agentRecognitionBenchmarkEnvironment() AgentRecognitionBenchmarkEnvironment {

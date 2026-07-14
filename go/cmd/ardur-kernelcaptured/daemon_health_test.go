@@ -106,6 +106,22 @@ func TestHandleAuthorizedRequest_HealthReportsMonotonicCaptureAndRecognitionAcco
 	}
 }
 
+func TestHandleAuthorizedRequest_HealthReportsDisabledRecognitionCounters(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.agentCandidatesTotal.Store(5)
+	d.agentRecognizedTotal.Store(3)
+	d.agentAmbiguousTotal.Store(2)
+
+	resp := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
+	if !resp.OK || resp.AgentRecognition == nil {
+		t.Fatalf("health response = %+v", resp)
+	}
+	if got := resp.AgentRecognition; got.Enabled || got.RegistryVersion != "" || got.RegistrySHA256 != "" || got.Counters.CandidatesTotal != 5 || got.Counters.Recognized != 3 || got.Counters.Ambiguous != 2 {
+		t.Fatalf("disabled recognition health = %+v", got)
+	}
+}
+
 func TestHandleAuthorizedRequest_HealthSamplesTerminalProducerDrops(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)

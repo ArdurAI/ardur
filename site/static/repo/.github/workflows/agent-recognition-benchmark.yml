@@ -40,7 +40,7 @@ jobs:
   benchmark:
     name: Agent recognition overhead (${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       BENCHMARK_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }}
       SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
