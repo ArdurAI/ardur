@@ -162,6 +162,10 @@ the release profile without a longitudinal experiment design.
   harness sums it over the daemon's thread group because Go work is not confined
   to the process leader:
   [Scheduler statistics](https://docs.kernel.org/scheduler/sched-stats.html#proc-pid-schedstat).
+- Linux documents that `poll(2)` may return `EINTR` when a signal arrives
+  before an event. The pidfd exit check retries that transient interruption
+  instead of misclassifying it as an unsupported fingerprint target:
+  [poll(2)](https://man7.org/linux/man-pages/man2/poll.2.html).
 
 ## Targeted verification
 

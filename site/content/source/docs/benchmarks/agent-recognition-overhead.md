@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "69482a230603ba77588b5e5db599c8bfb460c7b14746dd569ecdc2461d44e433"
+source_sha256: "b4819b5e03e9b03640e3678484e4c1543cf05d1740f4d2cf0ef41a1967c0ee7d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -179,6 +179,10 @@ the release profile without a longitudinal experiment design.
   harness sums it over the daemon's thread group because Go work is not confined
   to the process leader:
   [Scheduler statistics](https://docs.kernel.org/scheduler/sched-stats.html#proc-pid-schedstat).
+- Linux documents that `poll(2)` may return `EINTR` when a signal arrives
+  before an event. The pidfd exit check retries that transient interruption
+  instead of misclassifying it as an unsupported fingerprint target:
+  [poll(2)](https://man7.org/linux/man-pages/man2/poll.2.html).
 
 ## Targeted verification
 
