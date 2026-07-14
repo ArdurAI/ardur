@@ -237,7 +237,7 @@
       "platform": "linux",
       "signal_stratum": "name_only",
       "signals": {"comm_available": true, "executable_basename_available": true},
-      "input": {"comm": "gemini-proxy", "executable_basename": "gemini-proxy"},
+      "input": {"comm": "gemini-helper", "executable_basename": "gemini-helper"},
       "expected": {"status": "unknown"},
       "near_miss_for": ["gemini_cli"],
       "provenance": {"source_kind": "adversarial_synthetic", "reference": "docs/reference/agent-recognition-evaluation.md#sample-sources", "reviewed_at": "2026-07-14", "sanitized": true}

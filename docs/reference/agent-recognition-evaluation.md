@@ -99,7 +99,7 @@ standalone percentage is emitted. Wilson intervals are test-inversion
 intervals recommended over the normal approximation for small binomial
 samples. See the [NIST/SEMATECH proportion confidence-interval
 guidance](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm) and
-[Wilson's original 1927 paper](https://doi.org/10.1080/01621459.1927.10502953).
+Wilson's original 1927 paper (DOI `10.1080/01621459.1927.10502953`).
 
 ## Maintained-corpus threshold
 

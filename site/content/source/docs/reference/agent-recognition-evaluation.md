@@ -2,7 +2,7 @@
 title: "Agent Recognition Evaluation"
 description: "This reference describes the maintained, sanitized corpus gate for Ardur's"
 source_path: "docs/reference/agent-recognition-evaluation.md"
-source_sha256: "31c7637601672d0e44715a624814a9611bbf58280039b8f0ecb04fbe0d92826f"
+source_sha256: "f7d4b291479b6ae6f95660a616d4a30a206e5f55d7836d444a0d33de5fe5acba"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -116,7 +116,7 @@ standalone percentage is emitted. Wilson intervals are test-inversion
 intervals recommended over the normal approximation for small binomial
 samples. See the [NIST/SEMATECH proportion confidence-interval
 guidance](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm) and
-[Wilson's original 1927 paper](https://doi.org/10.1080/01621459.1927.10502953).
+Wilson's original 1927 paper (DOI `10.1080/01621459.1927.10502953`).
 
 ## Maintained-corpus threshold
 
