@@ -186,6 +186,8 @@ type daemon struct {
 	agentRecognitionMu       sync.RWMutex
 	agentRecognizer          *kernelcapture.AgentRecognizer
 	agentRecognitionObserver func(kernelcapture.ProcessEvent, kernelcapture.AgentRecognitionResult)
+	agentFingerprintWorker   *kernelcapture.AgentFingerprintWorker
+	agentFingerprintObserver func(kernelcapture.ProcessEvent, kernelcapture.AgentRecognitionResult, kernelcapture.AgentFingerprintObservation)
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
@@ -371,10 +373,55 @@ func (d *daemon) enableAgentRecognition(opts kernelcapture.AgentRecognizerOption
 	return nil
 }
 
+func (d *daemon) enableAgentFingerprinting(registry *kernelcapture.AgentFingerprintRegistry) error {
+	d.agentRecognitionMu.RLock()
+	recognizer := d.agentRecognizer
+	d.agentRecognitionMu.RUnlock()
+	if recognizer == nil {
+		return fmt.Errorf("agent recognition must be enabled before fingerprinting")
+	}
+	if err := registry.ValidateAgentTypes(recognizer.AgentTypes()); err != nil {
+		return err
+	}
+	worker, err := kernelcapture.NewAgentFingerprintWorker(registry, kernelcapture.AgentFingerprintWorkerOptions{
+		Observer: d.observeAgentFingerprint,
+	})
+	if err != nil {
+		return err
+	}
+	d.agentRecognitionMu.Lock()
+	if d.agentRecognizer != recognizer {
+		d.agentRecognitionMu.Unlock()
+		closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = worker.Close(closeCtx)
+		return fmt.Errorf("agent recognition changed while fingerprinting was enabled")
+	}
+	if d.agentFingerprintWorker != nil {
+		d.agentRecognitionMu.Unlock()
+		closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = worker.Close(closeCtx)
+		return fmt.Errorf("agent fingerprinting is already enabled")
+	}
+	d.agentFingerprintWorker = worker
+	d.agentRecognitionMu.Unlock()
+	return nil
+}
+
 func (d *daemon) disableAgentRecognition() {
 	d.agentRecognitionMu.Lock()
 	d.agentRecognizer = nil
+	worker := d.agentFingerprintWorker
+	d.agentFingerprintWorker = nil
 	d.agentRecognitionMu.Unlock()
+	if worker != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := worker.Close(ctx); err != nil {
+			d.log.Warn("stop agent fingerprint workers", "error", err)
+		}
+	}
 }
 
 func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
@@ -384,6 +431,7 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 	d.agentRecognitionMu.RLock()
 	recognizer := d.agentRecognizer
 	observer := d.agentRecognitionObserver
+	fingerprintWorker := d.agentFingerprintWorker
 	d.agentRecognitionMu.RUnlock()
 	if recognizer == nil {
 		return
@@ -391,6 +439,10 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 	result := recognizer.Classify(kernelcapture.AgentRecognitionInput{Comm: evt.Comm, ExecutableBasename: evt.ExecutableBasename})
 	if result.Status == kernelcapture.AgentRecognitionStatusUnknown {
 		return
+	}
+	var immediateFingerprint *kernelcapture.AgentFingerprintObservation
+	if result.Status == kernelcapture.AgentRecognitionStatusRecognized && fingerprintWorker != nil {
+		immediateFingerprint = fingerprintWorker.Submit(evt, result)
 	}
 	d.log.Info("AI agent launch candidate observed",
 		"recognition_status", result.Status,
@@ -411,6 +463,46 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 	if observer != nil {
 		observer(evt, result)
 	}
+	if immediateFingerprint != nil {
+		d.observeAgentFingerprint(evt, result, *immediateFingerprint)
+	}
+}
+
+func (d *daemon) observeAgentFingerprint(evt kernelcapture.ProcessEvent, candidate kernelcapture.AgentRecognitionResult, observation kernelcapture.AgentFingerprintObservation) {
+	d.log.Info("AI agent native executable fingerprint observed",
+		"fingerprint_outcome", observation.Outcome,
+		"fingerprint_method", observation.Method,
+		"object_state", observation.ObjectState,
+		"agent_type", observation.AgentType,
+		"confidence", observation.Confidence,
+		"identity_assurance", observation.IdentityAssurance,
+		"governance_action", observation.GovernanceAction,
+		"fingerprint_registry_version", observation.FingerprintRegistryVersion,
+		"fingerprint_registry_sha256", observation.FingerprintRegistrySHA256,
+		"matched_rule_ids", observation.MatchedRuleIDs,
+		"pid", evt.PID,
+		"ppid", evt.PPID,
+		"cgroup", evt.CgroupID,
+		"comm", evt.Comm,
+		"executable_basename", evt.ExecutableBasename,
+	)
+	d.agentRecognitionMu.RLock()
+	observer := d.agentFingerprintObserver
+	d.agentRecognitionMu.RUnlock()
+	if observer != nil {
+		observer(evt, candidate, observation)
+	}
+}
+
+func (d *daemon) agentFingerprintHealth() *kernelcapture.AgentFingerprintHealth {
+	d.agentRecognitionMu.RLock()
+	worker := d.agentFingerprintWorker
+	d.agentRecognitionMu.RUnlock()
+	if worker == nil {
+		return nil
+	}
+	health := worker.Health()
+	return &health
 }
 
 // registerSeccompListener records that sessionID now has a live seccomp
@@ -602,6 +694,7 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		// whether routing a governed process through ardur-exec-shim (the
 		// seccomp tier's on-ramp) is necessary before it ever spawns one.
 		resp.EnforcementTier = d.enforcementTier()
+		resp.AgentFingerprint = d.agentFingerprintHealth()
 	}
 	return resp
 }
@@ -2094,22 +2187,23 @@ func splitCommaSeparatedValues(raw string) []string {
 
 func main() {
 	var (
-		socketPath            = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
-		seccompSocketPath     = flag.String("seccomp-socket", defaultSeccompSocketPath, "Unix-domain socket ardur-exec-shim hands off its seccomp listener fd on (seccomp tier, plan E4)")
-		evidenceDir           = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
-		stateDir              = flag.String("state-dir", defaultStateDir, "Daemon state directory")
-		noRingbuf             = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
-		disableBPFLSM         = flag.Bool("disable-bpf-lsm", false, "Skip the BPF-LSM guard tier and force the seccomp user-notify fallback, even on hosts where BPF-LSM is available. Exec/exit observation still runs; only the BPF-LSM enforcement tier is suppressed. Used to exercise the seccomp path where BPF-LSM would otherwise win tier selection.")
-		debug                 = flag.Bool("debug", false, "Enable debug-level logging")
-		pruneEvery            = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
-		guardReadyTimeout     = flag.Duration("guard-ready-timeout", 10*time.Second, "How long to wait for the BPF-LSM guard to report load success/failure before falling back to the seccomp tier")
-		agentRecognition      = flag.Bool("agent-recognition", false, "Observe release-bound AI agent launch candidates using bounded process metadata")
-		agentRecognitionAllow = flag.String("agent-recognition-allow", "", "Comma-separated agent types allowed in the recognition prefilter")
-		agentRecognitionDeny  = flag.String("agent-recognition-deny", "", "Comma-separated agent types denied from the recognition prefilter")
+		socketPath               = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
+		seccompSocketPath        = flag.String("seccomp-socket", defaultSeccompSocketPath, "Unix-domain socket ardur-exec-shim hands off its seccomp listener fd on (seccomp tier, plan E4)")
+		evidenceDir              = flag.String("evidence-dir", defaultEvidenceDir, "Directory for per-session kernel receipt JSONL logs")
+		stateDir                 = flag.String("state-dir", defaultStateDir, "Daemon state directory")
+		noRingbuf                = flag.Bool("no-ringbuf", false, "Skip eBPF ringbuf consumer (socket control plane only)")
+		disableBPFLSM            = flag.Bool("disable-bpf-lsm", false, "Skip the BPF-LSM guard tier and force the seccomp user-notify fallback, even on hosts where BPF-LSM is available. Exec/exit observation still runs; only the BPF-LSM enforcement tier is suppressed. Used to exercise the seccomp path where BPF-LSM would otherwise win tier selection.")
+		debug                    = flag.Bool("debug", false, "Enable debug-level logging")
+		pruneEvery               = flag.Duration("prune-interval", 30*time.Second, "Interval to prune expired session routing entries")
+		guardReadyTimeout        = flag.Duration("guard-ready-timeout", 10*time.Second, "How long to wait for the BPF-LSM guard to report load success/failure before falling back to the seccomp tier")
+		agentRecognition         = flag.Bool("agent-recognition", false, "Observe release-bound AI agent launch candidates using bounded process metadata")
+		agentRecognitionAllow    = flag.String("agent-recognition-allow", "", "Comma-separated agent types allowed in the recognition prefilter")
+		agentRecognitionDeny     = flag.String("agent-recognition-deny", "", "Comma-separated agent types denied from the recognition prefilter")
+		agentFingerprintRegistry = flag.String("agent-recognition-fingerprint-registry", "", "Daemon-owned native executable fingerprint registry (Linux only; requires --agent-recognition)")
 	)
 	flag.Parse()
-	if !*agentRecognition && (strings.TrimSpace(*agentRecognitionAllow) != "" || strings.TrimSpace(*agentRecognitionDeny) != "") {
-		fmt.Fprintln(os.Stderr, "--agent-recognition-allow and --agent-recognition-deny require --agent-recognition")
+	if !*agentRecognition && (strings.TrimSpace(*agentRecognitionAllow) != "" || strings.TrimSpace(*agentRecognitionDeny) != "" || strings.TrimSpace(*agentFingerprintRegistry) != "") {
+		fmt.Fprintln(os.Stderr, "--agent-recognition-allow, --agent-recognition-deny, and --agent-recognition-fingerprint-registry require --agent-recognition")
 		os.Exit(2)
 	}
 	if *agentRecognition && *noRingbuf {
@@ -2149,6 +2243,28 @@ func main() {
 			"identity_assurance", "heuristic_process_metadata",
 			"governance_action", "observe_only",
 		)
+		if strings.TrimSpace(*agentFingerprintRegistry) != "" {
+			registry, loadErr := loadAgentFingerprintRegistry(*agentFingerprintRegistry, ownerUID)
+			if loadErr != nil {
+				log.Error("configure agent fingerprint registry", "error", loadErr)
+				os.Exit(2)
+			}
+			if enableErr := d.enableAgentFingerprinting(registry); enableErr != nil {
+				log.Error("configure agent fingerprint workers", "error", enableErr)
+				os.Exit(2)
+			}
+			health := d.agentFingerprintHealth()
+			log.Info("agent native executable fingerprinting enabled",
+				"identity_assurance", "heuristic_executable_content",
+				"governance_action", "observe_only",
+				"registry_version", health.RegistryVersion,
+				"registry_sha256", health.RegistrySHA256,
+				"queue_capacity", health.QueueCapacity,
+				"worker_count", health.WorkerCount,
+				"timeout_ms", health.TimeoutMS,
+				"max_file_bytes", health.MaxFileBytes,
+			)
+		}
 	}
 
 	// Ensure socket directory exists.
@@ -2310,5 +2426,6 @@ func main() {
 		log.Error("failed to close control socket server", "error", err)
 	}
 	wg.Wait()
+	d.disableAgentRecognition()
 	log.Info("ardur-kernelcaptured stopped")
 }

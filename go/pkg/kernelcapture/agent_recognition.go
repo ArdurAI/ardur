@@ -262,6 +262,25 @@ func (r *AgentRecognizer) PrefilterComms() []string {
 	return append([]string(nil), r.prefilterComms...)
 }
 
+// AgentTypes returns the active agent classes after allow/deny overrides.
+// The defensive copy is sorted so startup validation and diagnostics are
+// deterministic.
+func (r *AgentRecognizer) AgentTypes() []string {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(r.rules))
+	for _, rule := range r.rules {
+		seen[rule.AgentType] = struct{}{}
+	}
+	types := make([]string, 0, len(seen))
+	for agentType := range seen {
+		types = append(types, agentType)
+	}
+	sort.Strings(types)
+	return types
+}
+
 // Classify matches bounded names. Exact process names remain low-confidence
 // even when both fields agree because one executable can control both values.
 func (r *AgentRecognizer) Classify(input AgentRecognitionInput) AgentRecognitionResult {

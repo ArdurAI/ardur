@@ -36,6 +36,17 @@ environment, or file content. It does not attest or enforce. Issue #67 remains
 in progress for stronger fingerprints and corpus-backed precision/recall
 thresholds.
 
+Operators can now add a daemon-owned native-executable fingerprint registry to
+that opt-in preview. A fixed worker pool binds recognized PIDs with pidfds and
+hashes only bounded regular files opened through `/proc/<pid>/exe`; saturation,
+denial, exit, unsupported objects, size, deadline, mismatch, and success remain
+explicit health outcomes, while an unlinked live executable is labeled
+`object_state=deleted`. A match raises the observation only to
+`medium` / `heuristic_executable_content`; it is not provenance, attestation,
+or authorization. No computed executable digest or full host path is exposed,
+and no fingerprint cache is used. Script-backed launchers remain tracked
+separately because their live executable object is the interpreter.
+
 The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
 `bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
 health-tier read, withdrawal, and close boundary uses the same mutex; teardown

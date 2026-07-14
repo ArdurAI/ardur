@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "af9b9a63cb0c6ee285dac130fd17d1fd2f60ce389cce0dafeb913a639b6613b3"
+source_sha256: "adf33954532ed76fe0846b8411519bb1fa561c76f53294ed6e2fa7981ceb562c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -68,11 +68,15 @@ separate exact, in-kernel Linux `comm` and successful-exec basename prefilters
 for the release-bound `claude`, `codex`, `gemini`, and `kimi` command names and
 logs matching execs as low-confidence, observe-only launch candidates. The
 default cgroup-scoped capture path is unchanged. The producer derives only a
-bounded basename and never emits the parent path; it does not collect argv,
-binary hashes, environment, or file contents. It does not attest, adopt,
-authorize, or enforce the observed process, and an exact name is not proof of
-agent identity. Stronger fingerprints and measured precision/recall remain
-tracked by issue #67.
+bounded basename and never emits the parent path. Operators may additionally
+provide a daemon-owned `--agent-recognition-fingerprint-registry` on Linux to
+compare recognized native executables through a fixed asynchronous pidfd plus
+`/proc/<pid>/exe` worker pool. A configured match is only a medium-confidence
+heuristic content signal; computed digests, full paths, argv, environment, and
+file contents are never emitted. It does not attest, adopt, authorize, or
+enforce the observed process, and neither an exact name nor an ordinary SHA-256
+match proves agent identity or provenance. Script-backed identity, measured
+precision/recall, attestation, and governance remain separate follow-up work.
 
 For performance engineering, the
 [Linux governance overhead harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)

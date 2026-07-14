@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "ebe183636e9211490ad55f7b51531a6b718b3e7423dec15091ef22708b9d455f"
+source_sha256: "bd89f15d5dd7faa2b7b1e71c324d23a65bc4353df682f9865b02ead97bec55a1"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -52,6 +52,17 @@ basename but not its parent path and does not collect argv, hashes, uid,
 environment, or file content. It does not attest or enforce. Issue #67 remains
 in progress for stronger fingerprints and corpus-backed precision/recall
 thresholds.
+
+Operators can now add a daemon-owned native-executable fingerprint registry to
+that opt-in preview. A fixed worker pool binds recognized PIDs with pidfds and
+hashes only bounded regular files opened through `/proc/<pid>/exe`; saturation,
+denial, exit, unsupported objects, size, deadline, mismatch, and success remain
+explicit health outcomes, while an unlinked live executable is labeled
+`object_state=deleted`. A match raises the observation only to
+`medium` / `heuristic_executable_content`; it is not provenance, attestation,
+or authorization. No computed executable digest or full host path is exposed,
+and no fingerprint cache is used. Script-backed launchers remain tracked
+separately because their live executable object is the interpreter.
 
 The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
 `bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
