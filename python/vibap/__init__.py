@@ -29,6 +29,16 @@ from .passport import (
 )
 from .proxy import Decision, GovernanceProxy, GovernanceSession, PolicyEvent
 from .receipt import ExecutionReceipt, build_receipt, sign_receipt, verify_receipt
+from .spend_budget import (
+    FileSpendBudgetLedger,
+    SpendBudgetConflictError,
+    SpendBudgetError,
+    SpendCloseResult,
+    SpendQuote,
+    SpendReservationRequest,
+    SpendReservationResult,
+    StaticSpendQuoteStore,
+)
 
 __all__ = [
     "ALGORITHM",
@@ -44,12 +54,20 @@ __all__ = [
     "DRPVerifiedReceiptChainEvidence",
     "DRPVerifiedRevocationEvidence",
     "ExecutionReceipt",
+    "FileSpendBudgetLedger",
     "GovernanceProxy",
     "GovernanceSession",
     "MissionPassport",
     "MissionCache",
     "MissionDeclaration",
     "PolicyEvent",
+    "SpendBudgetConflictError",
+    "SpendBudgetError",
+    "SpendCloseResult",
+    "SpendQuote",
+    "SpendReservationRequest",
+    "SpendReservationResult",
+    "StaticSpendQuoteStore",
     "build_receipt",
     "compute_log_digest",
     "derive_child_passport",

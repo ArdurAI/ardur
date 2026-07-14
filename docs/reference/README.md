@@ -22,6 +22,9 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
 - [Advisory AI Controls](advisory-ai-controls.md) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Pre-action Spend Budgets](spend-budgets.md) — signed token/currency policy,
+  operator quote snapshots, atomic reserve/settle/quarantine semantics,
+  evidence, metrics, and deployment limits
 
 ## When To Update These Pages
 

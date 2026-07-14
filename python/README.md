@@ -209,6 +209,13 @@ domain, or audience. Without server trust configuration, Biscuit sessions
 remain explicitly `svid_bound=false`. JWT-SVID is still a bearer credential
 with a bounded replay window.
 
+Library adapters for metered tools can also configure operator-owned quote
+snapshots and signed session/agent/lineage spend ceilings. The proxy reserves
+integer token and currency-micro upper bounds before returning `PERMIT`, then
+settles trusted usage or conservatively quarantines missing evidence. See the
+[pre-action spend budget reference](../docs/reference/spend-budgets.md); no
+provider prices are hard-coded or fetched on the authorization hot path.
+
 ## Protocol identifier rename
 
 This implementation is a **clean break** on protocol identifiers — v0.1 receipts, passports, and attestations only emit and accept the new Ardur type strings. There is no dual-type backward-compat shim. If you have artifacts produced before the rename, they won't validate against this code, and that's intentional.

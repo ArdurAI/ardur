@@ -20,6 +20,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 022 | [SPIFFE mTLS identity for operator telemetry](./ADR-022-operator-telemetry-spiffe-mtls.md) | Accepted | 2026-07-11 |
 | 023 | [Explicit resource-scope authority](./ADR-023-explicit-resource-scope-authority.md) | Accepted | 2026-07-12 |
 | 024 | [Self-asserted owner identity assurance](./ADR-024-self-asserted-owner-identity-assurance.md) | Accepted | 2026-07-12 |
+| 025 | [Pre-action spend reservation and conservative settlement](./ADR-025-pre-action-spend-reservation.md) | Accepted | 2026-07-14 |
 
 ## Conventions
 

@@ -278,7 +278,77 @@ def _validate_budget_delta(value: Any) -> None:
         if "idempotent" in value and not isinstance(value["idempotent"], bool):
             _schema_violation("budget_delta.idempotent must be boolean")
         return
+    spend_required = {
+        "operation",
+        "resource",
+        "requested",
+        "reserved",
+        "actual",
+        "refunded",
+        "remaining",
+        "currency",
+        "quote_digest",
+        "reservation_hash",
+        "reason_code",
+    }
+    if spend_required <= set(value):
+        allowed = spend_required | {"idempotent", "reconciled"}
+        if set(value) - allowed:
+            _schema_violation("budget_delta contains unknown spend fields")
+        if value.get("operation") not in {
+            "reserve", "reject", "release", "settle", "quarantine"
+        }:
+            _schema_violation("budget_delta.operation has invalid spend value")
+        if value.get("resource") != "spend":
+            _schema_violation("budget_delta.resource must be 'spend'")
+        for field_name in ("requested", "reserved", "actual", "refunded"):
+            _validate_spend_amounts(value.get(field_name), f"budget_delta.{field_name}")
+        remaining = value.get("remaining")
+        if not isinstance(remaining, dict) or set(remaining) != {
+            "session", "agent", "lineage"
+        }:
+            _schema_violation(
+                "budget_delta.remaining must contain session, agent, and lineage"
+            )
+        for scope in ("session", "agent", "lineage"):
+            _validate_spend_amounts(
+                remaining[scope],
+                f"budget_delta.remaining.{scope}",
+            )
+        currency = value.get("currency")
+        if not isinstance(currency, str) or re.fullmatch(r"[A-Z]{3}", currency) is None:
+            _schema_violation("budget_delta.currency must be an uppercase code")
+        for key in ("quote_digest", "reservation_hash"):
+            digest = value.get(key)
+            if not isinstance(digest, str) or not _SHA256_HEX_RE.fullmatch(digest):
+                _schema_violation(f"budget_delta.{key} must be a SHA-256 hex digest")
+        reason_code = value.get("reason_code")
+        if (
+            not isinstance(reason_code, str)
+            or not reason_code
+            or len(reason_code) > 128
+            or _TOKEN_FIELD_RE.fullmatch(reason_code) is None
+        ):
+            _schema_violation("budget_delta.reason_code has invalid value")
+        for key in ("idempotent", "reconciled"):
+            if key in value and not isinstance(value[key], bool):
+                _schema_violation(f"budget_delta.{key} must be boolean")
+        return
     _schema_violation("budget_delta must match a supported shape")
+
+
+def _validate_spend_amounts(value: Any, field_name: str) -> None:
+    if not isinstance(value, dict) or set(value) != {"tokens", "currency_micros"}:
+        _schema_violation(f"{field_name} must contain tokens and currency_micros")
+    for dimension in ("tokens", "currency_micros"):
+        amount = value[dimension]
+        if (
+            isinstance(amount, bool)
+            or not isinstance(amount, int)
+            or amount < 0
+            or amount > 9_007_199_254_740_991
+        ):
+            _schema_violation(f"{field_name}.{dimension} must be a safe integer")
 
 
 def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:

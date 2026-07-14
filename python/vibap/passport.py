@@ -18,6 +18,8 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from .spend_budget import normalize_spend_budget
+
 ALGORITHM = "ES256"
 DEFAULT_ISSUER = "vibap-governance-proxy"
 DEFAULT_AUDIENCE = "vibap-proxy"
@@ -302,11 +304,17 @@ class MissionPassport:
     # DENY-wins across native + additional; formally verified in
     # verification/composition_smt.py (properties P1-P4).
     additional_policies: list[dict[str, Any]] = field(default_factory=list)
+    # Optional pre-action monetary/token authority. The mission form omits a
+    # lineage_id; issue_passport binds it to the fresh root JTI. Derived
+    # children inherit the signed policy and lineage identifier unchanged.
+    spend_budget: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Validate/normalize cwd at construction time so an invalid passport
         # can never be issued. Empty string → None; relative → ValueError.
         self.cwd = _normalize_cwd(self.cwd)
+        if self.spend_budget is not None:
+            self.spend_budget = normalize_spend_budget(self.spend_budget)
         if (
             UNRESTRICTED_RESOURCE_SCOPE_PATTERN in self.resource_scope
             and not resource_scope_is_explicitly_unrestricted(self.resource_scope)
@@ -338,6 +346,7 @@ class MissionPassport:
         "holder_spiffe_id",
         "additional_policies",  # pluggable policy backends
         "mission_id",  # H1: stable mission identifier for PolicyStore lookup
+        "spend_budget",  # pre-action token and monetary authority
         # Mission-file metadata handled by load_mission_file / issue_passport
         "budget", "ttl_s", "issued_at", "expires_at",
     })
@@ -386,6 +395,7 @@ class MissionPassport:
             holder_spiffe_id=data.get("holder_spiffe_id"),
             additional_policies=list(data.get("additional_policies", [])),
             mission_id=data.get("mission_id"),
+            spend_budget=data.get("spend_budget"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -394,6 +404,8 @@ class MissionPassport:
         data = asdict(self)
         if data.get("cwd") is None:
             data.pop("cwd", None)
+        if data.get("spend_budget") is None:
+            data.pop("spend_budget", None)
         return data
 
 
@@ -621,6 +633,25 @@ def issue_passport(
         claims["max_tool_calls_per_class"] = mission.max_tool_calls_per_class
     if mission.additional_policies:
         claims["additional_policies"] = mission.additional_policies
+    if mission.spend_budget is not None:
+        inherited_lineage_id = mission.spend_budget.get("lineage_id")
+        if mission.parent_jti is None and inherited_lineage_id is not None:
+            raise ValueError(
+                "root spend_budget must omit lineage_id; issuance binds it to the fresh jti"
+            )
+        if mission.parent_jti is not None and inherited_lineage_id is None:
+            raise ValueError(
+                "child spend_budget must inherit the parent lineage_id"
+            )
+        claims["spend_budget"] = normalize_spend_budget(
+            mission.spend_budget,
+            lineage_id=(
+                str(inherited_lineage_id)
+                if inherited_lineage_id is not None
+                else jti
+            ),
+            require_lineage_id=True,
+        )
     # K2 (I6): Proof of Possession via cnf claim. When the mission declares
     # a holder_key_thumbprint, the passport is bound to that key. Presenters
     # must prove possession by signing a KB-JWT with the matching private key.
@@ -629,6 +660,10 @@ def issue_passport(
     if mission.holder_key_thumbprint:
         claims["cnf"] = {"jkt": mission.holder_key_thumbprint}
     if extra_claims:
+        if "spend_budget" in extra_claims:
+            raise ValueError(
+                "extra_claims must not override the normalized spend_budget authority"
+            )
         claims.update(extra_claims)
 
     return jwt.encode(claims, private_key, algorithm=ALGORITHM)
@@ -1160,6 +1195,14 @@ def derive_child_passport(
         max_delegation_depth=child_depth,
         parent_jti=parent["jti"],
         cwd=final_cwd,
+        spend_budget=(
+            normalize_spend_budget(
+                parent["spend_budget"],
+                require_lineage_id=True,
+            )
+            if parent.get("spend_budget") is not None
+            else None
+        ),
     )
     child_chain: list[dict[str, str]] = [{"jti": str(parent["jti"])}]
     # Embed parent's own token hash in the chain link. This is ONE of two
