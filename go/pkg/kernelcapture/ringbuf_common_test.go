@@ -3,6 +3,7 @@ package kernelcapture
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -195,8 +196,8 @@ func TestDecodeRingbufRecordExitIncludesExitCode(t *testing.T) {
 	binary.LittleEndian.PutUint64(raw[32:40], 777)
 	exitCode := int32(-13)
 	binary.LittleEndian.PutUint32(raw[40:44], uint32(exitCode))
-	copy(raw[44:60], []byte("python3"))
-	copy(raw[60:124], []byte("agent.py"))
+	copy(raw[72:88], []byte("python3"))
+	copy(raw[88:152], []byte("agent.py"))
 
 	evt, err := decodeRingbufRecord(raw)
 	if err != nil {
@@ -225,6 +226,59 @@ func TestDecodeRingbufRecordExitIncludesExitCode(t *testing.T) {
 	}
 	if evt.ExecutableBasename != "agent.py" {
 		t.Fatalf("executable_basename = %q, want agent.py", evt.ExecutableBasename)
+	}
+}
+
+func TestDecodeRingbufRecordLauncherIdentityIsBoundedAndNonPath(t *testing.T) {
+	t.Parallel()
+
+	raw := make([]byte, ringbufRecordMinSize)
+	raw[0] = 1
+	raw[1] = 1
+	raw[2] = 1
+	binary.LittleEndian.PutUint32(raw[16:20], 7001)
+	binary.LittleEndian.PutUint32(raw[44:48], 2)
+	binary.LittleEndian.PutUint64(raw[48:56], 9988)
+	binary.LittleEndian.PutUint64(raw[56:64], 77)
+	binary.LittleEndian.PutUint32(raw[64:68], 8)
+	binary.LittleEndian.PutUint32(raw[68:72], 1)
+	copy(raw[72:88], []byte("codex"))
+	copy(raw[88:152], []byte("codex"))
+	copy(raw[152:216], []byte("python3"))
+
+	evt, err := decodeRingbufRecord(raw)
+	if err != nil {
+		t.Fatalf("decodeRingbufRecord error: %v", err)
+	}
+	if !evt.InterpreterBacked || !evt.LauncherScript || evt.LauncherInterpreter != "python3" {
+		t.Fatalf("launcher shape = interpreted:%t script:%t interpreter:%q", evt.InterpreterBacked, evt.LauncherScript, evt.LauncherInterpreter)
+	}
+	want := (LauncherObjectIdentity{Present: true, DeviceMajor: 8, DeviceMinor: 1, Inode: 9988, MountID: 77, LinkCount: 2})
+	if evt.LauncherIdentity != want {
+		t.Fatal("launcher identity fields did not decode to the expected bounded values")
+	}
+	serialized, err := json.Marshal(evt)
+	if err != nil {
+		t.Fatalf("marshal process event: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(serialized, &fields); err != nil {
+		t.Fatalf("decode serialized process event: %v", err)
+	}
+	for _, privateField := range []string{"InterpreterBacked", "LauncherScript", "LauncherIdentity", "LauncherInterpreter"} {
+		if _, exposed := fields[privateField]; exposed {
+			t.Fatalf("private launcher resolution field %q was serialized", privateField)
+		}
+	}
+
+	raw[1] = 2
+	raw[2] = 0
+	unknown, err := decodeRingbufRecord(raw)
+	if err != nil {
+		t.Fatalf("decode interpreter-backed record: %v", err)
+	}
+	if !unknown.InterpreterBacked || unknown.LauncherScript || unknown.LauncherIdentity.Present {
+		t.Fatalf("unsupported interpreter shape = interpreted:%t script:%t identity:%t", unknown.InterpreterBacked, unknown.LauncherScript, unknown.LauncherIdentity.Present)
 	}
 }
 

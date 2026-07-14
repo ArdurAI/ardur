@@ -106,6 +106,19 @@ func runEBPFConsumer(ctx context.Context, d *daemon, log *slog.Logger) error {
 			}
 		}()
 	}
+	if d.agentLauncherIdentityRequired() {
+		if err := handles.AttachLauncherIdentityObserver(); err != nil {
+			d.setAgentLauncherIdentityAvailable(false)
+			log.Warn("launcher identity observation unavailable; launcher fingerprints will fail low", "error", err)
+		} else {
+			d.setAgentLauncherIdentityAvailable(true)
+			defer d.setAgentLauncherIdentityAvailable(false)
+			log.Info("launcher identity BPF-LSM observer attached",
+				"hook", "bprm_check_security",
+				"governance_action", "observe_only",
+			)
+		}
+	}
 	d.setLifecycleDropCounter(handles.LifecycleDroppedTotal)
 	defer d.setLifecycleDropCounter(nil)
 

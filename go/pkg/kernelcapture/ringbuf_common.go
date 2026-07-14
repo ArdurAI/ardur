@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const ringbufRecordMinSize = 124
+const ringbufRecordMinSize = 216
 
 const defaultRingbufPollInterval = 200 * time.Millisecond
 
@@ -99,7 +99,15 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 	if err := binary.Read(reader, binary.LittleEndian, &rawType); err != nil {
 		return ProcessEvent{}, err
 	}
-	if _, err := reader.Seek(7, 1); err != nil {
+	var launcherKind uint8
+	if err := binary.Read(reader, binary.LittleEndian, &launcherKind); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherIdentityPresent uint8
+	if err := binary.Read(reader, binary.LittleEndian, &launcherIdentityPresent); err != nil {
+		return ProcessEvent{}, err
+	}
+	if _, err := reader.Seek(5, 1); err != nil {
 		return ProcessEvent{}, err
 	}
 
@@ -135,6 +143,26 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 	if err := binary.Read(reader, binary.LittleEndian, &exitCode); err != nil {
 		return ProcessEvent{}, err
 	}
+	var launcherLinkCount uint32
+	if err := binary.Read(reader, binary.LittleEndian, &launcherLinkCount); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherInode uint64
+	if err := binary.Read(reader, binary.LittleEndian, &launcherInode); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherMountID uint64
+	if err := binary.Read(reader, binary.LittleEndian, &launcherMountID); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherDeviceMajor uint32
+	if err := binary.Read(reader, binary.LittleEndian, &launcherDeviceMajor); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherDeviceMinor uint32
+	if err := binary.Read(reader, binary.LittleEndian, &launcherDeviceMinor); err != nil {
+		return ProcessEvent{}, err
+	}
 
 	commBuf := make([]byte, 16)
 	if _, err := reader.Read(commBuf); err != nil {
@@ -146,16 +174,32 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 		return ProcessEvent{}, err
 	}
 	executableBasename := strings.TrimRight(string(executableBasenameBuf), "\x00")
+	interpreterBasenameBuf := make([]byte, 64)
+	if _, err := reader.Read(interpreterBasenameBuf); err != nil {
+		return ProcessEvent{}, err
+	}
+	interpreterBasename := strings.TrimRight(string(interpreterBasenameBuf), "\x00")
 
 	return ProcessEvent{
-		Type:                decodeProcessEventType(rawType),
-		PID:                 pid,
-		PPID:                ppid,
-		TID:                 tid,
-		PIDNamespaceID:      uint64(pidNamespaceID),
-		CgroupID:            cgroupID,
-		Comm:                comm,
-		ExecutableBasename:  executableBasename,
+		Type:               decodeProcessEventType(rawType),
+		PID:                pid,
+		PPID:               ppid,
+		TID:                tid,
+		PIDNamespaceID:     uint64(pidNamespaceID),
+		CgroupID:           cgroupID,
+		Comm:               comm,
+		ExecutableBasename: executableBasename,
+		InterpreterBacked:  launcherKind != 0,
+		LauncherScript:     launcherKind == 1,
+		LauncherIdentity: LauncherObjectIdentity{
+			Present:     launcherIdentityPresent == 1,
+			DeviceMajor: launcherDeviceMajor,
+			DeviceMinor: launcherDeviceMinor,
+			Inode:       launcherInode,
+			MountID:     launcherMountID,
+			LinkCount:   launcherLinkCount,
+		},
+		LauncherInterpreter: interpreterBasename,
 		ExitCode:            exitCode,
 		ObservedMonotonicNS: monotonicNS,
 	}, nil

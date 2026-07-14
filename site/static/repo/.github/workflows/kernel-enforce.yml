@@ -6,7 +6,8 @@ name: kernel-enforce
 #
 #   bpf-generate — compiles process_guard.bpf.c with the same toolchain
 #     (Ubuntu 24.04 default clang, currently 18.x) used to produce the
-#     committed processguard_bpfel.{go,o} / processexec_bpfel.{go,o}, fails
+#     committed processguard_bpfel.{go,o} / processexec_bpfel.{go,o} /
+#     launcheridentity_bpfel.{go,o}, fails
 #     if regeneration drifts from what's committed, then builds/vets/tests
 #     the whole Go module with the real generated symbols present. This is
 #     the check that would have caught PR #92's original compile blockers
@@ -155,7 +156,9 @@ jobs:
               go/pkg/kernelcapture/processguard_bpfel.go \
               go/pkg/kernelcapture/processguard_bpfel.o \
               go/pkg/kernelcapture/processexec_bpfel.go \
-              go/pkg/kernelcapture/processexec_bpfel.o; then
+              go/pkg/kernelcapture/processexec_bpfel.o \
+              go/pkg/kernelcapture/launcheridentity_bpfel.go \
+              go/pkg/kernelcapture/launcheridentity_bpfel.o; then
             echo "::error::go generate produced output that differs from what's committed. Run 'go generate ./go/pkg/kernelcapture/...' on Linux (clang + libbpf-dev) and commit the regenerated files."
             exit 1
           fi

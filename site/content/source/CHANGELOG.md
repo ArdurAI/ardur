@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8813fc489745849ace625a5d531f1327541f234e93679586ba03a00c8a6b4236"
+source_sha256: "94cb08d34c6d84acd5b4a4f09bb824286a4188b6749c95a1b7378bf627c2cfc3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -56,6 +56,11 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Kernel-bound script-launcher fingerprinting for opt-in Linux agent
+  recognition: an optional non-enforcing BPF-LSM observer captures bounded
+  original-object identity, mutable cmdline is confined to locator duty behind
+  `openat2` plus `statx` equality, launcher digests bind to allowlisted final
+  interpreter profiles, and unsupported shapes return explicit fail-low labels
 - Bounded native Linux executable fingerprint matching for opt-in agent
   recognition, with a daemon-owned versioned registry, pidfd plus
   `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health

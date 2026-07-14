@@ -46,13 +46,67 @@ func TestAgentFingerprintRegistryCanonicalizesAndRejectsCrossClassDigestReuse(t 
 	if a.digest != b.digest || len(a.digest) != sha256.Size*2 {
 		t.Fatalf("canonical registry digests differ: %q != %q", a.digest, b.digest)
 	}
-	if got := a.match("type_a", digestA); !reflect.DeepEqual(got, []string{"native.a"}) {
+	if got := a.matchNative("type_a", digestA); !reflect.DeepEqual(got, []string{"native.a"}) {
 		t.Fatalf("matched rules = %v, want native.a", got)
 	}
 
 	documentB.Rules[1].ExpectedSHA256 = []string{hex.EncodeToString(digestA[:])}
 	if _, err := NewAgentFingerprintRegistry(documentB); err == nil {
 		t.Fatal("cross-agent digest reuse was accepted")
+	}
+}
+
+func TestAgentFingerprintRegistryLauncherRulesAreVersionedAndInterpreterBound(t *testing.T) {
+	t.Parallel()
+	launcher := sha256.Sum256([]byte("trusted launcher"))
+	native := sha256.Sum256([]byte("trusted native"))
+	document := AgentFingerprintRegistryDocument{
+		SchemaVersion:   AgentFingerprintRegistrySchema,
+		RegistryVersion: "operator.launchers.v1",
+		Rules: []AgentFingerprintRule{{
+			RuleID:                     "launcher.codex",
+			AgentType:                  "codex_cli",
+			ExpectedSHA256:             []string{hex.EncodeToString(native[:])},
+			ExpectedLauncherSHA256:     []string{stringsToUpperHex(launcher[:]), hex.EncodeToString(launcher[:])},
+			AllowedInterpreterProfiles: []string{"python3", "sh", "python3"},
+		}},
+	}
+	registry, err := NewAgentFingerprintRegistry(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !registry.HasLauncherRules() || !registry.hasNativeAgentType("codex_cli") || !registry.hasLauncherAgentType("codex_cli") {
+		t.Fatalf("registry domains were not retained")
+	}
+	if got := registry.matchLauncher("codex_cli", launcher, "python3"); !reflect.DeepEqual(got, []string{"launcher.codex"}) {
+		t.Fatalf("launcher match = %v", got)
+	}
+	if got := registry.matchLauncher("codex_cli", launcher, "ruby"); len(got) != 0 {
+		t.Fatalf("disallowed interpreter matched launcher: %v", got)
+	}
+	if got := registry.matchNative("codex_cli", launcher); len(got) != 0 {
+		t.Fatalf("launcher digest crossed into native domain: %v", got)
+	}
+
+	legacy, err := NewAgentFingerprintRegistry(AgentFingerprintRegistryDocument{
+		SchemaVersion:   agentFingerprintRegistryLegacySchema,
+		RegistryVersion: "operator.legacy.v1",
+		Rules:           []AgentFingerprintRule{{RuleID: "native.codex", AgentType: "codex_cli", ExpectedSHA256: []string{hex.EncodeToString(native[:])}}},
+	})
+	if err != nil || legacy.HasLauncherRules() {
+		t.Fatalf("legacy native registry compatibility failed: registry=%v err=%v", legacy, err)
+	}
+
+	invalid := document
+	invalid.SchemaVersion = agentFingerprintRegistryLegacySchema
+	if _, err := NewAgentFingerprintRegistry(invalid); err == nil {
+		t.Fatal("legacy schema accepted launcher fields")
+	}
+	invalid = document
+	invalid.Rules = append([]AgentFingerprintRule(nil), document.Rules...)
+	invalid.Rules[0].AllowedInterpreterProfiles = nil
+	if _, err := NewAgentFingerprintRegistry(invalid); err == nil {
+		t.Fatal("launcher digest without interpreter profile was accepted")
 	}
 }
 
@@ -135,6 +189,144 @@ func TestAgentFingerprintWorkerMatchAndMismatchNeverExposeComputedDigest(t *test
 				}
 			}
 		})
+	}
+}
+
+func TestAgentFingerprintWorkerLauncherCapabilityIdentityAndInterpreterFailLow(t *testing.T) {
+	t.Parallel()
+	launcher := sha256.Sum256([]byte("trusted launcher"))
+	registry, err := NewAgentFingerprintRegistry(AgentFingerprintRegistryDocument{
+		SchemaVersion:   AgentFingerprintRegistrySchema,
+		RegistryVersion: "operator.launchers.v1",
+		Rules: []AgentFingerprintRule{{
+			RuleID:                     "launcher.codex",
+			AgentType:                  "codex_cli",
+			ExpectedLauncherSHA256:     []string{hex.EncodeToString(launcher[:])},
+			AllowedInterpreterProfiles: []string{"python3"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := recognizedAgentCandidate("codex_cli")
+	baseEvent := ProcessEvent{
+		PID:                 42,
+		Type:                ProcessEventExec,
+		InterpreterBacked:   true,
+		LauncherScript:      true,
+		LauncherInterpreter: "python3",
+		LauncherIdentity: LauncherObjectIdentity{
+			Present: true, DeviceMajor: 8, DeviceMinor: 1, Inode: 99, MountID: 7, LinkCount: 1,
+		},
+	}
+
+	worker, err := newAgentFingerprintWorker(registry, &fakeAgentFingerprintResolver{}, AgentFingerprintWorkerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsupported := worker.Submit(baseEvent, candidate)
+	if unsupported == nil || unsupported.Outcome != AgentFingerprintOutcomeUnsupportedKernel {
+		t.Fatalf("unavailable observer outcome = %+v", unsupported)
+	}
+	closeAgentFingerprintWorker(t, worker)
+
+	worker, err = newAgentFingerprintWorker(registry, &fakeAgentFingerprintResolver{}, AgentFingerprintWorkerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.SetLauncherIdentityAvailable(true)
+	unsupportedShape := baseEvent
+	unsupportedShape.LauncherScript = false
+	unsupportedShape.LauncherIdentity = LauncherObjectIdentity{}
+	unsupportedShapeObservation := worker.Submit(unsupportedShape, candidate)
+	if unsupportedShapeObservation == nil || unsupportedShapeObservation.Outcome != AgentFingerprintOutcomeMissingIdentity {
+		t.Fatalf("unsupported interpreter-backed shape outcome = %+v", unsupportedShapeObservation)
+	}
+	missingEvent := baseEvent
+	missingEvent.LauncherIdentity = LauncherObjectIdentity{}
+	missing := worker.Submit(missingEvent, candidate)
+	if missing == nil || missing.Outcome != AgentFingerprintOutcomeMissingIdentity {
+		t.Fatalf("missing identity outcome = %+v", missing)
+	}
+	deniedEvent := baseEvent
+	deniedEvent.LauncherInterpreter = "ruby"
+	denied := worker.Submit(deniedEvent, candidate)
+	if denied == nil || denied.Outcome != AgentFingerprintOutcomeInterpreterDenied {
+		t.Fatalf("interpreter outcome = %+v", denied)
+	}
+	closeAgentFingerprintWorker(t, worker)
+}
+
+func TestAgentFingerprintWorkerKernelBoundLauncherMatchIsPrivateAndObserveOnly(t *testing.T) {
+	t.Parallel()
+	launcher := sha256.Sum256([]byte("trusted launcher"))
+	registry, err := NewAgentFingerprintRegistry(AgentFingerprintRegistryDocument{
+		SchemaVersion:   AgentFingerprintRegistrySchema,
+		RegistryVersion: "operator.launchers.v1",
+		Rules: []AgentFingerprintRule{{
+			RuleID:                     "launcher.codex",
+			AgentType:                  "codex_cli",
+			ExpectedLauncherSHA256:     []string{hex.EncodeToString(launcher[:])},
+			AllowedInterpreterProfiles: []string{"python3"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := make(chan AgentFingerprintObservation, 1)
+	resolver := &fakeAgentFingerprintResolver{digest: agentFingerprintDigest{
+		digest: launcher, method: AgentFingerprintMethodSHA256KernelLauncher, objectState: AgentFingerprintObjectLinked,
+	}}
+	worker, err := newAgentFingerprintWorker(registry, resolver, AgentFingerprintWorkerOptions{
+		Observer: func(_ ProcessEvent, _ AgentRecognitionResult, observation AgentFingerprintObservation) {
+			observed <- observation
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.SetLauncherIdentityAvailable(true)
+	t.Cleanup(func() { closeAgentFingerprintWorker(t, worker) })
+	event := ProcessEvent{
+		PID: 42, Type: ProcessEventExec, LauncherScript: true, LauncherInterpreter: "python3",
+		LauncherIdentity: LauncherObjectIdentity{Present: true, DeviceMajor: 8, DeviceMinor: 1, Inode: 99, MountID: 7, LinkCount: 1},
+	}
+	if immediate := worker.Submit(event, recognizedAgentCandidate("codex_cli")); immediate != nil {
+		t.Fatalf("unexpected immediate result: %+v", immediate)
+	}
+	observation := receiveFingerprintObservation(t, observed)
+	if observation.Outcome != AgentFingerprintOutcomeSuccess || observation.Method != AgentFingerprintMethodSHA256KernelLauncher || observation.IdentityAssurance != "heuristic_kernel_bound_launcher_content" || observation.GovernanceAction != "observe_only" {
+		t.Fatalf("launcher observation = %+v", observation)
+	}
+	encoded, err := json.Marshal(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"python3", "/trusted/launcher", hex.EncodeToString(launcher[:])} {
+		if bytes.Contains(encoded, []byte(secret)) {
+			t.Fatalf("launcher observation exposed private input %q: %s", secret, encoded)
+		}
+	}
+}
+
+func TestAgentFingerprintWorkerDoesNotHashScriptAsNative(t *testing.T) {
+	t.Parallel()
+	native := sha256.Sum256([]byte("native"))
+	registry := mustAgentFingerprintRegistry(t, "codex_cli", native)
+	resolver := &fakeAgentFingerprintResolver{}
+	worker, err := newAgentFingerprintWorker(registry, resolver, AgentFingerprintWorkerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeAgentFingerprintWorker(t, worker) })
+	event := ProcessEvent{PID: 42, Type: ProcessEventExec, InterpreterBacked: true, LauncherScript: false, LauncherInterpreter: "sh"}
+	if got := worker.Submit(event, recognizedAgentCandidate("codex_cli")); got != nil {
+		t.Fatalf("script with native-only registry produced observation: %+v", got)
+	}
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.targets) != 0 {
+		t.Fatalf("script was bound to native resolver")
 	}
 }
 
@@ -309,7 +501,7 @@ type fakeAgentFingerprintResolver struct {
 	targets        []*fakeAgentFingerprintTarget
 }
 
-func (r *fakeAgentFingerprintResolver) Bind(uint32) (agentFingerprintTarget, string) {
+func (r *fakeAgentFingerprintResolver) Bind(ProcessEvent) (agentFingerprintTarget, string) {
 	if r.bindOutcome != "" {
 		return nil, r.bindOutcome
 	}
@@ -320,7 +512,7 @@ func (r *fakeAgentFingerprintResolver) Bind(uint32) (agentFingerprintTarget, str
 	return target, ""
 }
 
-func (r *fakeAgentFingerprintResolver) Resolve(ctx context.Context, _ agentFingerprintTarget, _ int64) (agentFingerprintDigest, string) {
+func (r *fakeAgentFingerprintResolver) Resolve(ctx context.Context, _ agentFingerprintTarget, _ agentFingerprintResolveLimits) (agentFingerprintDigest, string) {
 	if r.panicOnResolve {
 		panic("resolver blew up")
 	}

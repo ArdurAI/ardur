@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "c093319d252c756700dc5c85955fef2f2c4eea04ebff9e726ae82f3603f5a84b"
+source_sha256: "11c97a2d9f46f5e27a911ccf3c9df0ff86e7b6564d6edb17049e376d3beb7b65"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -264,29 +264,37 @@ configuration fails, the classifier is disabled while normal cgroup-scoped
 lifecycle capture remains active. Clean detach disables and clears recognition
 so pinned tracepoints do not keep emitting candidates without a consumer.
 
-### Optional native executable fingerprint registry
+### Optional executable fingerprint registry
 
-Linux operators may strengthen recognized **native executable** candidates
-with an operator-maintained SHA-256 registry:
+Linux operators may strengthen recognized native executables and script-backed
+launchers with an operator-maintained SHA-256 registry:
 
 ```bash
 ardur-kernelcaptured --agent-recognition \
-  --agent-recognition-fingerprint-registry /etc/ardur/native-agent-fingerprints.json
+  --agent-recognition-fingerprint-registry /etc/ardur/agent-fingerprints.json
 ```
 
-The file uses schema `ardur.agent_fingerprint_registry.v0.1`. This illustrative
-document contains placeholders; replace each value with the 64-character
-lowercase SHA-256 of the reviewed native executable:
+Schema `ardur.agent_fingerprint_registry.v0.2` adds launcher digests and final
+interpreter profiles. Native-only v0.1 documents remain accepted unchanged,
+but v0.1 rejects launcher fields. This illustrative v0.2 document contains
+placeholders; replace each value with the 64-character lowercase SHA-256 of
+the reviewed object:
 
 ```json
 {
-  "schema_version": "ardur.agent_fingerprint_registry.v0.1",
-  "registry_version": "operator.native-agents.2026-07-14.v1",
+  "schema_version": "ardur.agent_fingerprint_registry.v0.2",
+  "registry_version": "operator.agents.2026-07-14.v2",
   "rules": [
     {
       "rule_id": "native.codex.reviewed-release",
       "agent_type": "codex_cli",
       "expected_sha256": ["<replace-with-64-lowercase-hex>"]
+    },
+    {
+      "rule_id": "launcher.codex.reviewed-release",
+      "agent_type": "codex_cli",
+      "expected_launcher_sha256": ["<replace-with-64-lowercase-hex>"],
+      "allowed_interpreter_profiles": ["node"]
     }
   ]
 }
@@ -298,35 +306,68 @@ descriptor is a regular file owned by the daemon UID and not writable by group
 or other, enforces a 64 KiB document ceiling, rejects unknown fields and
 inactive agent types, and then canonicalizes the rules. A digest cannot be
 assigned to two different agent types. Any failure aborts startup; local socket
-clients cannot select or replace the registry.
+clients cannot select or replace the registry. Native and launcher digest
+domains are matched separately, and every launcher rule must contain at least
+one exact bounded interpreter basename.
 
 Only already-recognized candidates enter fingerprinting. Queue admission never
 waits: the default queue holds 64 jobs, two workers run concurrently, each job
 has a 500 ms cooperative deadline, and at most 32 MiB of a regular executable
-is hashed. The event PID is first bound to a pidfd, then the worker opens the
-live executable object through `/proc/<pid>/exe`. It checks process lifetime
-before and after acquisition and labels an unlinked-but-open object with
-`object_state=deleted`. Procfs ptrace-policy denial, process exit, unsupported
-or non-regular objects, size/deadline limits, and queue saturation remain
-explicit bounded results. The lifecycle ringbuf consumer never performs file
-I/O or waits for queue capacity.
+is hashed. The event PID is first bound to a pidfd. A native worker then opens
+the live executable object through `/proc/<pid>/exe`, checks process lifetime
+before and after acquisition, and labels an unlinked-but-open object with
+`object_state=deleted`.
+
+A script's live executable object is its interpreter, not the original script.
+When launcher rules exist, the daemon therefore tries to attach a separate,
+non-enforcing BPF-LSM program at `bprm_check_security`. The first binary-handler
+pass first clears stale task state, requires the original buffer to begin with
+`#!`, and then records only the original object's device, inode, mount ID, and
+link count in a bounded 4,096-entry task-keyed map shared with the
+successful-exec tracepoint. Later interpreter passes do not overwrite it;
+successful exec and process exit delete it. `binfmt_misc` and any other
+interpreter-backed shape without that explicit marker remain unproven and can
+never fall back to native interpreter hashing. The emitted private worker event
+also carries only the bounded final-interpreter basename. The observer always
+returns the prior LSM result and cannot authorize or deny exec.
+
+`/proc/<pid>/cmdline` is mutable process-presented data and is never identity.
+For launcher jobs, the worker reads at most 16 KiB and 64 non-empty arguments,
+treats non-flag fields only as locator candidates, and opens them relative to
+the observed process root with `openat2(RESOLVE_IN_ROOT|RESOLVE_NO_MAGICLINKS)`.
+Relative fields use the observed process cwd. Before hashing, `statx` device,
+inode, and mount ID must exactly equal the kernel-observed object. A process
+that rewrites cmdline to a trusted, digest-matching file therefore receives
+`locator_mismatch`, not a match. Recursive/flagged shebangs are scanned within
+the same fixed limits; fd-backed, deleted-before-open, namespace-inaccessible,
+early-exit, and unsupported filesystem shapes return explicit low-confidence
+outcomes instead of falling back to hashing the interpreter.
+
+The launcher path requires Linux 5.11 or newer (the lifecycle programs use
+`bpf_get_current_task_btf()`), kernel BTF, `CONFIG_BPF_LSM`, and `bpf` in the
+active LSM list. Version alone is not enough because distributions choose
+kernel configuration and boot LSM order. If load or attach fails, native
+fingerprinting and ordinary lifecycle capture continue; launcher submissions
+return `unsupported_kernel`. Other bounded outcomes include process exit,
+missing kernel identity, unsupported filesystem, missing locator, locator
+mismatch, resolution denial, interpreter denial, argument/size/deadline limit,
+digest mismatch, queue saturation, and success. The lifecycle ringbuf consumer
+never performs file I/O or waits for queue capacity.
 
 A configured match produces `confidence=medium` and
-`identity_assurance=heuristic_executable_content`; a mismatch or unavailable
-resolution leaves the original low-confidence name result unchanged. Every
-result remains `governance_action=observe_only`. Ordinary SHA-256 is a content
-comparison, not signed provenance, package verification, fs-verity measurement,
-attestation, authorization, or policy selection. Script launchers are excluded
-from native executable fingerprinting: their live executable object is the
-interpreter, and issue #304 owns a safe kernel-object binding for the script
-itself.
+`identity_assurance=heuristic_executable_content` for native objects or
+`heuristic_kernel_bound_launcher_content` for scripts. A mismatch or
+unavailable resolution leaves the original low-confidence name result
+unchanged. Every result remains `governance_action=observe_only`. Ordinary
+SHA-256 is a content comparison, not signed provenance, package verification,
+fs-verity measurement, attestation, authorization, or policy selection.
 
 Authenticated `health` responses add `agent_fingerprint` with the canonical
 registry version/SHA-256, queue capacity/depth, worker count, timeout, maximum
-file size, and monotonic counters for saturation, denied resolution, exited
-processes, unsupported objects, size/deadline limits, mismatches, matches, and
-attempts the worker was unavailable for (submitted while closing or closed, or
-abandoned because processing panicked and was contained).
+file/argument bytes and argument count, launcher-observer availability, and
+monotonic counters for every bounded outcome above, including attempts the
+worker was unavailable for (submitted while closing or closed, or abandoned
+because processing panicked and was contained).
 The registry SHA-256 identifies the canonical configuration; it is not a
 computed executable digest. Logs, results, receipts, health data, and fixtures
 never include the computed executable digest, full host path, argv, environment,
@@ -338,11 +379,15 @@ mutable inode metadata or a stale cache entry as provenance. Capacity exhausts
 by reporting saturation rather than blocking lifecycle capture. Operators
 should monitor the counters and measure host I/O and CPU impact before changing
 the compiled defaults. The current CLI exposes no tuning flags; code-level hard
-ceilings are 4,096 queued jobs, 32 workers, a one-minute deadline, and 1 GiB per
-file. The cooperative deadline is checked before and after reads and between
-64 KiB chunks. It cannot preempt a single filesystem read blocked in the
-kernel, so keep executable objects on healthy local filesystems and treat
-storage stalls as an operator incident.
+ceilings are 4,096 queued jobs, 32 workers, a one-minute deadline, 1 GiB per
+file, 1 MiB of arguments, and 1,024 arguments. The cooperative deadline is
+checked before and after reads and between 64 KiB chunks. It cannot preempt a
+single filesystem read blocked in the kernel, so keep executable objects on
+healthy local filesystems and treat storage stalls as an operator incident.
+The optional BPF-LSM program observes every exec while launcher rules are
+active, but stores only bounded non-path identity and clears it at success or
+exit; the userspace I/O and hashing cost remains limited to recognized launcher
+candidates.
 
 The successful-exec hook reads at most 255 path bytes, derives and emits only a
 62-byte-or-shorter basename, and ignores truncated or oversized names. It never
@@ -353,22 +398,28 @@ evidence has `confidence=low`,
 `identity_assurance=heuristic_process_metadata`, and
 `governance_action=observe_only`. No argv, full executable path, binary hash,
 uid, environment, or file content is emitted by name-only recognition. The
-optional native fingerprint worker privately computes a bounded SHA-256 under
-the stricter contract above. Neither mode issues a passport, adopts a process,
-selects policy, or enforces an action. Any
+optional fingerprint worker privately computes a bounded SHA-256 under the
+stricter native or launcher contract above. Neither mode issues a passport,
+adopts a process, selects policy, or enforces an action. Any
 process can reuse one of these names, and unlisted launch shapes remain false
 negatives. The [agent-recognition evaluation
 reference](agent-recognition-evaluation.md) documents the versioned sanitized
 corpus, deterministic report, maintained-corpus threshold, Wilson intervals,
 and known renamed-binary false negatives. Issue #67 remains open for stronger
-fingerprints and additional signal strata, and the script, attestation, and
-governance slices remain separate.
+fingerprints and additional signal strata, and the attestation and governance
+slices remain separate.
 
-Kernel contract references: [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html),
-[`/proc/<pid>/exe`](https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html),
-and [fs-verity](https://docs.kernel.org/filesystems/fsverity.html). The current
-method is ordinary SHA-256 over the opened executable object and must not be
-reported as an fs-verity measurement.
+Kernel contract references: Linux [`fs/exec.c`](https://github.com/torvalds/linux/blob/v6.10/fs/exec.c),
+[`fs/binfmt_script.c`](https://github.com/torvalds/linux/blob/v6.10/fs/binfmt_script.c),
+[`sched_process_exec`](https://github.com/torvalds/linux/blob/v6.10/include/trace/events/sched.h),
+[`bpf_get_current_task_btf()` introduction](https://github.com/torvalds/linux/commit/3ca1032ab7ab010eccb107aa515598788f7d93bb),
+[BPF LSM](https://docs.kernel.org/bpf/prog_lsm.html),
+[`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html),
+[`openat2(2)`](https://man7.org/linux/man-pages/man2/openat2.2.html),
+[`statx(2)`](https://man7.org/linux/man-pages/man2/statx.2.html), and
+[`/proc/<pid>/cmdline`](https://man7.org/linux/man-pages/man5/proc_pid_cmdline.5.html).
+The current method is ordinary SHA-256 over the opened object and must not be
+reported as an fs-verity measurement or software-provenance proof.
 
 ## Lifecycle capture loss
 

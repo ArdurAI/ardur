@@ -39,6 +39,11 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Kernel-bound script-launcher fingerprinting for opt-in Linux agent
+  recognition: an optional non-enforcing BPF-LSM observer captures bounded
+  original-object identity, mutable cmdline is confined to locator duty behind
+  `openat2` plus `statx` equality, launcher digests bind to allowlisted final
+  interpreter profiles, and unsupported shapes return explicit fail-low labels
 - Bounded native Linux executable fingerprint matching for opt-in agent
   recognition, with a daemon-owned versioned registry, pidfd plus
   `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health

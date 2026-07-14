@@ -3,12 +3,15 @@
 package kernelcapture
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -19,28 +22,35 @@ const agentFingerprintReadBufferBytes = 64 << 10
 type linuxAgentFingerprintResolver struct{}
 
 type linuxAgentFingerprintTarget struct {
-	pid   uint32
-	pidfd int
+	pid              uint32
+	pidfd            int
+	launcher         bool
+	launcherIdentity LauncherObjectIdentity
 }
 
 func newPlatformAgentFingerprintResolver() agentFingerprintResolver {
 	return linuxAgentFingerprintResolver{}
 }
 
-func (linuxAgentFingerprintResolver) Bind(pid uint32) (agentFingerprintTarget, string) {
-	if pid == 0 {
+func (linuxAgentFingerprintResolver) Bind(event ProcessEvent) (agentFingerprintTarget, string) {
+	if event.PID == 0 {
 		return nil, AgentFingerprintOutcomeUnsupported
 	}
-	pidfd, err := unix.PidfdOpen(int(pid), 0)
+	pidfd, err := unix.PidfdOpen(int(event.PID), 0)
 	if err != nil {
 		return nil, agentFingerprintLinuxErrorOutcome(err)
 	}
-	return &linuxAgentFingerprintTarget{pid: pid, pidfd: pidfd}, ""
+	return &linuxAgentFingerprintTarget{
+		pid:              event.PID,
+		pidfd:            pidfd,
+		launcher:         event.InterpreterBacked || event.LauncherScript,
+		launcherIdentity: event.LauncherIdentity,
+	}, ""
 }
 
-func (linuxAgentFingerprintResolver) Resolve(ctx context.Context, rawTarget agentFingerprintTarget, maxFileBytes int64) (agentFingerprintDigest, string) {
+func (linuxAgentFingerprintResolver) Resolve(ctx context.Context, rawTarget agentFingerprintTarget, limits agentFingerprintResolveLimits) (agentFingerprintDigest, string) {
 	target, ok := rawTarget.(*linuxAgentFingerprintTarget)
-	if !ok || target == nil || target.pid == 0 || target.pidfd < 0 || maxFileBytes <= 0 {
+	if !ok || target == nil || target.pid == 0 || target.pidfd < 0 || limits.maxFileBytes <= 0 {
 		return agentFingerprintDigest{}, AgentFingerprintOutcomeUnsupported
 	}
 	if outcome := agentFingerprintContextOutcome(ctx); outcome != "" {
@@ -51,7 +61,13 @@ func (linuxAgentFingerprintResolver) Resolve(ctx context.Context, rawTarget agen
 	} else if exited {
 		return agentFingerprintDigest{}, AgentFingerprintOutcomeProcessExited
 	}
+	if target.launcher {
+		return resolveLinuxAgentLauncher(ctx, target, limits)
+	}
+	return resolveLinuxNativeExecutable(ctx, target, limits.maxFileBytes)
+}
 
+func resolveLinuxNativeExecutable(ctx context.Context, target *linuxAgentFingerprintTarget, maxFileBytes int64) (agentFingerprintDigest, string) {
 	// The path is constructed only to acquire an fd and is never returned or
 	// logged. Opening the procfs magic link opens the live executable object.
 	file, err := os.Open(fmt.Sprintf("/proc/%d/exe", target.pid))
@@ -74,17 +90,222 @@ func (linuxAgentFingerprintResolver) Resolve(ctx context.Context, rawTarget agen
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Nlink == 0 {
 		objectState = AgentFingerprintObjectDeleted
 	}
-	digest := agentFingerprintDigest{
-		method:      AgentFingerprintMethodSHA256ProcExe,
-		objectState: objectState,
-	}
+	digest := agentFingerprintDigest{method: AgentFingerprintMethodSHA256ProcExe, objectState: objectState}
 	if !info.Mode().IsRegular() || info.Size() < 0 {
 		return digest, AgentFingerprintOutcomeUnsupported
 	}
-	if info.Size() > maxFileBytes {
-		return digest, AgentFingerprintOutcomeSizeExceeded
+	return hashAgentFingerprintFile(ctx, file, info.Size(), maxFileBytes, digest)
+}
+
+func resolveLinuxAgentLauncher(ctx context.Context, target *linuxAgentFingerprintTarget, limits agentFingerprintResolveLimits) (agentFingerprintDigest, string) {
+	digest := agentFingerprintDigest{
+		method:      AgentFingerprintMethodSHA256KernelLauncher,
+		objectState: launcherFingerprintObjectState(target.launcherIdentity),
+	}
+	if !target.launcherIdentity.Present {
+		return digest, AgentFingerprintOutcomeMissingIdentity
+	}
+	arguments, outcome := readLinuxAgentLauncherArguments(target.pid, limits)
+	if outcome != "" {
+		return digest, outcome
+	}
+	return resolveLinuxAgentLauncherArguments(ctx, target, arguments, limits)
+}
+
+func readLinuxAgentLauncherArguments(pid uint32, limits agentFingerprintResolveLimits) ([]string, string) {
+	if limits.maxArgumentBytes <= 0 || limits.maxArguments <= 0 {
+		return nil, AgentFingerprintOutcomeUnsupported
+	}
+	file, err := os.Open(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return nil, agentFingerprintLinuxErrorOutcome(err)
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, limits.maxArgumentBytes+1))
+	if err != nil {
+		return nil, agentFingerprintLinuxErrorOutcome(err)
+	}
+	if int64(len(raw)) > limits.maxArgumentBytes {
+		return nil, AgentFingerprintOutcomeArgumentLimit
+	}
+	raw = bytes.TrimRight(raw, "\x00")
+	if len(raw) == 0 {
+		return nil, AgentFingerprintOutcomeMissingLocator
+	}
+	parts := bytes.Split(raw, []byte{0})
+	if len(parts) > limits.maxArguments {
+		return nil, AgentFingerprintOutcomeArgumentLimit
+	}
+	arguments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) != 0 {
+			arguments = append(arguments, string(part))
+		}
+	}
+	if len(arguments) == 0 {
+		return nil, AgentFingerprintOutcomeMissingLocator
+	}
+	return arguments, ""
+}
+
+// resolveLinuxAgentLauncherArguments is separated from procfs acquisition so
+// adversarial tests can supply rewritten cmdline candidates while exercising
+// the real openat2/statx identity gate.
+func resolveLinuxAgentLauncherArguments(ctx context.Context, target *linuxAgentFingerprintTarget, arguments []string, limits agentFingerprintResolveLimits) (agentFingerprintDigest, string) {
+	digest := agentFingerprintDigest{
+		method:      AgentFingerprintMethodSHA256KernelLauncher,
+		objectState: launcherFingerprintObjectState(target.launcherIdentity),
+	}
+	if len(arguments) == 0 {
+		return digest, AgentFingerprintOutcomeMissingLocator
+	}
+	if exited, outcome := linuxAgentFingerprintTargetExited(target.pidfd); outcome != "" {
+		return digest, outcome
+	} else if exited {
+		return digest, AgentFingerprintOutcomeProcessExited
 	}
 
+	rootFD, err := unix.Open(fmt.Sprintf("/proc/%d/root", target.pid), unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return digest, agentFingerprintLinuxErrorOutcome(err)
+	}
+	defer unix.Close(rootFD)
+
+	bestOutcome := AgentFingerprintOutcomeMissingLocator
+	cwd := ""
+	cwdLoaded := false
+	for _, argument := range arguments {
+		if outcome := agentFingerprintContextOutcome(ctx); outcome != "" {
+			return digest, outcome
+		}
+		if argument == "" || strings.HasPrefix(argument, "-") {
+			continue
+		}
+
+		candidate := argument
+		if filepath.IsAbs(candidate) {
+			candidate = strings.TrimPrefix(filepath.Clean(candidate), string(filepath.Separator))
+		} else {
+			if !cwdLoaded {
+				cwd, err = os.Readlink(fmt.Sprintf("/proc/%d/cwd", target.pid))
+				cwdLoaded = true
+				if err != nil {
+					bestOutcome = preferLauncherOutcome(bestOutcome, agentFingerprintLinuxErrorOutcome(err))
+					continue
+				}
+			}
+			if !filepath.IsAbs(cwd) || strings.HasSuffix(cwd, " (deleted)") {
+				bestOutcome = preferLauncherOutcome(bestOutcome, AgentFingerprintOutcomeMissingLocator)
+				continue
+			}
+			candidate = strings.TrimPrefix(filepath.Clean(filepath.Join(cwd, candidate)), string(filepath.Separator))
+		}
+		if candidate == "" || candidate == "." {
+			continue
+		}
+
+		fd, openErr := unix.Openat2(rootFD, candidate, &unix.OpenHow{
+			Flags:   uint64(unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK),
+			Resolve: unix.RESOLVE_IN_ROOT | unix.RESOLVE_NO_MAGICLINKS,
+		})
+		if openErr != nil {
+			bestOutcome = preferLauncherOutcome(bestOutcome, agentLauncherOpenOutcome(openErr))
+			continue
+		}
+
+		var stat unix.Statx_t
+		statErr := unix.Statx(fd, "", unix.AT_EMPTY_PATH|unix.AT_STATX_DONT_SYNC, unix.STATX_BASIC_STATS|unix.STATX_MNT_ID, &stat)
+		if statErr != nil {
+			_ = unix.Close(fd)
+			bestOutcome = preferLauncherOutcome(bestOutcome, agentLauncherStatxOutcome(statErr))
+			continue
+		}
+		if stat.Mask&unix.STATX_MNT_ID == 0 {
+			_ = unix.Close(fd)
+			bestOutcome = preferLauncherOutcome(bestOutcome, AgentFingerprintOutcomeUnsupportedFS)
+			continue
+		}
+		if !launcherIdentityMatchesStatx(target.launcherIdentity, stat) {
+			_ = unix.Close(fd)
+			bestOutcome = preferLauncherOutcome(bestOutcome, AgentFingerprintOutcomeLocatorMismatch)
+			continue
+		}
+		if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+			_ = unix.Close(fd)
+			return digest, AgentFingerprintOutcomeUnsupportedFS
+		}
+		if stat.Nlink == 0 {
+			digest.objectState = AgentFingerprintObjectDeleted
+		}
+		file := os.NewFile(uintptr(fd), "agent-launcher")
+		if file == nil {
+			_ = unix.Close(fd)
+			return digest, AgentFingerprintOutcomeUnsupportedFS
+		}
+		defer file.Close()
+		return hashAgentFingerprintFile(ctx, file, int64(stat.Size), limits.maxFileBytes, digest)
+	}
+
+	if exited, outcome := linuxAgentFingerprintTargetExited(target.pidfd); outcome != "" {
+		return digest, outcome
+	} else if exited {
+		return digest, AgentFingerprintOutcomeProcessExited
+	}
+	return digest, bestOutcome
+}
+
+func launcherIdentityMatchesStatx(identity LauncherObjectIdentity, stat unix.Statx_t) bool {
+	return identity.Present &&
+		identity.DeviceMajor == stat.Dev_major &&
+		identity.DeviceMinor == stat.Dev_minor &&
+		identity.Inode == stat.Ino &&
+		identity.MountID == stat.Mnt_id
+}
+
+func agentLauncherOpenOutcome(err error) string {
+	switch {
+	case errors.Is(err, unix.ENOSYS), errors.Is(err, unix.EINVAL):
+		return AgentFingerprintOutcomeUnsupportedKernel
+	case errors.Is(err, unix.EACCES), errors.Is(err, unix.EPERM), errors.Is(err, unix.EXDEV), errors.Is(err, unix.ELOOP):
+		return AgentFingerprintOutcomeResolutionDenied
+	case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTDIR):
+		return AgentFingerprintOutcomeMissingLocator
+	default:
+		return AgentFingerprintOutcomeUnsupportedFS
+	}
+}
+
+func agentLauncherStatxOutcome(err error) string {
+	if errors.Is(err, unix.ENOSYS) {
+		return AgentFingerprintOutcomeUnsupportedKernel
+	}
+	if errors.Is(err, unix.EACCES) || errors.Is(err, unix.EPERM) {
+		return AgentFingerprintOutcomeResolutionDenied
+	}
+	return AgentFingerprintOutcomeUnsupportedFS
+}
+
+func preferLauncherOutcome(current, candidate string) string {
+	rank := map[string]int{
+		AgentFingerprintOutcomeMissingLocator:    1,
+		AgentFingerprintOutcomeUnsupportedFS:     2,
+		AgentFingerprintOutcomeResolutionDenied:  3,
+		AgentFingerprintOutcomeUnsupportedKernel: 4,
+		AgentFingerprintOutcomeLocatorMismatch:   5,
+	}
+	if rank[candidate] > rank[current] {
+		return candidate
+	}
+	return current
+}
+
+func hashAgentFingerprintFile(ctx context.Context, file *os.File, size, maxFileBytes int64, digest agentFingerprintDigest) (agentFingerprintDigest, string) {
+	if file == nil || size < 0 {
+		return digest, AgentFingerprintOutcomeUnsupported
+	}
+	if size > maxFileBytes {
+		return digest, AgentFingerprintOutcomeSizeExceeded
+	}
 	hasher := sha256.New()
 	buffer := make([]byte, agentFingerprintReadBufferBytes)
 	var total int64

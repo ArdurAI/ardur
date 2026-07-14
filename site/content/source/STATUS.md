@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "8303587f60e4f876d007a27ab8cf4965f41bc60aae7f717d6b1d7872efcb0160"
+source_sha256: "5e4c2e76933d6b8269bb98bc19a34c99b3752bfd11a49a81442fea477458dd3f"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -57,16 +57,20 @@ deterministic report includes sample counts, Wilson intervals, stable error
 IDs, and exact corpus/registry digests; these are maintained-corpus results,
 not population accuracy or identity assurance.
 
-Operators can now add a daemon-owned native-executable fingerprint registry to
-that opt-in preview. A fixed worker pool binds recognized PIDs with pidfds and
-hashes only bounded regular files opened through `/proc/<pid>/exe`; saturation,
-denial, exit, unsupported objects, size, deadline, mismatch, and success remain
-explicit health outcomes, while an unlinked live executable is labeled
-`object_state=deleted`. A match raises the observation only to
-`medium` / `heuristic_executable_content`; it is not provenance, attestation,
-or authorization. No computed executable digest or full host path is exposed,
-and no fingerprint cache is used. Script-backed launchers remain tracked
-separately because their live executable object is the interpreter.
+Operators can now add a daemon-owned executable fingerprint registry to that
+opt-in preview. A fixed worker pool binds recognized PIDs with pidfds. Native
+candidates hash bounded regular files opened through `/proc/<pid>/exe`.
+Script-backed candidates use a separately loaded, non-enforcing BPF-LSM hook to
+capture the original object's device, inode, mount ID, and link state; mutable
+cmdline is only a bounded locator, opened below the process root and accepted
+only after exact object-identity equality. Unsupported launcher observation
+fails low without breaking native matching or lifecycle capture. Saturation,
+denial, exit, unsupported kernel/filesystem, missing identity/locator, locator
+mismatch, interpreter denial, argv/size/deadline limits, digest mismatch, and
+success remain explicit health outcomes. A match raises the observation only
+to `medium` heuristic content evidence; it is not provenance, attestation, or
+authorization. No computed digest, full host path, argv, environment, or file
+content is exposed, and no fingerprint cache is used.
 
 The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
 `bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
