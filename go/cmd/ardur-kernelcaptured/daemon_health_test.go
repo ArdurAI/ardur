@@ -78,6 +78,51 @@ func TestHandleAuthorizedRequest_HealthReportsBPFLSMWhenGuardLoaded(t *testing.T
 	}
 }
 
+func TestHandleAuthorizedRequest_HealthReportsMonotonicCaptureAndRecognitionAccounting(t *testing.T) {
+	d := newTestDaemon(t)
+	if err := d.enableAgentRecognition(kernelcapture.AgentRecognizerOptions{AllowAgentTypes: []string{"codex_cli"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.disableAgentRecognition)
+	d.setLifecycleDropCounter(scriptedLifecycleDropTotal(
+		lifecycleDropSample{total: 7, ok: true},
+		lifecycleDropSample{total: 9, ok: true},
+	))
+	d.processKernelEvent(kernelcapture.ProcessEvent{PID: 42, Type: kernelcapture.ProcessEventExec, Comm: "codex", ExecutableBasename: "codex"})
+	if delta := d.sampleLifecycleProducerLoss(); delta != 2 {
+		t.Fatalf("producer drop delta = %d, want 2", delta)
+	}
+	d.recordMalformedLifecycleRecord()
+
+	resp := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
+	if !resp.OK || resp.LifecycleCaptureHealth == nil || resp.AgentRecognition == nil {
+		t.Fatalf("health response = %+v", resp)
+	}
+	if got := resp.LifecycleCaptureHealth; got.DeliveredTotal != 1 || got.ProducerRingbufDroppedTotal != 2 || got.MalformedRecordsTotal != 1 || !got.ProducerCounterAvailable || got.ProducerCounterEvidenceGap {
+		t.Fatalf("lifecycle capture health = %+v", got)
+	}
+	if got := resp.AgentRecognition; !got.Enabled || got.Counters.CandidatesTotal != 1 || got.Counters.Recognized != 1 || got.Counters.Ambiguous != 0 || got.RegistryVersion == "" || got.RegistrySHA256 == "" {
+		t.Fatalf("agent recognition health = %+v", got)
+	}
+}
+
+func TestHandleAuthorizedRequest_HealthSamplesTerminalProducerDrops(t *testing.T) {
+	t.Parallel()
+	d := newTestDaemon(t)
+	d.setLifecycleDropCounter(scriptedLifecycleDropTotal(
+		lifecycleDropSample{total: 3, ok: true},
+		lifecycleDropSample{total: 8, ok: true},
+	))
+
+	resp := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
+	if !resp.OK || resp.LifecycleCaptureHealth == nil {
+		t.Fatalf("health response = %+v", resp)
+	}
+	if got := resp.LifecycleCaptureHealth.ProducerRingbufDroppedTotal; got != 5 {
+		t.Fatalf("producer drops = %d, want 5", got)
+	}
+}
+
 func readyHealthPolicyMaps() kernelcapture.PolicyMaps {
 	return kernelcapture.PolicyMaps{
 		CgroupOpPolicy:           &fakeHealthPolicyMap{},

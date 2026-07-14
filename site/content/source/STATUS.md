@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "8303587f60e4f876d007a27ab8cf4965f41bc60aae7f717d6b1d7872efcb0160"
+source_sha256: "ea1f3e246592be6096c4524972eeb01a230cb3149a138baf28625c4d64a16574"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -67,6 +67,15 @@ explicit health outcomes, while an unlinked live executable is labeled
 or authorization. No computed executable digest or full host path is exposed,
 and no fingerprint cache is used. Script-backed launchers remain tracked
 separately because their live executable object is the interpreter.
+
+The opt-in recognition preview now also has a bounded real-Linux AB/BA overhead
+harness. It records raw paired wall observations, daemon thread-group CPU,
+peak RSS, authenticated health, and exclusive lifecycle/classification/
+fingerprint ledgers for low, sustained, and storm profiles. The required CI
+profile uses at least 20 measured pairs after warm-up and fails closed on
+missing counters, loss, rejection, unavailable fingerprint work, schema drift,
+or digest mismatch once a reviewed target-runner budget is present. Its result
+is host-specific observer-effect evidence, not a universal performance claim.
 
 The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
 `bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
@@ -143,10 +152,9 @@ complete sensor coverage.
 - broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
-- completion of agent recognition issue #67 beyond the exact-name,
-  observe-only Linux foundation: binary hashes and argv/interpreter signals,
-  multi-signal corpus strata, cross-platform launch sources, and exec-storm
-  overhead/loss-budget evidence
+- completion of agent recognition issue #67 beyond the exact-name and native
+  fingerprint Linux foundation: argv/interpreter signals, multi-signal corpus
+  strata, and cross-platform launch sources
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 

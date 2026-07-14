@@ -41,6 +41,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -168,6 +169,9 @@ type daemon struct {
 	lifecycleCaptureSummaries map[string]*kernelcapture.LifecycleCaptureSummaryAccumulator
 	observabilityGaps         map[string]*kernelcapture.ObservabilityGapAccumulator
 	lifecycleCaptureLossEpoch uint64
+	lifecycleDeliveredTotal   atomic.Uint64
+	lifecycleProducerDropped  atomic.Uint64
+	lifecycleMalformedTotal   atomic.Uint64
 	// lifecycleDropMu protects daemon-lifetime producer-drop baselining. The
 	// source is installed by the Linux lifecycle consumer and sampled at event
 	// and session boundaries so final drops do not need a later valid event.
@@ -188,6 +192,9 @@ type daemon struct {
 	agentRecognitionObserver func(kernelcapture.ProcessEvent, kernelcapture.AgentRecognitionResult)
 	agentFingerprintWorker   *kernelcapture.AgentFingerprintWorker
 	agentFingerprintObserver func(kernelcapture.ProcessEvent, kernelcapture.AgentRecognitionResult, kernelcapture.AgentFingerprintObservation)
+	agentCandidatesTotal     atomic.Uint64
+	agentRecognizedTotal     atomic.Uint64
+	agentAmbiguousTotal      atomic.Uint64
 
 	// OS filesystem for JSONL append (interface for test injection).
 	fs evidenceFS
@@ -440,6 +447,13 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 	if result.Status == kernelcapture.AgentRecognitionStatusUnknown {
 		return
 	}
+	d.agentCandidatesTotal.Add(1)
+	switch result.Status {
+	case kernelcapture.AgentRecognitionStatusRecognized:
+		d.agentRecognizedTotal.Add(1)
+	case kernelcapture.AgentRecognitionStatusAmbiguous:
+		d.agentAmbiguousTotal.Add(1)
+	}
 	var immediateFingerprint *kernelcapture.AgentFingerprintObservation
 	if result.Status == kernelcapture.AgentRecognitionStatusRecognized && fingerprintWorker != nil {
 		immediateFingerprint = fingerprintWorker.Submit(evt, result)
@@ -503,6 +517,40 @@ func (d *daemon) agentFingerprintHealth() *kernelcapture.AgentFingerprintHealth 
 	}
 	health := worker.Health()
 	return &health
+}
+
+func (d *daemon) agentRecognitionHealth() *kernelcapture.AgentRecognitionHealth {
+	d.agentRecognitionMu.RLock()
+	recognizer := d.agentRecognizer
+	d.agentRecognitionMu.RUnlock()
+	if recognizer == nil {
+		return nil
+	}
+	metadata := recognizer.Classify(kernelcapture.AgentRecognitionInput{})
+	return &kernelcapture.AgentRecognitionHealth{
+		Enabled:         true,
+		RegistryVersion: metadata.RegistryVersion,
+		RegistrySHA256:  metadata.RegistrySHA256,
+		Counters: kernelcapture.AgentRecognitionCounters{
+			CandidatesTotal: d.agentCandidatesTotal.Load(),
+			Recognized:      d.agentRecognizedTotal.Load(),
+			Ambiguous:       d.agentAmbiguousTotal.Load(),
+		},
+	}
+}
+
+func (d *daemon) lifecycleCaptureHealth() *kernelcapture.DaemonLifecycleCaptureHealth {
+	d.lifecycleDropMu.Lock()
+	available := d.lifecycleDropTotal != nil && d.lifecycleDropBaselineSet && !d.lifecycleDropReadFailed && !d.lifecycleDropSourceGone
+	evidenceGap := d.lifecycleDropReadFailed || d.lifecycleDropSourceGone
+	d.lifecycleDropMu.Unlock()
+	return &kernelcapture.DaemonLifecycleCaptureHealth{
+		DeliveredTotal:              d.lifecycleDeliveredTotal.Load(),
+		ProducerRingbufDroppedTotal: d.lifecycleProducerDropped.Load(),
+		MalformedRecordsTotal:       d.lifecycleMalformedTotal.Load(),
+		ProducerCounterAvailable:    available,
+		ProducerCounterEvidenceGap:  evidenceGap,
+	}
 }
 
 // registerSeccompListener records that sessionID now has a live seccomp
@@ -690,11 +738,17 @@ func (d *daemon) handleAuthorizedRequest(ctx context.Context, req kernelcapture.
 		}
 		resp.SeccompListenerAttached = d.seccompListenerAttached(resp.SessionID)
 	case kernelcapture.DaemonProtocolMethodHealth:
+		// Health is the benchmark and operator boundary for daemon-lifetime
+		// lifecycle accounting. Sample the pinned producer counter here so a
+		// terminal ringbuf drop cannot remain hidden until a later session call.
+		d.sampleLifecycleProducerLoss()
 		// Advertise which enforcement tier is live so a launcher can decide
 		// whether routing a governed process through ardur-exec-shim (the
 		// seccomp tier's on-ramp) is necessary before it ever spawns one.
 		resp.EnforcementTier = d.enforcementTier()
 		resp.AgentFingerprint = d.agentFingerprintHealth()
+		resp.LifecycleCaptureHealth = d.lifecycleCaptureHealth()
+		resp.AgentRecognition = d.agentRecognitionHealth()
 	}
 	return resp
 }
@@ -1730,6 +1784,7 @@ func (d *daemon) processKernelEvent(evt kernelcapture.ProcessEvent) {
 	if evt.ObservedAt.IsZero() {
 		evt.ObservedAt = time.Now().UTC()
 	}
+	d.lifecycleDeliveredTotal.Add(1)
 	d.observeAgentLaunch(evt)
 	route := d.lockRouteEvent(&evt)
 	if route == nil {
@@ -1796,6 +1851,7 @@ func (d *daemon) recordLifecycleCaptureLossKind(loss kernelcapture.CaptureLoss, 
 }
 
 func (d *daemon) recordMalformedLifecycleRecord() uint64 {
+	d.lifecycleMalformedTotal.Add(1)
 	return d.recordLifecycleCaptureLossKind(kernelcapture.CaptureLoss{RingbufDropped: 1}, lifecycleCaptureLossMalformed)
 }
 
@@ -1896,6 +1952,7 @@ func (d *daemon) sampleLifecycleProducerLoss() uint64 {
 	}
 	delta := total - d.lifecycleDropLast
 	d.lifecycleDropLast = total
+	d.lifecycleProducerDropped.Add(delta)
 	epoch := d.recordLifecycleCaptureLossKind(kernelcapture.CaptureLoss{RingbufDropped: delta}, lifecycleCaptureLossProducer)
 	d.lifecycleDropMu.Unlock()
 	d.log.Warn("lifecycle ringbuf producer drops observed",

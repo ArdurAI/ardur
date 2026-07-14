@@ -47,6 +47,28 @@ relevant pull requests and offers manual Linux stress dispatch; it is not
 scheduled. See the
 [benchmark guide](benchmarks/linux-governance-overhead.md) for interpretation.
 
+When changing opt-in Linux agent recognition, daemon health accounting, or the
+recognition benchmark contract, run:
+
+```bash
+cd go
+go test -race -count=1 \
+  ./pkg/kernelcapture \
+  ./cmd/ardur-kernelcaptured \
+  ./cmd/ardur-agent-recognition-benchmark \
+  ./cmd/ardur-agent-recognition-workload
+```
+
+The dedicated `agent-recognition-benchmark` workflow builds the exact PR-head
+daemon, controller, and native workload, then runs one warm-up plus 20 paired
+recognition-off/on samples on a fresh privileged `ubuntu-24.04` runner. It
+uploads the privacy-bounded raw JSON report. The first reviewed baseline has no
+budget gate; once the committed budget exists, CI fails on metric drift, loss,
+rejection, unavailable fingerprint work, missing counters, schema drift, or
+digest mismatch. The larger release profile is manual and never substitutes
+for the required CI profile. See the
+[agent-recognition benchmark guide](benchmarks/agent-recognition-overhead.md).
+
 When changing the AuditBench evaluation-protocol artifact pipeline, run:
 
 ```bash
@@ -76,6 +98,19 @@ while Linux benchmark stress is manual.
 - Relevant pull requests run the focused benchmark tests and Linux smoke profile.
 - Manual dispatch defaults to stress and uploads the JSON/Markdown report for seven days.
 - No scheduled performance run exists; shared-runner variance and CI cost would make those numbers misleading.
+
+### `agent-recognition-benchmark` — paired real-Linux loss and budget gate
+
+[`/.github/workflows/agent-recognition-benchmark.yml`](../.github/workflows/agent-recognition-benchmark.yml)
+
+- Relevant pull requests and pushes to `dev` run the bounded CI profile with
+  one warm-up and 20 deterministic AB/BA pairs.
+- The required job uses authenticated daemon health to enforce exclusive
+  lifecycle, classification, and fingerprint accounting; any unreported or
+  unavailable work fails the reviewed budget gate.
+- Manual dispatch defaults to the longer release profile. There is no schedule,
+  because privileged performance work consumes runner CPU and shared-runner
+  variation is not longitudinal evidence.
 
 ### `secret-scan` — gitleaks + forbidden-term gate
 
