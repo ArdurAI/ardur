@@ -251,7 +251,8 @@ func TestLinuxAgentLauncherResolverExplicitFailureOutcomes(t *testing.T) {
 }
 
 func TestLinuxAgentLauncherCmdlineLimitsAreExplicit(t *testing.T) {
-	command := exec.Command("/bin/sh", "-c", "sleep 5", "sh", strings.Repeat("x", 128))
+	marker := strings.Repeat("x", 128)
+	command := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done", "sh", marker)
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -259,10 +260,27 @@ func TestLinuxAgentLauncherCmdlineLimitsAreExplicit(t *testing.T) {
 		_ = command.Process.Kill()
 		_ = command.Wait()
 	})
+	waitForLinuxCmdlineMarker(t, command.Process.Pid, marker)
 	_, outcome := readLinuxAgentLauncherArguments(uint32(command.Process.Pid), agentFingerprintResolveLimits{maxArgumentBytes: 16, maxArguments: 64})
 	if outcome != AgentFingerprintOutcomeArgumentLimit {
 		t.Fatalf("cmdline limit outcome = %q", outcome)
 	}
+}
+
+func waitForLinuxCmdlineMarker(t *testing.T, pid int, marker string) {
+	t.Helper()
+	path := fmt.Sprintf("/proc/%d/cmdline", pid)
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(path)
+		lastErr = err
+		if err == nil && strings.Contains(string(raw), marker) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("cmdline marker was not observable before the deadline (last read error: %v)", lastErr)
 }
 
 func launcherIdentityForLinuxTest(t *testing.T, path string) LauncherObjectIdentity {
