@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "119fca0a30ba11f8a99a689a0db3c4d1ff68983c05c13212cff1b8f84f0f9674"
+source_sha256: "eb41533a3cc5c0565cb99095c856f181aa490471f46edebe3c111446c73e11eb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -53,6 +53,9 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Add a versioned sanitized agent-recognition corpus, deterministic evaluator,
+  95% Wilson intervals, stable error IDs, exact corpus/registry digests, and a
+  maintained-corpus CI gate without making population-accuracy claims
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
   exact-name registry, separate in-kernel `comm` and successful-exec basename
   prefilters, operator class overrides, script-launcher smoke coverage, and
