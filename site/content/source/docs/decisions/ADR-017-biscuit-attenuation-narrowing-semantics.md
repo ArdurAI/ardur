@@ -1,8 +1,8 @@
 ---
-title: "ADR-017: Biscuit Attenuation Narrowing Semantics (proposed)"
+title: "ADR-017: Biscuit Attenuation Narrowing Semantics"
 description: "Date: 2026-04-21"
 source_path: "docs/decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md"
-source_sha256: "1648eeab451b80b95b28c68862863308bd726e16f2d781cedeaca6b0868afff7"
+source_sha256: "57176d875cf27f6ea6713f96a852e675052187dd4ce15680618260025dbe9fc4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -21,8 +21,9 @@ Date: 2026-04-21
 
 ## Status
 
-Proposed. Blocks: the "Biscuit-side fact-merge widening" finding from the
-2026-04-21 adversarial re-review of PR #10.
+Accepted on 2026-07-13. Implemented in
+`python/vibap/biscuit_passport.py` and covered by handcrafted-block
+regressions in `python/tests/test_biscuit_passport.py`.
 
 ## Context
 
@@ -56,24 +57,35 @@ Biscuit with an attenuation-violating block.
 
 ## Decision
 
-Replace wholesale with strictly narrowing semantics in
-`_context_from_blocks`:
+Validate every structured child block against the effective parent before
+committing any of the child's facts to `_context_from_blocks`. A widening is
+rejected; it is not silently intersected or clamped, because accepting and
+rewriting an attacker-authored grant would hide an invalid credential from
+operators.
 
 | Family | Parent → Child rule |
 |---|---|
-| `allowed_tool` | Child = Child ∩ Parent (intersection) |
-| `forbidden_tool` | Child = Child ∪ Parent (union) |
+| `allowed_tool` | Effective usable child tools MUST be a subset of the parent's. Parent `*` is unrestricted and can narrow to an explicit list. |
+| `forbidden_tool` | A present child list MUST retain every parent denial; new denials are allowed. |
 | `resource_scope` | Each child entry must be subpath of SOME parent entry |
-| `allowed_side_effect_class` | Child ⊆ Parent |
-| `max_tool_calls_per_class[k]` | Child[k] = min(Child[k], Parent[k]) |
-| `max_tool_calls` | Child = min(Child, Parent) |
-| `max_duration_s` | Child = min(Child, Parent) |
+| `allowed_side_effect_class` | When the parent list is non-empty, child ⊆ parent. An empty parent list is the existing unrestricted encoding and can narrow to any explicit list. |
+| `max_tool_calls_per_class[k]` | A present child map MUST retain parent caps and each retained value MUST be ≤ its parent value. New finite caps narrow an unbounded class. |
+| `max_tool_calls` | Child MUST be non-negative and ≤ parent. |
+| `max_duration_s` | Child MUST be positive and ≤ parent. |
+| `iat` / `exp` | Child `iat` MUST be ≥ parent `iat`; child `exp` MUST be ≤ parent `exp`, after the child `iat`, and not expired at verification time. |
 | `max_delegation_depth` | Child ≤ Parent − 1 |
-| `delegation_allowed` | Child ⇒ Parent (child can only turn it off) |
+| `delegation_allowed` | A structured child is invalid when the parent disallows delegation. A child may disable delegation; enabling it requires positive remaining depth. |
 | `cwd` | Child is subpath of Parent (same rule as JWT path) |
 
-`_context_from_blocks` will raise `BiscuitVerifyError` on any widening
-observed. The Python helper `derive_child_biscuit` stays as an
+The child `parent_jti` MUST also equal the immediately preceding block's `jti`.
+The verifier enforces child expiry directly against its effective wall clock;
+it does not rely on an untrusted holder to include a Datalog expiry check.
+Failures use the stable prefix
+`attenuation:<dimension>:block <index>:` so callers and tests can identify the
+rejected authority dimension without parsing free-form prose.
+
+`_context_from_blocks` raises `BiscuitVerifyError` on any widening observed.
+The Python helper `derive_child_biscuit` stays as an
 ergonomic issuance entrypoint; its invariants become redundant
 defence-in-depth rather than the only anchor.
 
@@ -82,13 +94,19 @@ defence-in-depth rather than the only anchor.
 - Biscuit first-party attenuation via `Biscuit.append` becomes safe
   regardless of holder intent: widening blocks fail verification
   instead of silently succeeding.
-- A handful of existing tests that rely on the current
-  "omit-to-inherit, one-entry-to-replace" shape will need updating.
-- `_context_from_blocks` grows ~60 LOC of narrowing logic. Budget:
-  one focused PR with unit + property-based tests.
+- Omission still inherits the parent family. Presence still requests a
+  replacement, but the replacement is accepted only after monotonic validation.
+- Handcrafted tests cover each authority family, removal of an existing class
+  cap, the reproduced multi-dimension exploit, wildcard/unrestricted parents,
+  and a valid transitive A→B→C narrowing chain.
 - Callers that want to GRANT authority must go through a key-holding
   issuer (`issue_biscuit_passport` or third-party attenuation with a
   signed block), not through `append`.
+
+## References
+
+- [Biscuit Datalog block scoping](https://doc.biscuitsec.org/reference/datalog.html#block-scoping)
+- [Biscuit specification: append-only blocks and execution scopes](https://doc.biscuitsec.org/reference/specifications)
 
 ## Out of scope (separate ADRs)
 

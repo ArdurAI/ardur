@@ -2,7 +2,7 @@
 title: "Architecture Decision Records"
 description: "ADRs document load-bearing design decisions behind Ardur's runtime, protocol, and deployment shape. Each record captures the context, the decision, and the trade-offs known at the "
 source_path: "docs/decisions/README.md"
-source_sha256: "ac671dc3a874361f53095034047281169bb03271cac1cc071113bfb00b6ce65d"
+source_sha256: "84309234880b2334351b79faf2ed8d2cb17c4a838141561f8803f12eb0cf1d7d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -29,7 +29,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 |---|-------|--------|------|
 | 015 | [Production-grade SPIRE deployment design for Kubernetes](/__ardur_internal__/source/docs/decisions/adr-015-production-spire-deployment/) | Proposed | 2026-04-19 |
 | 016 | [Delegation lineage hash index](/__ardur_internal__/source/docs/decisions/adr-016-delegation-lineage-hash-index/) | Accepted | 2026-04-21 |
-| 017 | [Biscuit attenuation narrowing semantics](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/) | Proposed | 2026-04-21 |
+| 017 | [Biscuit attenuation narrowing semantics](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/) | Accepted | 2026-04-21 |
 | 018 | [Delegation lineage hash domain unification](/__ardur_internal__/source/docs/decisions/adr-018-delegation-lineage-hash-domain-unification/) | Proposed | 2026-04-21 |
 | 019 | [Parent-token anchors against trusted lineage](/__ardur_internal__/source/docs/decisions/adr-019-parent-token-anchors-against-trusted-lineage/) | Proposed | 2026-04-21 |
 | 020 | [Persisted-session reverification on load](/__ardur_internal__/source/docs/decisions/adr-020-persisted-session-reverification-on-load/) | Proposed | 2026-04-21 |

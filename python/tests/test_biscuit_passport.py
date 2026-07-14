@@ -4,7 +4,14 @@ import hashlib
 from dataclasses import fields
 
 import pytest
-from biscuit_auth import Biscuit, BiscuitValidationError, KeyPair, UnverifiedBiscuit
+from biscuit_auth import (
+    Biscuit,
+    BiscuitValidationError,
+    BlockBuilder,
+    Fact,
+    KeyPair,
+    UnverifiedBiscuit,
+)
 
 from vibap.biscuit_passport import (
     BiscuitAttenuationError,
@@ -57,6 +64,51 @@ def _tamper_token_at_marker(token: bytes, marker: bytes) -> bytes:
         raise AssertionError(f"marker not found in token bytes: {marker!r}")
     raw[index] ^= 0x01
     return bytes(raw)
+
+
+def _append_handcrafted_child(
+    parent: bytes,
+    public_key: object,
+    *,
+    expected_parent_jti: str,
+    **overrides: list[str],
+) -> bytes:
+    """Append a structured child without using the trusted issuance helper."""
+
+    facts_by_name = {
+        "jti": ['jti("handcrafted-child")'],
+        "parent_jti": [f'parent_jti("{expected_parent_jti}")'],
+        "spiffe_id": ['spiffe_id("spiffe://example.org/agent/attacker")'],
+        "iat": ["iat(101)"],
+        "exp": ["exp(301)"],
+        "max_tool_calls": ["max_tool_calls(4)"],
+        "max_duration_s": ["max_duration_s(200)"],
+        "delegation_allowed": ["delegation_allowed(true)"],
+        "max_delegation_depth": ["max_delegation_depth(2)"],
+        "cwd": ['cwd("/workspace/project/reports")'],
+        "allowed_tool": [
+            'allowed_tool("read_file")',
+            'allowed_tool("search")',
+        ],
+        "forbidden_tool": [
+            'forbidden_tool("delete_file")',
+            'forbidden_tool("write_file")',
+        ],
+        "resource_scope": ['resource_scope("/workspace/project/reports")'],
+        "allowed_side_effect_class": [
+            'allowed_side_effect_class("none")',
+            'allowed_side_effect_class("external_send")',
+        ],
+        "max_tool_calls_per_class": [
+            'max_tool_calls_per_class("external_send", 1)'
+        ],
+    }
+    facts_by_name.update(overrides)
+    block = BlockBuilder()
+    for fact_sources in facts_by_name.values():
+        for source in fact_sources:
+            block.add_fact(Fact(source))
+    return bytes(Biscuit.from_bytes(parent, public_key).append(block).to_bytes())
 
 
 def test_issue_emits_valid_biscuit_parseable_by_unverified_biscuit() -> None:
@@ -372,8 +424,6 @@ def test_bounded_parent_can_derive_empty_resource_scope() -> None:
 
 
 def test_verifier_rejects_handcrafted_scope_expansion_from_empty_parent() -> None:
-    from biscuit_auth import BlockBuilder, Fact
-
     keypair = _keypair()
     parent = issue_biscuit_passport(
         _mission(resource_scope=[]),
@@ -400,6 +450,285 @@ def test_verifier_rejects_handcrafted_scope_expansion_from_empty_parent() -> Non
     token = Biscuit.from_bytes(parent, keypair.public_key).append(block).to_bytes()
 
     with pytest.raises(BiscuitVerifyError, match="resource scope expansion"):
+        verify_biscuit_passport(token, keypair.public_key, now=102)
+
+
+@pytest.mark.parametrize(
+    ("dimension", "overrides"),
+    [
+        (
+            "allowed_tool",
+            {
+                "allowed_tool": [
+                    'allowed_tool("read_file")',
+                    'allowed_tool("shell")',
+                ]
+            },
+        ),
+        (
+            "forbidden_tool",
+            {"forbidden_tool": ['forbidden_tool("harmless")']},
+        ),
+        (
+            "resource_scope",
+            {"resource_scope": ['resource_scope("/")']},
+        ),
+        (
+            "allowed_side_effect_class",
+            {
+                "allowed_side_effect_class": [
+                    'allowed_side_effect_class("none")',
+                    'allowed_side_effect_class("state_change")',
+                ]
+            },
+        ),
+        (
+            "max_tool_calls",
+            {"max_tool_calls": ["max_tool_calls(6)"]},
+        ),
+        (
+            "max_tool_calls_per_class",
+            {
+                "max_tool_calls_per_class": [
+                    'max_tool_calls_per_class("external_send", 2)'
+                ]
+            },
+        ),
+        (
+            "max_tool_calls_per_class",
+            {
+                "max_tool_calls_per_class": [
+                    'max_tool_calls_per_class("none", 1)'
+                ]
+            },
+        ),
+        (
+            "max_duration_s",
+            {"max_duration_s": ["max_duration_s(301)"]},
+        ),
+        ("iat", {"iat": ["iat(99)"]}),
+        ("exp", {"exp": ["exp(701)"]}),
+        (
+            "max_delegation_depth",
+            {"max_delegation_depth": ["max_delegation_depth(3)"]},
+        ),
+        ("cwd", {"cwd": ['cwd("/")']}),
+        (
+            "parent_jti",
+            {"parent_jti": ['parent_jti("unrelated-parent")']},
+        ),
+    ],
+)
+def test_verifier_rejects_each_handcrafted_authority_widening(
+    dimension: str,
+    overrides: dict[str, list[str]],
+) -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+        **overrides,
+    )
+
+    with pytest.raises(
+        BiscuitVerifyError,
+        match=rf"attenuation:{dimension}:",
+    ):
+        verify_biscuit_passport(token, keypair.public_key, now=102)
+
+
+def test_verifier_accepts_handcrafted_monotonic_narrowing() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+    )
+
+    context = verify_biscuit_passport(token, keypair.public_key, now=102)
+
+    assert context.allowed_tools == ["read_file", "search"]
+    assert context.forbidden_tools == ["delete_file", "write_file"]
+    assert context.resource_scope == ["/workspace/project/reports"]
+    assert context.max_tool_calls == 4
+    assert context.max_duration_s == 200
+    assert context.max_delegation_depth == 2
+    assert context.cwd == "/workspace/project/reports"
+
+
+def test_verifier_accepts_tool_narrowing_from_unrestricted_parent() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(allowed_tools=["*"]),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+        allowed_tool=['allowed_tool("read_file")'],
+    )
+
+    context = verify_biscuit_passport(token, keypair.public_key, now=102)
+
+    assert context.allowed_tools == ["read_file"]
+
+
+def test_verifier_accepts_side_effect_narrowing_from_unrestricted_parent() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(
+            allowed_side_effect_classes=[],
+            max_tool_calls_per_class={},
+        ),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+        allowed_side_effect_class=['allowed_side_effect_class("none")'],
+        max_tool_calls_per_class=['max_tool_calls_per_class("none", 1)'],
+    )
+
+    context = verify_biscuit_passport(token, keypair.public_key, now=102)
+
+    assert context.allowed_side_effect_classes == ["none"]
+    assert context.max_tool_calls_per_class == {"none": 1}
+
+
+def test_verifier_enforces_handcrafted_child_expiry_without_a_datalog_check() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=100)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+        iat=["iat(100)"],
+        exp=["exp(101)"],
+    )
+
+    with pytest.raises(BiscuitVerifyError, match=r"attenuation:exp:"):
+        verify_biscuit_passport(token, keypair.public_key, now=102)
+
+
+def test_verifier_rejects_structured_child_when_parent_disallows_delegation() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(delegation_allowed=False, max_delegation_depth=0),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+    )
+
+    with pytest.raises(
+        BiscuitVerifyError,
+        match=r"attenuation:delegation_allowed:",
+    ):
+        verify_biscuit_passport(token, keypair.public_key, now=102)
+
+
+def test_verifier_rejects_reproduced_holder_authority_widening() -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(
+            allowed_tools=["read_file"],
+            max_tool_calls=1,
+            delegation_allowed=False,
+            max_delegation_depth=0,
+            cwd="/safe",
+        ),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+        allowed_tool=['allowed_tool("delete_file")'],
+        forbidden_tool=['forbidden_tool("harmless")'],
+        max_tool_calls=["max_tool_calls(999)"],
+        delegation_allowed=["delegation_allowed(true)"],
+        max_delegation_depth=["max_delegation_depth(99)"],
+        cwd=['cwd("/")'],
+    )
+
+    with pytest.raises(BiscuitVerifyError, match=r"attenuation:"):
+        verify_biscuit_passport(token, keypair.public_key, now=102)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    [
+        (
+            {"max_tool_calls": ["max_tool_calls(true)"]},
+            "malformed:max_tool_calls",
+        ),
+        (
+            {
+                "max_tool_calls_per_class": [
+                    'max_tool_calls_per_class("external_send", true)'
+                ]
+            },
+            "malformed:max_tool_calls_per_class",
+        ),
+    ],
+)
+def test_verifier_rejects_boolean_values_for_integer_budgets(
+    overrides: dict[str, list[str]],
+    error: str,
+) -> None:
+    keypair = _keypair()
+    parent = issue_biscuit_passport(
+        _mission(),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    parent_context = verify_biscuit_passport(parent, keypair.public_key, now=101)
+    token = _append_handcrafted_child(
+        parent,
+        keypair.public_key,
+        expected_parent_jti=parent_context.jti,
+        **overrides,
+    )
+
+    with pytest.raises(BiscuitVerifyError, match=error):
         verify_biscuit_passport(token, keypair.public_key, now=102)
 
 
@@ -594,6 +923,52 @@ def test_derive_deeply_nested_chain_verifies() -> None:
     assert len(context.delegation_chain) == 4
     assert context.spiffe_id == "spiffe://example.org/agent/child-3"
     assert context.allowed_tools == ["read_file"]
+
+
+def test_valid_a_to_b_to_c_chain_narrows_every_supported_authority() -> None:
+    keypair = _keypair()
+    root = issue_biscuit_passport(
+        _mission(max_delegation_depth=2),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+    child = derive_child_biscuit(
+        root,
+        keypair.private_key,
+        "spiffe://example.org/agent/child",
+        child_allowed_tools=["read_file", "search"],
+        child_resource_scope=["/workspace/project/reports"],
+        child_max_tool_calls=4,
+        child_max_duration_s=200,
+        child_max_tool_calls_per_class={"external_send": 1},
+        child_cwd="/workspace/project/reports",
+        now=101,
+    )
+    grandchild = derive_child_biscuit(
+        child,
+        keypair.private_key,
+        "spiffe://example.org/agent/grandchild",
+        child_allowed_tools=["read_file"],
+        child_resource_scope=["/workspace/project/reports/q1"],
+        child_max_tool_calls=2,
+        child_max_duration_s=100,
+        child_max_tool_calls_per_class={"external_send": 0},
+        child_cwd="/workspace/project/reports/q1",
+        now=102,
+    )
+
+    context = verify_biscuit_passport(grandchild, keypair.public_key, now=103)
+
+    assert context.delegation_depth == 2
+    assert context.allowed_tools == ["read_file"]
+    assert context.resource_scope == ["/workspace/project/reports/q1"]
+    assert context.max_tool_calls == 2
+    assert context.max_duration_s == 100
+    assert context.max_tool_calls_per_class == {"external_send": 0}
+    assert context.delegation_allowed is False
+    assert context.max_delegation_depth == 0
+    assert context.cwd == "/workspace/project/reports/q1"
 
 
 def test_verify_detects_chain_splice() -> None:

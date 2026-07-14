@@ -5,6 +5,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
+  side-effect, budget, time, delegation, lineage-parent, or working-directory
+  authority while preserving valid transitive attenuation
 - Label exported actor/verifier identity as signed receipt claims while
   explicitly reporting that the detached exporter did not verify SPIFFE
   workload identity
