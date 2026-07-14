@@ -441,10 +441,13 @@ func waitForListenerAttached(daemonSockPath, sessionID string) error {
 		if err == nil && resp.OK && resp.SeccompListenerAttached {
 			return nil
 		}
-		if err != nil {
+		switch {
+		case err != nil:
 			lastErr = err
-		} else if !resp.OK {
+		case !resp.OK:
 			lastErr = errors.New(resp.Error)
+		default:
+			lastErr = fmt.Errorf("session %q reported ok=true but seccomp_listener_attached=false", sessionID)
 		}
 		time.Sleep(pollInterval)
 	}
