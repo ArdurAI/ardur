@@ -2,7 +2,7 @@
 title: "Ardur DRP Mapping Profile v0.1"
 description: "This document maps the current Ardur delegation and action-receipt surfaces to"
 source_path: "docs/specs/ardur-drp-mapping-v0.1.md"
-source_sha256: "c675c0dfef6f10af6f2b0ed2a435fe5f92ae03b8e1bbfdf3b0b091ff0cecae26"
+source_sha256: "36014979a9e810ffa6e338f713ad0b0206e4817949cf940706c49fc4795c80ad"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -92,7 +92,7 @@ transformations are:
 | `par_hash`, `parent_token_hash`, `parent_jti` | `parentReceiptId` plus Ardur audit fields | Resolve the actual profiled parent receipt. Token hashes and token IDs are retained but are not DRP receipt IDs. |
 | `cnf.jwk` | `metadata.x-ardur.capabilityTokenRef.holderConfirmation.jwk` | The holder key is not the DRP receipt-signing key. |
 | depth and delegation policy | `metadata.x-ardur.redelegation` | DRP describes depth behavior but has no Authorization Object fields for mode, depth, or maximum depth. |
-| budgets and policy references | `metadata.x-ardur.budget`, `metadata.x-ardur.policy` | Security-critical extensions that participate in attenuation checks. |
+| call-count/spend budgets and policy references | `metadata.x-ardur.budget`, `metadata.x-ardur.policy` | Security-critical extensions that participate in attenuation checks. The v0.1 mapping ledger reserves `spendBudget`, but the current DRP emitter/profile does not project it and must fail closed rather than omit or downgrade that authority. |
 | `mission_ref` | `metadata.x-ardur.missionRef` | DRP instruction commitment does not replace the governing Mission Declaration reference. |
 
 ### 3.1. Critical Extension Rule

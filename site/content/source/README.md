@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "af9b9a63cb0c6ee285dac130fd17d1fd2f60ce389cce0dafeb913a639b6613b3"
+source_sha256: "e8c6a36dbf12faad7f4c8988f14a1c7e10065b99af079181257dc107efbd3a09"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -229,6 +229,7 @@ Concretely — these are the design principles the repo is being built to meet, 
 - **Composable with what already exists.** Designed around SPIFFE for workload identity, Biscuit for first-party-attenuation credentials, Cedar for policy, the individual AAT Internet-Draft for delegation-token semantics, and EAT (RFC 9711) for attestation-token semantics. We didn't reinvent the substrate.
 - **Cryptographically bound by design.** Mission credentials are designed to be signed by an issuer key and produce signed receipts chain-hashed to the previous one. The Python Biscuit path reports SPIFFE holder binding only when the proxy has a server-owned Biscuit issuer key, JWT-SVID trust bundle, and audience and the presented credentials verify against them; request payloads cannot choose those verifier inputs. JWT-SVID itself remains a replayable bearer credential, so this is bounded holder evidence rather than universal replay prevention. The design is documented in the [ADRs](/__ardur_internal__/source/docs/decisions/readme/); the public code that implements it is being curated in phases.
 - **Delegation that narrows, never widens.** Child sessions get strictly narrower authority than their parent — fewer tools, smaller resource scope, smaller budget. The narrowing discipline is formalised in [ADR-017](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/).
+- **Pre-action spend authority.** Library adapters can reserve signed token and currency-micro ceilings across session, agent, and delegation-lineage scopes before a metered call, then settle trusted usage or quarantine uncertainty without silently refunding it. [Reference](/__ardur_internal__/source/docs/reference/spend-budgets/).
 - **No authority by omission.** An absent or empty `resource_scope` grants no resource authority. Operators who intentionally permit every resource must sign the sole explicit wildcard `resource_scope: ["**"]`; issuance and governed-run surfaces warn when they do. The decision and format-specific attenuation rules are documented in [ADR-023](/__ardur_internal__/source/docs/decisions/adr-023-explicit-resource-scope-authority/).
 - **Explicit about what it doesn't do.** Scope-level governance can't catch semantic misuse — if an allowed tool is used on an allowed resource for the wrong reason, that's a different layer's job.
 - **MIT licensed.** The research foundation (the Silence Theorem, the protocol formalism, the benchmark methodology) will be linked from this repo when the paper's public identifier is assigned. Articles in this repo paraphrase the research in original prose; they do not reproduce paper content.

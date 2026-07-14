@@ -385,6 +385,9 @@
         },
         {
           "$ref": "#/$defs/lineageBudgetDelta"
+        },
+        {
+          "$ref": "#/$defs/spendBudgetDelta"
         }
       ]
     },
@@ -483,6 +486,73 @@
         },
         "idempotent": {
           "type": "boolean"
+        }
+      }
+    },
+    "spendBudgetDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "resource",
+        "requested",
+        "reserved",
+        "actual",
+        "refunded",
+        "remaining",
+        "currency",
+        "quote_digest",
+        "reservation_hash",
+        "reason_code"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": ["reserve", "reject", "release", "settle", "quarantine"]
+        },
+        "resource": {"const": "spend"},
+        "requested": {"$ref": "#/$defs/spendAmounts"},
+        "reserved": {"$ref": "#/$defs/spendAmounts"},
+        "actual": {"$ref": "#/$defs/spendAmounts"},
+        "refunded": {"$ref": "#/$defs/spendAmounts"},
+        "remaining": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session", "agent", "lineage"],
+          "properties": {
+            "session": {"$ref": "#/$defs/spendAmounts"},
+            "agent": {"$ref": "#/$defs/spendAmounts"},
+            "lineage": {"$ref": "#/$defs/spendAmounts"}
+          }
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "quote_digest": {"$ref": "#/$defs/sha256HexString"},
+        "reservation_hash": {"$ref": "#/$defs/sha256HexString"},
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "idempotent": {"type": "boolean"},
+        "reconciled": {"type": "boolean"}
+      }
+    },
+    "spendAmounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens", "currency_micros"],
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "currency_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       }
     },

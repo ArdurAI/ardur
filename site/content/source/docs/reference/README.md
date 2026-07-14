@@ -2,7 +2,7 @@
 title: "Technical Reference"
 description: "Flat technical reference pages for the public Ardur surface. These describe"
 source_path: "docs/reference/README.md"
-source_sha256: "21c273bfe22e8db42fea61b7c7799ba85db7ec33df09dac6616673563d41c815"
+source_sha256: "95ef79e9239e5d03f9761fd357b02f4c30e2c8c65759a3fa0363b1fdefa8d506"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -39,6 +39,9 @@ walkthroughs see [`../guides/`](/__ardur_internal__/source/docs/guides/); for pr
 - [Advisory AI Controls](/__ardur_internal__/source/docs/reference/advisory-ai-controls/) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Pre-action Spend Budgets](/__ardur_internal__/source/docs/reference/spend-budgets/) — signed token/currency policy,
+  operator quote snapshots, atomic reserve/settle/quarantine semantics,
+  evidence, metrics, and deployment limits
 
 ## When To Update These Pages
 

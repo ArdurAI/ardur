@@ -5,9 +5,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-import vibap.proxy as proxy_module
-import vibap.spend_budget as spend_budget_module
-
 from vibap.passport import (
     MissionPassport,
     derive_child_passport,
@@ -375,7 +372,7 @@ def test_expired_terminal_records_are_pruned_before_capacity_check(
     tmp_path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(spend_budget_module, "MAX_LEDGER_RECORDS", 3)
+    monkeypatch.setattr("vibap.spend_budget.MAX_LEDGER_RECORDS", 3)
     ledger = FileSpendBudgetLedger(tmp_path)
     denied_policy = _policy(token_lineage=0)
     old_quote = _quote(valid_from=0, valid_until=10)
@@ -981,7 +978,7 @@ def test_spend_metrics_are_bounded_and_exclude_identifiers(
     monkeypatch,
 ) -> None:
     isolated_metrics = ArdurMetrics()
-    monkeypatch.setattr(proxy_module, "ardur_metrics", isolated_metrics)
+    monkeypatch.setattr("vibap.proxy.ardur_metrics", isolated_metrics)
     proxy, session = _spend_proxy(
         tmp_path,
         public_key,

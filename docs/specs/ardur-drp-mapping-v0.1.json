@@ -467,6 +467,13 @@
     },
     {
       "source_surface": "legacy_python_passport",
+      "source_path": "spend_budget",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.spendBudget",
+      "rationale": "Token and monetary authority is security-critical. This mapping ledger reserves the extension path; the current DRP v0.1 emitter/profile does not project it and must fail closed rather than omit or downgrade the claim."
+    },
+    {
+      "source_surface": "legacy_python_passport",
       "source_path": "max_duration_s",
       "classification": "extension",
       "drp_path": "metadata.x-ardur.budget.maxDurationSeconds",

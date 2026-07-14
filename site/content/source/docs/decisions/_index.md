@@ -25,4 +25,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ADR-022-operator-telemetry-spiffe-mtls.md`](/__ardur_internal__/source/docs/decisions/adr-022-operator-telemetry-spiffe-mtls/)
 - [`ADR-023-explicit-resource-scope-authority.md`](/__ardur_internal__/source/docs/decisions/adr-023-explicit-resource-scope-authority/)
 - [`ADR-024-self-asserted-owner-identity-assurance.md`](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/)
+- [`ADR-025-pre-action-spend-reservation.md`](/__ardur_internal__/source/docs/decisions/adr-025-pre-action-spend-reservation/)
 - [`README.md`](/__ardur_internal__/source/docs/decisions/readme/)
