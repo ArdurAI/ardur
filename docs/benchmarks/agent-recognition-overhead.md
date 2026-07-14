@@ -100,6 +100,10 @@ These are conservative first-run regression limits, not an SLO or a universal
 performance claim. They should be tightened only after additional exact-hosted-
 runner evidence, never loosened to conceal loss.
 
+The public site mirrors both evidence JSON files. After changing either
+fixture, run `python3 site/scripts/sync_source_docs.py` and commit the generated
+artifact copies and routes with the source change.
+
 ## Local real-Linux run
 
 Build all three exact artifacts from the same checkout:

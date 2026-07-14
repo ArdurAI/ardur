@@ -48,6 +48,7 @@ PUBLIC_ARTIFACT_GLOBS = [
     "docs/specs/fixtures/*.pem",
     "python/vibap/_specs/*.json",
     "go/spec/**/*.json",
+    "go/pkg/kernelcapture/testdata/agent-recognition-benchmark-*.json",
     "examples/**/*.json",
     "examples/_shared/*.py",
     "deploy/**/*.yaml",

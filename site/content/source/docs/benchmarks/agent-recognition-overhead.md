@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "4b6902a02bab22fba9cbe1e2f2d1d4bcd1e7c0715b8e5015b6b07abd573352b8"
+source_sha256: "69482a230603ba77588b5e5db599c8bfb460c7b14746dd569ecdc2461d44e433"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -93,7 +93,7 @@ loss into a pass.
 The initial exact-head x86 evidence is [GitHub Actions run
 29321373911](https://github.com/ArdurAI/ardur/actions/runs/29321373911) for
 source `967ba6702c721a351c9e52e665f16e591ac5d9b6`. The committed
-[raw report](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-baseline-967ba670.json)
+[raw report](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-baseline-967ba670.json)
 has artifact digest
 `60ec1e25e89375e323d6b564a91b74283aae3b2995a6878665e1ecdc3a399530`
 and records Linux amd64, kernel `6.17.0-1018-azure`, Go `1.26.5`, and four
@@ -116,6 +116,10 @@ ceiling below 18 MiB while allowing Go allocator and shared-runner variation.
 These are conservative first-run regression limits, not an SLO or a universal
 performance claim. They should be tightened only after additional exact-hosted-
 runner evidence, never loosened to conceal loss.
+
+The public site mirrors both evidence JSON files. After changing either
+fixture, run `python3 site/scripts/sync_source_docs.py` and commit the generated
+artifact copies and routes with the source change.
 
 ## Local real-Linux run
 
