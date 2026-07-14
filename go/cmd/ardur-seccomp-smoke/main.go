@@ -43,6 +43,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -50,6 +51,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -63,12 +65,18 @@ const (
 
 func main() {
 	probeConnect := flag.String("probe-connect", "", "internal: re-exec self as a connect(2) probe against this host:port")
+	probeWait := flag.Bool("probe-wait", false, "internal: re-exec self as a long-lived listener holder")
 	daemonBin := flag.String("daemon-bin", "", "path to a prebuilt ardur-kernelcaptured binary (required)")
 	shimBin := flag.String("shim-bin", "", "path to a prebuilt ardur-exec-shim binary (required)")
+	lifecycleStressIterations := flag.Int("lifecycle-stress-iterations", 100, "live listener teardown iterations under concurrent control traffic")
 	flag.Parse()
 
 	if *probeConnect != "" {
 		runProbe(*probeConnect)
+		return
+	}
+	if *probeWait {
+		runWaitProbe()
 		return
 	}
 
@@ -76,11 +84,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: ardur-seccomp-smoke --daemon-bin PATH --shim-bin PATH")
 		os.Exit(2)
 	}
-	if err := run(*daemonBin, *shimBin); err != nil {
+	if *lifecycleStressIterations < 1 {
+		fmt.Fprintln(os.Stderr, "lifecycle-stress-iterations must be at least 1")
+		os.Exit(2)
+	}
+	if err := run(*daemonBin, *shimBin, *lifecycleStressIterations); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("PASS: seccomp tier denied a policy-blocked connect() with EPERM and allowed a policy-permitted one through to the kernel")
+	fmt.Println("PASS: seccomp tier enforced connect policy and listener cancellation did not corrupt concurrent control connections")
 }
 
 // runProbe is this binary's own re-exec mode: attempt one TCP connect and
@@ -102,7 +114,13 @@ func runProbe(addr string) {
 	fmt.Printf("OTHER_ERROR:%v\n", err)
 }
 
-func run(daemonBin, shimBin string) (runErr error) {
+func runWaitProbe() {
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+func run(daemonBin, shimBin string, lifecycleStressIterations int) (runErr error) {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve own executable path (needed to re-exec as the connect probe): %w", err)
@@ -204,7 +222,233 @@ func run(daemonBin, shimBin string) (runErr error) {
 	}
 	fmt.Println("allowed target correctly reached the kernel with ECONNREFUSED:", allowedOut)
 
+	if err := runListenerCloseStress(sockPath, seccompSockPath, shimBin, self, lifecycleStressIterations); err != nil {
+		return err
+	}
+	fmt.Printf("listener cancellation survived %d live teardowns under concurrent control traffic\n", lifecycleStressIterations)
+
 	return nil
+}
+
+func runListenerCloseStress(daemonSockPath, seccompSockPath, shimBin, self string, iterations int) error {
+	const controlSessionID = "seccomp-close-race-control"
+	if err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    controlSessionID,
+			RootPID:      uint32(os.Getpid()),
+			CgroupID:     uint64(os.Getpid()),
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   300,
+		},
+	}); err != nil {
+		return fmt.Errorf("register control-churn session: %w", err)
+	}
+	defer func() {
+		_ = daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodEndSession,
+			EndSession:      &kernelcapture.DaemonEndSessionRequest{SessionID: controlSessionID},
+		})
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	controlErr := make(chan error, 1)
+	reportControlErr := func(err error) {
+		select {
+		case controlErr <- err:
+		default:
+		}
+	}
+	var controlWG sync.WaitGroup
+
+	// Keep one mutation stream sequential so every generation arrives in the
+	// strictly increasing order the daemon protocol requires. The health
+	// workers provide the other concurrently accepted control connections that
+	// make numeric-fd reuse likely without depending on out-of-order policy
+	// updates being accepted.
+	controlWG.Add(1)
+	go func() {
+		defer controlWG.Done()
+		var generation kernelcapture.BpfPolicyGeneration
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if generation == kernelcapture.MaxDaemonPolicyGeneration {
+				reportControlErr(errors.New("apply_policy generation exhausted during listener teardown stress"))
+				return
+			}
+			generation++
+			err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+				ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+				Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+				ApplyPolicy: &kernelcapture.DaemonApplyPolicyRequest{
+					SessionID:   controlSessionID,
+					Generation:  generation,
+					EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+					OpPolicies: []kernelcapture.DaemonOpPolicy{{
+						Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionAllowlist, EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+					}},
+					NetAllow: []string{"127.0.0.2/32"},
+				},
+			})
+			if err != nil {
+				reportControlErr(fmt.Errorf("apply_policy generation %d: %w", generation, err))
+				return
+			}
+		}
+	}()
+
+	for worker := 0; worker < 3; worker++ {
+		controlWG.Add(1)
+		go func(worker int) {
+			defer controlWG.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+					ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+					Method:          kernelcapture.DaemonProtocolMethodHealth,
+					Health:          &kernelcapture.DaemonHealthRequest{},
+				})
+				if err != nil {
+					reportControlErr(fmt.Errorf("health worker %d: %w", worker, err))
+					return
+				}
+			}
+		}(worker)
+	}
+
+	for i := 0; i < iterations; i++ {
+		select {
+		case err := <-controlErr:
+			cancel()
+			controlWG.Wait()
+			return fmt.Errorf("control connection failed during listener teardown: %w", err)
+		default:
+		}
+		sessionID := fmt.Sprintf("seccomp-close-race-%04d", i)
+		waiter, output, err := startShimWaiter(daemonSockPath, shimBin, seccompSockPath, sessionID, self)
+		if err != nil {
+			cancel()
+			controlWG.Wait()
+			return err
+		}
+		endErr := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodEndSession,
+			EndSession:      &kernelcapture.DaemonEndSessionRequest{SessionID: sessionID},
+		})
+		_ = waiter.Process.Kill()
+		waitErr := waiter.Wait()
+		if endErr != nil {
+			cancel()
+			controlWG.Wait()
+			return fmt.Errorf("end live listener session %q: %w (waiter output: %s)", sessionID, endErr, output.String())
+		}
+		if waitErr == nil {
+			cancel()
+			controlWG.Wait()
+			return fmt.Errorf("listener waiter %q exited before cleanup", sessionID)
+		}
+	}
+
+	cancel()
+	controlWG.Wait()
+	select {
+	case err := <-controlErr:
+		return fmt.Errorf("control connection failed during listener teardown: %w", err)
+	default:
+		return nil
+	}
+}
+
+func startShimWaiter(daemonSockPath, shimBin, seccompSockPath, sessionID, self string) (*exec.Cmd, *bytes.Buffer, error) {
+	readyFile := filepath.Join(filepath.Dir(seccompSockPath), sessionID+".ready")
+	cmd := exec.Command(shimBin,
+		"--session-id", sessionID,
+		"--seccomp-socket", seccompSockPath,
+		"--ready-file", readyFile,
+		"--",
+		self, "--probe-wait",
+	)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("start listener waiter %q: %w", sessionID, err)
+	}
+	fail := func(err error) (*exec.Cmd, *bytes.Buffer, error) {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = os.Remove(readyFile)
+		return nil, nil, err
+	}
+	if err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodRegisterSession,
+		RegisterSession: &kernelcapture.DaemonRegisterSessionRequest{
+			SessionID:    sessionID,
+			RootPID:      uint32(cmd.Process.Pid),
+			CgroupID:     uint64(cmd.Process.Pid),
+			EventClasses: []string{kernelcapture.DaemonProtocolEventProcessLifecycle},
+			TTLSeconds:   300,
+		},
+	}); err != nil {
+		return fail(fmt.Errorf("register listener waiter %q: %w", sessionID, err))
+	}
+	if err := daemonCall(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+		ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+		Method:          kernelcapture.DaemonProtocolMethodApplyPolicy,
+		ApplyPolicy: &kernelcapture.DaemonApplyPolicyRequest{
+			SessionID:   sessionID,
+			Generation:  1,
+			EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+			OpPolicies: []kernelcapture.DaemonOpPolicy{{
+				Op: kernelcapture.BpfOpNetConnect, Action: kernelcapture.BpfActionDeny, EnforceMode: kernelcapture.BpfEnforceModeEnforce,
+			}},
+		},
+	}); err != nil {
+		return fail(fmt.Errorf("apply listener waiter policy %q: %w", sessionID, err))
+	}
+	if err := os.WriteFile(readyFile, []byte("ready\n"), 0o600); err != nil {
+		return fail(fmt.Errorf("release listener waiter %q: %w", sessionID, err))
+	}
+	defer os.Remove(readyFile)
+	if err := waitForListenerAttached(daemonSockPath, sessionID); err != nil {
+		return fail(err)
+	}
+	return cmd, &output, nil
+}
+
+func waitForListenerAttached(daemonSockPath, sessionID string) error {
+	deadline := time.Now().Add(pollTimeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := daemonRequest(daemonSockPath, kernelcapture.DaemonProtocolRequest{
+			ProtocolVersion: kernelcapture.DaemonProtocolVersion,
+			Method:          kernelcapture.DaemonProtocolMethodSessionStatus,
+			SessionStatus:   &kernelcapture.DaemonSessionStatusRequest{SessionID: sessionID},
+		})
+		if err == nil && resp.OK && resp.SeccompListenerAttached {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else if !resp.OK {
+			lastErr = errors.New(resp.Error)
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("seccomp listener for %q did not attach within %s (last error: %v)", sessionID, pollTimeout, lastErr)
 }
 
 func waitForSocket(path string) error {

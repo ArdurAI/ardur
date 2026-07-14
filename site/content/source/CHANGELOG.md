@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8c69468dc7656a79739a37fcc05bff056ed40b811eb661fdd3fa1c2b7131db86"
+source_sha256: "119fca0a30ba11f8a99a689a0db3c4d1ff68983c05c13212cff1b8f84f0f9674"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -78,6 +78,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Keep seccomp listener ownership in one goroutine and wake cancellation through
+  a dedicated eventfd, preventing listener teardown from closing a reused
+  control-connection descriptor
 - Prevent torn `PolicyMaps` reads and use-after-close during BPF-LSM guard
   startup, degradation, and shutdown; reject late guards after seccomp fallback
 - Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the

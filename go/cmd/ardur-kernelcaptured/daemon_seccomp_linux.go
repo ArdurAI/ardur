@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -275,24 +276,27 @@ func sendSeccompHandoffResponse(conn *net.UnixConn, ok bool, errMsg string) erro
 // superviseSeccompListener services connect(2) notifications on fd until ctx
 // is cancelled or the listener errors out — most commonly because the
 // governed process tree exited, closing the last reference to the seccomp
-// filter the notifications were flowing from.
+// filter the notifications were flowing from. The caller is the listener's
+// sole owner and closer; cancellation wakes the poll below through a separate
+// eventfd rather than closing fd from another goroutine.
 func superviseSeccompListener(ctx context.Context, fd int, sessionID string, registrationGeneration, cgroupID uint64, d *daemon, log *slog.Logger) {
-	// Unblock a pending RecvSeccompNotif on shutdown — SECCOMP_IOCTL_NOTIF_RECV
-	// has no context awareness of its own, the same limitation
-	// ringbuf.Reader.Read() has (see daemon_guard_linux.go's runGuardConsumer,
-	// which uses the identical ctx.Done()-closes-the-fd pattern).
-	stop := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			unix.Close(fd)
-		case <-stop:
-		}
-	}()
-	defer close(stop)
+	cancelFD, stopCancellationWatcher, err := newSeccompListenerCancellation(ctx)
+	if err != nil {
+		log.Error("create seccomp listener cancellation event", "session_id", sessionID, "error", err)
+		return
+	}
+	defer stopCancellationWatcher()
 
 	for {
 		if ctx.Err() != nil {
+			return
+		}
+		ready, err := waitForSeccompListenerEvent(fd, cancelFD)
+		if err != nil {
+			log.Info("seccomp listener poll stopped supervisor", "session_id", sessionID, "error", err)
+			return
+		}
+		if !ready || ctx.Err() != nil {
 			return
 		}
 		notif, err := kernelcapture.RecvSeccompNotif(fd)
@@ -314,6 +318,76 @@ func superviseSeccompListener(ctx context.Context, fd int, sessionID string, reg
 		}
 		d.handleSeccompConnectNotif(fd, notif, sessionID, cgroupID, log)
 		d.seccompSessionMu.RUnlock()
+	}
+}
+
+// newSeccompListenerCancellation returns an eventfd that becomes readable
+// when ctx is cancelled. cleanup first stops and joins the watcher, then
+// closes the eventfd, so the watcher can never write to a reused descriptor.
+// It intentionally never closes the seccomp listener itself.
+func newSeccompListenerCancellation(ctx context.Context) (cancelFD int, cleanup func(), err error) {
+	cancelFD, err = unix.Eventfd(0, unix.EFD_CLOEXEC)
+	if err != nil {
+		return -1, nil, fmt.Errorf("create eventfd: %w", err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-ctx.Done():
+			var signal [8]byte
+			binary.NativeEndian.PutUint64(signal[:], 1)
+			for {
+				if _, writeErr := unix.Write(cancelFD, signal[:]); !errors.Is(writeErr, unix.EINTR) {
+					return
+				}
+			}
+		case <-stop:
+		}
+	}()
+
+	cleanup = func() {
+		close(stop)
+		<-done
+		_ = unix.Close(cancelFD)
+	}
+	return cancelFD, cleanup, nil
+}
+
+// waitForSeccompListenerEvent blocks without consuming either event. A true
+// result means the kernel reported that the following notification receive
+// ioctl will not block. A false result means cancellation won the race.
+func waitForSeccompListenerEvent(listenerFD, cancelFD int) (bool, error) {
+	pollFDs := []unix.PollFd{
+		{Fd: int32(listenerFD), Events: unix.POLLIN},
+		{Fd: int32(cancelFD), Events: unix.POLLIN},
+	}
+	for {
+		_, err := unix.Poll(pollFDs, -1)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("poll listener and cancellation event: %w", err)
+		}
+
+		cancelEvents := pollFDs[1].Revents
+		if cancelEvents&unix.POLLIN != 0 {
+			return false, nil
+		}
+		if cancelEvents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+			return false, fmt.Errorf("cancellation eventfd reported poll events %#x", cancelEvents)
+		}
+
+		listenerEvents := pollFDs[0].Revents
+		if listenerEvents&unix.POLLIN != 0 {
+			return true, nil
+		}
+		if listenerEvents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+			return false, fmt.Errorf("seccomp listener reported poll events %#x", listenerEvents)
+		}
 	}
 }
 
