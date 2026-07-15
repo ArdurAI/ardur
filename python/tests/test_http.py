@@ -31,6 +31,7 @@ import vibap.mission as mission_module
 from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import GovernanceProxy, serve_proxy
 from vibap.receipt import verify_chain
+from vibap.risk_budget import ToolRiskContract, ToolRiskRegistry
 
 from tests.conftest import (
     v01_default_status_list_token,
@@ -106,7 +107,9 @@ def _post(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     return status, body
 
 
-def _post_with_headers(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any], dict[str, str]]:
+def _post_with_headers(
+    url: str, payload: dict[str, Any]
+) -> tuple[int, dict[str, Any], dict[str, str]]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -116,7 +119,11 @@ def _post_with_headers(url: str, payload: dict[str, Any]) -> tuple[int, dict[str
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8")), dict(resp.headers.items())
+            return (
+                resp.status,
+                json.loads(resp.read().decode("utf-8")),
+                dict(resp.headers.items()),
+            )
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8")
         try:
@@ -168,7 +175,9 @@ class TestHTTPHealth:
 
 
 class TestHTTPRequestParsing:
-    def test_transfer_encoding_chunked_is_rejected_before_json_dispatch(self, http_proxy):
+    def test_transfer_encoding_chunked_is_rejected_before_json_dispatch(
+        self, http_proxy
+    ):
         base, _ = http_proxy
         port = int(base.rsplit(":", 1)[1])
         response = _raw_http_request(
@@ -185,7 +194,9 @@ class TestHTTPRequestParsing:
         headers, _, body = response.partition(b"\r\n\r\n")
 
         assert headers.startswith(b"HTTP/1.0 400 ")
-        assert json.loads(body.decode("utf-8")) == {"error": "unsupported Transfer-Encoding"}
+        assert json.loads(body.decode("utf-8")) == {
+            "error": "unsupported Transfer-Encoding"
+        }
 
 
 class TestHTTPEvaluate:
@@ -198,7 +209,11 @@ class TestHTTPEvaluate:
 
         status, body = _post(
             base + "/evaluate",
-            {"session_id": session_id, "tool_name": "read_file", "arguments": {"path": "/x"}},
+            {
+                "session_id": session_id,
+                "tool_name": "read_file",
+                "arguments": {"path": "/x"},
+            },
         )
         assert status == 200
         assert body["decision"] == "PERMIT"
@@ -217,7 +232,9 @@ class TestHTTPEvaluate:
         assert body["decision"] == "DENY"
         assert "reason" in body
 
-    def test_revoked_active_session_returns_403(self, http_proxy, example_mission, private_key):
+    def test_revoked_active_session_returns_403(
+        self, http_proxy, example_mission, private_key
+    ):
         base, proxy = http_proxy
         token = issue_passport(example_mission, private_key, ttl_s=60)
         _, start = _post(base + "/session/start", {"token": token})
@@ -225,7 +242,11 @@ class TestHTTPEvaluate:
 
         status, body = _post(
             base + "/evaluate",
-            {"session_id": session_id, "tool_name": "read_file", "arguments": {"path": "/x"}},
+            {
+                "session_id": session_id,
+                "tool_name": "read_file",
+                "arguments": {"path": "/x"},
+            },
         )
         assert status == 200
         assert body["decision"] == "PERMIT"
@@ -234,10 +255,114 @@ class TestHTTPEvaluate:
 
         status, body = _post(
             base + "/evaluate",
-            {"session_id": session_id, "tool_name": "read_file", "arguments": {"path": "/x"}},
+            {
+                "session_id": session_id,
+                "tool_name": "read_file",
+                "arguments": {"path": "/x"},
+            },
         )
         assert status == 403
         assert body == {"error": "passport_revoked"}
+
+    def test_governed_action_and_explicit_risk_outcome_roundtrip(
+        self,
+        tmp_path,
+        private_key,
+        session_keys_dir,
+        unused_tcp_port,
+    ):
+        contract = ToolRiskContract.from_schema(
+            "delete_objects",
+            {
+                "type": "object",
+                "properties": {
+                    "targets": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["targets"],
+                "additionalProperties": False,
+            },
+            {
+                "version": 1,
+                "mandatory_facts": ["objects_affected"],
+                "extractors": {
+                    "objects_affected": {
+                        "kind": "array_length",
+                        "pointer": "/targets",
+                    }
+                },
+            },
+        )
+        registry = ToolRiskRegistry()
+        registry.register(contract)
+        governed_proxy = GovernanceProxy(
+            log_path=tmp_path / "governance.jsonl",
+            state_dir=tmp_path / "state",
+            keys_dir=session_keys_dir,
+            public_key=private_key.public_key(),
+            private_key=private_key,
+            risk_registry=registry,
+        )
+        _, base, shutdown = _build_server_thread(
+            governed_proxy,
+            private_key,
+            unused_tcp_port,
+        )
+        try:
+            token = issue_passport(
+                MissionPassport(
+                    agent_id="risk-http-agent",
+                    mission="bounded deletion",
+                    allowed_tools=["delete_objects"],
+                    resource_scope=["**"],
+                    risk_budget={
+                        "version": 1,
+                        "lineage_id": "http-lineage",
+                        "tools": {
+                            "delete_objects": {
+                                "contract_digest": contract.digest,
+                                "max_facts": {"objects_affected": 2},
+                            }
+                        },
+                        "ceilings": {
+                            "objects_affected": {
+                                "session": 2,
+                                "agent": 2,
+                                "lineage": 2,
+                            }
+                        },
+                    },
+                ),
+                private_key,
+                ttl_s=60,
+            )
+            status, start = _post(base + "/session/start", {"token": token})
+            assert status == 200
+
+            status, evaluation = _post(
+                base + "/evaluate",
+                {
+                    "session_id": start["session_id"],
+                    "tool_name": "delete_objects",
+                    "arguments": {"targets": ["a", "b"]},
+                    "risk_request_id": "http-request-1",
+                },
+            )
+            assert status == 200
+            assert evaluation["decision"] == "PERMIT"
+
+            status, outcome = _post(
+                base + "/risk/outcome",
+                {
+                    "session_id": start["session_id"],
+                    "risk_request_id": "http-request-1",
+                    "outcome": "committed",
+                },
+            )
+            assert status == 200
+            assert outcome["status"] == "committed"
+            assert outcome["receipt_id"]
+        finally:
+            shutdown()
 
 
 class TestHTTPDelegate:
@@ -580,9 +705,10 @@ class TestHTTPDelegate:
 
             assert sum(accepted) == 5
             assert all(status == 403 for status in rejected)
-            assert p1.lineage_budget_ledger.snapshot(start["session_id"])[
-                "reserved_total"
-            ] == 5
+            assert (
+                p1.lineage_budget_ledger.snapshot(start["session_id"])["reserved_total"]
+                == 5
+            )
         finally:
             shutdown2()
             shutdown1()
@@ -652,9 +778,7 @@ class TestHTTPAuthAndValidation:
                     "allowed_tools": ["read"],
                     "delegation_allowed": True,
                     "max_delegation_depth": 1,
-                    "lineage_budgets": [
-                        {"type": "max_child_tool_calls", "limit": 3}
-                    ],
+                    "lineage_budgets": [{"type": "max_child_tool_calls", "limit": 3}],
                 }
             },
         )
@@ -726,7 +850,9 @@ class TestHTTPAuthAndValidation:
 
 
 class TestHTTPSessionEnd:
-    def test_session_end_includes_attestation(self, http_proxy, example_mission, private_key):
+    def test_session_end_includes_attestation(
+        self, http_proxy, example_mission, private_key
+    ):
         base, _ = http_proxy
         token = issue_passport(example_mission, private_key, ttl_s=60)
         _, start = _post(base + "/session/start", {"token": token})
@@ -742,7 +868,9 @@ class TestHTTPSessionEnd:
         assert "summary" in body
         assert body["summary"]["permits"] >= 1
 
-    def test_session_start_returns_503_when_replay_cache_deleted(self, http_proxy, example_mission, private_key):
+    def test_session_start_returns_503_when_replay_cache_deleted(
+        self, http_proxy, example_mission, private_key
+    ):
         base, proxy = http_proxy
         token = issue_passport(example_mission, private_key, ttl_s=60)
         _post(base + "/session/start", {"token": token})
@@ -753,7 +881,9 @@ class TestHTTPSessionEnd:
         assert status == 503
         assert body == {"error": "replay_cache_unavailable"}
 
-    def test_attest_is_idempotent_after_end(self, http_proxy, example_mission, private_key):
+    def test_attest_is_idempotent_after_end(
+        self, http_proxy, example_mission, private_key
+    ):
         base, _ = http_proxy
         token = issue_passport(example_mission, private_key, ttl_s=60)
         _, start = _post(base + "/session/start", {"token": token})
@@ -781,9 +911,7 @@ class TestDelegateRequiresActiveParentSession:
     parent's ceiling if the parent session wasn't in the in-memory dict.
     Now it must refuse unless there's a persisted session for the parent jti."""
 
-    def test_delegate_without_started_parent_returns_403(
-        self, http_proxy, private_key
-    ):
+    def test_delegate_without_started_parent_returns_403(self, http_proxy, private_key):
         base, _ = http_proxy
         parent_mission = MissionPassport(
             agent_id="parent",
@@ -809,9 +937,7 @@ class TestDelegateRequiresActiveParentSession:
         assert status == 403
         assert "parent session" in body.get("error", "").lower()
 
-    def test_delegate_with_ended_parent_returns_403(
-        self, http_proxy, private_key
-    ):
+    def test_delegate_with_ended_parent_returns_403(self, http_proxy, private_key):
         """A parent session that's been ended should not be able to spawn children."""
         base, _ = http_proxy
         parent_mission = MissionPassport(
@@ -859,11 +985,14 @@ class TestDelegateRequiresActiveParentSession:
 
         # Burn 7 calls of the 10 budget
         for _ in range(7):
-            _post(base + "/evaluate", {
-                "session_id": session_id,
-                "tool_name": "read",
-                "arguments": {},
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": session_id,
+                    "tool_name": "read",
+                    "arguments": {},
+                },
+            )
 
         # Delegate — parent has 3 remaining; child should get at most 3
         status, body = _post(
@@ -1055,6 +1184,7 @@ class TestHTTPAATInterop:
 # regressions pin the new HTTP-edge guards so future refactors can't
 # silently drop them.
 
+
 class TestHTTPAATPoP:
     def test_cnf_aat_without_pop_inputs_fails_closed_at_http_edge(
         self, http_proxy, private_key, public_key, monkeypatch
@@ -1130,9 +1260,7 @@ class TestHTTPAATPoP:
         assert status == 400, f"expected 400, got {status}: {body}"
         assert "MAX_KB_JWT_BYTES" in body.get("error", "")
 
-    def test_delegate_reserves_budget_across_siblings(
-        self, http_proxy, private_key
-    ):
+    def test_delegate_reserves_budget_across_siblings(self, http_proxy, private_key):
         """Round-3 H1: sibling delegations must not reuse the same remainder snapshot."""
         base, _ = http_proxy
         parent_mission = MissionPassport(
@@ -1148,11 +1276,14 @@ class TestHTTPAATPoP:
         session_id = start["session_id"]
 
         for _ in range(7):
-            _post(base + "/evaluate", {
-                "session_id": session_id,
-                "tool_name": "read",
-                "arguments": {},
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": session_id,
+                    "tool_name": "read",
+                    "arguments": {},
+                },
+            )
 
         status1, body1 = _post(
             base + "/delegate",
@@ -1212,11 +1343,14 @@ class TestHTTPAATPoP:
         session_id = start["session_id"]
 
         for _ in range(2):
-            status, body = _post(base + "/evaluate", {
-                "session_id": session_id,
-                "tool_name": "read",
-                "arguments": {},
-            })
+            status, body = _post(
+                base + "/evaluate",
+                {
+                    "session_id": session_id,
+                    "tool_name": "read",
+                    "arguments": {},
+                },
+            )
             assert status == 200
             assert body["decision"] == "PERMIT"
 
@@ -1267,7 +1401,10 @@ class TestHTTPAATPoP:
         claims = verify_chain([entry["jwt"] for entry in entries], public_key)
         assert {claim["trace_id"] for claim in claims} == {session_id}
         assert len({claim["run_nonce"] for claim in claims}) == 1
-        assert all(claim["invocation_digest"]["scope"] == "normalized_input" for claim in claims)
+        assert all(
+            claim["invocation_digest"]["scope"] == "normalized_input"
+            for claim in claims
+        )
         assert [claim["tool"] for claim in claims] == [
             "read",
             "read",
@@ -1308,11 +1445,14 @@ class TestHTTPAATPoP:
         session_id = start["session_id"]
 
         for _ in range(7):
-            _post(base + "/evaluate", {
-                "session_id": session_id,
-                "tool_name": "read",
-                "arguments": {},
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": session_id,
+                    "tool_name": "read",
+                    "arguments": {},
+                },
+            )
 
         failed_status, failed_body = _post(
             base + "/delegate",
@@ -1351,12 +1491,18 @@ class TestHTTPAATPoP:
 # Go regressions: missing-header → 401, wrong-token → 401, correct-
 # token → not-401, public paths remain unauthenticated.
 
+
 def _build_authenticated_server_thread(
-    proxy: GovernanceProxy, private_key, port: int, *, api_token: str,
+    proxy: GovernanceProxy,
+    private_key,
+    port: int,
+    *,
+    api_token: str,
 ):
     """Variant of ``_build_server_thread`` that runs with require_auth=True
     and a fixed token, so tests can exercise the bearer-auth path."""
     import signal as _signal
+
     original = _signal.signal
     _signal.signal = lambda *_a, **_kw: None  # type: ignore[assignment]
 
@@ -1393,7 +1539,10 @@ def _build_authenticated_server_thread(
 def authed_http_proxy(proxy, private_key, unused_tcp_port):
     token = "auth-test-token-32-bytes-A-B-C-D-E"
     thread, base, shutdown = _build_authenticated_server_thread(
-        proxy, private_key, unused_tcp_port, api_token=token,
+        proxy,
+        private_key,
+        unused_tcp_port,
+        api_token=token,
     )
     yield base, proxy, token
     shutdown()
@@ -1426,7 +1575,9 @@ class TestPythonProxyBearerAuth:
     def test_wrong_token_rejected(self, authed_http_proxy):
         base, _, _ = authed_http_proxy
         status, body = _post_with_auth(
-            base + "/issue", {}, token="attacker-supplied-wrong-token-32",
+            base + "/issue",
+            {},
+            token="attacker-supplied-wrong-token-32",
         )
         assert status == 401
         assert "invalid bearer token" in body.get("error", "")
@@ -1497,6 +1648,7 @@ class TestPythonProxyBearerAuth:
 # anti-pattern (raw ``compare_digest(provided, api_token_bytes)``)
 # that round-8 audit identified as the regression vector.
 
+
 class TestPythonProxyBearerAuthSourceShape:
     """Source-shape regressions that pin fixed-length bearer comparison
     closure (round-8 FIX-R8-1) at the code-text level. These tests
@@ -1563,6 +1715,7 @@ class TestPythonProxyBearerAuthSourceShape:
 # client-presented bearer can match — the operator-confusion failure
 # mode R9-1 closed.
 
+
 class TestPythonProxyCliTokenStrip:
     """FIX-R11-1 (round-11, 2026-04-29): close round-10 audit's
     LOW-R10-A finding — the R10-4 ``--api-token`` CLI strip shipped
@@ -1584,12 +1737,16 @@ class TestPythonProxyCliTokenStrip:
         monkeypatch.delenv("VIBAP_API_TOKEN", raising=False)
         canonical_token = "cli-test-token-32-bytes-DEFGHIJ"
         thread, base, shutdown = _build_authenticated_server_thread(
-            proxy, private_key, unused_tcp_port,
+            proxy,
+            private_key,
+            unused_tcp_port,
             api_token=f"   {canonical_token}   ",
         )
         try:
             status, body = _post_with_auth(
-                base + "/issue", {}, token=canonical_token,
+                base + "/issue",
+                {},
+                token=canonical_token,
             )
             assert status != 401, (
                 f"R10-4 regression: trimmed CLI token authentication "
@@ -1616,13 +1773,17 @@ class TestPythonProxyEnvTokenStrip:
         monkeypatch.setenv("VIBAP_API_TOKEN", f"  {canonical_token}  ")
 
         thread, base, shutdown = _build_authenticated_server_thread(
-            proxy, private_key, unused_tcp_port,
+            proxy,
+            private_key,
+            unused_tcp_port,
             api_token="ignored-arg-because-env-takes-precedence",
         )
         try:
             # Client presents the canonical (trimmed) token — must succeed.
             status, body = _post_with_auth(
-                base + "/issue", {}, token=canonical_token,
+                base + "/issue",
+                {},
+                token=canonical_token,
             )
             assert status != 401, (
                 f"R9-1 regression: trimmed env token authentication "
@@ -1677,8 +1838,7 @@ class TestPythonProxyStrictAscii:
             )
             body = json.loads(body_bytes.decode("utf-8"))
             assert "ASCII" in body.get("error", ""), (
-                f"R9-5 regression: error must explicitly name ASCII; "
-                f"got: {body}"
+                f"R9-5 regression: error must explicitly name ASCII; got: {body}"
             )
         except http.client.HTTPException:
             # If the underlying http.client refuses to send the header

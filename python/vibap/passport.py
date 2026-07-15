@@ -31,6 +31,7 @@ def resource_scope_is_explicitly_unrestricted(scope: list[str]) -> bool:
 
     return scope == [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
 
+
 # Bounded-iat skew window applied to every JWT we verify (passport, AAT,
 # Mission Declaration, status list, and receipt).
 #
@@ -42,11 +43,11 @@ def resource_scope_is_explicitly_unrestricted(scope: list[str]) -> bool:
 # legitimate clock drift across nodes. This helper provides a single
 # explicit bound; each verifier disables PyJWT's verify_iat and calls
 # this instead so the security choice is visible at every JWT decode.
-DEFAULT_IAT_FUTURE_SKEW_S = 300       # 5 min — clock-drift tolerance
+DEFAULT_IAT_FUTURE_SKEW_S = 300  # 5 min — clock-drift tolerance
 DEFAULT_IAT_PAST_SKEW_S = 30 * 86400  # 30 days — long-lived caches OK,
-                                       # archival replay handled by jti
-                                       # replay caches at the verifier
-                                       # boundary, not iat alone.
+# archival replay handled by jti
+# replay caches at the verifier
+# boundary, not iat alone.
 
 
 def assert_iat_in_window(
@@ -107,6 +108,7 @@ def _try_chmod_0700_warn(target: Path) -> None:
         os.chmod(target, stat.S_IRWXU)
     except OSError as exc:
         import sys
+
         print(
             f"warning: could not chmod 0o700 on VIBAP home {target}: "
             f"{exc}. Private-key material may be world-readable. "
@@ -179,7 +181,9 @@ def _is_under_default_home(path: Path) -> bool:
 
 
 DEFAULT_HOME = _default_home_dir()
-DEFAULT_KEYS_DIR = Path(os.environ.get("VIBAP_KEYS_DIR", DEFAULT_HOME / "keys")).expanduser()
+DEFAULT_KEYS_DIR = Path(
+    os.environ.get("VIBAP_KEYS_DIR", DEFAULT_HOME / "keys")
+).expanduser()
 
 
 class KeyDirectoryError(ValueError):
@@ -223,7 +227,9 @@ def _normalize_cwd(value: str | None) -> str | None:
     if not stripped:
         return None
     if not stripped.startswith("/"):
-        raise ValueError(f"cwd must be an absolute path (start with '/'), got {value!r}")
+        raise ValueError(
+            f"cwd must be an absolute path (start with '/'), got {value!r}"
+        )
     # Phase-3.1a C-3 (external-review-X F3 + SF-P3-04): reject any ``..`` segment
     # BEFORE calling posixpath.normpath. normpath silently collapses
     # ``/workspace/../etc`` → ``/etc``, which would let a passport claim
@@ -302,6 +308,11 @@ class MissionPassport:
     # DENY-wins across native + additional; formally verified in
     # verification/composition_smt.py (properties P1-P4).
     additional_policies: list[dict[str, Any]] = field(default_factory=list)
+    # Optional typed dangerous-action policy. When present, trusted proxy-side
+    # tool contracts derive risk facts before execution and reserve the signed
+    # session/agent/lineage ceilings atomically. Absence preserves the legacy
+    # behavior for missions that have not opted into impact governance.
+    risk_budget: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Validate/normalize cwd at construction time so an invalid passport
@@ -325,22 +336,34 @@ class MissionPassport:
     # `_ttl_from_payload` understands (`ttl_s`, `issued_at`, `expires_at`)
     # and the legacy `budget` dict shape that exposes nested
     # max_tool_calls / max_duration_s.
-    _KNOWN_FIELDS: ClassVar[frozenset[str]] = frozenset({
-        # MissionPassport dataclass fields
-        "agent_id", "mission",
-        "allowed_tools", "forbidden_tools", "resource_scope",
-        "max_tool_calls", "max_duration_s",
-        "delegation_allowed", "max_delegation_depth",
-        "parent_jti", "cwd",
-        "allowed_side_effect_classes",  # side-effect-class enforcement
-        "max_tool_calls_per_class",  # cumulative per-class budget
-        "holder_key_thumbprint",  # K2 PoP
-        "holder_spiffe_id",
-        "additional_policies",  # pluggable policy backends
-        "mission_id",  # H1: stable mission identifier for PolicyStore lookup
-        # Mission-file metadata handled by load_mission_file / issue_passport
-        "budget", "ttl_s", "issued_at", "expires_at",
-    })
+    _KNOWN_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            # MissionPassport dataclass fields
+            "agent_id",
+            "mission",
+            "allowed_tools",
+            "forbidden_tools",
+            "resource_scope",
+            "max_tool_calls",
+            "max_duration_s",
+            "delegation_allowed",
+            "max_delegation_depth",
+            "parent_jti",
+            "cwd",
+            "allowed_side_effect_classes",  # side-effect-class enforcement
+            "max_tool_calls_per_class",  # cumulative per-class budget
+            "holder_key_thumbprint",  # K2 PoP
+            "holder_spiffe_id",
+            "additional_policies",  # pluggable policy backends
+            "risk_budget",  # typed dangerous-action blast-radius caps
+            "mission_id",  # H1: stable mission identifier for PolicyStore lookup
+            # Mission-file metadata handled by load_mission_file / issue_passport
+            "budget",
+            "ttl_s",
+            "issued_at",
+            "expires_at",
+        }
+    )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MissionPassport":
@@ -364,28 +387,40 @@ class MissionPassport:
                     f"(known: {known_fields})"
                 )
             raise ValueError(
-                f"unknown fields in mission: {unknown_fields} "
-                f"(known: {known_fields})"
+                f"unknown fields in mission: {unknown_fields} (known: {known_fields})"
             )
         budget = data.get("budget") or {}
+        if "risk_budget" in data and not isinstance(data["risk_budget"], dict):
+            raise ValueError("risk_budget must be a JSON object when present")
         return cls(
             agent_id=data["agent_id"],
             mission=data["mission"],
             allowed_tools=list(data.get("allowed_tools", [])),
             forbidden_tools=list(data.get("forbidden_tools", [])),
             resource_scope=list(data.get("resource_scope", [])),
-            max_tool_calls=int(data.get("max_tool_calls", budget.get("max_tool_calls", 50))),
-            max_duration_s=int(data.get("max_duration_s", budget.get("max_duration_s", 600))),
+            max_tool_calls=int(
+                data.get("max_tool_calls", budget.get("max_tool_calls", 50))
+            ),
+            max_duration_s=int(
+                data.get("max_duration_s", budget.get("max_duration_s", 600))
+            ),
             delegation_allowed=bool(data.get("delegation_allowed", False)),
             max_delegation_depth=int(data.get("max_delegation_depth", 0)),
             parent_jti=data.get("parent_jti"),
             cwd=data.get("cwd"),
-            allowed_side_effect_classes=list(data.get("allowed_side_effect_classes", [])),
+            allowed_side_effect_classes=list(
+                data.get("allowed_side_effect_classes", [])
+            ),
             max_tool_calls_per_class=dict(data.get("max_tool_calls_per_class", {})),
             holder_key_thumbprint=data.get("holder_key_thumbprint"),
             holder_spiffe_id=data.get("holder_spiffe_id"),
             additional_policies=list(data.get("additional_policies", [])),
             mission_id=data.get("mission_id"),
+            risk_budget=(
+                dict(data["risk_budget"])
+                if isinstance(data.get("risk_budget"), dict)
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -394,6 +429,8 @@ class MissionPassport:
         data = asdict(self)
         if data.get("cwd") is None:
             data.pop("cwd", None)
+        if data.get("risk_budget") is None:
+            data.pop("risk_budget", None)
         return data
 
 
@@ -429,6 +466,7 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
     actual_mode = path.stat().st_mode & 0o777
     if actual_mode != 0o600:
         import sys
+
         print(
             f"WARNING: {path} permissions are {actual_mode:o}, expected 600; "
             f"private key may be readable by other users on this filesystem",
@@ -450,7 +488,9 @@ def generate_keypair(
     pub_path = target_dir / "passport_public.pem"
 
     if priv_path.exists() and pub_path.exists() and not force:
-        priv_key = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+        priv_key = serialization.load_pem_private_key(
+            priv_path.read_bytes(), password=None
+        )
         pub_key = serialization.load_pem_public_key(pub_path.read_bytes())
         return priv_key, pub_key
 
@@ -483,9 +523,13 @@ def load_private_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePriv
     return serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
 
 
-def load_existing_private_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePrivateKey:
+def load_existing_private_key(
+    keys_dir: str | Path | None = None,
+) -> ec.EllipticCurvePrivateKey:
     """Load ``passport_private.pem`` without creating directories or key material."""
-    target_dir = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    target_dir = (
+        Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    )
     try:
         if target_dir.exists() and not target_dir.is_dir():
             raise KeyDirectoryError()
@@ -507,7 +551,9 @@ def load_existing_private_key(keys_dir: str | Path | None = None) -> ec.Elliptic
     except NotADirectoryError as exc:
         raise KeyDirectoryError() from exc
     except OSError as exc:
-        raise ValueError("passport_private.pem is not a readable EC private key") from exc
+        raise ValueError(
+            "passport_private.pem is not a readable EC private key"
+        ) from exc
     private_key = serialization.load_pem_private_key(private_bytes, password=None)
     if not isinstance(private_key, ec.EllipticCurvePrivateKey):
         raise ValueError("passport_private.pem must contain an EC private key")
@@ -522,9 +568,13 @@ def load_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePubli
     return serialization.load_pem_public_key(pub_path.read_bytes())
 
 
-def load_existing_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePublicKey:
+def load_existing_public_key(
+    keys_dir: str | Path | None = None,
+) -> ec.EllipticCurvePublicKey:
     """Load ``passport_public.pem`` without creating key directories or key material."""
-    target_dir = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    target_dir = (
+        Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    )
     try:
         if target_dir.exists() and not target_dir.is_dir():
             raise KeyDirectoryError()
@@ -621,6 +671,17 @@ def issue_passport(
         claims["max_tool_calls_per_class"] = mission.max_tool_calls_per_class
     if mission.additional_policies:
         claims["additional_policies"] = mission.additional_policies
+    if mission.risk_budget is not None:
+        from .risk_budget import normalize_risk_budget
+
+        risk_budget = dict(mission.risk_budget)
+        if risk_budget.get("lineage_id") is None:
+            risk_budget = normalize_risk_budget(risk_budget, lineage_id=jti)
+        else:
+            risk_budget = normalize_risk_budget(risk_budget)
+        if not set(risk_budget["tools"]).issubset(mission.allowed_tools):
+            raise ValueError("risk_budget tools must be a subset of allowed_tools")
+        claims["risk_budget"] = risk_budget
     # K2 (I6): Proof of Possession via cnf claim. When the mission declares
     # a holder_key_thumbprint, the passport is bound to that key. Presenters
     # must prove possession by signing a KB-JWT with the matching private key.
@@ -629,6 +690,10 @@ def issue_passport(
     if mission.holder_key_thumbprint:
         claims["cnf"] = {"jkt": mission.holder_key_thumbprint}
     if extra_claims:
+        if "risk_budget" in extra_claims:
+            raise ValueError(
+                "extra_claims cannot override the signed risk_budget policy"
+            )
         claims.update(extra_claims)
 
     return jwt.encode(claims, private_key, algorithm=ALGORITHM)
@@ -647,9 +712,11 @@ def compute_jwk_thumbprint(public_key: ec.EllipticCurvePublicKey) -> str:
     x = base64.urlsafe_b64encode(nums.x.to_bytes(32, "big")).rstrip(b"=").decode()
     y = base64.urlsafe_b64encode(nums.y.to_bytes(32, "big")).rstrip(b"=").decode()
     canonical = f'{{"crv":"P-256","kty":"EC","x":"{x}","y":"{y}"}}'
-    return base64.urlsafe_b64encode(
-        hashlib.sha256(canonical.encode("ascii")).digest()
-    ).rstrip(b"=").decode()
+    return (
+        base64.urlsafe_b64encode(hashlib.sha256(canonical.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode()
+    )
 
 
 def create_kb_jwt(
@@ -862,7 +929,9 @@ def delegation_chain_entries(claims: dict[str, Any]) -> list[dict[str, str]]:
             field=f"{DELEGATION_CHAIN_CLAIM}[{index}].jti",
         )
         if link_jti != expected_jti:
-            raise PermissionError("delegated passport has inconsistent delegation_chain")
+            raise PermissionError(
+                "delegated passport has inconsistent delegation_chain"
+            )
         if link_jti in seen:
             raise PermissionError(f"passport lineage cycle detected at '{link_jti}'")
         seen.add(link_jti)
@@ -999,6 +1068,7 @@ def derive_child_passport(
     parent_reserved_for_descendants: int = 0,
     child_resource_scope: list[str] | None = None,
     child_cwd: str | None = None,
+    child_risk_budget: Mapping[str, Any] | None = None,
 ) -> str:
     """Derive a child passport with strictly narrowed scope.
 
@@ -1027,6 +1097,8 @@ def derive_child_passport(
              — ``/workspace/a`` narrows ``/workspace``; ``/workspaceabc``
              does not). Anything else raises ``PermissionError`` with a
              ``cwd escalation`` reason.
+      - risk_budget: a governed parent policy is inherited or explicitly
+                     attenuated; an ungoverned parent cannot introduce one.
     """
     # Signature-and-claims decode only. The full chain-anchor verification
     # (``verify_passport`` with ``parent_token=grandparent_token``) is the
@@ -1055,7 +1127,9 @@ def derive_child_passport(
     max_ttl = parent_exp - int(time.time())
     if max_ttl <= 0:
         raise PermissionError("parent passport expired")
-    requested_ttl = min(child_ttl_s, max_ttl) if child_ttl_s is not None else min(300, max_ttl)
+    requested_ttl = (
+        min(child_ttl_s, max_ttl) if child_ttl_s is not None else min(300, max_ttl)
+    )
     if requested_ttl <= 0:
         raise PermissionError("insufficient TTL for child passport")
 
@@ -1108,7 +1182,9 @@ def derive_child_passport(
             parent_scope_set = set(parent_scope)
             new_patterns = child_scope_set - parent_scope_set
             if new_patterns:
-                raise PermissionError(f"scope escalation (resources): {sorted(new_patterns)}")
+                raise PermissionError(
+                    f"scope escalation (resources): {sorted(new_patterns)}"
+                )
             final_scope = requested_scope
     else:
         final_scope = parent_scope
@@ -1148,11 +1224,28 @@ def derive_child_passport(
                     f"cwd escalation: {final_cwd!r} is not a subpath of parent's {parent_cwd!r}"
                 )
 
+    parent_risk_budget = parent.get("risk_budget")
+    if parent_risk_budget is None:
+        if child_risk_budget is not None:
+            raise PermissionError("cannot introduce risk_budget: parent has none")
+        final_risk_budget = None
+    else:
+        from .risk_budget import attenuate_risk_budget
+
+        if not isinstance(parent_risk_budget, dict):
+            raise PermissionError("parent risk_budget is invalid")
+        final_risk_budget = attenuate_risk_budget(
+            parent_risk_budget,
+            child_risk_budget,
+        )
+
     child = MissionPassport(
         agent_id=child_agent_id,
         mission=child_mission,
         allowed_tools=sorted(child_tools),
-        forbidden_tools=sorted(set(parent.get("forbidden_tools", [])) | (parent_tools - child_tools)),
+        forbidden_tools=sorted(
+            set(parent.get("forbidden_tools", [])) | (parent_tools - child_tools)
+        ),
         resource_scope=final_scope,
         max_tool_calls=child_budget,
         max_duration_s=int(requested_ttl),
@@ -1160,6 +1253,7 @@ def derive_child_passport(
         max_delegation_depth=child_depth,
         parent_jti=parent["jti"],
         cwd=final_cwd,
+        risk_budget=final_risk_budget,
     )
     child_chain: list[dict[str, str]] = [{"jti": str(parent["jti"])}]
     # Embed parent's own token hash in the chain link. This is ONE of two
@@ -1201,12 +1295,16 @@ def _ttl_from_payload(data: dict[str, Any]) -> int | None:
         reference = int(data.get("issued_at", time.time()))
         ttl = int(data["expires_at"]) - reference
         if ttl <= 0:
-            raise ValueError("mission file expires_at must be greater than issued_at/current time")
+            raise ValueError(
+                "mission file expires_at must be greater than issued_at/current time"
+            )
         return ttl
     return None
 
 
-def load_mission_file(path: str | Path) -> tuple[MissionPassport, int | None, dict[str, Any]]:
+def load_mission_file(
+    path: str | Path,
+) -> tuple[MissionPassport, int | None, dict[str, Any]]:
     mission_path = Path(path).expanduser()
     payload = json.loads(mission_path.read_text(encoding="utf-8"))
     mission = MissionPassport.from_dict(payload)

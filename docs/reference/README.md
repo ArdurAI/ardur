@@ -22,6 +22,9 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
 - [Advisory AI Controls](advisory-ai-controls.md) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Typed Dangerous-Action Risk Budgets](risk-budgets.md) — authenticated tool
+  contracts, signed impact caps, atomic session/agent/lineage accounting,
+  executor outcomes, receipts, and crash recovery
 
 ## When To Update These Pages
 
@@ -29,5 +32,6 @@ These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
 `python/vibap/ardur_profile.py`, `go/cmd/ardur-kernelcaptured`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
+`python/vibap/risk_budget.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.

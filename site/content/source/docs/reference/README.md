@@ -2,7 +2,7 @@
 title: "Technical Reference"
 description: "Flat technical reference pages for the public Ardur surface. These describe"
 source_path: "docs/reference/README.md"
-source_sha256: "21c273bfe22e8db42fea61b7c7799ba85db7ec33df09dac6616673563d41c815"
+source_sha256: "72c8d3b619708353ee190db1048e2660356f33eba593f65f144d266fe4511b72"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -39,6 +39,9 @@ walkthroughs see [`../guides/`](/__ardur_internal__/source/docs/guides/); for pr
 - [Advisory AI Controls](/__ardur_internal__/source/docs/reference/advisory-ai-controls/) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Typed Dangerous-Action Risk Budgets](/__ardur_internal__/source/docs/reference/risk-budgets/) — authenticated tool
+  contracts, signed impact caps, atomic session/agent/lineage accounting,
+  executor outcomes, receipts, and crash recovery
 
 ## When To Update These Pages
 
@@ -46,5 +49,6 @@ These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
 `python/vibap/ardur_profile.py`, `go/cmd/ardur-kernelcaptured`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
+`python/vibap/risk_budget.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.
