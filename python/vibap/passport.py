@@ -623,13 +623,30 @@ def issue_passport(
     audience: str = DEFAULT_AUDIENCE,
     ttl_s: int | None = None,
     extra_claims: dict[str, Any] | None = None,
+    *,
+    jti_override: str | None = None,
 ) -> str:
     now = int(time.time())
     ttl = int(ttl_s if ttl_s is not None else mission.max_duration_s)
     if ttl <= 0:
         raise ValueError("ttl_s must be positive")
 
-    jti = str(uuid.uuid4())
+    if jti_override is not None and (
+        not isinstance(jti_override, str)
+        or not jti_override
+        or len(jti_override.encode("utf-8")) > 1024
+    ):
+        raise ValueError(
+            "jti_override must be a non-empty string of at most 1024 bytes"
+        )
+    if jti_override is not None:
+        try:
+            parsed_jti = uuid.UUID(jti_override)
+        except ValueError as exc:
+            raise ValueError("jti_override must use canonical UUID format") from exc
+        if str(parsed_jti).lower() != jti_override.lower():
+            raise ValueError("jti_override must use canonical UUID format")
+    jti = jti_override or str(uuid.uuid4())
     # H1 (2026-04-19): ``mission_id`` is DISTINCT from ``jti``.
     # Previously this field was set to ``jti`` which re-randomized every
     # issuance — the PolicyStore's key would rotate with every re-issued
@@ -690,9 +707,12 @@ def issue_passport(
     if mission.holder_key_thumbprint:
         claims["cnf"] = {"jkt": mission.holder_key_thumbprint}
     if extra_claims:
-        if "risk_budget" in extra_claims:
+        protected_claims = set(claims)
+        collisions = set(extra_claims).intersection(protected_claims)
+        if collisions:
             raise ValueError(
-                "extra_claims cannot override the signed risk_budget policy"
+                "extra_claims cannot override protected passport claims: "
+                f"{sorted(collisions)}"
             )
         claims.update(extra_claims)
 
@@ -1230,14 +1250,26 @@ def derive_child_passport(
             raise PermissionError("cannot introduce risk_budget: parent has none")
         final_risk_budget = None
     else:
-        from .risk_budget import attenuate_risk_budget
+        from .risk_budget import attenuate_risk_budget, project_risk_budget
 
         if not isinstance(parent_risk_budget, dict):
             raise PermissionError("parent risk_budget is invalid")
-        final_risk_budget = attenuate_risk_budget(
-            parent_risk_budget,
-            child_risk_budget,
-        )
+        projected_parent = project_risk_budget(parent_risk_budget, child_tools)
+        if projected_parent is None:
+            if child_risk_budget is not None:
+                raise PermissionError(
+                    "cannot retain risk_budget after removing all governed tools"
+                )
+            final_risk_budget = None
+        else:
+            final_risk_budget = attenuate_risk_budget(
+                projected_parent,
+                child_risk_budget,
+            )
+            if set(final_risk_budget["tools"]) != set(projected_parent["tools"]):
+                raise PermissionError(
+                    "risk_budget tool removal must match child allowed_tools"
+                )
 
     child = MissionPassport(
         agent_id=child_agent_id,

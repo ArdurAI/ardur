@@ -22,5 +22,6 @@ class DenialReason(str, Enum):
     RISK_CONTRACT_INVALID = "risk_contract_invalid"
     RISK_FACT_INVALID = "risk_fact_invalid"
     RISK_POLICY_INVALID = "risk_policy_invalid"
+    RISK_REQUEST_ID_INVALID = "risk_request_id_invalid"
     RISK_REPLAY = "risk_replay"
     RISK_STATE_UNAVAILABLE = "risk_state_unavailable"

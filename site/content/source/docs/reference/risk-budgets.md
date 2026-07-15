@@ -2,7 +2,7 @@
 title: "Typed Dangerous-Action Risk Budgets"
 description: "Ardur's optional `risk_budget` claim reserves signed impact ceilings before a configured dangerous tool may run."
 source_path: "docs/reference/risk-budgets.md"
-source_sha256: "c134977d5880da7ae88ca853a2c67d86c313b36df97f4d35935b9f66012361a2"
+source_sha256: "eb8ad1def867eb8c2f9635c71ed04dc6101a08cf1ff5868eb78be896fb4232ab"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -160,9 +160,10 @@ It also supports ordered categorical facts:
 Every numeric fact used by a tool policy requires all three ceilings. Tool
 entries must be a subset of `allowed_tools`. A root issuer fills an omitted
 `lineage_id` with the new passport JTI. Child passports inherit the policy or
-provide an explicit policy with the same lineage, the same contract digests
-and fact sets, a subset of tools, and caps/ceilings no greater than their
-parent. A parent without `risk_budget` cannot introduce it in a child.
+provide an explicit policy with the same lineage, a subset of tools, the same
+contract digests and fact sets for retained tools, and caps/ceilings no greater
+than their parent. Removing a tool also removes numeric ceilings referenced
+only by that tool. A parent without `risk_budget` cannot introduce it in a child.
 
 The first governed call freezes a normalized risk-policy snapshot in the
 persisted session. Later mission-policy refreshes may continue to affect other
@@ -210,9 +211,10 @@ ID cannot receive another `PERMIT`.
 
 ## Crash and lifecycle behavior
 
-The file ledger stores only hashes of lineage, session, agent, request, and
-fingerprint identities. One `flock`-protected, fsync-backed replacement
-transaction updates every fact and scope. Ledger invariants require account
+The global file ledger stores only hashes of lineage, session, agent, request,
+and fingerprint identities. One `flock`-protected, fsync-backed replacement
+transaction updates every fact and scope across all lineages, so agent ceilings
+cannot be spent independently in separate lineages. Ledger invariants require account
 `reserved` totals to equal active plus quarantined reservations and account
 `spent` totals to equal retained plus archived committed reservations.
 
@@ -220,7 +222,8 @@ transaction updates every fact and scope. Ledger invariants require account
 active reservations for that session to `quarantined` without returning
 authority. Quarantine and later explicit reconciliation produce separate
 signed lifecycle receipts. A session cannot end or issue its final attestation
-while active or quarantined reservations remain.
+while active or quarantined reservations remain, or while a resolved lifecycle
+receipt is still pending delivery.
 
 Quarantined reservations cannot be released; explicit reconciliation may only
 commit them. After passport expiry and at least 24 hours in quarantine, pruning

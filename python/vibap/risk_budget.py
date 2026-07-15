@@ -229,6 +229,7 @@ class ToolRiskContract:
         schema = _require_object(input_schema, "input_schema")
         contract = _require_object(risk_contract, "risk_contract")
         _bounded_json_bytes(schema, "input_schema", MAX_CONTRACT_BYTES)
+        _bounded_json_bytes(contract, "risk_contract", MAX_CONTRACT_BYTES)
         _validate_schema_shape(schema)
         try:
             Draft202012Validator.check_schema(schema)
@@ -513,13 +514,46 @@ def attenuate_risk_budget(
                 broader = levels.index(str(child_cap)) > levels.index(str(parent_cap))
             if broader:
                 raise PermissionError(f"risk_budget {fact} cap escalation")
-    if set(normalized_child["ceilings"]) != set(normalized_parent["ceilings"]):
-        raise PermissionError("risk_budget ceiling facts must be preserved")
+    if not set(normalized_child["ceilings"]).issubset(normalized_parent["ceilings"]):
+        raise PermissionError("risk_budget ceiling fact escalation")
     for fact, child_scopes in normalized_child["ceilings"].items():
         for scope in RISK_SCOPES:
             if child_scopes[scope] > normalized_parent["ceilings"][fact][scope]:
                 raise PermissionError(f"risk_budget {fact}.{scope} ceiling escalation")
     return normalized_child
+
+
+def project_risk_budget(
+    policy: Mapping[str, Any],
+    allowed_tools: set[str],
+) -> dict[str, Any] | None:
+    """Project a policy onto retained tools without retaining unused ceilings."""
+
+    normalized = normalize_risk_budget(policy)
+    retained_tools = {
+        tool: tool_policy
+        for tool, tool_policy in normalized["tools"].items()
+        if tool in allowed_tools
+    }
+    if not retained_tools:
+        return None
+    retained_numeric_facts = {
+        fact
+        for tool_policy in retained_tools.values()
+        for fact in tool_policy["max_facts"]
+        if fact in NUMERIC_RISK_FACTS
+    }
+    projected = {
+        "version": RISK_BUDGET_VERSION,
+        "lineage_id": normalized["lineage_id"],
+        "tools": retained_tools,
+        "ceilings": {
+            fact: scopes
+            for fact, scopes in normalized["ceilings"].items()
+            if fact in retained_numeric_facts
+        },
+    }
+    return normalize_risk_budget(projected)
 
 
 def validate_action_risk(
@@ -591,7 +625,7 @@ _LOCKS_GUARD = threading.Lock()
 
 
 class FileRiskBudgetLedger:
-    """Atomic multi-fact, multi-scope reservation ledger per lineage."""
+    """Atomic multi-fact, multi-scope reservation ledger across all lineages."""
 
     def __init__(self, state_dir: str | Path) -> None:
         self.state_dir = Path(state_dir).expanduser()
@@ -604,6 +638,10 @@ class FileRiskBudgetLedger:
     @staticmethod
     def _hash(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _request_hash(cls, lineage_id: str, request_id: str) -> str:
+        return cls._hash(f"{cls._hash(lineage_id)}:{request_id}")
 
     @staticmethod
     def _remaining(
@@ -651,7 +689,7 @@ class FileRiskBudgetLedger:
             fact: _require_risk_int(value, fact)
             for fact, value in numeric_facts.items()
         }
-        request_hash = self._hash(request_id)
+        request_hash = self._request_hash(lineage_id, request_id)
         fingerprint_hash = self._hash(fingerprint)
         scope_keys = {
             "session": self._hash(session_id),
@@ -662,7 +700,10 @@ class FileRiskBudgetLedger:
             payload = self._load(lineage_id)
             self._validate(payload)
             timestamp = float(time.time() if now is None else now)
-            self._prune_payload(payload, timestamp)
+            prune_result = self._prune_payload(payload, timestamp)
+            if prune_result["pruned"] or prune_result["quarantined"]:
+                self._validate(payload)
+                self._persist(lineage_id, payload)
             reservations = payload["reservations"]
             tombstone = payload["tombstones"].get(request_hash)
             if isinstance(tombstone, dict):
@@ -750,11 +791,15 @@ class FileRiskBudgetLedger:
     ) -> RiskOutcomeResult:
         if outcome not in {"committed", "released"}:
             raise RiskBudgetError("risk outcome must be committed or released")
-        request_hash = self._hash(
-            _require_string(request_id, "request_id", max_bytes=1024)
+        request_hash = self._request_hash(
+            lineage_id,
+            _require_string(request_id, "request_id", max_bytes=1024),
         )
         session_hash = self._hash(
             _require_string(session_id, "session_id", max_bytes=1024)
+        )
+        lineage_hash = self._hash(
+            _require_string(lineage_id, "lineage_id", max_bytes=1024)
         )
         with self._locked(lineage_id):
             payload = self._load(lineage_id)
@@ -765,6 +810,10 @@ class FileRiskBudgetLedger:
             if reservation.get("scope_keys", {}).get("session") != session_hash:
                 raise RiskBudgetConflictError(
                     "risk reservation belongs to a different session"
+                )
+            if reservation.get("scope_keys", {}).get("lineage") != lineage_hash:
+                raise RiskBudgetConflictError(
+                    "risk reservation belongs to a different lineage"
                 )
             status = reservation.get("status")
             scope_keys = reservation["scope_keys"]
@@ -836,6 +885,9 @@ class FileRiskBudgetLedger:
         session_hash = self._hash(
             _require_string(session_id, "session_id", max_bytes=1024)
         )
+        lineage_hash = self._hash(
+            _require_string(lineage_id, "lineage_id", max_bytes=1024)
+        )
         _require_string(lifecycle_id, "lifecycle_id", max_bytes=128)
         _require_string(receipt_id, "receipt_id", max_bytes=1024)
         with self._locked(lineage_id):
@@ -852,6 +904,13 @@ class FileRiskBudgetLedger:
             if record_session_hash != session_hash:
                 raise RiskBudgetConflictError(
                     "risk lifecycle belongs to a different session"
+                )
+            record_lineage_hash = record.get("lineage_hash")
+            if record_lineage_hash is None:
+                record_lineage_hash = record.get("scope_keys", {}).get("lineage")
+            if record_lineage_hash != lineage_hash:
+                raise RiskBudgetConflictError(
+                    "risk lifecycle belongs to a different lineage"
                 )
             lifecycle = record.get("lifecycle")
             if not isinstance(lifecycle, dict) or lifecycle.get("id") != lifecycle_id:
@@ -880,6 +939,9 @@ class FileRiskBudgetLedger:
         session_hash = self._hash(
             _require_string(session_id, "session_id", max_bytes=1024)
         )
+        lineage_hash = self._hash(
+            _require_string(lineage_id, "lineage_id", max_bytes=1024)
+        )
         with self._locked(lineage_id):
             payload = self._load(lineage_id)
             self._validate(payload)
@@ -888,6 +950,7 @@ class FileRiskBudgetLedger:
                 if (
                     reservation.get("status") == "active"
                     and reservation.get("scope_keys", {}).get("session") == session_hash
+                    and reservation.get("scope_keys", {}).get("lineage") == lineage_hash
                     and float(reservation.get("created_at", timestamp)) <= stale_before
                 ):
                     reservation["status"] = "quarantined"
@@ -903,6 +966,7 @@ class FileRiskBudgetLedger:
                 if (
                     reservation.get("status") == "quarantined"
                     and reservation.get("scope_keys", {}).get("session") == session_hash
+                    and reservation.get("scope_keys", {}).get("lineage") == lineage_hash
                     and isinstance(lifecycle, dict)
                     and lifecycle.get("state") == "pending"
                 ):
@@ -926,6 +990,7 @@ class FileRiskBudgetLedger:
                 if (
                     tombstone.get("status") == "quarantined_committed"
                     and tombstone.get("session_hash") == session_hash
+                    and tombstone.get("lineage_hash") == lineage_hash
                     and isinstance(lifecycle, dict)
                     and lifecycle.get("state") == "pending"
                 ):
@@ -947,6 +1012,7 @@ class FileRiskBudgetLedger:
 
     def unresolved_for_session(self, *, lineage_id: str, session_id: str) -> list[str]:
         session_hash = self._hash(session_id)
+        lineage_hash = self._hash(lineage_id)
         with self._locked(lineage_id):
             payload = self._load(lineage_id)
             self._validate(payload)
@@ -955,11 +1021,13 @@ class FileRiskBudgetLedger:
                 for request_hash, reservation in payload["reservations"].items()
                 if reservation.get("status") in {"active", "quarantined"}
                 and reservation.get("scope_keys", {}).get("session") == session_hash
+                and reservation.get("scope_keys", {}).get("lineage") == lineage_hash
             ] + [
                 request_hash
                 for request_hash, tombstone in payload["tombstones"].items()
                 if tombstone.get("status") == "quarantined_committed"
                 and tombstone.get("session_hash") == session_hash
+                and tombstone.get("lineage_hash") == lineage_hash
                 and tombstone.get("lifecycle", {}).get("state") == "pending"
             ]
 
@@ -974,6 +1042,9 @@ class FileRiskBudgetLedger:
         session_hash = self._hash(
             _require_string(session_id, "session_id", max_bytes=1024)
         )
+        lineage_hash = self._hash(
+            _require_string(lineage_id, "lineage_id", max_bytes=1024)
+        )
         with self._locked(lineage_id):
             payload = self._load(lineage_id)
             self._validate(payload)
@@ -982,6 +1053,7 @@ class FileRiskBudgetLedger:
                 lifecycle = reservation.get("lifecycle")
                 if (
                     reservation.get("scope_keys", {}).get("session") == session_hash
+                    and reservation.get("scope_keys", {}).get("lineage") == lineage_hash
                     and isinstance(lifecycle, dict)
                     and lifecycle.get("state") == "pending"
                 ):
@@ -1004,6 +1076,7 @@ class FileRiskBudgetLedger:
                 lifecycle = tombstone["lifecycle"]
                 if (
                     tombstone["session_hash"] == session_hash
+                    and tombstone["lineage_hash"] == lineage_hash
                     and lifecycle["state"] == "pending"
                 ):
                     status = str(tombstone["status"])
@@ -1066,10 +1139,11 @@ class FileRiskBudgetLedger:
 
     @staticmethod
     def _prune_payload(payload: dict[str, Any], now: float) -> dict[str, int]:
+        working = json.loads(json.dumps(payload))
         pruned = 0
         quarantined = 0
-        reservations = payload["reservations"]
-        tombstones = payload["tombstones"]
+        reservations = working["reservations"]
+        tombstones = working["tombstones"]
         for request_hash, tombstone in list(tombstones.items()):
             if (
                 float(tombstone["replay_until"]) <= now
@@ -1105,7 +1179,7 @@ class FileRiskBudgetLedger:
                         account_key = (
                             f"{fact}:{scope}:{reservation['scope_keys'][scope]}"
                         )
-                        account = payload["accounts"][account_key]
+                        account = working["accounts"][account_key]
                         account["reserved"] = int(account["reserved"]) - int(amount)
                         account["spent"] = int(account["spent"]) + int(amount)
                         account["archived_spent"] = int(
@@ -1125,7 +1199,7 @@ class FileRiskBudgetLedger:
                         account_key = (
                             f"{fact}:{scope}:{reservation['scope_keys'][scope]}"
                         )
-                        account = payload["accounts"][account_key]
+                        account = working["accounts"][account_key]
                         account["archived_spent"] = int(
                             account["archived_spent"]
                         ) + int(amount)
@@ -1135,6 +1209,7 @@ class FileRiskBudgetLedger:
                 "fingerprint_hash": reservation["fingerprint_hash"],
                 "fact_digest": reservation["fact_digest"],
                 "session_hash": reservation["scope_keys"]["session"],
+                "lineage_hash": reservation["scope_keys"]["lineage"],
                 "status": status_value,
                 "replay_until": max(expires_at, int(now))
                 + REPLAY_TOMBSTONE_RETENTION_S,
@@ -1142,10 +1217,13 @@ class FileRiskBudgetLedger:
             }
             del reservations[request_hash]
             pruned += 1
+        payload.clear()
+        payload.update(working)
         return {"pruned": pruned, "quarantined": quarantined}
 
     def _path(self, lineage_id: str) -> Path:
-        return self.ledger_dir / f"{self._hash(lineage_id)}.json"
+        del lineage_id
+        return self.ledger_dir / "global.json"
 
     def _lock_path(self, lineage_id: str) -> Path:
         return self._path(lineage_id).with_suffix(".lock")
@@ -1183,7 +1261,7 @@ class FileRiskBudgetLedger:
         if not path.exists():
             return {
                 "version": RISK_BUDGET_VERSION,
-                "lineage_hash": self._hash(lineage_id),
+                "ledger_scope": "global",
                 "accounts": {},
                 "reservations": {},
                 "tombstones": {},
@@ -1203,15 +1281,15 @@ class FileRiskBudgetLedger:
                 os.close(fd)
         if not isinstance(payload, dict):
             raise RiskBudgetError("risk ledger must contain a JSON object")
-        if payload.get("lineage_hash") != self._hash(lineage_id):
-            raise RiskBudgetError("risk ledger lineage binding mismatch")
+        if payload.get("ledger_scope") != "global":
+            raise RiskBudgetError("risk ledger scope binding mismatch")
         return payload
 
     @staticmethod
     def _validate(payload: Mapping[str, Any]) -> None:
         if set(payload) != {
             "version",
-            "lineage_hash",
+            "ledger_scope",
             "accounts",
             "reservations",
             "tombstones",
@@ -1238,6 +1316,7 @@ class FileRiskBudgetLedger:
                 "fingerprint_hash",
                 "fact_digest",
                 "session_hash",
+                "lineage_hash",
                 "status",
                 "replay_until",
                 "lifecycle",
@@ -1267,6 +1346,11 @@ class FileRiskBudgetLedger:
                 or len(tombstone["session_hash"]) != 64
             ):
                 raise RiskBudgetError("risk ledger tombstone session hash is invalid")
+            if (
+                not isinstance(tombstone["lineage_hash"], str)
+                or len(tombstone["lineage_hash"]) != 64
+            ):
+                raise RiskBudgetError("risk ledger tombstone lineage hash is invalid")
             if tombstone["status"] not in {
                 "committed",
                 "released",

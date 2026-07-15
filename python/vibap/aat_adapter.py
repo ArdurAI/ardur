@@ -170,7 +170,9 @@ def material_from_aat_grant(
             raise PermissionError("AAT child grant requires the exact parent token")
         _assert_child_parent_binding(claims, parent_token)
     elif parent_token is not None:
-        raise PermissionError("AAT parent token was supplied without verified parent claims")
+        raise PermissionError(
+            "AAT parent token was supplied without verified parent claims"
+        )
 
     try:
         mission_ref = parse_mission_ref(claims["mission_ref"])
@@ -221,7 +223,6 @@ def material_from_aat_grant(
         mission_id=declaration.mission_id,
     )
     extra_claims = {
-        "jti": str(claims["jti"]),
         "credential_format": AAT_CREDENTIAL_FORMAT,
         "aat_grant_id": str(claims["jti"]),
         "aat_issuer": str(claims["iss"]),

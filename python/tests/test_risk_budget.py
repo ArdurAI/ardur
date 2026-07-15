@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import multiprocessing
 import os
@@ -12,6 +13,8 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.canonical_json import canonical_json_bytes
+from vibap.denial import DenialReason
+from vibap.mission import MissionDeclaration, load_mission_declaration
 from vibap.passport import (
     MissionPassport,
     derive_child_passport,
@@ -110,6 +113,11 @@ def _reserve(
     objects: int,
     ceiling: int,
     fingerprint: str | None = None,
+    lineage_id: str = "lineage-1",
+    session_id: str = "session-1",
+    agent_id: str = "agent-1",
+    expires_at: int = 2_000_000_000,
+    now: float | None = None,
 ):
     ceilings = {
         "objects_affected": {
@@ -119,9 +127,9 @@ def _reserve(
         }
     }
     return ledger.reserve(
-        lineage_id="lineage-1",
-        session_id="session-1",
-        agent_id="agent-1",
+        lineage_id=lineage_id,
+        session_id=session_id,
+        agent_id=agent_id,
         request_id=request_id,
         fingerprint=fingerprint or f"fingerprint-{request_id}",
         numeric_facts={"objects_affected": objects},
@@ -129,7 +137,8 @@ def _reserve(
         policy_digest="sha256:" + "1" * 64,
         contract_digest="sha256:" + "2" * 64,
         fact_digest="sha256:" + "3" * 64,
-        expires_at=2_000_000_000,
+        expires_at=expires_at,
+        now=now,
     )
 
 
@@ -223,6 +232,24 @@ def test_contract_rejects_ambiguous_json_pointer_escape() -> None:
                     "objects_affected": {
                         "kind": "integer",
                         "pointer": "/count~2shadow",
+                    }
+                },
+            },
+        )
+
+
+def test_contract_rejects_oversized_risk_contract_before_processing() -> None:
+    with pytest.raises(RiskBudgetError, match="risk_contract exceeds"):
+        ToolRiskContract.from_schema(
+            "dangerous",
+            {"type": "object"},
+            {
+                "version": 1,
+                "mandatory_facts": ["destination_risk"],
+                "extractors": {
+                    "destination_risk": {
+                        "kind": "constant",
+                        "value": "x" * (64 * 1024),
                     }
                 },
             },
@@ -332,6 +359,21 @@ def test_child_policy_can_only_reduce_authority(
     escalated["tools"][delete_contract.tool_name]["max_facts"]["objects_affected"] = 6
     with pytest.raises(PermissionError, match="cap escalation"):
         attenuate_risk_budget(parent, escalated)
+
+    parent["tools"]["purge_records"] = {
+        "contract_digest": "sha256:" + ("4" * 64),
+        "max_facts": {"destructive_targets": 3},
+    }
+    parent["ceilings"]["destructive_targets"] = {
+        "session": 3,
+        "agent": 3,
+        "lineage": 3,
+    }
+    child_without_purge = json.loads(json.dumps(parent))
+    child_without_purge["tools"].pop("purge_records")
+    child_without_purge["ceilings"].pop("destructive_targets")
+
+    assert attenuate_risk_budget(parent, child_without_purge) == child_without_purge
 
 
 def test_child_policy_cannot_switch_lineage(delete_contract: ToolRiskContract) -> None:
@@ -455,7 +497,10 @@ def test_concurrent_workers_cannot_oversubscribe_lineage_ceiling(
         except Exception as exc:  # pragma: no cover - asserted below
             failures.append(exc)
 
-    threads = [threading.Thread(target=worker, args=(index,)) for index in range(2)]
+    threads = [
+        threading.Thread(target=worker, args=(index,), daemon=True)
+        for index in range(2)
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -463,6 +508,80 @@ def test_concurrent_workers_cannot_oversubscribe_lineage_ceiling(
 
     assert not failures
     assert sorted(results) == [False, True]
+
+
+def test_concurrent_lineages_share_one_agent_ceiling(tmp_path: Path) -> None:
+    ledgers = [FileRiskBudgetLedger(tmp_path), FileRiskBudgetLedger(tmp_path)]
+    barrier = threading.Barrier(2)
+    results: list[bool] = []
+    failures: list[Exception] = []
+
+    def worker(index: int) -> None:
+        try:
+            barrier.wait()
+            result = _reserve(
+                ledgers[index],
+                request_id="shared-cross-lineage-request",
+                objects=1,
+                ceiling=1,
+                lineage_id=f"lineage-{index}",
+                session_id=f"session-{index}",
+                agent_id="shared-agent",
+            )
+            results.append(result.accepted)
+        except Exception as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=(index,), daemon=True)
+        for index in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert not failures
+    assert sorted(results) == [False, True]
+
+
+def test_reserve_persists_pruning_before_budget_rejection(tmp_path: Path) -> None:
+    ledger = FileRiskBudgetLedger(tmp_path)
+    _reserve(
+        ledger,
+        request_id="expired-release",
+        objects=1,
+        ceiling=1,
+        expires_at=100,
+        now=10,
+    )
+    released = ledger.record_outcome(
+        lineage_id="lineage-1",
+        session_id="session-1",
+        request_id="expired-release",
+        outcome="released",
+        now=20,
+    )
+    ledger.mark_lifecycle_delivered(
+        lineage_id="lineage-1",
+        session_id="session-1",
+        request_hash=released.request_hash,
+        lifecycle_id=released.lifecycle_id,
+        receipt_id="released-receipt",
+    )
+
+    rejected = _reserve(
+        ledger,
+        request_id="too-large",
+        objects=2,
+        ceiling=1,
+        now=101,
+    )
+
+    assert rejected.accepted is False
+    reopened = FileRiskBudgetLedger(tmp_path).snapshot("lineage-1")
+    assert released.request_hash in reopened["tombstones"]
+    assert released.request_hash not in reopened["reservations"]
 
 
 def test_commit_spends_authority_and_release_returns_it(tmp_path: Path) -> None:
@@ -727,20 +846,73 @@ def test_extra_claims_cannot_replace_validated_risk_policy(
     delete_contract: ToolRiskContract,
 ) -> None:
     private_key = ec.generate_private_key(ec.SECP256R1())
+    policy = _policy(delete_contract)
+    policy.pop("lineage_id")
     mission = MissionPassport(
         agent_id="agent-1",
         mission="delete bounded objects",
         allowed_tools=["delete_objects"],
-        risk_budget=_policy(delete_contract),
+        risk_budget=policy,
     )
 
-    with pytest.raises(ValueError, match="cannot override"):
+    claims = verify_passport(
+        issue_passport(mission, private_key, ttl_s=60),
+        private_key.public_key(),
+    )
+    assert claims["risk_budget"]["lineage_id"] == claims["jti"]
+
+    for protected_claims in (
+        {"risk_budget": {}},
+        {"jti": "attacker-jti"},
+        {"sub": "attacker-agent"},
+        {"allowed_tools": ["unbounded_tool"]},
+    ):
+        with pytest.raises(ValueError, match="cannot override"):
+            issue_passport(
+                mission,
+                private_key,
+                ttl_s=60,
+                extra_claims=protected_claims,
+            )
+
+    with pytest.raises(ValueError, match="canonical UUID"):
         issue_passport(
             mission,
             private_key,
             ttl_s=60,
-            extra_claims={"risk_budget": {}},
+            jti_override="not-a-session-uuid",
         )
+
+
+def test_mission_declaration_loader_preserves_signed_risk_policy(
+    delete_contract: ToolRiskContract,
+) -> None:
+    from tests.conftest import v01_required_md_extras
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    mission = MissionPassport(
+        agent_id="risk-md-authority",
+        mission_id="urn:ardur:mission:risk-budget",
+        mission="authoritative bounded deletion",
+        allowed_tools=["delete_objects"],
+        risk_budget=_policy(delete_contract),
+    )
+    token = issue_passport(
+        mission,
+        private_key,
+        ttl_s=60,
+        extra_claims=v01_required_md_extras(mission_id="urn:ardur:mission:risk-budget"),
+    )
+
+    declaration = load_mission_declaration(token, private_key.public_key())
+
+    assert (
+        declaration.passport.risk_budget
+        == verify_passport(
+            token,
+            private_key.public_key(),
+        )["risk_budget"]
+    )
 
 
 def test_delegated_passport_attenuates_risk_policy(
@@ -775,6 +947,47 @@ def test_delegated_passport_attenuates_risk_policy(
     )
     claims = verify_passport(child, private_key.public_key(), parent_token=parent)
     assert claims["risk_budget"] == child_policy
+
+
+def test_delegated_passport_projects_policy_to_retained_tools(
+    delete_contract: ToolRiskContract,
+) -> None:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    parent_policy = _policy(delete_contract)
+    parent_policy["tools"]["purge_records"] = {
+        "contract_digest": "sha256:" + ("4" * 64),
+        "max_facts": {"destructive_targets": 3},
+    }
+    parent_policy["ceilings"]["destructive_targets"] = {
+        "session": 3,
+        "agent": 3,
+        "lineage": 3,
+    }
+    parent = issue_passport(
+        MissionPassport(
+            agent_id="parent",
+            mission="coordinate bounded cleanup",
+            allowed_tools=["delete_objects", "purge_records"],
+            delegation_allowed=True,
+            max_delegation_depth=1,
+            risk_budget=parent_policy,
+        ),
+        private_key,
+        ttl_s=60,
+    )
+
+    child = derive_child_passport(
+        parent,
+        private_key.public_key(),
+        private_key,
+        "child",
+        ["delete_objects"],
+        "delete bounded objects only",
+    )
+    claims = verify_passport(child, private_key.public_key(), parent_token=parent)
+
+    assert set(claims["risk_budget"]["tools"]) == {"delete_objects"}
+    assert "destructive_targets" not in claims["risk_budget"]["ceilings"]
 
 
 def test_ungoverned_parent_cannot_introduce_child_risk_policy(
@@ -888,6 +1101,7 @@ def test_proxy_requires_request_id_before_governed_action(
 
     assert decision == Decision.INSUFFICIENT_EVIDENCE
     assert reason == "risk_request_id_invalid"
+    assert session.events[-1].denial_reason == DenialReason.RISK_REQUEST_ID_INVALID
     assert session.tool_call_count == 0
 
 
@@ -1064,6 +1278,84 @@ def test_proxy_rejects_mid_session_risk_policy_rotation(
     assert session.risk_policy_snapshot == frozen_snapshot
 
 
+def test_mission_reference_preserves_and_attenuates_signed_risk_policy(
+    tmp_path: Path,
+    private_key: ec.EllipticCurvePrivateKey,
+    session_keys_dir: Path,
+    delete_contract: ToolRiskContract,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = _governed_proxy(tmp_path, private_key, session_keys_dir, delete_contract)
+    mission = MissionPassport(
+        agent_id="risk-agent",
+        mission_id="mission-risk-budget",
+        mission="bounded object deletion",
+        allowed_tools=["delete_objects"],
+        risk_budget=_policy(delete_contract),
+    )
+    token = issue_passport(
+        mission,
+        private_key,
+        ttl_s=60,
+        extra_claims={
+            "mission_ref": {
+                "uri": "https://registry.example/missions/risk-budget",
+                "mission_id": "mission-risk-budget",
+            }
+        },
+    )
+    presented = verify_passport(token, private_key.public_key())
+    authoritative_policy = _policy(delete_contract, ceiling=10)
+    authoritative_policy["tools"]["delete_objects"]["max_facts"]["objects_affected"] = 2
+    declaration = MissionDeclaration(
+        mission_id="mission-risk-budget",
+        issuer=str(presented["iss"]),
+        subject=str(presented["sub"]),
+        audience=presented["aud"],
+        issued_at=int(presented["iat"]),
+        expires_at=int(presented["exp"]),
+        jwt_id=str(presented["jti"]),
+        passport=MissionPassport(
+            agent_id=mission.agent_id,
+            mission_id=mission.mission_id,
+            mission=mission.mission,
+            allowed_tools=mission.allowed_tools,
+            risk_budget=authoritative_policy,
+        ),
+        payload_digest="sha256:" + ("5" * 64),
+    )
+    monkeypatch.setattr(proxy.mission_cache, "resolve", lambda *_args: declaration)
+    monkeypatch.setattr("vibap.proxy.mission_is_revoked", lambda *_args: False)
+
+    resolved = proxy._resolve_authoritative_policy_claims(presented)
+
+    assert resolved["risk_budget"] == authoritative_policy
+
+    ungoverned_declaration = MissionDeclaration(
+        mission_id=declaration.mission_id,
+        issuer=declaration.issuer,
+        subject=declaration.subject,
+        audience=declaration.audience,
+        issued_at=declaration.issued_at,
+        expires_at=declaration.expires_at,
+        jwt_id=declaration.jwt_id,
+        passport=MissionPassport(
+            agent_id=mission.agent_id,
+            mission_id=mission.mission_id,
+            mission=mission.mission,
+            allowed_tools=mission.allowed_tools,
+        ),
+        payload_digest=declaration.payload_digest,
+    )
+    monkeypatch.setattr(
+        proxy.mission_cache,
+        "resolve",
+        lambda *_args: ungoverned_declaration,
+    )
+    with pytest.raises(RuntimeError, match="risk_policy_invalid"):
+        proxy._resolve_authoritative_policy_claims(presented)
+
+
 def test_proxy_replay_cannot_repermit_after_terminal_outcome(
     tmp_path: Path,
     private_key: ec.EllipticCurvePrivateKey,
@@ -1194,6 +1486,90 @@ def test_receipt_outbox_deduplicates_across_proxy_processes(tmp_path: Path) -> N
     ) == (0o600)
 
 
+def test_receipt_append_is_ordered_with_cross_proxy_session_advancement(
+    tmp_path: Path,
+    private_key: ec.EllipticCurvePrivateKey,
+    session_keys_dir: Path,
+    delete_contract: ToolRiskContract,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_proxy = _governed_proxy(
+        tmp_path,
+        private_key,
+        session_keys_dir,
+        delete_contract,
+    )
+    session = _start_governed_session(first_proxy, private_key, delete_contract)
+    second_proxy = _governed_proxy(
+        tmp_path,
+        private_key,
+        session_keys_dir,
+        delete_contract,
+    )
+    first_append_entered = threading.Event()
+    allow_first_append = threading.Event()
+    second_append_entered = threading.Event()
+    original_first_append = first_proxy._log_receipt
+    original_second_append = second_proxy._log_receipt
+    decisions: list[Decision] = []
+    failures: list[Exception] = []
+
+    def block_first_append(entry: dict) -> None:
+        first_append_entered.set()
+        allow_first_append.wait(timeout=5)
+        original_first_append(entry)
+
+    def observe_second_append(entry: dict) -> None:
+        second_append_entered.set()
+        original_second_append(entry)
+
+    def evaluate(proxy: GovernanceProxy, request_id: str) -> None:
+        try:
+            decision, _ = proxy.evaluate_tool_call(
+                session.jti,
+                "delete_objects",
+                _safe_delete_arguments(count=1),
+                risk_request_id=request_id,
+            )
+            decisions.append(decision)
+        except Exception as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    monkeypatch.setattr(first_proxy, "_log_receipt", block_first_append)
+    monkeypatch.setattr(second_proxy, "_log_receipt", observe_second_append)
+    first_thread = threading.Thread(
+        target=evaluate,
+        args=(first_proxy, "ordered-first"),
+        daemon=True,
+    )
+    second_thread = threading.Thread(
+        target=evaluate,
+        args=(second_proxy, "ordered-second"),
+        daemon=True,
+    )
+    first_thread.start()
+    assert first_append_entered.wait(timeout=5)
+    second_thread.start()
+    assert not second_append_entered.wait(timeout=0.25)
+    allow_first_append.set()
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+
+    assert not failures
+    assert decisions == [Decision.PERMIT, Decision.PERMIT]
+    entries = [
+        json.loads(line)
+        for line in (tmp_path / "receipts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(entries) == 2
+    assert (
+        entries[1]["parent_receipt_hash"]
+        == hashlib.sha256(entries[0]["jwt"].encode("ascii")).hexdigest()
+    )
+
+
 def test_session_finalization_flushes_failed_policy_denial_outbox(
     tmp_path: Path,
     private_key: ec.EllipticCurvePrivateKey,
@@ -1250,6 +1626,51 @@ def test_session_finalization_flushes_failed_policy_denial_outbox(
         .splitlines()
     ]
     assert sum(line["receipt_id"] == receipt_id for line in receipt_lines) == 1
+
+
+def test_attestation_refuses_pending_lifecycle_until_outbox_is_durable(
+    tmp_path: Path,
+    private_key: ec.EllipticCurvePrivateKey,
+    session_keys_dir: Path,
+    delete_contract: ToolRiskContract,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy = _governed_proxy(tmp_path, private_key, session_keys_dir, delete_contract)
+    session = _start_governed_session(
+        proxy,
+        private_key,
+        delete_contract,
+        forbidden=True,
+    )
+    original_log_once = proxy._log_receipt_once
+
+    def fail_before_append(_entry: dict) -> None:
+        raise OSError("simulated lifecycle sink outage")
+
+    monkeypatch.setattr(proxy, "_log_receipt_once", fail_before_append)
+    with pytest.raises(OSError, match="simulated lifecycle sink outage"):
+        proxy.evaluate_tool_call(
+            session,
+            "delete_objects",
+            _safe_delete_arguments(),
+            risk_request_id="attestation-outbox",
+        )
+    with pytest.raises(OSError, match="simulated lifecycle sink outage"):
+        proxy.issue_attestation_for_session(session.jti, private_key)
+    assert session.attestation_token is None
+
+    monkeypatch.setattr(proxy, "_log_receipt_once", original_log_once)
+    token, claims = proxy.issue_attestation_for_session(session.jti, private_key)
+
+    assert token
+    assert claims["passport_jti"] == session.jti
+    assert (
+        proxy.risk_budget_ledger.pending_lifecycles_for_session(
+            lineage_id="lineage-1",
+            session_id=session.jti,
+        )
+        == []
+    )
 
 
 def test_proxy_enforces_action_and_cumulative_caps_before_native_permit(

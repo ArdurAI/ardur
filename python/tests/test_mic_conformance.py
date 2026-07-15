@@ -47,6 +47,7 @@ def _issue_passport(
     pass ``""`` to remove it from claims entirely."""
     mission = MissionPassport(
         agent_id="mic-test-agent",
+        mission_id=mission_id or FAKE_MISSION_ID,
         mission="MIC conformance test",
         allowed_tools=allowed_tools or ["read_file", "write_file"],
         forbidden_tools=["delete_file"],
@@ -318,7 +319,9 @@ class TestLastSeenReceiptsTracking:
         with proxy._last_seen_receipts_lock:
             assert s1.jti in proxy._last_seen_receipts
             assert s2.jti in proxy._last_seen_receipts
-            assert proxy._last_seen_receipts[s1.jti] != proxy._last_seen_receipts[s2.jti]
+            assert (
+                proxy._last_seen_receipts[s1.jti] != proxy._last_seen_receipts[s2.jti]
+            )
 
     def test_parent_receipt_required_for_child(self, proxy, private_key):
         # Inject parent_jti + delegation_chain into claims after session
@@ -455,6 +458,7 @@ class TestConformanceProfileGating:
     def test_missing_profile_defaults_to_delegation_core(self, proxy, private_key):
         mission = MissionPassport(
             agent_id="no-profile-agent",
+            mission_id="urn:ardur:mission:mic:no-profile",
             mission="No conformance profile set",
             allowed_tools=["read_file"],
             forbidden_tools=[],
@@ -493,7 +497,9 @@ class TestReceiptDenialReasons:
         receipts = _read_receipts(proxy.receipts_log_path)
         assert len(receipts) >= 1
         assert receipts[0]["verdict"] == "violation"
-        assert receipts[0].get("internal_denial_code") == DenialReason.MANIFEST_DRIFT.value
+        assert (
+            receipts[0].get("internal_denial_code") == DenialReason.MANIFEST_DRIFT.value
+        )
 
     def test_receipt_records_envelope_tampered(self, proxy, private_key):
         token = _issue_passport(
@@ -506,7 +512,10 @@ class TestReceiptDenialReasons:
 
         receipts = _read_receipts(proxy.receipts_log_path)
         assert len(receipts) >= 1
-        assert receipts[0].get("internal_denial_code") == DenialReason.ENVELOPE_TAMPERED.value
+        assert (
+            receipts[0].get("internal_denial_code")
+            == DenialReason.ENVELOPE_TAMPERED.value
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -517,4 +526,8 @@ class TestReceiptDenialReasons:
 def _read_receipts(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]

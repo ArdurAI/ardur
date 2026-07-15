@@ -2,7 +2,7 @@
 title: "Architecture Decision Records"
 description: "ADRs document load-bearing design decisions behind Ardur's runtime, protocol, and deployment shape. Each record captures the context, the decision, and the trade-offs known at the "
 source_path: "docs/decisions/README.md"
-source_sha256: "e4ae065505a9644de07e4b37ef7937d2cbe89ec946567ea3bd330c8654d2a1fe"
+source_sha256: "86594bbb4560310a23d6c5e37eefb7a774da1d5ce7ee44736382c563479fbc2f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -39,13 +39,12 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 024 | [Self-asserted owner identity assurance](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/) | Accepted | 2026-07-12 |
 | 026 | [Typed dangerous-action risk budgets](/__ardur_internal__/source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/) | Accepted | 2026-07-14 |
 
-ADR-025 is allocated to the focused spend-gate decision in active PR #314.
-Parallel issue branches may therefore show ADR-026 before ADR-025 lands in
-`dev`; the allocation avoids a guaranteed rename conflict between the two
-focused changes.
+ADR-025 is reserved by a concurrently reviewed spend-gate decision. Parallel
+issue branches may therefore show ADR-026 before ADR-025 lands in `dev`; the
+reservation avoids a guaranteed rename conflict between focused changes.
 
 ## Conventions
 
 - **Status**: `Proposed`, `Accepted`, `Superseded by ADR-NNN`, `Deprecated`. A `Proposed` status means the design is documented but not yet landed in code; it can still change.
-- **Numbering**: sequential, no gaps. The formal ADR-file practice began at ADR-015 in the private research repo; earlier design decisions were captured in running decision logs rather than individual ADR files. Public numbering preserves the original sequence so cross-references stay stable.
+- **Numbering**: sequential with no gaps on `dev`. Concurrent branches may reserve the next number when the reservation is documented; an abandoned reservation must be reclaimed or later ADRs renumbered before merge. The formal ADR-file practice began at ADR-015 in the private research repo; earlier design decisions were captured in running decision logs rather than individual ADR files. Public numbering preserves the original sequence so cross-references stay stable.
 - **Scope**: ADRs record decisions about the protocol (MCEP), the runtime (Ardur), and deployment shapes. They do not duplicate spec content — the v0.1 specs live in [`docs/specs/`](/__ardur_internal__/source/docs/specs/readme/).

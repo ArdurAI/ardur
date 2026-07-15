@@ -40,14 +40,16 @@ the [risk-budget reference](../reference/risk-budgets.md#protocol-boundary-and-p
    lineage ceilings. Delegation preserves lineage and contract/fact identity
    while allowing only tool subsets and lower/equal caps. The first governed
    call freezes a normalized session snapshot; reservations retain the exact
-   accounting ceilings used at authorization.
+   accounting ceilings used at authorization. Tools removed during delegation
+   also remove numeric ceilings that no retained tool references.
 5. `evaluate_tool_call` atomically reserves all numeric facts across all three
    scopes before ordinary policy can return `PERMIT`. A unique request ID is
    mandatory for governed actions; active or terminal replay cannot re-permit.
 6. The executor explicitly records `committed` once execution may have started
    or `released` only when it did not start. Session finalization refuses active
-   or quarantined reservations. Exceptions never imply release, and
-   quarantined reservations may only reconcile as committed.
+   or quarantined reservations and resolved lifecycle events whose receipts are
+   not yet durable. Exceptions never imply release, and quarantined reservations
+   may only reconcile as committed.
 7. Stale active reservations quarantine while retaining authority. Explicit
    reconciliation is preferred. After expiry and a bounded quarantine window,
    pruning conservatively archives uncertainty as spent. Terminal compaction
@@ -66,8 +68,9 @@ the [risk-budget reference](../reference/risk-budgets.md#protocol-boundary-and-p
 - Configured dangerous tools can enforce per-action and cumulative impact caps
   before dispatch, including across processes and delegated agents.
 - The proxy adds JSON Schema validation and an fsync-backed reservation plus
-  outcome transaction for each governed action. Mutations in one lineage
-  serialize on one lock.
+  outcome transaction for each governed action. All lineages serialize on one
+  global ledger lock so agent ceilings remain atomic across lineage boundaries;
+  this favors safety over high-throughput authorization.
 - An executor crash conservatively consumes/quarantines authority until an
   operator or recovery controller explicitly reconciles it, or bounded
   post-expiry maintenance archives the uncertainty as spent.

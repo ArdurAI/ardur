@@ -1055,6 +1055,7 @@ def _install_aat_fetch_map(
 def _issue_aat_md(private_key, *, mission_id: str) -> str:
     mission = MissionPassport(
         agent_id="md-authority",
+        mission_id=mission_id,
         mission="authoritative AAT HTTP mission",
         allowed_tools=["read"],
         forbidden_tools=[],

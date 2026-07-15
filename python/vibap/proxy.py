@@ -44,6 +44,7 @@ from .risk_budget import (
     RiskBudgetReplayError,
     RiskFactError,
     ToolRiskRegistry,
+    attenuate_risk_budget,
     normalize_risk_budget,
     validate_action_risk,
 )
@@ -2624,6 +2625,34 @@ class GovernanceProxy:
                     DenialReason.REVOKED,
                 )
             claims = mission.policy_claims()
+            presented_risk = passport_claims.get("risk_budget")
+            authoritative_risk = claims.get("risk_budget")
+            if presented_risk is not None:
+                if not isinstance(presented_risk, dict) or not isinstance(
+                    authoritative_risk, dict
+                ):
+                    raise _MissionPolicyResolutionError(
+                        Decision.VIOLATION,
+                        "risk_policy_invalid",
+                        DenialReason.RISK_POLICY_INVALID,
+                    )
+                try:
+                    claims["risk_budget"] = attenuate_risk_budget(
+                        authoritative_risk,
+                        presented_risk,
+                    )
+                except (PermissionError, RiskBudgetError):
+                    try:
+                        claims["risk_budget"] = attenuate_risk_budget(
+                            presented_risk,
+                            authoritative_risk,
+                        )
+                    except (PermissionError, RiskBudgetError) as exc:
+                        raise _MissionPolicyResolutionError(
+                            Decision.VIOLATION,
+                            "risk_policy_invalid",
+                            DenialReason.RISK_POLICY_INVALID,
+                        ) from exc
             claims["mission_ref"] = copy.deepcopy(mission_ref_raw)
             claims["mission_digest"] = mission.payload_digest
             # H5 (2026-04-19): propagate mission_id from the session
@@ -3164,6 +3193,7 @@ class GovernanceProxy:
             signing_key or self.receipt_private_key,
             ttl_s=material.ttl_s,
             extra_claims=material.extra_claims,
+            jti_override=material.grant_id,
         )
         return self.start_session(internal_token)
 
@@ -3584,7 +3614,7 @@ class GovernanceProxy:
                 governed=True,
                 accepted=False,
                 reason="risk_request_id_invalid",
-                denial_reason=DenialReason.RISK_STATE_UNAVAILABLE,
+                denial_reason=DenialReason.RISK_REQUEST_ID_INVALID,
             )
 
         try:
@@ -3819,6 +3849,7 @@ class GovernanceProxy:
         self.flush_risk_lifecycle_outbox(session)
         arguments_snapshot = copy.deepcopy(arguments)
         receipt_entry: dict[str, Any] | None = None
+        receipt_callback_id: str | None = None
         released: RiskOutcomeResult | None = None
         # Refresh persisted state under a per-session coordination lock before
         # mutating. Without this, separate proxies that share a state_dir can
@@ -4023,6 +4054,23 @@ class GovernanceProxy:
                 if event.risk_lifecycle_id is not None:
                     event.risk_receipt_entry = copy.deepcopy(receipt_entry)
                 self._persist_session(target)
+                if event.risk_lifecycle_id is not None:
+                    self._log_receipt_once(receipt_entry)
+                    policy = target.risk_policy_snapshot
+                    if policy is None or released is None:
+                        raise RiskBudgetError(
+                            "risk lifecycle delivery state is unavailable"
+                        )
+                    self.risk_budget_ledger.mark_lifecycle_delivered(
+                        lineage_id=policy["lineage_id"],
+                        session_id=target.jti,
+                        request_hash=released.request_hash,
+                        lifecycle_id=released.lifecycle_id,
+                        receipt_id=str(receipt_entry["receipt_id"]),
+                    )
+                else:
+                    self._log_receipt(receipt_entry)
+                receipt_callback_id = str(receipt_entry["receipt_id"])
                 call_number = target.tool_call_count
         self._log(
             {
@@ -4034,25 +4082,8 @@ class GovernanceProxy:
                 "call_number": call_number,
             }
         )
-        if receipt_entry is not None:
-            if event.risk_lifecycle_id is not None:
-                self._log_receipt_once(receipt_entry)
-                policy = target.risk_policy_snapshot
-                if policy is None or released is None:
-                    raise RiskBudgetError(
-                        "risk lifecycle delivery state is unavailable"
-                    )
-                self.risk_budget_ledger.mark_lifecycle_delivered(
-                    lineage_id=policy["lineage_id"],
-                    session_id=target.jti,
-                    request_hash=released.request_hash,
-                    lifecycle_id=released.lifecycle_id,
-                    receipt_id=str(receipt_entry["receipt_id"]),
-                )
-            else:
-                self._log_receipt(receipt_entry)
-            if receipt_callback is not None:
-                receipt_callback(str(receipt_entry["receipt_id"]))
+        if receipt_callback is not None and receipt_callback_id is not None:
+            receipt_callback(receipt_callback_id)
         return decision, reason
 
     def record_tool_result(
@@ -4098,6 +4129,7 @@ class GovernanceProxy:
 
         receipt_entry: dict[str, Any] | None = None
         policy: dict[str, Any] | None = None
+        receipt_callback_id: str | None = None
         with self._locked_persisted_session(session) as target:
             with target._lock:
                 if target.summary is not None:
@@ -4117,21 +4149,21 @@ class GovernanceProxy:
                 )
                 receipt_entry = self._ensure_risk_lifecycle_event(target, result)
                 self._persist_session(target)
+                self._log_receipt_once(receipt_entry)
+                self.risk_budget_ledger.mark_lifecycle_delivered(
+                    lineage_id=policy["lineage_id"],
+                    session_id=target.jti,
+                    request_hash=result.request_hash,
+                    lifecycle_id=result.lifecycle_id,
+                    receipt_id=str(receipt_entry["receipt_id"]),
+                )
+                receipt_callback_id = str(receipt_entry["receipt_id"])
                 self._risk_metric(
                     operation="outcome",
                     outcome=result.status,
                 )
-        if receipt_entry is not None and policy is not None:
-            self._log_receipt_once(receipt_entry)
-            self.risk_budget_ledger.mark_lifecycle_delivered(
-                lineage_id=policy["lineage_id"],
-                session_id=target.jti,
-                request_hash=result.request_hash,
-                lifecycle_id=result.lifecycle_id,
-                receipt_id=str(receipt_entry["receipt_id"]),
-            )
-            if receipt_callback is not None:
-                receipt_callback(str(receipt_entry["receipt_id"]))
+        if receipt_callback is not None and receipt_callback_id is not None:
+            receipt_callback(receipt_callback_id)
         return {
             "status": result.status,
             "idempotent": result.idempotent,
@@ -4171,21 +4203,20 @@ class GovernanceProxy:
                     )
                 if receipt_entries:
                     self._persist_session(target)
+                    for result, receipt_entry in receipt_entries:
+                        self._log_receipt_once(receipt_entry)
+                        self.risk_budget_ledger.mark_lifecycle_delivered(
+                            lineage_id=policy["lineage_id"],
+                            session_id=target.jti,
+                            request_hash=result.request_hash,
+                            lifecycle_id=result.lifecycle_id,
+                            receipt_id=str(receipt_entry["receipt_id"]),
+                        )
         if quarantined:
             self._risk_metric(
                 operation="quarantine",
                 outcome="quarantined",
             )
-        if policy is not None:
-            for result, receipt_entry in receipt_entries:
-                self._log_receipt_once(receipt_entry)
-                self.risk_budget_ledger.mark_lifecycle_delivered(
-                    lineage_id=policy["lineage_id"],
-                    session_id=target.jti,
-                    request_hash=result.request_hash,
-                    lifecycle_id=result.lifecycle_id,
-                    receipt_id=str(receipt_entry["receipt_id"]),
-                )
         return sum(not result.idempotent for result in quarantined)
 
     def _ensure_risk_lifecycle_event(
@@ -4268,17 +4299,15 @@ class GovernanceProxy:
                     )
                 if receipt_entries:
                     self._persist_session(target)
-        if policy is None:
-            return 0
-        for result, receipt_entry in receipt_entries:
-            self._log_receipt_once(receipt_entry)
-            self.risk_budget_ledger.mark_lifecycle_delivered(
-                lineage_id=policy["lineage_id"],
-                session_id=target.jti,
-                request_hash=result.request_hash,
-                lifecycle_id=result.lifecycle_id,
-                receipt_id=str(receipt_entry["receipt_id"]),
-            )
+                    for result, receipt_entry in receipt_entries:
+                        self._log_receipt_once(receipt_entry)
+                        self.risk_budget_ledger.mark_lifecycle_delivered(
+                            lineage_id=policy["lineage_id"],
+                            session_id=target.jti,
+                            request_hash=result.request_hash,
+                            lifecycle_id=result.lifecycle_id,
+                            receipt_id=str(receipt_entry["receipt_id"]),
+                        )
         return len(receipt_entries)
 
     def summarize_session(self, session: GovernanceSession | str) -> dict[str, Any]:
@@ -4305,6 +4334,7 @@ class GovernanceProxy:
         *,
         kernel_enforcement: dict[str, Any] | None = None,
     ) -> tuple[str, dict[str, Any]]:
+        self.flush_risk_lifecycle_outbox(session_id)
         created_summary = False
         token = ""
         with self._locked_persisted_session(session_id) as target:
@@ -4358,8 +4388,6 @@ class GovernanceProxy:
     def _finalize_session_locked(
         self, session: GovernanceSession
     ) -> tuple[dict[str, Any], bool]:
-        if session.summary is not None:
-            return dict(session.summary), False
         risk_budget = (
             session.risk_policy_snapshot
             if session.risk_policy_snapshot is not None
@@ -4378,6 +4406,16 @@ class GovernanceProxy:
                 raise PermissionError(
                     "risk_budget_outcome_unresolved: record committed or released outcome"
                 )
+            pending = self.risk_budget_ledger.pending_lifecycles_for_session(
+                lineage_id=normalized["lineage_id"],
+                session_id=session.jti,
+            )
+            if pending:
+                raise PermissionError(
+                    "risk_budget_lifecycle_pending: deliver lifecycle receipts before finalization"
+                )
+        if session.summary is not None:
+            return dict(session.summary), False
         session.end_time = time.time()
         summary = self._build_summary(session)
         session.summary = summary
@@ -5576,6 +5614,7 @@ class GovernanceProxy:
                     parent_session.passport_claims,
                 )
                 self._persist_session(parent_session)
+                self._log_receipt(receipt_entry)
         self._log(
             {
                 "type": "delegation",
@@ -5585,8 +5624,6 @@ class GovernanceProxy:
                 "parent_calls_remaining_at_delegation": parent_calls_remaining,
             }
         )
-        if receipt_entry is not None:
-            self._log_receipt(receipt_entry)
         return child_token, child_claims, parent_calls_remaining
 
     def _load_replay_cache_locked(self) -> dict[str, dict[str, int]]:
