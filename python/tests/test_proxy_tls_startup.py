@@ -138,7 +138,8 @@ def test_tls_expected_never_starts_plain_http(
                 ) as response:
                     plaintext_status = int(response.status)
             except (OSError, urllib.error.URLError):
-                pass
+                # Refusal or protocol failure is the expected fail-closed outcome.
+                plaintext_status = None
             pytest.fail(
                 "TLS-expected proxy stayed alive instead of failing closed; "
                 f"plaintext_health_status={plaintext_status}"
