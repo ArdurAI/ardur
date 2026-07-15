@@ -2,7 +2,7 @@
 title: "LangGraph + Ardur quickstart"
 description: "A LangGraph agent making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a small set of tools (read, write, summarize), "
 source_path: "examples/langgraph-quickstart/README.md"
-source_sha256: "8652ff8484ebfec46ab1ebe5c2ea85a7d13209b4c28bd844eed30d01d00b8b0e"
+source_sha256: "23bfccc4851348e363cbfba09159d27ffe6f67d384d21e8be6541ad9b5d65998"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -39,15 +39,17 @@ langgraph-quickstart/
 ## Dependencies
 
 - Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
-- `python/` editable install (this repo, `pip install -e ../../python[dev]`)
-- `langgraph ^0.2.0` plus the `langchain-*` family (already pulled by `[dev]` extras for the LangChain demo)
+- `python/` editable install with the LangGraph integration extra
+  (`pip install -e '../../python[dev,langgraph]'`)
+- `langgraph >=1.2.9,<2` and `langchain >=1.3.13,<2`, matching the typed
+  runtime-context and `ToolRuntime` APIs used by the reference
 - LLM access: local Ollama, an OpenAI-compatible gateway, or an Anthropic API key
 - Optional: Docker via the LangChain image (`rahulnutakki/ardur-demo:lang` runs this demo too — pass `demo.py` as the entrypoint)
 
 ## Running locally
 
 ```bash
-cd ../../python && pip install -e '.[dev]'
+cd ../../python && pip install -e '.[dev,langgraph]'
 export ARDUR_PROVIDER=ollama
 export OLLAMA_MODEL='<your local model tag>'
 cd ../examples/langgraph-quickstart
@@ -62,5 +64,31 @@ PYTHONPATH=../_shared python demo.py
 - Live LLM provider failover — single provider per run.
 - Multi-tenant key isolation — single issuer key.
 - Persistent checkpointing across runs (LangGraph supports it, but the example resets state each run for reproducible receipts).
+
+## Governed subagent boundary
+
+The multiagent profile injects a `GovernedSubagentRuntimeContext` per graph
+invocation. The context carries the adapter-backed demo engine but is excluded
+from model-visible tool schemas and graph state. Spawn returns only an opaque,
+parent-bound handle; child passports, sessions, receipts, and the signing key
+remain in Ardur's private state.
+
+The reference compiles with `checkpointer=None`. If an application enables a
+checkpointer, persist only framework messages, opaque handles, and tool results.
+Never copy credentials or the runtime context into checkpoint state. A retried
+tool call is keyed by LangGraph's hidden `tool_call_id`; Ardur suppresses a
+duplicate executor call and expects the framework to recover the prior result
+from its checkpoint.
+
+Synchronous tool executors use `GovernedSubagentAdapter.run_tool`; async
+applications use `arun_tool`. Cancellation or an uncertain executor outcome
+quarantines the child without refunding authority. Exception handlers should
+let active executors unwind, then call `close_all(cancelled=True)` for bounded
+cleanup.
+
+The no-bypass rule is strict: every child tool call uses the exact opaque handle
+and therefore the child session. A missing, forged, wrong-parent, expired,
+cancelled, closed, quarantined, or replay-conflicting handle fails before the
+executor runs. Falling back to the parent session is never allowed.
 
 For pure protocol exercising without the framework on top, see [`examples/missions/`](/__ardur_internal__/source/examples/missions/).

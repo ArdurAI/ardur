@@ -239,6 +239,7 @@
     "docs/reference/advisory-ai-controls.md": "source/docs/reference/advisory-ai-controls/",
     "docs/reference/ardur-md-profile.md": "source/docs/reference/ardur-md-profile/",
     "docs/reference/cli.md": "source/docs/reference/cli/",
+    "docs/reference/governed-subagent-adapter.md": "source/docs/reference/governed-subagent-adapter/",
     "docs/reference/kernel-capture-daemon.md": "source/docs/reference/kernel-capture-daemon/",
     "docs/reference/personal-hub-api.md": "source/docs/reference/personal-hub-api/",
     "docs/reference/proxy-oci-image.md": "source/docs/reference/proxy-oci-image/",
