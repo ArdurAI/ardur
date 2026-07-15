@@ -440,7 +440,7 @@ def test_concurrent_workers_cannot_oversubscribe_lineage_ceiling(
     ledgers = [FileRiskBudgetLedger(tmp_path), FileRiskBudgetLedger(tmp_path)]
     barrier = threading.Barrier(2)
     results: list[bool] = []
-    failures: list[BaseException] = []
+    failures: list[Exception] = []
 
     def worker(index: int) -> None:
         try:
@@ -452,7 +452,7 @@ def test_concurrent_workers_cannot_oversubscribe_lineage_ceiling(
                 ceiling=1,
             )
             results.append(result.accepted)
-        except BaseException as exc:  # pragma: no cover - asserted below
+        except Exception as exc:  # pragma: no cover - asserted below
             failures.append(exc)
 
     threads = [threading.Thread(target=worker, args=(index,)) for index in range(2)]
