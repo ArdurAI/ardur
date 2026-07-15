@@ -526,6 +526,7 @@ Start the local Ardur Personal Hub HTTP service.
 
 ```text
 ardur hub [--host HOST] [--port PORT] [--home DIR]
+          [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
 
 If `--home` points to an existing file instead of a directory, `ardur hub`
@@ -545,6 +546,20 @@ parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
 values, a message, a detail, and placeholder-only `next_steps`; stderr stays
 empty, no traceback is emitted, no raw local paths or malformed hosts are echoed,
 and no Personal Hub state or service artifacts are created.
+
+The Hub serves HTTPS by default. Without explicit TLS paths, it resolves or
+creates its managed local certificate and private key. `--tls-cert` and
+`--tls-key` select an explicit PEM pair and must be supplied together as
+existing files. Missing, incomplete, or invalid TLS material fails closed
+before the Hub binds a listening socket; the command exits `1` with
+`condition: hub_tls_material_invalid`, placeholder-only recovery steps, empty
+stderr, and no raw path, file-name, certificate, or private-key disclosure.
+Port, host, and Personal home validation retain their existing precedence.
+
+`--no-tls` is the only intentional plaintext Hub mode and is intended for
+explicit local development. Environment configuration such as
+`ARDUR_NO_TLS=1` does not silently downgrade `ardur hub`; without `--no-tls`,
+the command still requires a usable TLS context before binding.
 
 See [Personal Hub HTTP API](personal-hub-api.md) for the endpoints exposed.
 

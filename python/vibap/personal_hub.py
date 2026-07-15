@@ -36,7 +36,14 @@ from urllib import request as urlrequest
 from cryptography.hazmat.primitives import serialization
 
 from . import __version__
-from .passport import DEFAULT_HOME, MissionPassport, _ensure_default_home_dir, _is_under_default_home, generate_keypair, issue_passport
+from .passport import (
+    DEFAULT_HOME,
+    MissionPassport,
+    _ensure_default_home_dir,
+    _is_under_default_home,
+    generate_keypair,
+    issue_passport,
+)
 from .proxy import Decision, GovernanceProxy
 from .metrics import metrics as ardur_metrics
 from .rate_limiter import RateLimiter
@@ -66,6 +73,7 @@ PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
 SETUP_HOME_INVALID_CONDITION = "setup_home_invalid"
 SETUP_HOST_INVALID_CONDITION = "setup_host_invalid"
 SETUP_PORT_INVALID_CONDITION = "setup_port_invalid"
+HUB_TLS_MATERIAL_INVALID_CONDITION = "hub_tls_material_invalid"
 _QUERY_TOKEN_LOG_RE = re.compile(
     r"([?&](?:access[-_]?token|api[-_]?key|auth|key|password|secret|token)=)[^\s&\"']+",
     re.I,
@@ -85,10 +93,23 @@ _DANGEROUS_CLI_RE = re.compile(
 
 
 class HubError(ValueError):
-    def __init__(self, message: str, *, status: int = 400, code: str = "bad_request") -> None:
+    def __init__(
+        self, message: str, *, status: int = 400, code: str = "bad_request"
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
+
+
+class HubTLSConfigurationError(HubError):
+    """TLS was required but no usable Hub server context could be constructed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Ardur Personal Hub TLS configuration is unavailable.",
+            status=400,
+            code=HUB_TLS_MATERIAL_INVALID_CONDITION,
+        )
 
 
 @dataclass(frozen=True)
@@ -465,14 +486,26 @@ _RUN_TOKEN_CONDITIONS = {
     "unauthorized",
 }
 _RUN_FAILURE_SUMMARY_LINES = {
-    ("session_start", "hub_token_required"): "Ardur Hub unavailable: hub_token_required",
+    (
+        "session_start",
+        "hub_token_required",
+    ): "Ardur Hub unavailable: hub_token_required",
     ("session_start", "hub_unavailable"): "Ardur Hub unavailable: hub_unavailable",
     ("session_start", "hub_url_invalid"): "Ardur Hub unavailable: hub_url_invalid",
-    ("session_start", "run_session_start_failed"): "Ardur Hub unavailable: run_session_start_failed",
-    ("policy_check", "hub_token_required"): "Ardur policy check failed: hub_token_required",
+    (
+        "session_start",
+        "run_session_start_failed",
+    ): "Ardur Hub unavailable: run_session_start_failed",
+    (
+        "policy_check",
+        "hub_token_required",
+    ): "Ardur policy check failed: hub_token_required",
     ("policy_check", "hub_unavailable"): "Ardur policy check failed: hub_unavailable",
     ("policy_check", "hub_url_invalid"): "Ardur policy check failed: hub_url_invalid",
-    ("policy_check", "run_policy_check_failed"): "Ardur policy check failed: run_policy_check_failed",
+    (
+        "policy_check",
+        "run_policy_check_failed",
+    ): "Ardur policy check failed: run_policy_check_failed",
 }
 _RECEIPT_REFERENCE_RE = re.compile(r"^receipt:[0-9a-f]{32}$")
 
@@ -510,7 +543,9 @@ def _run_failure_summary_line(response: dict[str, Any], *, phase: str) -> str:
     fallback = f"run_{phase}_failed"
     return _RUN_FAILURE_SUMMARY_LINES.get(
         (phase, condition),
-        _RUN_FAILURE_SUMMARY_LINES.get((phase, fallback), "Ardur run failed: run_failed"),
+        _RUN_FAILURE_SUMMARY_LINES.get(
+            (phase, fallback), "Ardur run failed: run_failed"
+        ),
     )
 
 
@@ -524,7 +559,9 @@ def _run_audit_reference_for_user_output(response: dict[str, Any]) -> str:
     reference = str(_dict(response.get("receipt")).get("receipt_id") or "").strip()
     if not reference:
         return ""
-    if _RECEIPT_REFERENCE_RE.fullmatch(reference) and not _SENSITIVE_TARGET_RE.search(reference):
+    if _RECEIPT_REFERENCE_RE.fullmatch(reference) and not _SENSITIVE_TARGET_RE.search(
+        reference
+    ):
         return reference
     return "<receipt>"
 
@@ -542,7 +579,9 @@ def _emit_run_audit_reference_for_user_output(response: dict[str, Any]) -> None:
     if not audit_reference:
         return
     sys.stderr.flush()
-    os.write(sys.stderr.fileno(), b"receipt: " + audit_reference.encode("ascii") + b"\n")
+    os.write(
+        sys.stderr.fileno(), b"receipt: " + audit_reference.encode("ascii") + b"\n"
+    )
 
 
 def _utc_now() -> str:
@@ -583,7 +622,9 @@ def _stream_subprocess(command: list[str]) -> StreamedProcessResult:
                 counts[key] += len(chunk)
                 target.write(chunk)
                 target.flush()
-        except Exception as exc:  # pragma: no cover - stdout/stderr pipe failures are host-specific
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - stdout/stderr pipe failures are host-specific
             errors.append(exc)
         finally:
             with suppress(OSError):
@@ -623,7 +664,9 @@ def _read_json(path: Path, default: Any) -> Any:
     except FileNotFoundError:
         return default
     except json.JSONDecodeError as exc:
-        raise HubError(f"{path.name} is not valid JSON", status=500, code="state_corrupt") from exc
+        raise HubError(
+            f"{path.name} is not valid JSON", status=500, code="state_corrupt"
+        ) from exc
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -720,7 +763,11 @@ def _ensure_hub_config(
     config["home"] = str(paths.home)
     if browser_extension_path is not None:
         config["browser_extension_path"] = browser_extension_path
-    if rotate_token or not isinstance(config.get("hub_token"), str) or not config["hub_token"]:
+    if (
+        rotate_token
+        or not isinstance(config.get("hub_token"), str)
+        or not config["hub_token"]
+    ):
         config["hub_token"] = _new_hub_token()
     config.setdefault("created_at", _utc_now())
     config["updated_at"] = _utc_now()
@@ -745,7 +792,9 @@ def resolve_hub_token(
     try:
         token = _load_hub_config(paths).get("hub_token")
     except HubError as exc:
-        if _is_personal_home_not_directory_error(exc) or _is_setup_home_invalid_error(exc):
+        if _is_personal_home_not_directory_error(exc) or _is_setup_home_invalid_error(
+            exc
+        ):
             raise
         return None
     return str(token) if token else None
@@ -776,7 +825,9 @@ def _public_key_pem(public_key: Any) -> str:
 class PersonalHub:
     """Local in-process Hub used by the HTTP server and CLI helpers."""
 
-    def __init__(self, home: str | Path | None = None, *, hub_url: str | None = None) -> None:
+    def __init__(
+        self, home: str | Path | None = None, *, hub_url: str | None = None
+    ) -> None:
         self.paths = HubPaths.from_home(home)
         _ensure_personal_home_directory(self.paths)
         self.config = _ensure_hub_config(self.paths, hub_url=hub_url)
@@ -881,7 +932,9 @@ class PersonalHub:
         tool_name = self._tool_name(source, policy)
         arguments = self._arguments(payload, policy)
         session_id = str(session_record["ardur_session_id"])
-        decision, reason = self.proxy.evaluate_tool_call(session_id, tool_name, arguments)
+        decision, reason = self.proxy.evaluate_tool_call(
+            session_id, tool_name, arguments
+        )
         receipt = self._latest_receipt(session_id)
         review = self._update_session_review(
             payload=payload,
@@ -917,13 +970,19 @@ class PersonalHub:
         if event.get("raw_content_included") is True:
             verdict = "blocked"
             reason = "raw page or app content is not accepted at receipt boundary"
-        elif event.get("text_snapshot_included") is True and not _dict(event.get("consent")).get("visible_text"):
+        elif event.get("text_snapshot_included") is True and not _dict(
+            event.get("consent")
+        ).get("visible_text"):
             verdict = "blocked"
             reason = "visible text snapshot requires explicit user consent"
         elif action_class in {"send", "write"} and _SENSITIVE_TARGET_RE.search(target):
             verdict = "blocked"
             reason = "sensitive target requires explicit stronger policy"
-        elif source.get("type") == "cli" and command and _DANGEROUS_CLI_RE.search(command):
+        elif (
+            source.get("type") == "cli"
+            and command
+            and _DANGEROUS_CLI_RE.search(command)
+        ):
             verdict = "blocked"
             reason = "command matches default dangerous CLI policy"
             evidence_level = "enforced"
@@ -936,7 +995,10 @@ class PersonalHub:
                 labels.append("enforced")
                 evidence_level = "enforced"
 
-        if source.get("type") in {"browser", "desktop"} and event.get("hidden_provider_activity") is True:
+        if (
+            source.get("type") in {"browser", "desktop"}
+            and event.get("hidden_provider_activity") is True
+        ):
             labels.append("insufficient_evidence")
             verdict = "unknown"
             reason = "provider-side activity is not locally visible"
@@ -950,7 +1012,9 @@ class PersonalHub:
         }
 
     def attest(self, ardur_session_id: str) -> dict[str, Any]:
-        token, claims = self.proxy.issue_attestation_for_session(ardur_session_id, self.private_key)
+        token, claims = self.proxy.issue_attestation_for_session(
+            ardur_session_id, self.private_key
+        )
         return {"ok": True, "token": token, "claims": claims}
 
     def export(self) -> dict[str, Any]:
@@ -974,13 +1038,23 @@ class PersonalHub:
         if digest is not None and not _SHA256_DIGEST_RE.fullmatch(str(digest)):
             raise HubError("event.content_digest must be sha-256:<hex>")
         if event.get("raw_content_included") is True:
-            raise HubError("raw_content_included=true is rejected; send digests and consented excerpts")
-        if event.get("text_snapshot_included") is True and not _dict(event.get("consent")).get("visible_text"):
+            raise HubError(
+                "raw_content_included=true is rejected; send digests and consented excerpts"
+            )
+        if event.get("text_snapshot_included") is True and not _dict(
+            event.get("consent")
+        ).get("visible_text"):
             raise HubError("text snapshot requires event.consent.visible_text=true")
 
     def _agent_id(self, source: dict[str, Any]) -> str:
         source_type = _clip(source.get("type") or "unknown", 40)
-        app = _clip(source.get("app") or source.get("origin") or source.get("process") or "local", 80)
+        app = _clip(
+            source.get("app")
+            or source.get("origin")
+            or source.get("process")
+            or "local",
+            80,
+        )
         return f"ardur-personal:{source_type}:{app}"
 
     def _session_key(self, payload: dict[str, Any]) -> str:
@@ -996,9 +1070,12 @@ class PersonalHub:
             "process": source.get("process"),
             "title": session.get("title"),
         }
-        return "session:" + hashlib.sha256(
-            json.dumps(basis, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:32]
+        return (
+            "session:"
+            + hashlib.sha256(
+                json.dumps(basis, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:32]
+        )
 
     def _tool_name(self, source: dict[str, Any], policy: dict[str, Any]) -> str:
         if policy["verdict"] == "blocked":
@@ -1011,7 +1088,9 @@ class PersonalHub:
             return "cli_command"
         return "browser_observe"
 
-    def _arguments(self, payload: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    def _arguments(
+        self, payload: dict[str, Any], policy: dict[str, Any]
+    ) -> dict[str, Any]:
         source = _dict(payload.get("source"))
         event = _dict(payload.get("event"))
         session = _dict(payload.get("session"))
@@ -1021,7 +1100,10 @@ class PersonalHub:
             "origin": source.get("origin"),
             "process": source.get("process"),
             "title": session.get("title"),
-            "target": event.get("target") or source.get("origin") or source.get("process") or "local",
+            "target": event.get("target")
+            or source.get("origin")
+            or source.get("process")
+            or "local",
             "capture_mode": event.get("capture_mode") or "digest_only",
             "content_digest": event.get("content_digest"),
             "raw_content_included": False,
@@ -1036,7 +1118,9 @@ class PersonalHub:
             args["stderr_digest"] = event.get("stderr_digest")
         if event.get("text_snapshot_included"):
             args["text_excerpt_digest"] = _sha256_text(_clip(event.get("text_excerpt")))
-        return {key: value for key, value in args.items() if value not in (None, "", [])}
+        return {
+            key: value for key, value in args.items() if value not in (None, "", [])
+        }
 
     def _update_session_review(
         self,
@@ -1052,7 +1136,9 @@ class PersonalHub:
         event = _dict(payload.get("event"))
         session_key = str(session_record["session_key"])
         reviews = _read_json(self.paths.reviews, [])
-        review = next((item for item in reviews if item.get("session_id") == session_key), None)
+        review = next(
+            (item for item in reviews if item.get("session_id") == session_key), None
+        )
         now = _utc_now()
         if review is None:
             review = {
@@ -1060,7 +1146,10 @@ class PersonalHub:
                 "session_id": session_key,
                 "ardur_session_id": session_record["ardur_session_id"],
                 "source": source,
-                "provider": source.get("app") or source.get("origin") or source.get("process") or "Local",
+                "provider": source.get("app")
+                or source.get("origin")
+                or source.get("process")
+                or "Local",
                 "title": session_record.get("title") or "",
                 "started_at": session_record.get("started_at") or now,
                 "updated_at": now,
@@ -1093,7 +1182,9 @@ class PersonalHub:
             review["actions"] = review["actions"][-MAX_ACTIONS_PER_REVIEW:]
             review["latest_action"] = review["actions"][-1]
         review["updated_at"] = now
-        review["policy_labels"] = sorted(set(_list(review.get("policy_labels")) + list(policy["labels"])))
+        review["policy_labels"] = sorted(
+            set(_list(review.get("policy_labels")) + list(policy["labels"]))
+        )
         review["latest_receipt_id"] = receipt.get("receipt_id") if receipt else None
         review["latest_receipt_hash"] = receipt.get("receipt_hash") if receipt else None
         review["summary"] = self._review_summary(review)
@@ -1119,40 +1210,48 @@ class PersonalHub:
                 continue
             role = str(message.get("role") or "unknown")
             excerpt = _clip(message.get("text_excerpt"), 1200)
-            digest = message.get("text_digest") or ( _sha256_text(excerpt) if excerpt else None )
+            digest = message.get("text_digest") or (
+                _sha256_text(excerpt) if excerpt else None
+            )
             kind = {
                 "user": "user_prompt_observed",
                 "assistant": "assistant_response_observed",
                 "tool": "tool_output_observed",
             }.get(role, "visible_message_observed")
-            actions.append({
-                **base,
-                "action_id": str(uuid.uuid4()),
-                "kind": kind,
-                "role": role,
-                "summary": self._action_summary(kind, excerpt),
-                "text_excerpt": excerpt,
-                "message_digest": digest,
-            })
+            actions.append(
+                {
+                    **base,
+                    "action_id": str(uuid.uuid4()),
+                    "kind": kind,
+                    "role": role,
+                    "summary": self._action_summary(kind, excerpt),
+                    "text_excerpt": excerpt,
+                    "message_digest": digest,
+                }
+            )
         if actions:
             return actions
         if source.get("type") == "cli":
             command = " ".join(str(part) for part in _list(event.get("command")))
-            return [{
+            return [
+                {
+                    **base,
+                    "kind": "cli_command_observed",
+                    "role": "local_process",
+                    "summary": f"CLI command observed: {_clip(command, 240)}",
+                    "command_digest": _sha256_text(command),
+                }
+            ]
+        return [
+            {
                 **base,
-                "kind": "cli_command_observed",
-                "role": "local_process",
-                "summary": f"CLI command observed: {_clip(command, 240)}",
-                "command_digest": _sha256_text(command),
-            }]
-        return [{
-            **base,
-            "kind": f"{source.get('type')}_state_observed",
-            "role": "unknown",
-            "summary": f"{str(source.get('type') or 'local').title()} state observed.",
-            "visible_text_digest": event.get("content_digest"),
-            "text_excerpt": _clip(event.get("text_excerpt")),
-        }]
+                "kind": f"{source.get('type')}_state_observed",
+                "role": "unknown",
+                "summary": f"{str(source.get('type') or 'local').title()} state observed.",
+                "visible_text_digest": event.get("content_digest"),
+                "text_excerpt": _clip(event.get("text_excerpt")),
+            }
+        ]
 
     @staticmethod
     def _action_summary(kind: str, excerpt: str) -> str:
@@ -1165,7 +1264,10 @@ class PersonalHub:
 
     @staticmethod
     def _review_summary(review: dict[str, Any]) -> str:
-        latest = _dict(review.get("latest_action")).get("summary") or "No readable action text captured yet."
+        latest = (
+            _dict(review.get("latest_action")).get("summary")
+            or "No readable action text captured yet."
+        )
         labels = ", ".join(_list(review.get("policy_labels")) or ["observed"])
         return (
             f"{review.get('provider') or 'Local'} session review: "
@@ -1203,7 +1305,9 @@ class PersonalHub:
         result = dict(latest)
         jwt_value = str(result.get("jwt") or "")
         if jwt_value:
-            result["receipt_hash"] = hashlib.sha256(jwt_value.encode("ascii")).hexdigest()
+            result["receipt_hash"] = hashlib.sha256(
+                jwt_value.encode("ascii")
+            ).hexdigest()
         return result
 
 
@@ -1265,9 +1369,15 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json({"ok": False, "error": "not found"}, status=404)
         except HubError as exc:
-            self._send_json({"ok": False, "error": str(exc), "error_code": exc.code}, status=exc.status)
+            self._send_json(
+                {"ok": False, "error": str(exc), "error_code": exc.code},
+                status=exc.status,
+            )
         except Exception as exc:  # pragma: no cover - defensive server boundary
-            self._send_json({"ok": False, "error": str(exc), "error_code": "internal_error"}, status=500)
+            self._send_json(
+                {"ok": False, "error": str(exc), "error_code": "internal_error"},
+                status=500,
+            )
 
     def log_message(self, fmt: str, *args: Any) -> None:
         message = _redact_url_tokens(fmt % args)
@@ -1370,12 +1480,20 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
             if not re.fullmatch(r"[A-Za-z0-9_-]+", parsed.netloc):
                 return None
             return "*"
-        if parsed.scheme in {"http", "https"} and parsed.hostname in {"127.0.0.1", "localhost"}:
+        if parsed.scheme in {"http", "https"} and parsed.hostname in {
+            "127.0.0.1",
+            "localhost",
+        }:
             try:
                 parsed.port
             except ValueError:
                 return None
-            if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+            if (
+                parsed.path not in {"", "/"}
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+            ):
                 return None
             configured = self._configured_loopback_cors_origin()
             if configured and origin == configured:
@@ -1384,16 +1502,28 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
 
     def _configured_loopback_cors_origin(self) -> str | None:
         configured = urlparse.urlparse(str(self.hub.hub_url))
-        if configured.scheme not in {"http", "https"} or configured.hostname not in {"127.0.0.1", "localhost"}:
+        if configured.scheme not in {"http", "https"} or configured.hostname not in {
+            "127.0.0.1",
+            "localhost",
+        }:
             return None
         try:
             port = configured.port
         except ValueError:
             return None
-        if configured.path not in {"", "/"} or configured.params or configured.query or configured.fragment:
+        if (
+            configured.path not in {"", "/"}
+            or configured.params
+            or configured.query
+            or configured.fragment
+        ):
             return None
         host = configured.hostname
-        return f"{configured.scheme}://{host}:{port}" if port is not None else f"{configured.scheme}://{host}"
+        return (
+            f"{configured.scheme}://{host}:{port}"
+            if port is not None
+            else f"{configured.scheme}://{host}"
+        )
 
     def _send_html(self, content: str, *, status: int = 200) -> None:
         data = content.encode("utf-8")
@@ -1401,7 +1531,10 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
         self.send_header("content-type", "text/html; charset=utf-8")
         self.send_header("cache-control", "no-store")
         self.send_header("pragma", "no-cache")
-        self.send_header("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header(
+            "content-security-policy",
+            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        )
         self.send_header("referrer-policy", "no-referrer")
         self.send_header("x-content-type-options", "nosniff")
         self.send_header("content-length", str(len(data)))
@@ -1466,18 +1599,41 @@ def serve_hub(
 ) -> None:
     paths = HubPaths.from_home(home)
     validate_personal_home_directory(paths)
+
+    tls_context = None
+    cert_fingerprint = None
+    if not no_tls:
+        try:
+            if (tls_cert is None) != (tls_key is None):
+                raise HubTLSConfigurationError()
+            if tls_cert is not None and tls_key is not None:
+                if (
+                    not Path(tls_cert).expanduser().is_file()
+                    or not Path(tls_key).expanduser().is_file()
+                ):
+                    raise HubTLSConfigurationError()
+            tls_result = resolve_tls_paths(
+                tls_cert,
+                tls_key,
+                home=paths.home,
+                hostname=host,
+            )
+            if tls_result is None:
+                raise HubTLSConfigurationError()
+            cert_path, key_path, cert_fingerprint = tls_result
+            tls_context = create_ssl_context(cert_path, key_path)
+        except HubTLSConfigurationError:
+            raise
+        except (OSError, ValueError) as exc:
+            raise HubTLSConfigurationError() from exc
+    tls_active = tls_context is not None
+
     server = ThreadingHTTPServer((host, port), _HubRequestHandler)
     server.rate_limiter = RateLimiter()  # type: ignore[attr-defined]
 
-    tls_active = False
-    if not no_tls:
-        tls_result = resolve_tls_paths(tls_cert, tls_key, home=paths.home, hostname=host)
-        if tls_result:
-            cert_path, key_path, cert_fingerprint = tls_result
-            ssl_ctx = create_ssl_context(cert_path, key_path)
-            server.socket = ssl_ctx.wrap_socket(server.socket, server_side=True)
-            tls_active = True
-            print(f"[tls] cert fingerprint: {cert_fingerprint}", file=sys.stderr)
+    if tls_context is not None:
+        server.socket = tls_context.wrap_socket(server.socket, server_side=True)
+        print(f"[tls] cert fingerprint: {cert_fingerprint}", file=sys.stderr)
     if no_tls:
         print("[tls] WARNING: TLS disabled — plain HTTP only", file=sys.stderr)
 
@@ -1558,7 +1714,11 @@ def hub_request(
         except Exception:
             return {"ok": False, "error": str(exc), "status": exc.code}
     except OSError:
-        return {"ok": False, "error": "hub_unavailable", "error_code": "hub_unavailable"}
+        return {
+            "ok": False,
+            "error": "hub_unavailable",
+            "error_code": "hub_unavailable",
+        }
 
 
 def status_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
@@ -1587,8 +1747,14 @@ def _hub_setup_failure_flags(response: dict[str, Any]) -> tuple[bool, bool]:
     token_problem = (
         error_code in {"hub_auth_required", "hub_token_missing", "unauthorized"}
         or status == "401"
-        or ("token" in error and ("required" in error or "missing" in error or "unauthorized" in error))
-        or ("authorization" in error and ("required" in error or "missing" in error or "unauthorized" in error))
+        or (
+            "token" in error
+            and ("required" in error or "missing" in error or "unauthorized" in error)
+        )
+        or (
+            "authorization" in error
+            and ("required" in error or "missing" in error or "unauthorized" in error)
+        )
     )
     return hub_unavailable, token_problem
 
@@ -1664,7 +1830,9 @@ def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, 
     if hub_unavailable or token_problem:
         steps.append(
             {
-                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "condition": "hub_token_required"
+                if token_problem
+                else "check_hub_token",
                 "action": "supply_or_rotate_hub_token",
                 "command": "ardur status --hub-url <hub-url> --hub-token <hub-token>",
                 "detail": (
@@ -1690,7 +1858,9 @@ def _status_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, 
     return steps
 
 
-def desktop_observe_response_with_next_steps(response: dict[str, Any]) -> dict[str, Any]:
+def desktop_observe_response_with_next_steps(
+    response: dict[str, Any],
+) -> dict[str, Any]:
     """Return ``ardur desktop-observe`` output with safe local remediation hints."""
     if response.get("ok"):
         return response
@@ -1723,7 +1893,9 @@ def _desktop_observe_invalid_hub_url_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _desktop_observe_next_steps_for_response(response: dict[str, Any]) -> list[dict[str, str]]:
+def _desktop_observe_next_steps_for_response(
+    response: dict[str, Any],
+) -> list[dict[str, str]]:
     if _hub_failure_condition(response) == "hub_url_invalid":
         return _desktop_observe_invalid_hub_url_next_steps()
 
@@ -1759,7 +1931,9 @@ def _desktop_observe_next_steps_for_response(response: dict[str, Any]) -> list[d
     if hub_unavailable or token_problem:
         steps.append(
             {
-                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "condition": "hub_token_required"
+                if token_problem
+                else "check_hub_token",
                 "action": "supply_or_rotate_hub_token",
                 "command": (
                     "ardur desktop-observe --app <app-name> --title <window-title> "
@@ -1828,7 +2002,9 @@ def run_recovery_next_steps_for_response(
     if hub_unavailable or token_problem:
         steps.append(
             {
-                "condition": "hub_token_required" if token_problem else "check_hub_token",
+                "condition": "hub_token_required"
+                if token_problem
+                else "check_hub_token",
                 "action": "supply_or_rotate_hub_token",
                 "command": (
                     "ardur run --home <ardur-home> --hub-url <hub-url> "
@@ -1928,7 +2104,9 @@ def setup_personal(args: argparse.Namespace) -> dict[str, Any]:
     config = _ensure_hub_config(
         paths,
         hub_url=_setup_hub_url(host, port),
-        browser_extension_path=str(Path(args.extension_path).expanduser()) if args.extension_path else None,
+        browser_extension_path=str(Path(args.extension_path).expanduser())
+        if args.extension_path
+        else None,
         rotate_token=bool(getattr(args, "rotate_token", False)),
     )
     launch_agent = _write_launch_agent(paths, host, port)
@@ -2053,13 +2231,17 @@ def _doctor_personal_next_steps(
 def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
     try:
-        token = resolve_hub_token(home=args.home, explicit=getattr(args, "hub_token", None))
+        token = resolve_hub_token(
+            home=args.home, explicit=getattr(args, "hub_token", None)
+        )
     except HubError as exc:
         mapped = _personal_home_failure_response_for(exc)
         if mapped is not None:
             return mapped
         raise
-    hub = hub_request("GET", "/v1/status", hub_url=args.hub_url, hub_token=token, home=args.home)
+    hub = hub_request(
+        "GET", "/v1/status", hub_url=args.hub_url, hub_token=token, home=args.home
+    )
     home_ok = paths.home.exists()
     config_ok = paths.config.exists()
     hub_token_ok = bool(token)
@@ -2067,8 +2249,17 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     checks = [
         {"name": "home", "ok": home_ok, "detail": "<ardur-home>"},
         {"name": "config", "ok": config_ok, "detail": "<ardur-config>"},
-        {"name": "hub_token", "ok": hub_token_ok, "detail": "configured" if token else "missing"},
-        {"name": "hub", "ok": hub_ok, "detail": hub.get("error") or _redact_url_for_user_output(str(args.hub_url))},
+        {
+            "name": "hub_token",
+            "ok": hub_token_ok,
+            "detail": "configured" if token else "missing",
+        },
+        {
+            "name": "hub",
+            "ok": hub_ok,
+            "detail": hub.get("error")
+            or _redact_url_for_user_output(str(args.hub_url)),
+        },
         {
             "name": "desktop_permissions",
             "ok": sys.platform == "darwin",
@@ -2154,7 +2345,9 @@ def _uninstall_dry_run_next_steps(remove_data: bool) -> list[dict[str, str]]:
 
 def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
     paths = HubPaths.from_home(args.home)
-    launch_agent = Path.home() / "Library" / "LaunchAgents" / "dev.ardur.personal-hub.plist"
+    launch_agent = (
+        Path.home() / "Library" / "LaunchAgents" / "dev.ardur.personal-hub.plist"
+    )
     would_remove = []
     if launch_agent.exists():
         would_remove.append(str(launch_agent))
@@ -2195,8 +2388,14 @@ def run_under_hub(args: argparse.Namespace) -> int:
     # ``None`` means the flag was omitted and the default home should be used.
     home_arg = getattr(args, "home", None)
     if home_arg is not None and not str(home_arg).strip():
-        print("ardur run --home must be a non-empty path after trimming whitespace.", file=sys.stderr)
-        print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+        print(
+            "ardur run --home must be a non-empty path after trimming whitespace.",
+            file=sys.stderr,
+        )
+        print(
+            'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+            file=sys.stderr,
+        )
         return 2
 
     session_id = f"cli:{uuid.uuid4()}"
@@ -2205,14 +2404,23 @@ def run_under_hub(args: argparse.Namespace) -> int:
         "session": {"id": session_id, "title": " ".join(command)},
     }
     try:
-        token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+        token = resolve_hub_token(
+            home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None)
+        )
     except HubError as exc:
         mapped = _personal_home_failure_response_for(exc)
         if mapped is not None:
             _print_json_response(mapped)
             return 1
         raise
-    start = hub_request("POST", "/v1/sessions/start", start_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
+    start = hub_request(
+        "POST",
+        "/v1/sessions/start",
+        start_payload,
+        hub_url=args.hub_url,
+        hub_token=token,
+        home=getattr(args, "home", None),
+    )
     if not start.get("ok"):
         print(_run_failure_summary_line(start, phase="session_start"), file=sys.stderr)
         _print_run_recovery_next_steps(start, phase="session_start")
@@ -2227,14 +2435,28 @@ def run_under_hub(args: argparse.Namespace) -> int:
             "raw_content_included": False,
         },
     }
-    check = hub_request("POST", "/v1/policy/check", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
+    check = hub_request(
+        "POST",
+        "/v1/policy/check",
+        check_payload,
+        hub_url=args.hub_url,
+        hub_token=token,
+        home=getattr(args, "home", None),
+    )
     if not check.get("ok"):
         print(_run_failure_summary_line(check, phase="policy_check"), file=sys.stderr)
         _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
     policy = _dict(check.get("policy"))
     if policy.get("verdict") == "blocked":
-        observe = hub_request("POST", "/v1/events/observe", check_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
+        observe = hub_request(
+            "POST",
+            "/v1/events/observe",
+            check_payload,
+            hub_url=args.hub_url,
+            hub_token=token,
+            home=getattr(args, "home", None),
+        )
         print(_blocked_command_summary_line(policy), file=sys.stderr)
         _emit_run_audit_reference_for_user_output(observe)
         return 126
@@ -2252,10 +2474,19 @@ def run_under_hub(args: argparse.Namespace) -> int:
             "stderr_digest": completed.stderr_digest,
             "stdout_bytes": completed.stdout_bytes,
             "stderr_bytes": completed.stderr_bytes,
-            "content_digest": _sha256_text(" ".join(command) + str(completed.returncode)),
+            "content_digest": _sha256_text(
+                " ".join(command) + str(completed.returncode)
+            ),
         },
     }
-    hub_request("POST", "/v1/events/observe", observe_payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
+    hub_request(
+        "POST",
+        "/v1/events/observe",
+        observe_payload,
+        hub_url=args.hub_url,
+        hub_token=token,
+        home=getattr(args, "home", None),
+    )
     return completed.returncode
 
 
@@ -2270,25 +2501,36 @@ def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
     if sys.platform == "darwin" and (not app or not title):
         script = (
             'tell application "System Events"\n'
-            'set frontApp to name of first application process whose frontmost is true\n'
+            "set frontApp to name of first application process whose frontmost is true\n"
             'set winTitle to ""\n'
-            'try\n'
-            'set winTitle to name of front window of first application process whose frontmost is true\n'
-            'end try\n'
+            "try\n"
+            "set winTitle to name of front window of first application process whose frontmost is true\n"
+            "end try\n"
             'return frontApp & "\\n" & winTitle\n'
-            'end tell'
+            "end tell"
         )
-        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+        result = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True
+        )
         if result.returncode == 0:
             lines = result.stdout.splitlines()
             app = app or (lines[0] if lines else "Unknown")
             title = title or (lines[1] if len(lines) > 1 else "")
         else:
-            permission_note = result.stderr.strip() or "macOS Accessibility permission unavailable"
+            permission_note = (
+                result.stderr.strip() or "macOS Accessibility permission unavailable"
+            )
     text = args.text or ""
     payload = {
-        "source": {"type": "desktop", "app": app or "Unknown", "process": app or "Unknown"},
-        "session": {"id": args.session_id or f"desktop:{app or 'unknown'}", "title": title or ""},
+        "source": {
+            "type": "desktop",
+            "app": app or "Unknown",
+            "process": app or "Unknown",
+        },
+        "session": {
+            "id": args.session_id or f"desktop:{app or 'unknown'}",
+            "title": title or "",
+        },
         "event": {
             "kind": "desktop_observation",
             "action_class": "observe",
@@ -2296,20 +2538,31 @@ def desktop_observe(args: argparse.Namespace) -> dict[str, Any]:
             "capture_mode": "structured_visible_text" if text else "digest_only",
             "text_snapshot_included": bool(text),
             "text_excerpt": _clip(text),
-            "content_digest": _sha256_text(text or f"{app}:{title}:{permission_note or ''}"),
+            "content_digest": _sha256_text(
+                text or f"{app}:{title}:{permission_note or ''}"
+            ),
             "raw_content_included": False,
             "consent": {"visible_text": bool(text)},
             "hidden_provider_activity": True,
         },
     }
     try:
-        token = resolve_hub_token(home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None))
+        token = resolve_hub_token(
+            home=getattr(args, "home", None), explicit=getattr(args, "hub_token", None)
+        )
     except HubError as exc:
         mapped = _personal_home_failure_response_for(exc)
         if mapped is not None:
             return mapped
         raise
-    response = hub_request("POST", "/v1/events/observe", payload, hub_url=args.hub_url, hub_token=token, home=getattr(args, "home", None))
+    response = hub_request(
+        "POST",
+        "/v1/events/observe",
+        payload,
+        hub_url=args.hub_url,
+        hub_token=token,
+        home=getattr(args, "home", None),
+    )
     response = desktop_observe_response_with_next_steps(response)
     if permission_note:
         response["permission_note"] = permission_note
