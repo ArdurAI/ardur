@@ -733,6 +733,9 @@ class GovernedSubagentAdapter:
             try:
                 temporary.unlink()
             except OSError:
+                # Preserve the original persistence failure.  os.replace may
+                # already have consumed the temporary path, and a failed
+                # best-effort cleanup must not obscure that primary error.
                 pass
             raise
 
@@ -1401,6 +1404,9 @@ class GovernedSubagentAdapter:
                 duration_ms=duration_ms,
             )
         except Exception:
+            # Serialization already failed after the executor may have caused
+            # an effect.  The caller quarantines the operation below, so a
+            # failed best-effort evidence write can never authorize a replay.
             pass
 
     def _evaluate_operation(

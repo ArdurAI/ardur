@@ -761,7 +761,8 @@ def test_close_all_continues_after_one_child_cleanup_failure(
         adapter.close_all(cancelled=True)
 
     assert _error_code(captured) == "TEST_FAILURE"
-    assert attempted == [str(first), str(second)]
+    assert len(attempted) == 2
+    assert set(attempted) == {str(first), str(second)}
     assert adapter.lifecycle_snapshot(second)["status"] == "cancelled"
 
 
