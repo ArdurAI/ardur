@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "ac37d68a586ad225f30a3aaacf8b0ac9ca82a468178f9d6f6cacd5404bdeeada"
+source_sha256: "0061dd7560f5427f1f63b0d23b6298c2d053f5fb31dc6f37db06d604ce46db36"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -275,8 +275,11 @@ evidence has `confidence=low`,
 uid, environment, or file content is collected by this preview. It does not
 issue a passport, adopt a process, select policy, or enforce an action. Any
 process can reuse one of these names, and unlisted launch shapes remain false
-negatives. Issue #67 remains open for stronger fingerprints and the measured
-precision/recall gate.
+negatives. The [agent-recognition evaluation
+reference](agent-recognition-evaluation.md) documents the versioned sanitized
+corpus, deterministic report, maintained-corpus threshold, Wilson intervals,
+and known renamed-binary false negatives. Issue #67 remains open for stronger
+fingerprints and additional signal strata.
 
 ## Lifecycle capture loss
 

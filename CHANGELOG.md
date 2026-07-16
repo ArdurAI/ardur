@@ -36,6 +36,9 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Add a versioned sanitized agent-recognition corpus, deterministic evaluator,
+  95% Wilson intervals, stable error IDs, exact corpus/registry digests, and a
+  maintained-corpus CI gate without making population-accuracy claims
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
   exact-name registry, separate in-kernel `comm` and successful-exec basename
   prefilters, operator class overrides, script-launcher smoke coverage, and

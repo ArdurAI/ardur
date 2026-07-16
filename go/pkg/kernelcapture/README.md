@@ -38,6 +38,13 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
     capture, while dropping noncandidate host execs and all host-wide exits;
   - labels exact-name matches low-confidence and observe-only, with no
     attestation, policy selection, process adoption, or enforcement.
+- Includes a deterministic maintained-corpus evaluation gate:
+  - validates versioned samples, reviewed thresholds, sanitized provenance,
+    stable IDs, and explicit signal availability;
+  - reports confusion cells, per-class and aggregate ratios with numerator,
+    denominator, and 95% Wilson intervals, plus exact corpus/registry digests;
+  - gates supported-shape recall at 0.90 and hard-negative false positives at
+    zero without claiming population accuracy or identity assurance.
 - Includes a local-only dry-run daemon custody scaffold and read-only preflight
   inspector for the root-owned config/state/socket/bpffs boundary, plus bounded
   Linux Slice 2 installer surfaces: a privileged `ardur-sensor install`
