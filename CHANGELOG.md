@@ -61,6 +61,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Keep seccomp listener ownership in one goroutine and wake cancellation through
+  a dedicated eventfd, preventing listener teardown from closing a reused
+  control-connection descriptor
 - Prevent torn `PolicyMaps` reads and use-after-close during BPF-LSM guard
   startup, degradation, and shutdown; reject late guards after seccomp fallback
 - Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the
