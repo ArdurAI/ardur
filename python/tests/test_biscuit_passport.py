@@ -969,6 +969,18 @@ def test_valid_a_to_b_to_c_chain_narrows_every_supported_authority() -> None:
     assert context.delegation_allowed is False
     assert context.max_delegation_depth == 0
     assert context.cwd == "/workspace/project/reports/q1"
+    # Denials accrete across the whole chain: the root's own forbidden_tools
+    # plus every tool each hop dropped from allowed_tools (write_file at A→B,
+    # search at B→C). A regression that let a hop forget an ancestor's denial
+    # would still satisfy the allowed_tools subset assertion above.
+    assert context.forbidden_tools == ["delete_file", "search", "write_file"]
+    # Families no hop narrows must survive the chain rather than resetting to
+    # an unrestricted default.
+    assert context.allowed_side_effect_classes == ["external_send", "none"]
+    # Time bounds narrow monotonically down the chain: A expires at 700,
+    # B at 301, C at 202.
+    assert context.issued_at == 102
+    assert context.expires_at == 202
 
 
 def test_verify_detects_chain_splice() -> None:
