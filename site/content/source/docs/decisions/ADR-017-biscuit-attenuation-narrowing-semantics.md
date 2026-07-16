@@ -2,7 +2,7 @@
 title: "ADR-017: Biscuit Attenuation Narrowing Semantics"
 description: "Date: 2026-04-21"
 source_path: "docs/decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md"
-source_sha256: "57176d875cf27f6ea6713f96a852e675052187dd4ce15680618260025dbe9fc4"
+source_sha256: "572c86c509e2e181cff6eda0468b669cd66e36ecc9bc19e4c80ffe3d5b878dd2"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -84,7 +84,9 @@ Failures use the stable prefix
 `attenuation:<dimension>:block <index>:` so callers and tests can identify the
 rejected authority dimension without parsing free-form prose.
 
-`_context_from_blocks` raises `BiscuitVerifyError` on any widening observed.
+`_context_from_blocks` raises `ValueError` on any widening observed, and
+`verify_biscuit_passport` translates it into `BiscuitVerifyError` so callers
+see a single verification-failure type.
 The Python helper `derive_child_biscuit` stays as an
 ergonomic issuance entrypoint; its invariants become redundant
 defence-in-depth rather than the only anchor.

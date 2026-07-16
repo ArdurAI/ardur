@@ -67,7 +67,9 @@ Failures use the stable prefix
 `attenuation:<dimension>:block <index>:` so callers and tests can identify the
 rejected authority dimension without parsing free-form prose.
 
-`_context_from_blocks` raises `BiscuitVerifyError` on any widening observed.
+`_context_from_blocks` raises `ValueError` on any widening observed, and
+`verify_biscuit_passport` translates it into `BiscuitVerifyError` so callers
+see a single verification-failure type.
 The Python helper `derive_child_biscuit` stays as an
 ergonomic issuance entrypoint; its invariants become redundant
 defence-in-depth rather than the only anchor.
