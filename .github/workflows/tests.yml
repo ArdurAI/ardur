@@ -243,10 +243,7 @@ jobs:
 
       - name: Install ardur
         working-directory: python
-        run: python -m pip install -e '.[dev]'
-
-      - name: Install langchain-core for governed-tool integration tests
-        run: python -m pip install langchain-core
+        run: python -m pip install -e '.[dev,langgraph]'
 
       - name: Run governance integration tests (demo code paths)
         working-directory: python
