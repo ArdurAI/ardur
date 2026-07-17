@@ -39,7 +39,14 @@ def _section(document: str, heading: str) -> str:
     return match.group("body")
 
 
-def _fixture_repo(tmp_path: Path, *, complete_graph: bool | None) -> Path:
+def _fixture_repo(
+    tmp_path: Path,
+    *,
+    complete_graph: bool | None,
+    empty_graph_artifact: str | None = None,
+) -> Path:
+    assert empty_graph_artifact in (None, "ardur-graph.md", "ardur-graph.mmd")
+    assert empty_graph_artifact is None or complete_graph is True
     repo = tmp_path / "repo"
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
@@ -66,8 +73,14 @@ output.mkdir(parents=True, exist_ok=True)
     encoding="utf-8",
 )
 if {complete_graph!r}:
-    (output / "ardur-graph.md").write_text("# Graph\\n", encoding="utf-8")
-    (output / "ardur-graph.mmd").write_text("graph TD\\n", encoding="utf-8")
+    (output / "ardur-graph.md").write_text(
+        {"" if empty_graph_artifact == "ardur-graph.md" else "# Graph\\n"!r},
+        encoding="utf-8",
+    )
+    (output / "ardur-graph.mmd").write_text(
+        {"" if empty_graph_artifact == "ardur-graph.mmd" else "graph TD\\n"!r},
+        encoding="utf-8",
+    )
 """,
             encoding="utf-8",
         )
@@ -191,6 +204,23 @@ def test_present_graph_builder_must_produce_the_complete_artifact_set(
     stale_context = repo / ".context" / "ARDUR_CONTEXT.md"
     stale_context.parent.mkdir()
     stale_context.write_text("# stale successful context\n", encoding="utf-8")
+    completed = _run_fixture_bootstrap(repo)
+
+    assert completed.returncode != 0
+    assert "graph builder did not produce required artifact" in completed.stderr
+    assert not (repo / ".context" / "ARDUR_CONTEXT.md").exists()
+
+
+def test_present_graph_builder_must_produce_nonempty_artifacts(
+    tmp_path: Path,
+) -> None:
+    """An empty graph artifact must fail before success context is emitted."""
+
+    repo = _fixture_repo(
+        tmp_path,
+        complete_graph=True,
+        empty_graph_artifact="ardur-graph.mmd",
+    )
     completed = _run_fixture_bootstrap(repo)
 
     assert completed.returncode != 0

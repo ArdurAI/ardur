@@ -2,7 +2,7 @@
 title: "Codex Agent Instructions"
 description: "Codex should follow the [Shared Agent Contract](shared.md), plus the"
 source_path: "docs/agent-instructions/codex.md"
-source_sha256: "ce605f060c46c2fec17855433927cadc7ffffd31e7ea7be90f65e65fb21a2c8d"
+source_sha256: "195a90da11751be898de5dcf5f9a47e56f75cf68e60d744d33e718458b7a80eb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,8 +30,10 @@ Then read:
 
 1. `.context/ARDUR_CONTEXT.md`
 2. Graph artifacts only when its **Generated Graph** status is `available`
-3. `AGENTS.md`
-4. `docs/engineering-standards.md`
+3. When its graph status is `unavailable`, use the live source and applicable
+   workflow files; missing graph artifacts are optional in this path
+4. `AGENTS.md`
+5. `docs/engineering-standards.md`
 
 ## Codex-Specific Rules
 

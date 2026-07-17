@@ -2,7 +2,7 @@
 title: "Conductor Agent Instructions"
 description: "Conductor workspaces are parallel, branch-isolated working areas. Follow the"
 source_path: "docs/agent-instructions/conductor.md"
-source_sha256: "f639a28961925b8beecfca2da7bfd93e88e403f1dfae7de74f41ae90dd3b9849"
+source_sha256: "830b523cf8089829ac842fd6c9da5aad8354f2e6faa5644a1461f1c5fe00474b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,8 +30,10 @@ Then read:
 
 1. `.context/ARDUR_CONTEXT.md`
 2. Graph artifacts only when its **Generated Graph** status is `available`
-3. `AGENTS.md`
-4. `docs/engineering-standards.md`
+3. When its graph status is `unavailable`, use the live source and applicable
+   workflow files; missing graph artifacts are optional in this path
+4. `AGENTS.md`
+5. `docs/engineering-standards.md`
 
 ## Conductor-Specific Rules
 

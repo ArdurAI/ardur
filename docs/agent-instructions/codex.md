@@ -13,8 +13,10 @@ Then read:
 
 1. `.context/ARDUR_CONTEXT.md`
 2. Graph artifacts only when its **Generated Graph** status is `available`
-3. `AGENTS.md`
-4. `docs/engineering-standards.md`
+3. When its graph status is `unavailable`, use the live source and applicable
+   workflow files; missing graph artifacts are optional in this path
+4. `AGENTS.md`
+5. `docs/engineering-standards.md`
 
 ## Codex-Specific Rules
 
