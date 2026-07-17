@@ -36,4 +36,8 @@ def test_required_link_check_keeps_timeouts_fail_closed() -> None:
     normalized_workflow = workflow.replace("\\.", ".")
     assert "--accept-timeouts" not in workflow
     assert "manpages.ubuntu.com" not in normalized_workflow
+    assert "fail: true" in workflow
+    assert "needs: lychee" in workflow
+    assert "if: ${{ always() }}" in workflow
+    assert "LYCHEE: ${{ needs.lychee.result }}" in workflow
     assert 'if [ "$LYCHEE" != "success" ]' in workflow
