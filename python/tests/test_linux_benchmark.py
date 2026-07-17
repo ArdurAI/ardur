@@ -125,6 +125,13 @@ def test_report_schema_gives_heap_bytes_a_dedicated_integer_bound(
 
     assert list(validator.iter_errors(report)) == []
 
+    report["sustained_governance"]["python_heap_peak_bytes"] = 1_000_000_000_000_000
+    assert list(validator.iter_errors(report)) == []
+
+    report["sustained_governance"]["python_heap_peak_bytes"] = 1_000_000_000_000_001
+    errors = list(validator.iter_errors(report))
+    assert [error.validator for error in errors] == ["maximum"]
+
     report["sustained_governance"]["python_heap_peak_bytes"] = True
     errors = list(validator.iter_errors(report))
     assert [error.validator for error in errors] == ["type"]
