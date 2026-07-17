@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "eb41533a3cc5c0565cb99095c856f181aa490471f46edebe3c111446c73e11eb"
+source_sha256: "e2397852a3cf91e7e1dd6e5c90809ae1bc848c51dabafb7abab220c60514b3c5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
+  side-effect, budget, time, delegation, lineage-parent, or working-directory
+  authority while preserving valid transitive attenuation
 - Label exported actor/verifier identity as signed receipt claims while
   explicitly reporting that the detached exporter did not verify SPIFFE
   workload identity
