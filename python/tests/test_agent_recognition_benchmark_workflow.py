@@ -7,7 +7,7 @@ WORKFLOW_MIRROR = REPO_ROOT / "site" / "static" / "repo" / WORKFLOW.relative_to(
 BUDGET = REPO_ROOT / "go" / "pkg" / "kernelcapture" / "testdata" / "agent-recognition-benchmark-budget-v0.3.json"
 
 
-def test_automatic_ci_requires_v3_budget_and_manual_ci_is_explicit_evidence_only() -> None:
+def test_automatic_ci_requires_v3_budget_and_manual_profiles_are_explicit() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert BUDGET.is_file()
@@ -17,6 +17,8 @@ def test_automatic_ci_requires_v3_budget_and_manual_ci_is_explicit_evidence_only
     assert 'test -f "$BUDGET_FILE"' in workflow
     assert 'if [ "$BENCHMARK_PROFILE" = "ci" ] && [ "$EVIDENCE_ONLY" != "true" ]; then' in workflow
     assert 'args+=(--budget "$BUDGET_FILE")' in workflow
+    assert "manual CI dispatch is collecting budget-independent v0.3 evidence" in workflow
+    assert "manual release profile is a budget-independent experiment and never substitutes for required CI" in workflow
 
 
 def test_workflow_builds_and_records_an_exact_same_vm_reference() -> None:

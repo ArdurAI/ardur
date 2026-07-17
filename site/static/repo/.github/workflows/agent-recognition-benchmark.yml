@@ -193,6 +193,8 @@ jobs:
             args+=(--budget "$BUDGET_FILE")
           elif [ "$BENCHMARK_PROFILE" = "ci" ]; then
             echo "::notice::manual CI dispatch is collecting budget-independent v0.3 evidence"
+          else
+            echo "::notice::manual release profile is a budget-independent experiment and never substitutes for required CI"
           fi
           set +e
           sudo -- "${args[@]}"

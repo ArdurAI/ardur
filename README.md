@@ -90,9 +90,10 @@ claim.
 
 The separate
 [agent-recognition overhead harness](docs/benchmarks/agent-recognition-overhead.md)
-runs a real-Linux exact-exec corpus with recognition off, with an exact
-target-branch reference daemon, and with the candidate daemon on the same VM;
-arm order rotates through all six permutations. Its machine report keeps
+runs a real-Linux exact-exec corpus with recognition disabled for the candidate
+baseline, enabled for the exact target-branch reference daemon, and enabled for
+the candidate daemon on the same VM; arm order rotates through all six
+permutations. Its machine report keeps
 lifecycle delivery/loss, classifier rejection, fingerprint terminal outcomes,
 daemon CPU, peak RSS, and workload wall time separate. It is host-specific
 observer-effect evidence, not identity, accuracy, attestation, or governance

@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "1db88522442c0a1940fef90957f314083dfa0196231bb237b9c15297d425c008"
+source_sha256: "faf9e8bb5755ac3191c27230d4d01eaeeba4817a19899a3eb045e9bc41c53ca3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -107,9 +107,10 @@ claim.
 
 The separate
 [agent-recognition overhead harness](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/)
-runs a real-Linux exact-exec corpus with recognition off, with an exact
-target-branch reference daemon, and with the candidate daemon on the same VM;
-arm order rotates through all six permutations. Its machine report keeps
+runs a real-Linux exact-exec corpus with recognition disabled for the candidate
+baseline, enabled for the exact target-branch reference daemon, and enabled for
+the candidate daemon on the same VM; arm order rotates through all six
+permutations. Its machine report keeps
 lifecycle delivery/loss, classifier rejection, fingerprint terminal outcomes,
 daemon CPU, peak RSS, and workload wall time separate. It is host-specific
 observer-effect evidence, not identity, accuracy, attestation, or governance

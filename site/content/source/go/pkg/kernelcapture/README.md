@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "021a1fe06c4481c92fb0d3360a97b68993f2e9256d1e9ec96cdcbf9b33ee16b1"
+source_sha256: "68a87b5acd7617ca0fc7538523bdae7d69680e61de6b2444cd64b37172f5092a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -61,11 +61,14 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - exposes only bounded outcome counters and canonical registry metadata,
     never computed executable digests, full paths, argv, environment, or file
     content; matches remain heuristic and observe-only.
-  - provides a separate real-Linux paired overhead harness with deterministic
-    CI/release profiles, raw six-order baseline/reference/candidate
-    observations, same-VM daemon CPU ratios, peak RSS, authenticated health,
-    exclusive capture/classification/fingerprint ledgers, artifact digests, and
-    fail-closed reviewed-budget enforcement.
+  - provides a separate [real-Linux paired overhead
+    harness](../../../docs/benchmarks/agent-recognition-overhead.md) with
+    deterministic CI/release profiles, raw six-order
+    baseline/reference/candidate observations, same-VM daemon CPU ratios, peak
+    RSS, authenticated health, exclusive capture/classification/fingerprint
+    ledgers, artifact digests, and fail-closed reviewed-budget enforcement; the
+    [strict report tests](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/go/pkg/kernelcapture/agent_recognition_benchmark_test.go) bind those claims
+    to the committed evidence and budgets.
 - Includes a deterministic maintained-corpus evaluation gate:
   - validates versioned samples, reviewed thresholds, sanitized provenance,
     stable IDs, and explicit signal availability;
