@@ -145,6 +145,42 @@ func TestDaemonProtocolResponseAgentFingerprintHealthRoundTripIsPrivacyBounded(t
 	}
 }
 
+func TestDaemonProtocolResponseRecognitionAndCaptureHealthRoundTripIsPrivacyBounded(t *testing.T) {
+	t.Parallel()
+	response := DaemonProtocolResponse{
+		ProtocolVersion: DaemonProtocolVersion,
+		OK:              true,
+		Method:          DaemonProtocolMethodHealth,
+		LifecycleCaptureHealth: &DaemonLifecycleCaptureHealth{
+			DeliveredTotal: 23, ProducerRingbufDroppedTotal: 2, MalformedRecordsTotal: 1,
+			ProducerCounterAvailable: true,
+		},
+		AgentRecognition: &AgentRecognitionHealth{
+			Enabled: true, RegistryVersion: "release.v1", RegistrySHA256: "registry-metadata",
+			Counters: AgentRecognitionCounters{CandidatesTotal: 20, Recognized: 19, Ambiguous: 1},
+		},
+	}
+	encoded, err := EncodeDaemonProtocolResponse(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range [][]byte{[]byte("/private/native-agent"), []byte("--secret"), []byte("computed-executable-digest")} {
+		if bytes.Contains(encoded, private) {
+			t.Fatalf("health response exposed private process input %q: %s", private, encoded)
+		}
+	}
+	decoded, err := DecodeDaemonProtocolResponse(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.LifecycleCaptureHealth == nil || decoded.LifecycleCaptureHealth.DeliveredTotal != 23 || !decoded.LifecycleCaptureHealth.ProducerCounterAvailable {
+		t.Fatalf("decoded lifecycle health = %+v", decoded.LifecycleCaptureHealth)
+	}
+	if decoded.AgentRecognition == nil || decoded.AgentRecognition.Counters.CandidatesTotal != 20 || decoded.AgentRecognition.Counters.Ambiguous != 1 {
+		t.Fatalf("decoded recognition health = %+v", decoded.AgentRecognition)
+	}
+}
+
 func TestDaemonProtocolResponseLifecycleCaptureRoundTrip(t *testing.T) {
 	t.Parallel()
 

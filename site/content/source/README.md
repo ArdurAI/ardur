@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "7e3a2b82efa9d9643fb8fe02b574db5bee132faf78189382380037b4d2a0adbc"
+source_sha256: "f09f8809ab270fc53bd9ab7dccc12a1d04102c83bb30ab6722ad91b272683b61"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -104,6 +104,14 @@ latency, imported-evidence processing, sustained resource use, and optional
 paired sensor overhead separate. Pull requests run a small shape-only smoke;
 host-specific stress results are manual evidence, not a universal overhead
 claim.
+
+The separate
+[agent-recognition overhead harness](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/)
+runs a real-Linux exact-exec corpus with recognition off and on in paired AB/BA
+order. Its machine report keeps lifecycle delivery/loss, classifier rejection,
+fingerprint terminal outcomes, daemon CPU, peak RSS, and workload wall time
+separate. It is host-specific observer-effect evidence, not identity,
+accuracy, attestation, or governance proof.
 
 The [AuditBench evaluation protocol](/__ardur_internal__/source/docs/specs/auditbench-evaluation-protocol-v0.1/)
 adds strict raw-capture replay, blind two-view annotations, a local

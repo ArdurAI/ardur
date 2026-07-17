@@ -1,0 +1,125 @@
+name: Agent recognition benchmark
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/agent-recognition-benchmark.yml"
+      - "docs/benchmarks/agent-recognition-overhead.md"
+      - "go/cmd/ardur-agent-recognition-benchmark/**"
+      - "go/cmd/ardur-agent-recognition-workload/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/pkg/kernelcapture/**"
+  pull_request:
+    paths:
+      - ".github/workflows/agent-recognition-benchmark.yml"
+      - "docs/benchmarks/agent-recognition-overhead.md"
+      - "go/cmd/ardur-agent-recognition-benchmark/**"
+      - "go/cmd/ardur-agent-recognition-workload/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/pkg/kernelcapture/**"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Bounded workload profile"
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-recognition-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Agent recognition overhead (${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      BENCHMARK_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }}
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.1.json
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Run race-sensitive benchmark tests
+        working-directory: go
+        run: |
+          go test -race -count=1 \
+            ./pkg/kernelcapture \
+            ./cmd/ardur-kernelcaptured \
+            ./cmd/ardur-agent-recognition-benchmark \
+            ./cmd/ardur-agent-recognition-workload
+
+      - name: Build exact benchmark artifacts
+        working-directory: go
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/ardur-kernelcaptured" ./cmd/ardur-kernelcaptured
+          go build -trimpath -o "$RUNNER_TEMP/ardur-agent-recognition-benchmark" ./cmd/ardur-agent-recognition-benchmark
+          go build -trimpath -o "$RUNNER_TEMP/ardur-agent-recognition-workload" ./cmd/ardur-agent-recognition-workload
+
+      - name: Prepare isolated kernel filesystems
+        run: |
+          set -euo pipefail
+          if [ "$(stat -f -c %T /sys/fs/bpf)" != "bpf_fs" ]; then
+            sudo mount -t bpf bpf /sys/fs/bpf
+          fi
+          if [ "$(stat -f -c %T /sys/kernel/tracing)" != "tracefs" ]; then
+            sudo mount -t tracefs tracefs /sys/kernel/tracing
+          fi
+
+      - name: Run paired recognition benchmark
+        run: |
+          set -euo pipefail
+          benchmark_bin="$RUNNER_TEMP/ardur-agent-recognition-benchmark"
+          report_dir="$RUNNER_TEMP/ardur-agent-recognition-benchmark-report"
+          if [ "$benchmark_bin" = "$report_dir" ] || [ -e "$report_dir" ]; then
+            echo "::error::benchmark report path is not isolated"
+            exit 2
+          fi
+          args=(
+            "$benchmark_bin"
+            --daemon-bin "$RUNNER_TEMP/ardur-kernelcaptured"
+            --workload-bin "$RUNNER_TEMP/ardur-agent-recognition-workload"
+            --source-sha "$SOURCE_SHA"
+            --output-dir "$report_dir"
+            --profile "$BENCHMARK_PROFILE"
+            --warmup-pairs 1
+            --measured-pairs 20
+            --timeout 25m
+          )
+          if [ "$BENCHMARK_PROFILE" = "ci" ] && [ -f "$BUDGET_FILE" ]; then
+            args+=(--budget "$BUDGET_FILE")
+          fi
+          set +e
+          sudo -- "${args[@]}"
+          benchmark_status=$?
+          set -e
+          if [ -d "$report_dir" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$report_dir"
+          fi
+          exit "$benchmark_status"
+
+      - name: Upload machine-readable report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-recognition-benchmark-${{ env.BENCHMARK_PROFILE }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ardur-agent-recognition-benchmark-report/
+          if-no-files-found: warn
+          retention-days: 14

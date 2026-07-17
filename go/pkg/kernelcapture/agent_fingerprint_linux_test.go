@@ -302,6 +302,32 @@ func launcherIdentityForLinuxTest(t *testing.T, path string) LauncherObjectIdent
 	}
 }
 
+func TestLinuxAgentFingerprintTargetExitedRetriesInterruptedPoll(t *testing.T) {
+	calls := 0
+	exited, outcome := linuxAgentFingerprintTargetExitedWithPoll(42, func(fds []unix.PollFd, timeout int) (int, error) {
+		calls++
+		if len(fds) != 1 || fds[0].Fd != 42 || timeout != 0 {
+			t.Fatalf("poll arguments = %+v, timeout %d", fds, timeout)
+		}
+		if calls <= 2 {
+			return -1, unix.EINTR
+		}
+		return 0, nil
+	})
+	if exited || outcome != "" || calls != 3 {
+		t.Fatalf("exited=%v outcome=%q calls=%d", exited, outcome, calls)
+	}
+
+	calls = 0
+	exited, outcome = linuxAgentFingerprintTargetExitedWithPoll(42, func([]unix.PollFd, int) (int, error) {
+		calls++
+		return -1, unix.EINTR
+	})
+	if exited || outcome != AgentFingerprintOutcomeUnsupported || calls != maxAgentFingerprintPollInterruptRetries+1 {
+		t.Fatalf("bounded retry exited=%v outcome=%q calls=%d", exited, outcome, calls)
+	}
+}
+
 func hashFileForLinuxFingerprintTest(t *testing.T, path string) [sha256.Size]byte {
 	t.Helper()
 	file, err := os.Open(path)

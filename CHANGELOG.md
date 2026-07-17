@@ -44,6 +44,10 @@ All notable changes to Ardur will be documented in this file.
   original-object identity, mutable cmdline is confined to locator duty behind
   `openat2` plus `statx` equality, launcher digests bind to allowlisted final
   interpreter profiles, and unsupported shapes return explicit fail-low labels
+- Real-Linux paired agent-recognition overhead and loss benchmarking with
+  deterministic CI/release profiles, authenticated daemon health counters,
+  raw AB/BA observations, privacy-bounded digested reports, and reviewed-budget
+  enforcement
 - Bounded native Linux executable fingerprint matching for opt-in agent
   recognition, with a daemon-owned versioned registry, pidfd plus
   `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health
