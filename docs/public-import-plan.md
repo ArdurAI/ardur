@@ -100,7 +100,7 @@ ardur/
 5. **Go runtime and protocol schemas — done.**
    `go/` is a coherent module covering credential, governance, policy, SPIFFE,
    AAT (draft-00/draft-01 profile dispatch, constraint engine, derivation, PoP,
-   chain verification, and deterministic fixture regression — 74 package tests),
+   chain verification, and deterministic fixture regression — 76 package tests),
    provenance, issuer, trust, transparency, and CLI surfaces.
 
 6. **Deployment material — partly done.**

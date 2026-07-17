@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "d909610cc24d34c84a59fbd5bbc4492f89fa860d3483e7f73efef1df8eb1cbc0"
+source_sha256: "33a43e63be579a3252216ab9832292ed92c9c84ba61ad0bab6fec205994c5eed"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -98,14 +98,14 @@ while Linux benchmark stress is manual.
 
 [`/.github/workflows/secret-scan.yml`](/__ardur_internal__/repo/.github/workflows/secret-scan.yml)
 
-- **gitleaks** scans the full git history (`fetch-depth: 0`) for secrets — API keys, tokens, private key material. Pinned to commit SHA `ff98106e...`.
+- **gitleaks** scans the full git history (`fetch-depth: 0`) for secrets — API keys, tokens, private key material. It downloads the `gitleaks` v8.18.0 release tarball over HTTPS and verifies it against the published SHA-256 checksum before scanning.
 - **forbidden-terms** is a custom `grep -RInE` job. The configured pattern is defined inline in [`/.github/workflows/secret-scan.yml`](/__ardur_internal__/repo/.github/workflows/secret-scan.yml) — read the workflow file for the authoritative regex (this page deliberately doesn't reproduce the pattern, because doing so would self-trip the gate). The pattern targets a small set of historical-internal references the repo cannot leak. Excludes `.github/`, `.git/`, `artifacts/`. Includes Markdown, YAML, JSON, asciinema casts, TOML, Python, Go, shell, `.gitignore`, `.env*`, `Dockerfile*`, `Makefile*`.
 
 ### `link-check` — lychee on Markdown links
 
 [`/.github/workflows/link-check.yml`](/__ardur_internal__/repo/.github/workflows/link-check.yml)
 
-- Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.8.0` (commit-pinned).
+- Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.9.0` (commit-pinned).
 - Currently excludes five URL patterns/domains. One (`security/advisories/new`) requires being signed in to GitHub, so an unauthenticated checker gets a 404. Four bot-blocking domains (`developers.redhat.com`, `medium.com`, `answers.uillinois.edu`, `theregister.com`) return 403 to automated requests; these are legitimate research citations excluded rather than removed. The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
 
 ### `validate-formats` — JSON and YAML parsers
@@ -121,7 +121,7 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 [`/.github/workflows/codeql.yml`](/__ardur_internal__/repo/.github/workflows/codeql.yml)
 
 - A pre-flight job (`detect-languages`) checks whether `python/` or `go/` carries source files. With the current dev tree, the matrix detects Python and Go and runs analysis per language.
-- The CodeQL actions (`init`, `autobuild`, and `analyze`) are pinned to full commit SHAs in the workflow file, with the human-readable `v3` series noted in comments. Treat `.github/workflows/codeql.yml` as the authority for the exact pins so this testing guide does not drift when the pin is updated.
+- The CodeQL actions (`init`, `autobuild`, and `analyze`) are pinned to full commit SHAs in the workflow file, with the human-readable `v4` series noted in comments. Treat `.github/workflows/codeql.yml` as the authority for the exact pins so this testing guide does not drift when the pin is updated.
 - Pairs with the `code_quality` ruleset rule on `main`: that rule reads from GitHub's code-scanning alerts table, so it passes vacuously while the matrix is empty and substantively once code lands. The CI job name (`codeql`) is intentionally **not** in the required-status-checks list — the ruleset already gates merges via the alerts mechanism.
 
 ### `tests` — Python and Go runtime tests
@@ -182,7 +182,7 @@ make reproduce
 
 ## Go AAT Test Suite
 
-The `go/pkg/aat` package has 74 named tests covering the draft-00 DG v0.1
+The `go/pkg/aat` package has 76 named tests covering the draft-00 DG v0.1
 contract and the version-dispatched draft-01 DG v0.2 profile. The fixture
 command has an additional byte-for-byte artifact regression:
 

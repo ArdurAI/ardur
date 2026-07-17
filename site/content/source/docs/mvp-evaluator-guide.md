@@ -2,7 +2,7 @@
 title: "Ardur MVP Evaluator Guide"
 description: "Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:"
 source_path: "docs/mvp-evaluator-guide.md"
-source_sha256: "6f96a6f592cb74634e596913957e6b13b1864fd06ccf4e62b41b82f829faaf75"
+source_sha256: "d61273611c9d0c7ff38a2352d4053853727a4275236dc21137e9f39745095573"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -251,8 +251,10 @@ This removes the Compose containers, network, and named volumes for the project.
   so the walkthrough uses curl's loopback-only `--insecure` mode. Do not carry
   that TLS policy to a remote deployment.
 - **Single-user demo:** the local stack is not a multi-tenant isolation model.
-- **Python Token Status List:** Token Status List revocation checking is
-  implemented in the Go credential verifier but not yet in Python.
+- **Token Status List scope:** Credential-level Token Status List revocation
+  checking lives in the Go credential verifier (`go/pkg/credential`). The Python
+  path checks mission-level status lists (`vibap.mission.mission_is_revoked`)
+  but does not yet implement the credential-level check.
 
 ## Where to look next
 

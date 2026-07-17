@@ -2,7 +2,7 @@
 title: "ARDUR.md` Profile Format"
 description: "The `ARDUR.md` profile is a plain-Markdown guardrail file that compiles into"
 source_path: "docs/reference/ardur-md-profile.md"
-source_sha256: "926aba720ee884d74863521a0678ee03745ce5ae1bbd29be5a01d2a8f77279c8"
+source_sha256: "82d0a7fedfb1f63ef729b05e554a3e21a0308da0b65f7af171854223a43de8ca"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -126,6 +126,9 @@ Passport:
   new users.
 - `safe-coding` — allow Read, Search, Edit, Write inside the protected
   folder; block shell commands.
+- `personal-firewall` — allow Read, Search, Edit, Write; block shell commands
+  and external network access; adds a forbid rule that blocks secret-like
+  arguments (API keys, tokens, private key material).
 
 Template source is in
 [`python/vibap/ardur_profile.py`](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/python/vibap/ardur_profile.py)

@@ -14,9 +14,21 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
+NO_TLS_ENV_VAR = "ARDUR_NO_TLS"
+
+
+def tls_disabled_by_environment() -> bool:
+    """Return whether the legacy transport hint requests a plaintext healthcheck."""
+
+    return os.environ.get(NO_TLS_ENV_VAR, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
 
 def _default_tls_dir(home: Path | None = None) -> Path:
-    from .passport import DEFAULT_HOME, _is_under_default_home
+    from .passport import DEFAULT_HOME
 
     return (home or DEFAULT_HOME) / "tls"
 
@@ -60,11 +72,17 @@ def generate_self_signed_cert(
         .issuer_name(subject)
         .public_key(private_key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1))
-        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365))
+        .not_valid_before(
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+        )
+        .not_valid_after(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)
+        )
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.IPv4Address(hostname))]),
+            x509.SubjectAlternativeName(
+                [x509.IPAddress(ipaddress.IPv4Address(hostname))]
+            ),
             critical=False,
         )
         .sign(private_key, hashes.SHA256())
@@ -101,23 +119,25 @@ def resolve_tls_paths(
     hostname: str = "127.0.0.1",
 ) -> tuple[Path, Path, str] | None:
     """Resolve TLS cert/key or auto-generate. Returns (cert_path, key_path, fingerprint) or None if TLS disabled."""
-    no_tls = os.environ.get("ARDUR_NO_TLS", "").strip().lower() in ("1", "true", "yes")
+    no_tls = tls_disabled_by_environment()
 
     if tls_cert and tls_key:
         cert_path = Path(tls_cert)
         key_path = Path(tls_key)
         if not cert_path.exists():
-            print(f"TLS cert not found: {cert_path}", file=sys.stderr)
+            print("TLS certificate is unavailable", file=sys.stderr)
             return None
         if not key_path.exists():
-            print(f"TLS key not found: {key_path}", file=sys.stderr)
+            print("TLS private key is unavailable", file=sys.stderr)
             return None
         fingerprint = _cert_fingerprint(cert_path)
         return cert_path, key_path, fingerprint
 
     if not tls_cert and not tls_key and not no_tls:
         tls_dir = _default_tls_dir(home)
-        key_path, cert_path, fingerprint = generate_self_signed_cert(tls_dir, hostname=hostname)
+        key_path, cert_path, fingerprint = generate_self_signed_cert(
+            tls_dir, hostname=hostname
+        )
         print(f"[tls] auto-generated self-signed cert for {hostname}", file=sys.stderr)
         print(f"[tls] fingerprint: {fingerprint}", file=sys.stderr)
         return cert_path, key_path, fingerprint

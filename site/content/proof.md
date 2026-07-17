@@ -25,11 +25,11 @@ a live provider.
 
 ## Current Verification Snapshot
 
-At the reviewed `dev` tree on 2026-07-09:
+At the reviewed `dev` tree on 2026-07-11:
 
 | Gate | Result |
 |---|---|
-| Python local run with CI coverage flags | 1,363 passed, 32 skipped, 85% coverage |
+| Python local run with CI coverage flags | 1,665 passed, 33 skipped; CI separately enforces its coverage threshold |
 | Python CI | Python 3.10 and 3.13, lint, and wheel smoke passed |
 | Go CI | Tests, vet, lint, and vulnerability scan passed |
 | Static/security | Python and Go CodeQL, secret scans, and format checks passed |

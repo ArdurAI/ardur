@@ -25,12 +25,20 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
 - [Pre-action Spend Budgets](spend-budgets.md) — signed token/currency policy,
   operator quote snapshots, atomic reserve/settle/quarantine semantics,
   evidence, metrics, and deployment limits
+- [Agent Recognition Evaluation](agent-recognition-evaluation.md) — versioned
+  maintained corpus, deterministic metrics, Wilson intervals, CI thresholds,
+  and claim boundaries
 
 ## When To Update These Pages
 
 These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
 `python/vibap/ardur_profile.py`, `go/cmd/ardur-kernelcaptured`,
+`go/cmd/ardur-agent-recognition-eval`,
+`go/pkg/kernelcapture/agent_recognition.go`,
+`go/pkg/kernelcapture/agent_recognition_evaluation.go`,
+`go/pkg/kernelcapture/testdata/agent_recognition_corpus.json`,
+`go/pkg/kernelcapture/testdata/agent_recognition_thresholds.json`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.
