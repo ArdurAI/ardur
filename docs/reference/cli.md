@@ -63,6 +63,13 @@ certificate and private-key PEM files, and `--no-tls` disables TLS only for
 plain-HTTP loopback development. This is not a production TLS, release, or
 hosted-website visibility claim.
 
+Newly generated material uses a DNS SAN for a DNS bind name and an IP SAN for
+a concrete IPv4 or IPv6 bind address. Because an unspecified wildcard bind
+such as `0.0.0.0` or `::` is not a client-verifiable identity, newly generated
+local material uses `localhost` in that case. Supply an explicit certificate
+and key whose SAN matches the client-facing identity for any non-loopback
+deployment.
+
 Invalid explicit TLS material fails closed before keys, state files, audit logs,
 sessions, or the proxy startup path are created. If either `--tls-cert` or
 `--tls-key` is provided, both values must point to existing files unless TLS is
@@ -555,6 +562,12 @@ before the Hub binds a listening socket; the command exits `1` with
 `condition: hub_tls_material_invalid`, placeholder-only recovery steps, empty
 stderr, and no raw path, file-name, certificate, or private-key disclosure.
 Port, host, and Personal home validation retain their existing precedence.
+
+Newly generated managed local material uses a DNS SAN for a DNS bind name and
+an IP SAN for a concrete IPv4 or IPv6 bind address. An unspecified wildcard
+bind uses `localhost` as the generated certificate identity; operators
+exposing the Hub beyond loopback must provide a certificate whose SAN matches
+the identity used by clients.
 
 `--no-tls` is the only intentional plaintext Hub mode and is intended for
 explicit local development. Environment configuration such as
