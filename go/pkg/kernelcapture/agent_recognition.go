@@ -263,6 +263,8 @@ func (r *AgentRecognizer) PrefilterComms() []string {
 }
 
 // AgentTypes returns the active agent classes after allow/deny overrides.
+// The defensive copy is sorted so startup validation and diagnostics are
+// deterministic.
 func (r *AgentRecognizer) AgentTypes() []string {
 	if r == nil {
 		return nil

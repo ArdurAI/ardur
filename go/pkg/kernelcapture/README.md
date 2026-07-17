@@ -38,6 +38,12 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
     capture, while dropping noncandidate host execs and all host-wide exits;
   - labels exact-name matches low-confidence and observe-only, with no
     attestation, policy selection, process adoption, or enforcement.
+  - optionally validates a daemon-owned native-executable SHA-256 registry,
+    binds candidate PIDs with pidfds, and resolves bounded regular executable
+    objects through `/proc/<pid>/exe` in a fixed non-blocking worker pool;
+  - exposes only bounded outcome counters and canonical registry metadata,
+    never computed executable digests, full paths, argv, environment, or file
+    content; matches remain heuristic and observe-only.
 - Includes a deterministic maintained-corpus evaluation gate:
   - validates versioned samples, reviewed thresholds, sanitized provenance,
     stable IDs, and explicit signal availability;

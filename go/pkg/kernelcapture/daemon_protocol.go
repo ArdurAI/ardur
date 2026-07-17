@@ -181,6 +181,10 @@ type DaemonProtocolResponse struct {
 	// this session. It never represents universal file, network, or host-effect
 	// coverage, and its status degrades with LifecycleCapture loss.
 	ObservabilityGap *ObservabilityGapSummary `json:"observability_gap,omitempty"`
+	// AgentFingerprint reports bounded asynchronous native-executable matching
+	// state on authenticated health responses only. It never contains a host
+	// path, computed executable digest, argv, environment, or file content.
+	AgentFingerprint *AgentFingerprintHealth `json:"agent_fingerprint,omitempty"`
 	// EnforcementTier carries which kernel enforcement tier is currently
 	// active — EnforcementTierBPFLSM, EnforcementTierSeccomp, or
 	// EnforcementTierNone — on successful health responses. The daemon

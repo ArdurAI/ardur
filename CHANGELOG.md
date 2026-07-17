@@ -39,6 +39,10 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Bounded native Linux executable fingerprint matching for opt-in agent
+  recognition, with a daemon-owned versioned registry, pidfd plus
+  `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health
+  counters, and privacy-safe observe-only results
 - Add a versioned sanitized agent-recognition corpus, deterministic evaluator,
   95% Wilson intervals, stable error IDs, exact corpus/registry digests, and a
   maintained-corpus CI gate without making population-accuracy claims

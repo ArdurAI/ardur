@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "0061dd7560f5427f1f63b0d23b6298c2d053f5fb31dc6f37db06d604ce46db36"
+source_sha256: "c093319d252c756700dc5c85955fef2f2c4eea04ebff9e726ae82f3603f5a84b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -264,6 +264,86 @@ configuration fails, the classifier is disabled while normal cgroup-scoped
 lifecycle capture remains active. Clean detach disables and clears recognition
 so pinned tracepoints do not keep emitting candidates without a consumer.
 
+### Optional native executable fingerprint registry
+
+Linux operators may strengthen recognized **native executable** candidates
+with an operator-maintained SHA-256 registry:
+
+```bash
+ardur-kernelcaptured --agent-recognition \
+  --agent-recognition-fingerprint-registry /etc/ardur/native-agent-fingerprints.json
+```
+
+The file uses schema `ardur.agent_fingerprint_registry.v0.1`. This illustrative
+document contains placeholders; replace each value with the 64-character
+lowercase SHA-256 of the reviewed native executable:
+
+```json
+{
+  "schema_version": "ardur.agent_fingerprint_registry.v0.1",
+  "registry_version": "operator.native-agents.2026-07-14.v1",
+  "rules": [
+    {
+      "rule_id": "native.codex.reviewed-release",
+      "agent_type": "codex_cli",
+      "expected_sha256": ["<replace-with-64-lowercase-hex>"]
+    }
+  ]
+}
+```
+
+For the root systemd daemon, install the completed file as `root:root` mode
+`0600`. The daemon opens it read-only with `O_NOFOLLOW`, validates the opened
+descriptor is a regular file owned by the daemon UID and not writable by group
+or other, enforces a 64 KiB document ceiling, rejects unknown fields and
+inactive agent types, and then canonicalizes the rules. A digest cannot be
+assigned to two different agent types. Any failure aborts startup; local socket
+clients cannot select or replace the registry.
+
+Only already-recognized candidates enter fingerprinting. Queue admission never
+waits: the default queue holds 64 jobs, two workers run concurrently, each job
+has a 500 ms cooperative deadline, and at most 32 MiB of a regular executable
+is hashed. The event PID is first bound to a pidfd, then the worker opens the
+live executable object through `/proc/<pid>/exe`. It checks process lifetime
+before and after acquisition and labels an unlinked-but-open object with
+`object_state=deleted`. Procfs ptrace-policy denial, process exit, unsupported
+or non-regular objects, size/deadline limits, and queue saturation remain
+explicit bounded results. The lifecycle ringbuf consumer never performs file
+I/O or waits for queue capacity.
+
+A configured match produces `confidence=medium` and
+`identity_assurance=heuristic_executable_content`; a mismatch or unavailable
+resolution leaves the original low-confidence name result unchanged. Every
+result remains `governance_action=observe_only`. Ordinary SHA-256 is a content
+comparison, not signed provenance, package verification, fs-verity measurement,
+attestation, authorization, or policy selection. Script launchers are excluded
+from native executable fingerprinting: their live executable object is the
+interpreter, and issue #304 owns a safe kernel-object binding for the script
+itself.
+
+Authenticated `health` responses add `agent_fingerprint` with the canonical
+registry version/SHA-256, queue capacity/depth, worker count, timeout, maximum
+file size, and monotonic counters for saturation, denied resolution, exited
+processes, unsupported objects, size/deadline limits, mismatches, matches, and
+attempts the worker was unavailable for (submitted while closing or closed, or
+abandoned because processing panicked and was contained).
+The registry SHA-256 identifies the canonical configuration; it is not a
+computed executable digest. Logs, results, receipts, health data, and fixtures
+never include the computed executable digest, full host path, argv, environment,
+or file content.
+
+There is deliberately no fingerprint cache in this slice. Re-reading a bounded
+live object costs disk I/O and CPU during candidate bursts, but avoids treating
+mutable inode metadata or a stale cache entry as provenance. Capacity exhausts
+by reporting saturation rather than blocking lifecycle capture. Operators
+should monitor the counters and measure host I/O and CPU impact before changing
+the compiled defaults. The current CLI exposes no tuning flags; code-level hard
+ceilings are 4,096 queued jobs, 32 workers, a one-minute deadline, and 1 GiB per
+file. The cooperative deadline is checked before and after reads and between
+64 KiB chunks. It cannot preempt a single filesystem read blocked in the
+kernel, so keep executable objects on healthy local filesystems and treat
+storage stalls as an operator incident.
+
 The successful-exec hook reads at most 255 path bytes, derives and emits only a
 62-byte-or-shorter basename, and ignores truncated or oversized names. It never
 emits the parent path. The daemon classifies only bounded process metadata in
@@ -272,14 +352,23 @@ An unrouted candidate is not appended to a session evidence log. Exact-name
 evidence has `confidence=low`,
 `identity_assurance=heuristic_process_metadata`, and
 `governance_action=observe_only`. No argv, full executable path, binary hash,
-uid, environment, or file content is collected by this preview. It does not
-issue a passport, adopt a process, select policy, or enforce an action. Any
+uid, environment, or file content is emitted by name-only recognition. The
+optional native fingerprint worker privately computes a bounded SHA-256 under
+the stricter contract above. Neither mode issues a passport, adopts a process,
+selects policy, or enforces an action. Any
 process can reuse one of these names, and unlisted launch shapes remain false
 negatives. The [agent-recognition evaluation
 reference](agent-recognition-evaluation.md) documents the versioned sanitized
 corpus, deterministic report, maintained-corpus threshold, Wilson intervals,
 and known renamed-binary false negatives. Issue #67 remains open for stronger
-fingerprints and additional signal strata.
+fingerprints and additional signal strata, and the script, attestation, and
+governance slices remain separate.
+
+Kernel contract references: [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html),
+[`/proc/<pid>/exe`](https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html),
+and [fs-verity](https://docs.kernel.org/filesystems/fsverity.html). The current
+method is ordinary SHA-256 over the opened executable object and must not be
+reported as an fs-verity measurement.
 
 ## Lifecycle capture loss
 

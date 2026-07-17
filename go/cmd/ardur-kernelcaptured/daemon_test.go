@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -873,6 +876,86 @@ func TestAgentRecognitionObservesUnroutedExecOnlyWhenEnabled(t *testing.T) {
 				t.Fatalf("unsafe or incorrect recognition result: %+v", got)
 			}
 		})
+	}
+}
+
+func TestAgentFingerprintingObservesNativeMatchAndReportsHealth(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("native executable fingerprint resolution requires Linux pidfds and procfs")
+	}
+	d := newTestDaemon(t)
+	if err := d.enableAgentRecognition(kernelcapture.AgentRecognizerOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := kernelcapture.NewAgentFingerprintRegistry(kernelcapture.AgentFingerprintRegistryDocument{
+		SchemaVersion:   kernelcapture.AgentFingerprintRegistrySchema,
+		RegistryVersion: "test.native.v1",
+		Rules: []kernelcapture.AgentFingerprintRule{{
+			RuleID: "native.codex", AgentType: "codex_cli", ExpectedSHA256: []string{hex.EncodeToString(hasher.Sum(nil))},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.enableAgentFingerprinting(registry); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.disableAgentRecognition)
+
+	observed := make(chan kernelcapture.AgentFingerprintObservation, 1)
+	d.agentRecognitionMu.Lock()
+	d.agentFingerprintObserver = func(_ kernelcapture.ProcessEvent, _ kernelcapture.AgentRecognitionResult, observation kernelcapture.AgentFingerprintObservation) {
+		observed <- observation
+	}
+	d.agentRecognitionMu.Unlock()
+	d.processKernelEvent(kernelcapture.ProcessEvent{
+		PID: uint32(os.Getpid()), Type: kernelcapture.ProcessEventExec, Comm: "codex", ExecutableBasename: "codex",
+	})
+	select {
+	case observation := <-observed:
+		if observation.Outcome != kernelcapture.AgentFingerprintOutcomeSuccess || observation.Confidence != kernelcapture.AgentRecognitionConfidenceMedium {
+			t.Fatalf("fingerprint observation = %+v", observation)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for native fingerprint observation")
+	}
+	response := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
+	if !response.OK || response.AgentFingerprint == nil || response.AgentFingerprint.Counters.Success != 1 {
+		t.Fatalf("health response = %+v", response)
+	}
+}
+
+func TestEnableAgentFingerprintingRejectsInactiveAgentType(t *testing.T) {
+	d := newTestDaemon(t)
+	if err := d.enableAgentRecognition(kernelcapture.AgentRecognizerOptions{AllowAgentTypes: []string{"claude_code"}}); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("trusted"))
+	registry, err := kernelcapture.NewAgentFingerprintRegistry(kernelcapture.AgentFingerprintRegistryDocument{
+		SchemaVersion: kernelcapture.AgentFingerprintRegistrySchema, RegistryVersion: "test.native.v1",
+		Rules: []kernelcapture.AgentFingerprintRule{{RuleID: "native.codex", AgentType: "codex_cli", ExpectedSHA256: []string{hex.EncodeToString(digest[:])}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.enableAgentFingerprinting(registry); err == nil {
+		t.Fatal("fingerprint registry for inactive agent type was accepted")
 	}
 }
 

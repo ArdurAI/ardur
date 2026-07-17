@@ -117,6 +117,34 @@ func TestDaemonProtocolResponseDecodeRejectsInternalExpansion(t *testing.T) {
 	}
 }
 
+func TestDaemonProtocolResponseAgentFingerprintHealthRoundTripIsPrivacyBounded(t *testing.T) {
+	computedExecutableDigest := bytes.Repeat([]byte("a"), 64)
+	response := DaemonProtocolResponse{
+		ProtocolVersion: DaemonProtocolVersion,
+		OK:              true,
+		Method:          DaemonProtocolMethodHealth,
+		AgentFingerprint: &AgentFingerprintHealth{
+			Enabled: true, RegistryVersion: "operator.v1", RegistrySHA256: "registry-metadata",
+			QueueCapacity: 64, QueueDepth: 3, WorkerCount: 2, TimeoutMS: 500, MaxFileBytes: 32 << 20,
+			Counters: AgentFingerprintCounters{QueueSaturated: 1, DigestMismatch: 2, Success: 3},
+		},
+	}
+	encoded, err := EncodeDaemonProtocolResponse(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, computedExecutableDigest) || bytes.Contains(encoded, []byte("/private/native-agent")) {
+		t.Fatalf("health response exposed private fingerprint input: %s", encoded)
+	}
+	decoded, err := DecodeDaemonProtocolResponse(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.AgentFingerprint == nil || decoded.AgentFingerprint.QueueDepth != 3 || decoded.AgentFingerprint.Counters.Success != 3 {
+		t.Fatalf("decoded health response = %+v", decoded)
+	}
+}
+
 func TestDaemonProtocolResponseLifecycleCaptureRoundTrip(t *testing.T) {
 	t.Parallel()
 

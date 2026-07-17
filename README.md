@@ -59,15 +59,20 @@ separate exact, in-kernel Linux `comm` and successful-exec basename prefilters
 for the release-bound `claude`, `codex`, `gemini`, and `kimi` command names and
 logs matching execs as low-confidence, observe-only launch candidates. The
 default cgroup-scoped capture path is unchanged. The producer derives only a
-bounded basename and never emits the parent path; it does not collect argv,
-binary hashes, environment, or file contents. It does not attest, adopt,
-authorize, or enforce the observed process, and an exact name is not proof of
-agent identity. A [maintained sanitized corpus and deterministic
-gate](docs/reference/agent-recognition-evaluation.md) now publish exact corpus
-and registry digests, sample-counted precision/recall, Wilson intervals, and
-stable false-positive/false-negative IDs. The gate is regression evidence for
-the maintained corpus—not population accuracy—and stronger fingerprints remain
-tracked separately under issue #67.
+bounded basename and never emits the parent path. Operators may additionally
+provide a daemon-owned `--agent-recognition-fingerprint-registry` on Linux to
+compare recognized native executables through a fixed asynchronous pidfd plus
+`/proc/<pid>/exe` worker pool. A configured match is only a medium-confidence
+heuristic content signal; computed digests, full paths, argv, environment, and
+file contents are never emitted. It does not attest, adopt, authorize, or
+enforce the observed process, and neither an exact name nor an ordinary SHA-256
+match proves agent identity or provenance. A [maintained sanitized corpus and
+deterministic gate](docs/reference/agent-recognition-evaluation.md) publishes
+exact corpus and registry digests, sample-counted precision/recall, Wilson
+intervals, and stable false-positive/false-negative IDs. The gate is regression
+evidence for the maintained corpus—not population accuracy—and stronger
+fingerprints remain tracked separately under issue #67. Script-backed identity,
+attestation, and governance remain separate follow-up work.
 
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)
