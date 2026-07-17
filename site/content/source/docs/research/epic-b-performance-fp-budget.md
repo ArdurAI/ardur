@@ -2,7 +2,7 @@
 title: "Epic B — The \"CrowdStrike Tax\": Cost & Reliability Budget of Always-On Host-Wide Agent Detection"
 description: "Status: **research document only** (2026-07-03). Read-only pass; no code changed."
 source_path: "docs/research/epic-b-performance-fp-budget.md"
-source_sha256: "4fc094f11f111009851b0e07eb84b26323f6c534a2168d2444ae62901da04775"
+source_sha256: "cb6bd5219e8df21d30a7ed1f79e25defd802554bd82d210a6e6cc63289a7b7d4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -72,8 +72,7 @@ of every `execve` the machine does. This section budgets that cost.
 - **How often execs happen:** Brendan Gregg's `execsnoop` documentation states the
   exec rate is "expected to be low" — **< 500/s** (ftrace build), **< 1000/s**
   (bcc/eBPF build)
-  ([bcc execsnoop man page](https://github.com/iovisor/bcc/blob/master/man/man8/execsnoop.8);
-  [Ubuntu execsnoop-bpfcc](https://manpages.ubuntu.com/manpages/focal/en/man8/execsnoop-bpfcc.8.html)).
+  ([bcc execsnoop man page](https://github.com/iovisor/bcc/blob/6ebeb451656d75e599dc34af12b479c02a3fc041/man/man8/execsnoop.8)).
   Tetragon in the field reports ~200 process events/s typical, 1,000–2,000/s under
   a synthetic connect-storm
   ([tetragon.io events docs](https://tetragon.io/docs/concepts/events/)).
@@ -350,8 +349,7 @@ one-time pass.**
 - [InfoQ — eBPF for security observability (Falco 2–5% CPU)](https://www.infoq.com/articles/ebpf-for-security-observability/)
 - [Syairozi & Arizal, "Comparative Analysis of eBPF-Based Runtime Security Monitoring Tools," RITECH 2025 (SCITEPRESS)](https://www.scitepress.org/Papers/2025/142727/142727.pdf)
 - [CrowdStrike Deployment FAQ (≤1% CPU claim)](https://www.crowdstrike.com/en-us/products/faq/)
-- [Brendan Gregg / iovisor — bcc execsnoop man page (exec rate < 1000/s)](https://github.com/iovisor/bcc/blob/master/man/man8/execsnoop.8)
-- [Ubuntu — execsnoop-bpfcc man page](https://manpages.ubuntu.com/manpages/focal/en/man8/execsnoop-bpfcc.8.html)
+- [Brendan Gregg / iovisor — bcc execsnoop man page (exec rate < 1000/s)](https://github.com/iovisor/bcc/blob/6ebeb451656d75e599dc34af12b479c02a3fc041/man/man8/execsnoop.8)
 - [lmbench — process creation latency (USENIX)](https://www.usenix.org/legacy/publications/library/proceedings/usenix01/freenix01/full_papers/loscocco/loscocco_html/node16.html)
 - [Red Hat Developer — measuring BPF performance (kprobe cycle costs)](https://developers.redhat.com/articles/2022/06/22/measuring-bpf-performance-tips-tricks-and-best-practices)
 - [iximiuz Labs — tracepoints vs kprobes vs fprobes](https://labs.iximiuz.com/tutorials/ebpf-tracing-46a570d1)
