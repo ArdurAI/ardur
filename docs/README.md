@@ -23,6 +23,8 @@ coverage are in active development.
 - [Testing](TESTING.md)
 - [Linux Governance Overhead Harness](benchmarks/linux-governance-overhead.md) —
   repeatable smoke/stress reports with explicit measurement classes and claim limits
+- [Linux Agent-Recognition Overhead Harness](benchmarks/agent-recognition-overhead.md) —
+  paired real-Linux recognition off/on evidence with exclusive loss accounting and reviewed budgets
 - [Ardur Personal Hub](guides/ardur-personal-hub.md)
 - [Agent Instructions](agent-instructions/README.md)
 - [Engineering Standards](engineering-standards.md)

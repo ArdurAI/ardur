@@ -1,0 +1,41 @@
+{
+  "schema_version": "ardur.agent_recognition_benchmark_budget.v0.1",
+  "budget_version": "github-ubuntu-24.04-amd64.203c101.v2",
+  "evidence_artifact_sha256": "cd0a5e68b45757886e67d6f546de9e2be4bbf0f48f7fdaa1b9a0acbd279c9d23",
+  "minimum_measured_pairs": 20,
+  "profiles": [
+    {
+      "profile_name": "low",
+      "evidence_p50_wall_overhead_percent": 0.06187349881473099,
+      "evidence_p95_wall_overhead_percent": 0.08518892286006075,
+      "wall_overhead_tolerance_percentage_points": 0.5,
+      "evidence_p95_enabled_daemon_cpu_nanoseconds": 10719316,
+      "daemon_cpu_relative_tolerance_percent": 30,
+      "daemon_cpu_absolute_tolerance_nanoseconds": 5000000,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13372,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "storm",
+      "evidence_p50_wall_overhead_percent": 0.5645765215515641,
+      "evidence_p95_wall_overhead_percent": 0.8333745338467347,
+      "wall_overhead_tolerance_percentage_points": 0.5,
+      "evidence_p95_enabled_daemon_cpu_nanoseconds": 158632151,
+      "daemon_cpu_relative_tolerance_percent": 30,
+      "daemon_cpu_absolute_tolerance_nanoseconds": 5000000,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13464,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "sustained",
+      "evidence_p50_wall_overhead_percent": 0.04191223721268695,
+      "evidence_p95_wall_overhead_percent": 0.12570804901090368,
+      "wall_overhead_tolerance_percentage_points": 0.5,
+      "evidence_p95_enabled_daemon_cpu_nanoseconds": 44236213,
+      "daemon_cpu_relative_tolerance_percent": 30,
+      "daemon_cpu_absolute_tolerance_nanoseconds": 5000000,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13432,
+      "peak_rss_tolerance_kib": 4096
+    }
+  ]
+}

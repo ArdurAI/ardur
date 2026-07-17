@@ -39,6 +39,10 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Real-Linux paired agent-recognition overhead and loss benchmarking with
+  deterministic CI/release profiles, authenticated daemon health counters,
+  raw AB/BA observations, privacy-bounded digested reports, and reviewed-budget
+  enforcement
 - Bounded native Linux executable fingerprint matching for opt-in agent
   recognition, with a daemon-owned versioned registry, pidfd plus
   `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health

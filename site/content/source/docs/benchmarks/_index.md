@@ -15,4 +15,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 ## Hosted Docs
 
+- [`agent-recognition-overhead.md`](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/)
 - [`linux-governance-overhead.md`](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)

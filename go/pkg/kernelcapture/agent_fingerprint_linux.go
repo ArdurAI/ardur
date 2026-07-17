@@ -14,7 +14,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const agentFingerprintReadBufferBytes = 64 << 10
+const (
+	agentFingerprintReadBufferBytes         = 64 << 10
+	maxAgentFingerprintPollInterruptRetries = 8
+)
 
 type linuxAgentFingerprintResolver struct{}
 
@@ -124,15 +127,24 @@ func (t *linuxAgentFingerprintTarget) Close() error {
 }
 
 func linuxAgentFingerprintTargetExited(pidfd int) (bool, string) {
-	pollFDs := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
-	n, err := unix.Poll(pollFDs, 0)
-	if err != nil {
-		return false, agentFingerprintLinuxErrorOutcome(err)
+	return linuxAgentFingerprintTargetExitedWithPoll(pidfd, unix.Poll)
+}
+
+func linuxAgentFingerprintTargetExitedWithPoll(pidfd int, poll func([]unix.PollFd, int) (int, error)) (bool, string) {
+	for interrupted := 0; ; interrupted++ {
+		pollFDs := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
+		n, err := poll(pollFDs, 0)
+		if errors.Is(err, unix.EINTR) && interrupted < maxAgentFingerprintPollInterruptRetries {
+			continue
+		}
+		if err != nil {
+			return false, agentFingerprintLinuxErrorOutcome(err)
+		}
+		if n == 0 {
+			return false, ""
+		}
+		return pollFDs[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR) != 0, ""
 	}
-	if n == 0 {
-		return false, ""
-	}
-	return pollFDs[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR) != 0, ""
 }
 
 func agentFingerprintContextOutcome(ctx context.Context) string {

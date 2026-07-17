@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8813fc489745849ace625a5d531f1327541f234e93679586ba03a00c8a6b4236"
+source_sha256: "2c3cb71c9dc0a79d2e2c239b4754e1d4155d17bc282874c13bdf0dac58241df8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -56,6 +56,10 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Real-Linux paired agent-recognition overhead and loss benchmarking with
+  deterministic CI/release profiles, authenticated daemon health counters,
+  raw AB/BA observations, privacy-bounded digested reports, and reviewed-budget
+  enforcement
 - Bounded native Linux executable fingerprint matching for opt-in agent
   recognition, with a daemon-owned versioned registry, pidfd plus
   `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health
