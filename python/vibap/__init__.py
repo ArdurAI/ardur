@@ -16,6 +16,16 @@ from .drp import (
     verify_drp_chain,
 )
 from .mission import MissionCache, MissionDeclaration, load_mission_declaration
+from .governed_subagent import (
+    GovernedSubagentAdapter,
+    GovernedSubagentCloseResult,
+    GovernedSubagentConflictError,
+    GovernedSubagentError,
+    GovernedSubagentHandle,
+    GovernedSubagentRecovery,
+    GovernedSubagentRequest,
+    GovernedToolResult,
+)
 from .passport import (
     ALGORITHM,
     DEFAULT_AUDIENCE,
@@ -55,6 +65,14 @@ __all__ = [
     "FileRiskBudgetLedger",
     "GovernanceProxy",
     "GovernanceSession",
+    "GovernedSubagentAdapter",
+    "GovernedSubagentCloseResult",
+    "GovernedSubagentConflictError",
+    "GovernedSubagentError",
+    "GovernedSubagentHandle",
+    "GovernedSubagentRecovery",
+    "GovernedSubagentRequest",
+    "GovernedToolResult",
     "MissionPassport",
     "MissionCache",
     "MissionDeclaration",

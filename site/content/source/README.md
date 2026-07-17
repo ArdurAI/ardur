@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "688f143e9030066a8e3cb53f99408a8ff0457229848255cf27ff856166eb22bd"
+source_sha256: "052b2e9b561022dd035a459adf26c70298b3292136bb87a319617628ba66c05e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -259,7 +259,7 @@ This repo currently includes:
 - a short research-informed positioning summary
 - current status and what is still being resolved
 - public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus a draft-10-pinned DRP mapping and executable profile with RFC 8785/P-256 emit, external-trust full-chain and critical-bound verification, and a portable seven-scenario implementation self-test bundle/report (not an IETF or independent interoperability claim), the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, a receiver-attestation profile with a two-key offline verifier and MCP shim fixture, a full offline-verification bundle/profile with redacted CLI/JSON/static HTML explorer reports, and a verified-receipt governance telemetry profile with redacted JSONL plus OTLP/HTTP trace/log export
-- Python governance runtime under `python/`; Go eBPF/K8s packages and version-dispatched JWT AAT credential attenuation under `go/`: the existing draft-00 DG v0.1 contract plus the explicit `ardur.dg.aat-draft-01.v0.2` profile with chain-position roles, audience-bound PoP, fresh per-hop holder keys, approval gates, and a deterministic self-test fixture (CWT and independent interoperability are not claimed)
+- Python governance runtime under `python/`, including the framework-neutral [governed subagent adapter](/__ardur_internal__/source/docs/reference/governed-subagent-adapter/) with opaque parent-bound handles, durable retry/recovery, pre-action child gates, and credential-free session evidence; Go eBPF/K8s packages and version-dispatched JWT AAT credential attenuation under `go/`: the existing draft-00 DG v0.1 contract plus the explicit `ardur.dg.aat-draft-01.v0.2` profile with chain-position roles, audience-bound PoP, fresh per-hop holder keys, approval gates, and a deterministic self-test fixture (CWT and independent interoperability are not claimed)
 - optional Python typed dangerous-action risk budgets with authenticated schema/extractor digests, signed attenuation, fsync-backed multi-scope reservations, explicit executor outcomes, and privacy-bounded signed receipts; the existing DRP profile does not project this extension
 - a Linux governance-overhead harness with a closed report schema, PR smoke workflow, manual stress profile, owner-only artifacts, and an opt-in shell-free paired-sensor mode
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, verified redacted receipt telemetry export, receiver-envelope verification, detached normalized/Tetragon/Falco runtime-evidence correlation, static non-executing MCP/tool-server preflight, and no-key DRP/receiver/offline-verification fixtures), plus deterministic `ardur-drp-fixtures` and `ardur-policy-conformance` runners
@@ -269,7 +269,7 @@ This repo currently includes:
 - the Hugo public evidence site source under `site/`, with each public claim linkable to its backing source file
 - bootstrap and verification scripts under `scripts/` (`conductor-bootstrap.sh`, `setup-dev.sh`, `check-local.sh`)
 - agent-specific public guides under [`docs/agent-instructions/`](/__ardur_internal__/source/docs/agent-instructions/readme/) (Conductor, Codex, Claude)
-- new technical reference pages under [`docs/reference/`](/__ardur_internal__/source/docs/reference/readme/) — CLI, Personal Hub HTTP API, and the `ARDUR.md` profile format
+- new technical reference pages under [`docs/reference/`](/__ardur_internal__/source/docs/reference/readme/) — CLI, Personal Hub HTTP API, the `ARDUR.md` profile format, and the governed subagent adapter
 - selected archival terminal recordings, plus a separate re-runnable no-key
   Phase 1 evidence harness for the Claude Code MVP path — see
   [MEDIA.md](/__ardur_internal__/source/media-notes/) and the
