@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -25,6 +26,15 @@ EXPECTED_STATUSES = {
 
 def _runner(adapter: str) -> Path:
     return REPO_ROOT / "examples" / adapter / "run.sh"
+
+
+def _runner_without_repo_venv(tmp_path: Path, adapter: str) -> Path:
+    """Copy a runner into an ephemeral repo root with no local virtualenv."""
+
+    runner = tmp_path / "isolated-repo" / "examples" / adapter / "run.sh"
+    runner.parent.mkdir(parents=True)
+    shutil.copy(_runner(adapter), runner)
+    return runner
 
 
 def _json_report(stdout: str) -> dict[str, Any]:
@@ -206,10 +216,13 @@ def test_no_key_provider_adapter_runner_reports_missing_default_dependencies(tmp
 
     out_dir = tmp_path / f"{adapter}-missing-dependencies"
     env = _env_with_path_missing_dependency_python(tmp_path)
+    runner = _runner_without_repo_venv(tmp_path, adapter)
+    isolated_repo_root = runner.parents[2]
     assert "PYTHON" not in env
+    assert not (isolated_repo_root / "python" / ".venv").exists()
     completed = subprocess.run(
-        [str(_runner(adapter)), "--out-dir", str(out_dir), "--mission", str(MISSION)],
-        cwd=REPO_ROOT,
+        [str(runner), "--out-dir", str(out_dir), "--mission", str(MISSION)],
+        cwd=isolated_repo_root,
         env=env,
         text=True,
         capture_output=True,
