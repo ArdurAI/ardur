@@ -59,13 +59,15 @@ def _post_issue_with_bearer(
 
 
 def _stop_process(process: subprocess.Popen[str]) -> tuple[str, str]:
+    # Drain the pipes as part of the wait. ``process.wait()`` on a PIPE-backed
+    # child deadlocks once the child has filled a pipe buffer, which would turn
+    # a chatty CLI into a spurious timeout/kill.
     if process.poll() is None:
         process.terminate()
         try:
-            process.wait(timeout=5)
+            return process.communicate(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.wait(timeout=5)
     return process.communicate(timeout=5)
 
 
@@ -121,7 +123,13 @@ def test_start_cli_trims_padded_api_token_through_real_argument_loading(
         assert missing_body["error"] == "missing or malformed Authorization header"
         assert wrong_status == 401
         assert wrong_body["error"] == "invalid bearer token"
-        assert canonical_status != 401, canonical_body
+        # The trimmed token must get PAST authentication. Asserting only
+        # ``!= 401`` would also pass on a 500, so pin the specific post-auth
+        # outcome instead: this request carries an empty ``{}`` body, so
+        # reaching missing-field validation is itself the proof that the
+        # bearer token was accepted.
+        assert canonical_status == 400, canonical_body
+        assert "agent_id" in canonical_body["error"], canonical_body
     finally:
         stdout, stderr = _stop_process(process)
 
