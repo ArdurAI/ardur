@@ -160,6 +160,11 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
   directories unless a test explicitly directs output elsewhere. Coverage data
   and the uploaded XML report are written to the GitHub runner temp directory.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
+- **Windows portability compile**: the Go job also cross-compiles
+  `pkg/kernelcapture`, `ardur-kernelcaptured`, and the agent-recognition
+  benchmark command for `windows/amd64` without executing them. This guards
+  portable import boundaries; it does not claim Windows kernel capture or
+  enforcement support.
 - **Demo stack smoke**: starts the exact `make demo` target from fresh Compose
   volumes in detached/wait mode, then runs `scripts/verify-mvp.sh`. The job
   requires healthy public endpoints, authenticated issue/start, one `PERMIT`,

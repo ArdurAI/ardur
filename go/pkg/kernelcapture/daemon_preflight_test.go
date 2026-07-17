@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func TestDaemonPreflightFileOwnerDefaultsToUnknown(t *testing.T) {
+	t.Parallel()
+
+	uid, gid := daemonPreflightFileOwner(nil)
+	if uid != -1 || gid != -1 {
+		t.Fatalf("owner = %d:%d, want unknown -1:-1", uid, gid)
+	}
+}
+
 func TestInspectDaemonCustodyPreflightSafeDefaults(t *testing.T) {
 	t.Parallel()
 

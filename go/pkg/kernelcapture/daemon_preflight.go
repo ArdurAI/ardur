@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 const (
@@ -441,10 +440,6 @@ func (osDaemonPreflightFS) EvalSymlinks(path string) (string, error) {
 }
 
 func daemonPreflightPathInfoFromFileInfo(info fs.FileInfo) daemonPreflightPathInfo {
-	out := daemonPreflightPathInfo{Mode: info.Mode(), UID: -1, GID: -1}
-	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		out.UID = int(st.Uid)
-		out.GID = int(st.Gid)
-	}
-	return out
+	uid, gid := daemonPreflightFileOwner(info.Sys())
+	return daemonPreflightPathInfo{Mode: info.Mode(), UID: uid, GID: gid}
 }
