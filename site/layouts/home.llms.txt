@@ -1,0 +1,40 @@
+{{- $pages := sort site.RegularPages "RelPermalink" -}}
+# Ardur
+
+> Open-source runtime governance and signed evidence for configured AI-agent tool paths.
+
+This file is generated from Ardur's public Hugo evidence site. Curated pages describe the current public surface, source-backed pages mirror public repository documentation, and optional pages retain visible maturity boundaries.
+
+## Curated Documentation
+
+{{ range $pages -}}
+  {{- if and (not .Draft) (ne .Section "source") (in (.Param "maturity") "public-now") -}}
+    {{- $title := .LinkTitle | plainify | htmlUnescape | replaceRE `[\[\]]` `` | replaceRE `\s+` ` ` | strings.TrimSpace -}}
+    {{- $description := .Description | plainify | htmlUnescape | replaceRE `\s+` ` ` | strings.TrimSpace -}}
+    {{- printf "- [%s](%s)" $title .Permalink -}}
+    {{- with $description }}{{ printf ": %s" . }}{{ end -}}
+    {{- printf "\n" -}}
+  {{- end -}}
+{{ end }}
+## Source-Backed Repository Documentation
+
+{{ range $pages -}}
+  {{- if and (not .Draft) (eq .Section "source") (in (.Param "maturity") "public-now") -}}
+    {{- $title := .LinkTitle | plainify | htmlUnescape | replaceRE `[\[\]]` `` | replaceRE `\s+` ` ` | strings.TrimSpace -}}
+    {{- $description := .Description | plainify | htmlUnescape | replaceRE `\s+` ` ` | strings.TrimSpace -}}
+    {{- printf "- [%s](%s)" $title .Permalink -}}
+    {{- with $description }}{{ printf ": %s" . }}{{ end -}}
+    {{- printf "\n" -}}
+  {{- end -}}
+{{ end }}
+## Optional
+
+{{ range $pages -}}
+  {{- if and (not .Draft) (not (in (.Param "maturity") "public-now")) -}}
+    {{- $title := .LinkTitle | plainify | htmlUnescape | replaceRE `[\[\]]` `` | replaceRE `\s+` ` ` | strings.TrimSpace -}}
+    {{- $description := .Description | plainify | htmlUnescape | replaceRE `\s+` ` ` | strings.TrimSpace -}}
+    {{- printf "- [%s](%s)" $title .Permalink -}}
+    {{- with $description }}{{ printf ": %s" . }}{{ end -}}
+    {{- printf "\n" -}}
+  {{- end -}}
+{{ end -}}
