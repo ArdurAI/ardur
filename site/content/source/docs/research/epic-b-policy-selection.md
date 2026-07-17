@@ -2,7 +2,7 @@
 title: "Epic B — Policy Selection for Un-Wrapped Agents: Default Missions, Binding Rules, and the Governance Posture Ladder"
 description: "Status: **research/design document** (2026-07-03). No code changed. This is the"
 source_path: "docs/research/epic-b-policy-selection.md"
-source_sha256: "e28081a82b0980c4b2df977fbd92c40b662273fbc1d30aa2c3046362d6e284f7"
+source_sha256: "62c51124d24600fb3d247f9c2197719bafbfc3e264a8e60381682e0a72e87d6d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -654,9 +654,9 @@ Web (accessed 2026-07-03):
 - Santa MONITOR/LOCKDOWN semantics: <https://santa.dev/concepts/mode.html>,
   <https://github.com/northpolesec/santa>
 - SELinux targeted/unconfined; AppArmor complain mode + `aa-logprof`:
-  <https://documentation.suse.com/sles/12-SP5/html/SLES-all/cha-apparmor-concept.html>,
-  <https://wiki.archlinux.org/title/AppArmor>,
-  <https://tuxcare.com/blog/selinux-vs-apparmor/>
+  <https://fedoraproject.org/wiki/SELinux/Policies>,
+  <https://documentation.ubuntu.com/server/how-to/security/apparmor/>,
+  <https://apparmor.net/man/4.0/aa-logprof/>
 - NAC/802.1X quarantine & guest VLAN, posture assessment:
   <https://www.forescout.com/glossary/802-1x-network-access-control/>,
   <https://infohub.delltechnologies.com/static/media/60658f87-85c9-4493-a78a-7871a3e7acbb.pdf>
