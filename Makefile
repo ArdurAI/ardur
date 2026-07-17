@@ -69,7 +69,7 @@ bench-protocol-test: ## Test the AuditBench evaluation protocol (no real annotat
 gen-agent-docs: ## Regenerate the generated command block in AGENTS.md
 	python3 scripts/gen-agent-docs.py
 
-gen-agent-docs-check: ## Fail if the AGENTS.md command block is stale (what CI runs)
+gen-agent-docs-check: ## Fail if the AGENTS.md command block is stale (local equivalent of the CI gate)
 	python3 scripts/gen-agent-docs.py --check
 
 # ── Utilities ─────────────────────────────────────────────────────────────────

@@ -120,7 +120,7 @@ make cert                  # Generate self-signed TLS certs for local dev
 make bench                 # Run the AuditBench evaluation harness and write results to bench-results/
 make bench-protocol-test   # Test the AuditBench evaluation protocol (no real annotation study)
 make gen-agent-docs        # Regenerate the generated command block in AGENTS.md
-make gen-agent-docs-check  # Fail if the AGENTS.md command block is stale (what CI runs)
+make gen-agent-docs-check  # Fail if the AGENTS.md command block is stale (local equivalent of the CI gate)
 make clean                 # Remove build artifacts
 ```
 
@@ -412,8 +412,13 @@ generated:
 
 ```bash
 make gen-agent-docs                        # regenerate the block
-python3 scripts/gen-agent-docs.py --check  # what CI runs; fails on drift
+python3 scripts/gen-agent-docs.py --check  # fails on drift, without writing
 ```
+
+The `agent-docs` job does not run `--check`; it regenerates the block and then
+runs `git diff --exit-code`, so a failure prints the exact drift in the log. The
+two are equivalent as a pass/fail gate — use `--check` locally, because it
+reports staleness without touching your working tree.
 
 The hosted site reflects the last Pages deployment from `main`, not the latest
 `dev` commit.

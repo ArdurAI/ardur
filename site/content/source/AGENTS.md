@@ -2,7 +2,7 @@
 title: "Ardur Agent Instructions"
 description: "The canonical entry point for coding agents working in this repository. These"
 source_path: "AGENTS.md"
-source_sha256: "a1b41a532fe0faf8e00e30b1716fb8207aac6bc151bb2f0b9aa4161bd136e5fe"
+source_sha256: "d0ee1142c3f783bd09eacef617a954a1e61e534f7d69d639496d8b8a23b3f6ba"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -137,7 +137,7 @@ make cert                  # Generate self-signed TLS certs for local dev
 make bench                 # Run the AuditBench evaluation harness and write results to bench-results/
 make bench-protocol-test   # Test the AuditBench evaluation protocol (no real annotation study)
 make gen-agent-docs        # Regenerate the generated command block in AGENTS.md
-make gen-agent-docs-check  # Fail if the AGENTS.md command block is stale (what CI runs)
+make gen-agent-docs-check  # Fail if the AGENTS.md command block is stale (local equivalent of the CI gate)
 make clean                 # Remove build artifacts
 ```
 
@@ -429,8 +429,13 @@ generated:
 
 ```bash
 make gen-agent-docs                        # regenerate the block
-python3 scripts/gen-agent-docs.py --check  # what CI runs; fails on drift
+python3 scripts/gen-agent-docs.py --check  # fails on drift, without writing
 ```
+
+The `agent-docs` job does not run `--check`; it regenerates the block and then
+runs `git diff --exit-code`, so a failure prints the exact drift in the log. The
+two are equivalent as a pass/fail gate — use `--check` locally, because it
+reports staleness without touching your working tree.
 
 The hosted site reflects the last Pages deployment from `main`, not the latest
 `dev` commit.
