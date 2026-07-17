@@ -399,6 +399,84 @@ func TestCommittedAgentRecognitionBenchmarkEvidenceMatchesBudget(t *testing.T) {
 	}
 }
 
+func TestCommittedAgentRecognitionBenchmarkV2EvidenceMatchesBudget(t *testing.T) {
+	evidenceFiles := []string{
+		"agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt1.json",
+		"agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt2.json",
+		"agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt3.json",
+	}
+	type reviewedProfileEvidence struct {
+		p50WallOverheadPercent              float64
+		p95WallOverheadPercent              float64
+		p95EnabledDaemonCPUCalibrationRatio float64
+		maxEnabledDaemonPeakRSSKiB          uint64
+	}
+	aggregates := make(map[string]reviewedProfileEvidence, 3)
+	reports := make([]*AgentRecognitionBenchmarkReport, 0, len(evidenceFiles))
+	artifactDigests := make([]string, 0, len(evidenceFiles))
+	cpuModels := make(map[string]struct{})
+	var expectedEvents, deliveredEvents, recognizedEvents, fingerprintSuccesses uint64
+	for _, evidenceFile := range evidenceFiles {
+		report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", evidenceFile))
+		if err != nil {
+			t.Fatalf("load %s: %v", evidenceFile, err)
+		}
+		if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV2 || report.SourceSHA != "a0bdcd981107631a45476ac27f84ed17da2d221d" || report.Calibration == nil ||
+			report.Gate.Status != AgentRecognitionBenchmarkGateNotRun || report.Gate.BudgetSHA256 != "" || len(report.Gate.Violations) != 0 {
+			t.Fatalf("reviewed v0.2 evidence provenance drifted for %s", evidenceFile)
+		}
+		reports = append(reports, report)
+		artifactDigests = append(artifactDigests, report.ArtifactSHA256)
+		cpuModels[report.Environment.CPUModel] = struct{}{}
+		for _, summary := range report.Summaries {
+			if summary.EnabledDaemonCPUCalibrationRatio == nil {
+				t.Fatalf("reviewed v0.2 evidence %s profile %q has no normalized CPU distribution", evidenceFile, summary.ProfileName)
+			}
+			aggregate := aggregates[summary.ProfileName]
+			aggregate.p50WallOverheadPercent = math.Max(aggregate.p50WallOverheadPercent, summary.PairedWallOverheadPercent.P50)
+			aggregate.p95WallOverheadPercent = math.Max(aggregate.p95WallOverheadPercent, summary.PairedWallOverheadPercent.P95)
+			aggregate.p95EnabledDaemonCPUCalibrationRatio = math.Max(aggregate.p95EnabledDaemonCPUCalibrationRatio, summary.EnabledDaemonCPUCalibrationRatio.P95)
+			if summary.MaxEnabledDaemonPeakRSSKiB > aggregate.maxEnabledDaemonPeakRSSKiB {
+				aggregate.maxEnabledDaemonPeakRSSKiB = summary.MaxEnabledDaemonPeakRSSKiB
+			}
+			aggregates[summary.ProfileName] = aggregate
+			expectedEvents += summary.TotalCapture.ExpectedEvents
+			deliveredEvents += summary.TotalCapture.Delivered
+			recognizedEvents += summary.TotalRecognition.Recognized
+			fingerprintSuccesses += summary.TotalFingerprint.Success
+		}
+	}
+	if len(cpuModels) < 2 {
+		t.Fatalf("reviewed evidence covers %d CPU model(s), want at least 2", len(cpuModels))
+	}
+	if expectedEvents != 6240 || deliveredEvents != expectedEvents || recognizedEvents != expectedEvents || fingerprintSuccesses != expectedEvents {
+		t.Fatalf("reviewed evidence correctness totals: expected=%d delivered=%d recognized=%d fingerprint_success=%d", expectedEvents, deliveredEvents, recognizedEvents, fingerprintSuccesses)
+	}
+
+	budget, budgetDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stringSlicesEqual(budget.EvidenceArtifactSHA256s, artifactDigests) {
+		t.Fatalf("budget evidence digests = %v, want %v", budget.EvidenceArtifactSHA256s, artifactDigests)
+	}
+	for _, profile := range budget.Profiles {
+		aggregate, ok := aggregates[profile.ProfileName]
+		if !ok || !nearlyEqual(profile.EvidenceP50WallOverheadPercent, aggregate.p50WallOverheadPercent) ||
+			!nearlyEqual(profile.EvidenceP95WallOverheadPercent, aggregate.p95WallOverheadPercent) ||
+			!nearlyEqual(profile.EvidenceP95EnabledDaemonCPUCalibrationRatio, aggregate.p95EnabledDaemonCPUCalibrationRatio) ||
+			profile.EvidenceMaxEnabledDaemonPeakRSSKiB != aggregate.maxEnabledDaemonPeakRSSKiB {
+			t.Fatalf("budget profile %q drifted from reviewed v0.2 evidence", profile.ProfileName)
+		}
+	}
+	for index, report := range reports {
+		gate := EvaluateAgentRecognitionBenchmarkBudget(report, budget, budgetDigest)
+		if gate.Status != AgentRecognitionBenchmarkGatePass || len(gate.Violations) != 0 {
+			t.Fatalf("reviewed evidence %s does not pass its bound budget: %+v", evidenceFiles[index], gate)
+		}
+	}
+}
+
 func validAgentRecognitionBenchmarkReport(t *testing.T) AgentRecognitionBenchmarkReport {
 	t.Helper()
 	profiles := []AgentRecognitionBenchmarkProfile{

@@ -17,4 +17,8 @@ This section lists hosted documentation and mirrored artifacts generated from `g
 
 - [`agent-recognition-benchmark-baseline-967ba670.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-baseline-967ba670.json)
 - [`agent-recognition-benchmark-budget-v0.1.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.1.json)
+- [`agent-recognition-benchmark-budget-v0.2.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.2.json)
 - [`agent-recognition-benchmark-evidence-203c101.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-203c101.json)
+- [`agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt1.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt1.json)
+- [`agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt2.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt2.json)
+- [`agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt3.json`](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt3.json)

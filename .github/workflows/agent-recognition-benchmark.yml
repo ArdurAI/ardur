@@ -105,7 +105,7 @@ jobs:
             --measured-pairs 20
             --timeout 25m
           )
-          if [ "$BENCHMARK_PROFILE" = "ci" ] && [ -f "$BUDGET_FILE" ]; then
+          if [ "$BENCHMARK_PROFILE" = "ci" ]; then
             args+=(--budget "$BUDGET_FILE")
           fi
           set +e

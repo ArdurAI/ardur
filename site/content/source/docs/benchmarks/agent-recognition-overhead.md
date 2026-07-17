@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "72c00a832318233526bd6ad08b5931f9bc3e95b296a4c06018e54243cbb89982"
+source_sha256: "518faef38b845b54aaf297a2ed5285d3bbc9fd988b5951951f058b5bfb7ae5ee"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -80,11 +80,12 @@ explicit workflow dispatch or `--profile release`; it is not scheduled.
 
 ## Budget lifecycle
 
-The v0.2 workflow reports `gate_status: not_evaluated` while
-`agent-recognition-benchmark-budget-v0.2.json` is absent. Reviewers inspect at
-least three independent exact-head hosted-runner artifacts, including their raw
-pairs, calibration, runner context, loss ledgers, and artifact digests before
-committing:
+The v0.2 workflow loads the committed
+`agent-recognition-benchmark-budget-v0.2.json` for the required `ci` profile.
+Before that budget was committed, the calibration workflow reported
+`gate_status: not_evaluated` while reviewers inspected three independent
+exact-head hosted-runner artifacts, including their raw pairs, calibration,
+runner context, loss ledgers, and artifact digests. The reviewed change commits:
 
 - every reviewed calibration report as an explicit public evidence fixture; and
 - `go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.2.json`.
@@ -101,8 +102,12 @@ wall decision uses p50; p95 remains visible diagnostic evidence because a small
 number of hosted-runner scheduling stalls can dominate a 20-sample tail. The
 normalized daemon CPU decision still uses p95 because process CPU time excludes
 descheduling, while the per-VM calibration removes the unrecorded CPU-class
-scale. Once the file exists, the CI workflow automatically loads it for the
-`ci` profile. The command exits 1 when a budget is exceeded and exits 2 for
+scale. The CI workflow automatically loads the budget for the `ci` profile.
+The required workflow always supplies that budget path: a missing, renamed, or
+invalid budget fails closed instead of falling back to `not_evaluated`.
+Evidence-only operation remains available for explicit local/bootstrap runs,
+not as an automatic required-CI fallback. The command exits 1 when a budget is
+exceeded and exits 2 for
 invalid input, unavailable measurement, schema drift, digest mismatch, or
 report-publication failure.
 
@@ -115,6 +120,48 @@ convert loss or incorrect fingerprinting into a pass.
 The historical v0.1 report and budget remain strictly loadable and
 digest-verifiable. They retain their original absolute daemon-CPU and wall-p95
 decision rules; they are not silently reinterpreted as calibrated evidence.
+
+### Reviewed v0.2 calibrated evidence
+
+[GitHub Actions run
+29575721818](https://github.com/ArdurAI/ardur/actions/runs/29575721818)
+executed source `a0bdcd981107631a45476ac27f84ed17da2d221d` three times on
+fresh `ubuntu-24.04` hosted VMs. Attempts 1 and 3 used an AMD EPYC 9V74 and
+attempt 2 used an Intel Xeon Platinum 8573C. All three recorded runner image
+`ubuntu24` version `20260714.240.1`, kernel `6.17.0-1020-azure`, Go `1.26.5`,
+four effective CPUs, unlimited cgroup CPU bandwidth, and effective CPU set
+`0-3`.
+
+| Attempt | Reviewed report | CPU model | Calibration p50 | Artifact digest |
+|---:|---|---|---:|---|
+| 1 | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt1.json) | AMD EPYC 9V74 | 191.873 ms | `02b15844718be0ec716397b8b1d17b4efcfe9e6ecb19a40c8e424e1a7f658b06` |
+| 2 | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt2.json) | Intel Xeon Platinum 8573C | 155.492 ms | `3150fd7e1a66fa8f9f958df9efcf64a550a1bac2d03061c724154aed7a385d5b` |
+| 3 | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt3.json) | AMD EPYC 9V74 | 191.909 ms | `6989c8b13c3f4bd68968be576c4adc708401e436c21afc6c30a3dfc2384b97e7` |
+
+Each attempt delivered, recognized, and fingerprinted all 2,080 enabled events.
+Across the evidence set that is 6,240 exact successes with zero producer drop,
+malformed record, rejection, mismatch, saturation, unavailable or in-flight
+work, or unexplained outcome. The committed provenance test strictly reloads
+each report, recomputes its artifact digest, verifies that the budget lists all
+three distinct digests, derives the per-profile maxima, and proves that every
+reviewed report passes the resulting budget.
+
+| Profile | Maximum wall p50 | Diagnostic wall p95 maximum | Normalized CPU p95 range | Budget evidence normalized CPU p95 | Maximum RSS |
+|---|---:|---:|---:|---:|---:|
+| low | 0.0461% | 0.1033% | 0.06153–0.06499 | 0.06499 | 13,568 KiB |
+| sustained | 0.0651% | 0.2045% | 0.24197–0.27459 | 0.27459 | 13,592 KiB |
+| storm | 0.6100% | 1.1457% | 0.86626–0.98490 | 0.98490 | 15,532 KiB |
+
+Budget version `github-ubuntu-24.04-amd64.a0bdcd9.v1` uses the maximum reviewed
+value for every evidence field. The 0.1-percentage-point wall tolerance is more
+than twice the largest cross-attempt p50 spread (0.0330 points; twice is 0.0659)
+and is rounded upward. The normalized CPU tolerance is the larger of 30% or
+0.01; 30% is more than twice the largest cross-attempt relative range (13.7%)
+and dominates the 0.01 floor for every current profile. RSS retains the
+historical 4,096 KiB allowance. These limits are designed to detect regression
+across the observed hosted-runner CPU classes. They are not an SLO, a capacity
+claim, or permission to ignore a new runner class; unexpected failures require
+artifact review, never retry voting.
 
 ### Historical v0.1 CI evidence
 
@@ -169,8 +216,9 @@ gate. These are historical regression limits, not an SLO or a universal
 performance claim. They should be tightened only after additional exact-hosted-
 runner evidence, never loosened to conceal loss.
 
-The public site mirrors the historical baseline, corrected-method evidence,
-and budget JSON files. After changing any fixture, run
+The public site mirrors the historical baseline and corrected-method evidence,
+plus the reviewed v0.2 evidence and both versioned budget JSON files. After
+changing any fixture, run
 `python3 site/scripts/sync_source_docs.py` and commit the generated artifact
 copies and routes with the source change.
 
