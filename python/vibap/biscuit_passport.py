@@ -8,7 +8,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 from biscuit_auth import (
     AuthorizationError,
@@ -292,7 +292,7 @@ def verify_biscuit_passport(
                 )
 
     try:
-        context = _context_from_blocks(block_facts)
+        context = _context_from_blocks(block_facts, effective_now=effective_now)
     except ValueError as exc:
         raise BiscuitVerifyError(str(exc)) from exc
 
@@ -459,7 +459,11 @@ def decode_biscuit_b64(s: str) -> bytes:
         raise ValueError(f"invalid biscuit base64: {exc}") from exc
 
 
-def _context_from_blocks(blocks: list[dict[str, list[list[Any]]]]) -> PassportContext:
+def _context_from_blocks(
+    blocks: list[dict[str, list[list[Any]]]],
+    *,
+    effective_now: int,
+) -> PassportContext:
     if not blocks:
         raise ValueError("missing authority block")
 
@@ -527,9 +531,231 @@ def _context_from_blocks(blocks: list[dict[str, list[list[Any]]]]) -> PassportCo
     ]
     extra_facts = _unknown_fact_map(root)
 
-    for block in blocks[1:]:
+    for block_index, block in enumerate(blocks[1:], start=1):
         block_jti = _required_single(block, "jti", str)
         block_spiffe_id = _required_single(block, "spiffe_id", str)
+        block_parent_jti = _required_single(block, "parent_jti", str)
+        block_issued_at = _required_single(block, "iat", int)
+        block_expires_at = _required_single(block, "exp", int)
+        block_max_tool_calls = _required_single(block, "max_tool_calls", int)
+        block_max_duration_s = _required_single(block, "max_duration_s", int)
+        block_delegation_allowed = _required_single(
+            block, "delegation_allowed", bool
+        )
+        block_max_delegation_depth = _required_single(
+            block, "max_delegation_depth", int
+        )
+
+        if not effective_delegation_allowed:
+            _reject_attenuation(
+                block_index,
+                "delegation_allowed",
+                "parent passport does not allow a structured child block",
+            )
+        if effective_max_delegation_depth <= 0:
+            _reject_attenuation(
+                block_index,
+                "max_delegation_depth",
+                "parent delegation depth is exhausted",
+            )
+        if block_parent_jti != effective_jti:
+            _reject_attenuation(
+                block_index,
+                "parent_jti",
+                f"expected {effective_jti!r}, got {block_parent_jti!r}",
+            )
+        if block_issued_at < effective_issued_at:
+            _reject_attenuation(
+                block_index,
+                "iat",
+                f"child {block_issued_at} precedes parent {effective_issued_at}",
+            )
+        if block_expires_at > effective_expires_at:
+            _reject_attenuation(
+                block_index,
+                "exp",
+                f"child {block_expires_at} exceeds parent {effective_expires_at}",
+            )
+        if block_expires_at <= block_issued_at:
+            _reject_attenuation(
+                block_index,
+                "exp",
+                f"child expiry {block_expires_at} is not after iat {block_issued_at}",
+            )
+        if effective_now > block_expires_at:
+            _reject_attenuation(
+                block_index,
+                "exp",
+                f"child expired at {block_expires_at}; now is {effective_now}",
+            )
+        if block_max_tool_calls < 0:
+            _reject_attenuation(
+                block_index,
+                "max_tool_calls",
+                f"child budget must be non-negative, got {block_max_tool_calls}",
+            )
+        if block_max_tool_calls > effective_max_tool_calls:
+            _reject_attenuation(
+                block_index,
+                "max_tool_calls",
+                (
+                    f"child {block_max_tool_calls} exceeds parent "
+                    f"{effective_max_tool_calls}"
+                ),
+            )
+        if block_max_duration_s <= 0:
+            _reject_attenuation(
+                block_index,
+                "max_duration_s",
+                f"child duration must be positive, got {block_max_duration_s}",
+            )
+        if block_max_duration_s > effective_max_duration_s:
+            _reject_attenuation(
+                block_index,
+                "max_duration_s",
+                (
+                    f"child {block_max_duration_s} exceeds parent "
+                    f"{effective_max_duration_s}"
+                ),
+            )
+        if block_max_delegation_depth < 0:
+            _reject_attenuation(
+                block_index,
+                "max_delegation_depth",
+                f"child depth must be non-negative, got {block_max_delegation_depth}",
+            )
+        max_child_depth = effective_max_delegation_depth - 1
+        if block_max_delegation_depth > max_child_depth:
+            _reject_attenuation(
+                block_index,
+                "max_delegation_depth",
+                f"child {block_max_delegation_depth} exceeds {max_child_depth}",
+            )
+        if block_delegation_allowed and block_max_delegation_depth == 0:
+            _reject_attenuation(
+                block_index,
+                "delegation_allowed",
+                "child enables delegation with zero remaining depth",
+            )
+
+        requested_forbidden_tools = effective_forbidden_tools
+        if "forbidden_tool" in block:
+            requested_forbidden_tools = _fact_values(block, "forbidden_tool", str)
+            removed_denials = sorted(
+                set(effective_forbidden_tools) - set(requested_forbidden_tools)
+            )
+            if removed_denials:
+                _reject_attenuation(
+                    block_index,
+                    "forbidden_tool",
+                    f"child removed parent denials {removed_denials}",
+                )
+
+        requested_allowed_tools = effective_allowed_tools
+        if "allowed_tool" in block:
+            requested_allowed_tools = _fact_values(block, "allowed_tool", str)
+        parent_allowed = set(effective_allowed_tools)
+        child_allowed = set(requested_allowed_tools)
+        parent_denied = set(effective_forbidden_tools)
+        child_denied = set(requested_forbidden_tools)
+        expanded_tools: set[str] = set()
+        if "*" not in parent_allowed:
+            if "*" in child_allowed:
+                expanded_tools.add("*")
+            else:
+                expanded_tools = (child_allowed - child_denied) - (
+                    parent_allowed - parent_denied
+                )
+        if expanded_tools:
+            _reject_attenuation(
+                block_index,
+                "allowed_tool",
+                f"child added usable tools {sorted(expanded_tools)}",
+            )
+
+        requested_resource_scope = effective_resource_scope
+        child_declared_resource_scope: list[str] | None = None
+        if "resource_scope_empty" in block:
+            if _required_single(block, "resource_scope_empty", bool) is not True:
+                raise ValueError("malformed:resource_scope_empty")
+            if "resource_scope" in block:
+                raise ValueError("conflicting:resource_scope and resource_scope_empty")
+            child_declared_resource_scope = []
+        elif "resource_scope" in block:
+            child_declared_resource_scope = _fact_values(
+                block, "resource_scope", str
+            )
+        if child_declared_resource_scope is not None:
+            try:
+                requested_resource_scope = _derive_resource_scope(
+                    effective_resource_scope,
+                    child_declared_resource_scope,
+                )
+            except BiscuitAttenuationError as exc:
+                _reject_attenuation(block_index, "resource_scope", str(exc))
+
+        requested_side_effect_classes = effective_allowed_side_effect_classes
+        if "allowed_side_effect_class" in block:
+            requested_side_effect_classes = _fact_values(
+                block, "allowed_side_effect_class", str
+            )
+            if effective_allowed_side_effect_classes:
+                expanded_classes = sorted(
+                    set(requested_side_effect_classes)
+                    - set(effective_allowed_side_effect_classes)
+                )
+                if expanded_classes:
+                    _reject_attenuation(
+                        block_index,
+                        "allowed_side_effect_class",
+                        f"child added classes {expanded_classes}",
+                    )
+
+        requested_per_class_budget = effective_max_tool_calls_per_class
+        if "max_tool_calls_per_class" in block:
+            requested_per_class_budget = _pair_values(
+                block, "max_tool_calls_per_class"
+            )
+            removed_caps = sorted(
+                set(effective_max_tool_calls_per_class)
+                - set(requested_per_class_budget)
+            )
+            if removed_caps:
+                _reject_attenuation(
+                    block_index,
+                    "max_tool_calls_per_class",
+                    f"child removed parent caps {removed_caps}",
+                )
+            for side_effect_class, child_budget in requested_per_class_budget.items():
+                if child_budget < 0:
+                    _reject_attenuation(
+                        block_index,
+                        "max_tool_calls_per_class",
+                        f"{side_effect_class!r} budget must be non-negative",
+                    )
+                parent_budget = effective_max_tool_calls_per_class.get(
+                    side_effect_class
+                )
+                if parent_budget is not None and child_budget > parent_budget:
+                    _reject_attenuation(
+                        block_index,
+                        "max_tool_calls_per_class",
+                        (
+                            f"{side_effect_class!r} child {child_budget} "
+                            f"exceeds parent {parent_budget}"
+                        ),
+                    )
+
+        requested_cwd = effective_cwd
+        if "cwd" in block:
+            try:
+                requested_cwd = _derive_child_cwd(
+                    effective_cwd,
+                    _required_single(block, "cwd", str),
+                )
+            except (BiscuitAttenuationError, ValueError) as exc:
+                _reject_attenuation(block_index, "cwd", str(exc))
+
         delegation_chain.append(
             {
                 "jti": block_jti,
@@ -541,48 +767,19 @@ def _context_from_blocks(blocks: list[dict[str, list[list[Any]]]]) -> PassportCo
         )
         effective_jti = block_jti
         effective_spiffe_id = block_spiffe_id
-        effective_issued_at = _required_single(block, "iat", int)
-        effective_expires_at = _required_single(block, "exp", int)
-        effective_parent_jti = _required_single(block, "parent_jti", str)
-        effective_max_tool_calls = _required_single(block, "max_tool_calls", int)
-        effective_max_duration_s = _required_single(block, "max_duration_s", int)
-        effective_delegation_allowed = _required_single(
-            block, "delegation_allowed", bool
-        )
-        effective_max_delegation_depth = _required_single(
-            block, "max_delegation_depth", int
-        )
-        if "cwd" in block:
-            effective_cwd = _required_single(block, "cwd", str)
-        if "allowed_tool" in block:
-            effective_allowed_tools = _fact_values(block, "allowed_tool", str)
-        if "forbidden_tool" in block:
-            effective_forbidden_tools = _fact_values(block, "forbidden_tool", str)
-        requested_resource_scope: list[str] | None = None
-        if "resource_scope_empty" in block:
-            if _required_single(block, "resource_scope_empty", bool) is not True:
-                raise ValueError("malformed:resource_scope_empty")
-            if "resource_scope" in block:
-                raise ValueError("conflicting:resource_scope and resource_scope_empty")
-            requested_resource_scope = []
-        elif "resource_scope" in block:
-            requested_resource_scope = _fact_values(block, "resource_scope", str)
-        if requested_resource_scope is not None:
-            try:
-                effective_resource_scope = _derive_resource_scope(
-                    effective_resource_scope,
-                    requested_resource_scope,
-                )
-            except BiscuitAttenuationError as exc:
-                raise ValueError(str(exc)) from exc
-        if "allowed_side_effect_class" in block:
-            effective_allowed_side_effect_classes = _fact_values(
-                block, "allowed_side_effect_class", str
-            )
-        if "max_tool_calls_per_class" in block:
-            effective_max_tool_calls_per_class = _pair_values(
-                block, "max_tool_calls_per_class"
-            )
+        effective_parent_jti = block_parent_jti
+        effective_issued_at = block_issued_at
+        effective_expires_at = block_expires_at
+        effective_max_tool_calls = block_max_tool_calls
+        effective_max_duration_s = block_max_duration_s
+        effective_delegation_allowed = block_delegation_allowed
+        effective_max_delegation_depth = block_max_delegation_depth
+        effective_cwd = requested_cwd
+        effective_allowed_tools = requested_allowed_tools
+        effective_forbidden_tools = requested_forbidden_tools
+        effective_resource_scope = requested_resource_scope
+        effective_allowed_side_effect_classes = requested_side_effect_classes
+        effective_max_tool_calls_per_class = requested_per_class_budget
         extra_facts.update(_unknown_fact_map(block))
 
     # Canonicalize list-valued fields: sorted output guarantees a
@@ -716,13 +913,26 @@ def _split_block_statements(source: str) -> list[str]:
     return statements
 
 
+def _reject_attenuation(
+    block_index: int,
+    dimension: str,
+    detail: str,
+) -> NoReturn:
+    raise ValueError(f"attenuation:{dimension}:block {block_index}: {detail}")
+
+
 def _required_single(block: dict[str, Any], name: str, expected_type: type[Any]) -> Any:
     values = block.get(name)
     if not values:
         raise ValueError(f"missing:{name}")
-    if len(values[-1]) != 1 or not isinstance(values[-1][0], expected_type):
+    value = values[-1][0] if len(values[-1]) == 1 else None
+    if (
+        len(values[-1]) != 1
+        or not isinstance(value, expected_type)
+        or (expected_type is int and isinstance(value, bool))
+    ):
         raise ValueError(f"malformed:{name}")
-    return values[-1][0]
+    return value
 
 
 def _optional_single(
@@ -756,6 +966,7 @@ def _pair_values(block: dict[str, Any], name: str) -> dict[str, int]:
             len(entry) != 2
             or not isinstance(entry[0], str)
             or not isinstance(entry[1], int)
+            or isinstance(entry[1], bool)
         ):
             raise ValueError(f"malformed:{name}")
         parsed[entry[0]] = entry[1]

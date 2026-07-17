@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "1edcf0e3cbde5d90e8a2bc1cb7f1d876f5578330e7ef52722ba131864b07cb63"
+source_sha256: "d0832dc5ebaa5038669abe2e4f87bfea8fa1376ce64ec4516f44f296119bfce4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -79,8 +79,12 @@ default cgroup-scoped capture path is unchanged. The producer derives only a
 bounded basename and never emits the parent path; it does not collect argv,
 binary hashes, environment, or file contents. It does not attest, adopt,
 authorize, or enforce the observed process, and an exact name is not proof of
-agent identity. Stronger fingerprints and measured precision/recall remain
-tracked by issue #67.
+agent identity. A [maintained sanitized corpus and deterministic
+gate](docs/reference/agent-recognition-evaluation.md) now publish exact corpus
+and registry digests, sample-counted precision/recall, Wilson intervals, and
+stable false-positive/false-negative IDs. The gate is regression evidence for
+the maintained corpus—not population accuracy—and stronger fingerprints remain
+tracked separately under issue #67.
 
 For performance engineering, the
 [Linux governance overhead harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)

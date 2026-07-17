@@ -43,9 +43,12 @@ should use encrypted storage with access controls appropriate for signing-key
 material. Do not put API tokens, private keys, or development certificates in
 the image, build arguments, labels, or Kubernetes manifests.
 
-`ARDUR_NO_TLS=1` is supported only when a trusted local reverse proxy, sidecar,
-or service mesh terminates TLS before traffic reaches the container. Bearer
-tokens must not cross an unencrypted or untrusted network.
+Plain HTTP is supported only when a trusted local reverse proxy, sidecar, or
+service mesh terminates TLS before traffic reaches the container. Append the
+explicit `--no-tls` argument to the image command and set `ARDUR_NO_TLS=1` so
+the container healthcheck probes HTTP. The environment variable selects only
+the healthcheck scheme; by itself it cannot disable proxy TLS. Bearer tokens
+must not cross an unencrypted or untrusted network.
 
 An equivalent hardened Docker invocation is:
 

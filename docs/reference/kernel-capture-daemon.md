@@ -258,8 +258,11 @@ evidence has `confidence=low`,
 uid, environment, or file content is collected by this preview. It does not
 issue a passport, adopt a process, select policy, or enforce an action. Any
 process can reuse one of these names, and unlisted launch shapes remain false
-negatives. Issue #67 remains open for stronger fingerprints and the measured
-precision/recall gate.
+negatives. The [agent-recognition evaluation
+reference](agent-recognition-evaluation.md) documents the versioned sanitized
+corpus, deterministic report, maintained-corpus threshold, Wilson intervals,
+and known renamed-binary false negatives. Issue #67 remains open for stronger
+fingerprints and additional signal strata.
 
 ## Lifecycle capture loss
 

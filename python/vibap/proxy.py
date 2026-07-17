@@ -35,8 +35,6 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from .metrics import metrics as ardur_metrics
-from .rate_limiter import RateLimiter
 from .risk_budget import (
     FileRiskBudgetLedger,
     RiskBudgetError,
@@ -48,8 +46,6 @@ from .risk_budget import (
     normalize_risk_budget,
     validate_action_risk,
 )
-from .tls import create_ssl_context, resolve_tls_paths
-
 from .aat_adapter import (
     AAT_CREDENTIAL_FORMAT,
     decode_aat_claims,
@@ -64,6 +60,13 @@ from .lineage_budget import (
     LineageBudgetConflictError,
     LineageBudgetLedger,
 )
+from .memory import (
+    MEMORY_STORE_READ_TOOL,
+    MEMORY_STORE_WRITE_TOOL,
+    GovernedMemoryStore,
+    MemoryIntegrityError,
+)
+from .metrics import metrics as ardur_metrics
 from .mission import (
     MissionBindingError,
     MissionCache,
@@ -71,12 +74,6 @@ from .mission import (
     fetch_mission_declaration,
     mission_is_revoked,
     parse_mission_ref,
-)
-from .memory import (
-    MEMORY_STORE_READ_TOOL,
-    MEMORY_STORE_WRITE_TOOL,
-    GovernedMemoryStore,
-    MemoryIntegrityError,
 )
 from .passport import (
     DEFAULT_HOME,
@@ -92,6 +89,40 @@ from .passport import (
     resolve_keys_dir,
     verify_passport,
 )
+from .policy_backend import (
+    PolicyDecision,
+    compose_decisions,
+    get_backend,
+    timed_evaluate,
+)
+from .rate_limiter import RateLimiter
+from .tls import create_ssl_context, resolve_tls_paths
+
+# Session IDs are UUIDs — reject anything else to prevent path traversal
+_SESSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+MAX_REQUEST_BODY = 1024 * 1024  # 1 MiB
+_API_TOKEN_COMPARE_MAX_BYTES = 4096
+
+
+# Per-session in-process coordination for shared state_dir access. ``flock``
+# closes the cross-process hole, but same-process proxies can still share a
+# PID, so we need a process-local lock keyed by the absolute lockfile path.
+class _SessionCoordinationLock:
+    """Weakref-able wrapper for a per-session reentrant process lock."""
+
+    __slots__ = ("lock", "__weakref__")
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+
+
+_SESSION_COORDINATION_LOCKS: weakref.WeakValueDictionary[
+    str, _SessionCoordinationLock
+] = weakref.WeakValueDictionary()
+_SESSION_COORDINATION_LOCKS_GUARD = threading.Lock()
 
 # NOTE: ``from .receipt import build_receipt, sign_receipt`` was a top-level
 # import here, but proxy ↔ receipt forms a cycle (receipt.py uses ``PolicyEvent``
@@ -103,12 +134,6 @@ from .passport import (
 # called in exactly one method (``_build_receipt_log_entry``), so a deferred
 # local import there breaks the topological cycle without changing semantics.
 # See ``_build_receipt_log_entry`` for the deferred import.
-from .policy_backend import (
-    PolicyDecision,
-    compose_decisions,
-    get_backend,
-    timed_evaluate,
-)
 
 # Session IDs are UUIDs — reject anything else to prevent path traversal
 _SESSION_ID_RE = re.compile(
@@ -6052,6 +6077,10 @@ def _api_token_compare_material(token: bytes) -> bytes:
     )
 
 
+class TLSConfigurationError(RuntimeError):
+    """TLS was required but no usable server context could be constructed."""
+
+
 def serve_proxy(
     proxy: GovernanceProxy,
     private_key: ec.EllipticCurvePrivateKey,
@@ -6107,6 +6136,26 @@ def serve_proxy(
     # round-8 closes the symmetric Python proxy gap that round-7 audit
     # flagged as MED-NEW-1.
     api_token_compare_material = _api_token_compare_material(api_token.encode("ascii"))
+
+    tls_context = None
+    cert_fingerprint = None
+    if not no_tls:
+        try:
+            tls_result = resolve_tls_paths(tls_cert, tls_key, hostname=host)
+            if tls_result is None:
+                raise TLSConfigurationError(
+                    "TLS configuration is unavailable; use --no-tls only when "
+                    "plain HTTP is explicitly intended"
+                )
+            cert_path, key_path, cert_fingerprint = tls_result
+            tls_context = create_ssl_context(cert_path, key_path)
+        except TLSConfigurationError:
+            raise
+        except (OSError, ValueError) as exc:
+            raise TLSConfigurationError(
+                "TLS configuration is unavailable; verify the certificate and key"
+            ) from exc
+    tls_active = tls_context is not None
 
     active_session_ref = {"id": initial_session_id}
     active_session_lock = threading.Lock()
@@ -6751,15 +6800,9 @@ def serve_proxy(
 
     httpd = ThreadingHTTPServer((host, port), Handler)
 
-    tls_active = False
-    if not no_tls:
-        tls_result = resolve_tls_paths(tls_cert, tls_key, hostname=host)
-        if tls_result:
-            cert_path, key_path, cert_fingerprint = tls_result
-            ssl_ctx = create_ssl_context(cert_path, key_path)
-            httpd.socket = ssl_ctx.wrap_socket(httpd.socket, server_side=True)
-            tls_active = True
-            print(f"[tls] cert fingerprint: {cert_fingerprint}", file=sys.stderr)
+    if tls_context is not None:
+        httpd.socket = tls_context.wrap_socket(httpd.socket, server_side=True)
+        print(f"[tls] cert fingerprint: {cert_fingerprint}", file=sys.stderr)
     if no_tls:
         print("[tls] WARNING: TLS disabled — plain HTTP only", file=sys.stderr)
 
@@ -6847,18 +6890,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"revoked passport jti {args.revoke} in {proxy.revoked_path}")
         return 0
 
-    serve_proxy(
-        proxy=proxy,
-        private_key=private_key,
-        host=args.host,
-        port=args.port,
-        initial_session_id=args.initial_session,
-        require_auth=not args.no_require_auth,
-        api_token=args.api_token,
-        tls_cert=args.tls_cert,
-        tls_key=args.tls_key,
-        no_tls=args.no_tls,
-    )
+    try:
+        serve_proxy(
+            proxy=proxy,
+            private_key=private_key,
+            host=args.host,
+            port=args.port,
+            initial_session_id=args.initial_session,
+            require_auth=not args.no_require_auth,
+            api_token=args.api_token,
+            tls_cert=args.tls_cert,
+            tls_key=args.tls_key,
+            no_tls=args.no_tls,
+        )
+    except TLSConfigurationError as exc:
+        print(f"[tls] ERROR: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

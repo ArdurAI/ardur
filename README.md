@@ -62,8 +62,12 @@ default cgroup-scoped capture path is unchanged. The producer derives only a
 bounded basename and never emits the parent path; it does not collect argv,
 binary hashes, environment, or file contents. It does not attest, adopt,
 authorize, or enforce the observed process, and an exact name is not proof of
-agent identity. Stronger fingerprints and measured precision/recall remain
-tracked by issue #67.
+agent identity. A [maintained sanitized corpus and deterministic
+gate](docs/reference/agent-recognition-evaluation.md) now publish exact corpus
+and registry digests, sample-counted precision/recall, Wilson intervals, and
+stable false-positive/false-negative IDs. The gate is regression evidence for
+the maintained corpus—not population accuracy—and stronger fingerprints remain
+tracked separately under issue #67.
 
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)

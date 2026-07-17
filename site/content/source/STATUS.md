@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "ebe183636e9211490ad55f7b51531a6b718b3e7423dec15091ef22708b9d455f"
+source_sha256: "ee139d7d60e87f1719721a08779a95cdb71e30bc108a04cb0398999da9d71c8e"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -50,8 +50,12 @@ successful-exec basename matches the embedded `claude`, `codex`, `gemini`, or
 writes an unrouted candidate into governed session evidence. It emits the
 basename but not its parent path and does not collect argv, hashes, uid,
 environment, or file content. It does not attest or enforce. Issue #67 remains
-in progress for stronger fingerprints and corpus-backed precision/recall
-thresholds.
+in progress for stronger fingerprints and additional signal strata. A
+versioned, sanitized 28-sample corpus now gates exact-name regressions at
+least 0.90 supported-shape recall and zero hard-negative false positives. Its
+deterministic report includes sample counts, Wilson intervals, stable error
+IDs, and exact corpus/registry digests; these are maintained-corpus results,
+not population accuracy or identity assurance.
 
 The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
 `bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
@@ -130,7 +134,8 @@ complete sensor coverage.
 - broader deployment material beyond the SPIRE design surface
 - completion of agent recognition issue #67 beyond the exact-name,
   observe-only Linux foundation: binary hashes and argv/interpreter signals,
-  maintained corpus thresholds, and cross-platform launch sources
+  multi-signal corpus strata, cross-platform launch sources, and exec-storm
+  overhead/loss-budget evidence
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 

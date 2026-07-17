@@ -12,7 +12,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 |---|-------|--------|------|
 | 015 | [Production-grade SPIRE deployment design for Kubernetes](./ADR-015-production-spire-deployment.md) | Proposed | 2026-04-19 |
 | 016 | [Delegation lineage hash index](./ADR-016-delegation-lineage-hash-index.md) | Accepted | 2026-04-21 |
-| 017 | [Biscuit attenuation narrowing semantics](./ADR-017-biscuit-attenuation-narrowing-semantics.md) | Proposed | 2026-04-21 |
+| 017 | [Biscuit attenuation narrowing semantics](./ADR-017-biscuit-attenuation-narrowing-semantics.md) | Accepted | 2026-04-21 |
 | 018 | [Delegation lineage hash domain unification](./ADR-018-delegation-lineage-hash-domain-unification.md) | Proposed | 2026-04-21 |
 | 019 | [Parent-token anchors against trusted lineage](./ADR-019-parent-token-anchors-against-trusted-lineage.md) | Proposed | 2026-04-21 |
 | 020 | [Persisted-session reverification on load](./ADR-020-persisted-session-reverification-on-load.md) | Proposed | 2026-04-21 |
