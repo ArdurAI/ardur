@@ -11,6 +11,37 @@ import (
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
 
+func TestWriteReportUsesOwnerOnlyAtomicOutputAndRejectsSymlinkDirectory(t *testing.T) {
+	report := &kernelcapture.AgentRecognitionBenchmarkReport{SchemaVersion: kernelcapture.AgentRecognitionBenchmarkReportSchema, ArtifactSHA256: strings.Repeat("a", 64)}
+	output := filepath.Join(t.TempDir(), "output")
+	if err := writeReport(output, report); err != nil {
+		t.Fatal(err)
+	}
+	outputInfo, err := os.Stat(output)
+	if err != nil {
+		t.Fatalf("stat output directory: %v", err)
+	}
+	if outputInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("output mode=%v, want 0700", outputInfo.Mode().Perm())
+	}
+	path := filepath.Join(output, reportFilename)
+	reportInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat report: %v", err)
+	}
+	if reportInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("report mode=%v, want 0600", reportInfo.Mode().Perm())
+	}
+
+	link := filepath.Join(t.TempDir(), "output-link")
+	if err := os.Symlink(output, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeReport(link, report); err == nil {
+		t.Fatal("symlink output directory was accepted")
+	}
+}
+
 func TestWriteReportRejectsSymlinkedParentAndExistingDestination(t *testing.T) {
 	report := &kernelcapture.AgentRecognitionBenchmarkReport{SchemaVersion: kernelcapture.AgentRecognitionBenchmarkReportSchema, ArtifactSHA256: strings.Repeat("a", 64)}
 	realParent := t.TempDir()
