@@ -90,11 +90,14 @@ claim.
 
 The separate
 [agent-recognition overhead harness](docs/benchmarks/agent-recognition-overhead.md)
-runs a real-Linux exact-exec corpus with recognition off and on in paired AB/BA
-order. Its machine report keeps lifecycle delivery/loss, classifier rejection,
-fingerprint terminal outcomes, daemon CPU, peak RSS, and workload wall time
-separate. It is host-specific observer-effect evidence, not identity,
-accuracy, attestation, or governance proof.
+runs a real-Linux exact-exec corpus with recognition disabled for the candidate
+baseline, enabled for the exact target-branch reference daemon, and enabled for
+the candidate daemon on the same VM; arm order rotates through all six
+permutations. Its machine report keeps
+lifecycle delivery/loss, classifier rejection, fingerprint terminal outcomes,
+daemon CPU, peak RSS, and workload wall time separate. It is host-specific
+observer-effect evidence, not identity, accuracy, attestation, or governance
+proof.
 
 The [AuditBench evaluation protocol](docs/specs/auditbench-evaluation-protocol-v0.1.md)
 adds strict raw-capture replay, blind two-view annotations, a local

@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "1e2831af42ca865d13e1238028e56b672da9a842b2ecb5c671ef06d03f6d3108"
+source_sha256: "52350d10dc444cd29924cf2482b30f6d24e4b1ea91d5401bda060c67039cb537"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -76,13 +76,22 @@ go test -race -count=1 \
   ./cmd/ardur-agent-recognition-workload
 ```
 
-The dedicated `agent-recognition-benchmark` workflow builds the exact PR-head
-daemon, controller, and native workload, then runs one warm-up plus 20 paired
-recognition-off/on samples on a fresh privileged `ubuntu-24.04` runner. It
-uploads the privacy-bounded raw JSON report and enforces the committed reviewed
-budget. CI fails on metric drift, loss, rejection, unavailable fingerprint
-work, missing counters, schema drift, or digest mismatch. The larger release
-profile is manual and never substitutes for the required CI profile. See the
+The dedicated `agent-recognition-benchmark` workflow builds the exact candidate
+daemon, controller, and native workload plus an exact target-branch reference
+daemon. It runs one warm-up plus 20 three-arm groups on one fresh privileged
+`ubuntu-24.04` runner, rotating through all six baseline/reference/candidate
+orders. The report binds both source SHAs and both copied daemon digests,
+records bounded CPU/scheduling identity, retains three diagnostic process-CPU
+calibration samples, and uploads privacy-bounded raw JSON. CI fails on median
+wall drift, same-VM candidate/reference daemon-CPU p95 drift, RSS drift, loss or
+partial accounting in either enabled arm, rejection, unavailable fingerprint
+work, schema drift, or digest mismatch. Automatic CI does not retry into a
+pass. It requires the reviewed v0.3 budget before measurement; a missing or
+invalid budget fails instead of silently reverting performance to
+`not_evaluated`. Only an explicit manual `ci` dispatch may collect
+budget-independent replacement evidence, and correctness still fails closed.
+The committed budget is bound to three independent exact-head reports; the
+larger release profile is manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
 
 When changing the AuditBench evaluation-protocol artifact pipeline, run:
@@ -115,15 +124,17 @@ while Linux benchmark stress is manual.
 - Manual dispatch defaults to stress and uploads the JSON/Markdown report for seven days.
 - No scheduled performance run exists; shared-runner variance and CI cost would make those numbers misleading.
 
-### `agent-recognition-benchmark` — paired real-Linux loss and budget gate
+### `agent-recognition-benchmark` — reference-paired real-Linux loss and budget gate
 
 [`/.github/workflows/agent-recognition-benchmark.yml`](/__ardur_internal__/repo/.github/workflows/agent-recognition-benchmark.yml)
 
 - Relevant pull requests and pushes to `dev` run the bounded CI profile with
-  one warm-up and 20 deterministic AB/BA pairs.
+  one warm-up and 20 deterministic three-arm groups.
 - The required job uses authenticated daemon health to enforce exclusive
   lifecycle, classification, and fingerprint accounting; any unreported or
-  unavailable work fails the reviewed budget gate.
+  unavailable work in either enabled arm fails the reviewed budget gate. The
+  hard CPU signal is the candidate/exact-reference ratio on one VM; synthetic
+  process-CPU calibration remains diagnostic without weakening those ledgers.
 - Manual dispatch defaults to the longer release profile. There is no schedule,
   because privileged performance work consumes runner CPU and shared-runner
   variation is not longitudinal evidence.

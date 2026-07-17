@@ -26,7 +26,15 @@ func TestRunRejectsInvalidArgumentsWithoutEchoingPrivatePaths(t *testing.T) {
 func TestRunRejectsUnknownProfileBeforeMeasurement(t *testing.T) {
 	privatePath := filepath.Join(t.TempDir(), "private-output")
 	var stdout bytes.Buffer
-	if code := run([]string{"--daemon-bin", "/not/a/daemon", "--workload-bin", "/not/a/workload", "--source-sha", strings.Repeat("a", 40), "--output-dir", privatePath, "--profile", "unbounded"}, &stdout); code != 2 {
+	if code := run([]string{
+		"--daemon-bin", "/not/a/daemon",
+		"--reference-daemon-bin", "/not/a/private-reference-daemon",
+		"--workload-bin", "/not/a/workload",
+		"--source-sha", strings.Repeat("a", 40),
+		"--reference-source-sha", strings.Repeat("b", 40),
+		"--output-dir", privatePath,
+		"--profile", "unbounded",
+	}, &stdout); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
 	}
 	var summary commandSummary

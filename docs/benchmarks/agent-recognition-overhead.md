@@ -1,10 +1,11 @@
 # Linux Agent-Recognition Overhead And Loss Harness
 
-Ardur ships a real-Linux paired benchmark for the opt-in
+Ardur ships a real-Linux reference-paired benchmark for the opt-in
 `ardur-kernelcaptured --agent-recognition` path. It measures the same
-deterministic native exec corpus with recognition disabled and enabled, records
-raw AB/BA observations, and fails closed when lifecycle or fingerprint work is
-not completely accounted.
+deterministic native exec corpus with recognition disabled, with the exact
+target-branch daemon enabled, and with the candidate daemon enabled. It records
+all three raw arms and fails closed when lifecycle or fingerprint work is not
+completely accounted in either enabled arm.
 
 This is host-specific engineering evidence. It is not a universal overhead
 number, an accuracy study, identity attestation, or proof that the observed
@@ -14,13 +15,18 @@ process is governed.
 
 Each run uses one copied native workload whose basename is `codex`, one
 generated owner-only fingerprint registry, and the production daemon's fixed
-non-blocking fingerprint queue and worker count. The harness performs one or
-more discarded warm-up pairs followed by at least 20 measured pairs. Pair order
-alternates deterministically between baseline-first and enabled-first.
+non-blocking fingerprint queue and worker count. The harness copies and hashes
+both daemon executables into its private workspace before measurement. It
+performs one or more discarded warm-up groups followed by at least 20 measured
+groups. The baseline-off, exact-reference-on, and candidate-on arm order rotates
+deterministically through all six permutations so one arm does not always pay
+the same thermal or scheduling position.
 
-Every pair records:
+Every group records:
 
-- the baseline and enabled workload elapsed time, including the signed
+- the baseline, exact-reference-enabled, and candidate-enabled observations,
+  including both daemon binary SHA-256 digests and exact source SHAs;
+- the baseline and candidate workload elapsed time, including the signed
   overhead numerator, baseline denominator, and percentage;
 - daemon CPU runtime summed across `/proc/<pid>/task/*/schedstat` and daemon
   peak RSS from procfs;
@@ -32,11 +38,23 @@ Every pair records:
   process-exited, unsupported, size-exceeded, deadline-exceeded, in-flight,
   and unexplained counts.
 
-The report recomputes p50, p95, minimum, maximum, and mean from the raw pairs.
-It carries the exact source SHA, kernel/architecture/Go metadata, workload and
-registry digests, sample counts, profile settings, gate result, and a SHA-256
-artifact digest. Validation recomputes every ledger, summary, overhead value,
-and artifact digest before the file is published.
+The report recomputes p50, p95, minimum, maximum, and mean from the raw groups.
+It carries both exact source SHAs, both executed daemon digests,
+kernel/architecture/Go metadata, workload and registry digests, sample counts,
+profile settings, gate result, and a SHA-256 artifact digest. It also records a
+sanitized CPU model, cgroup `cpu.max`, effective CPU set, hosted-runner image
+OS/version, and three bounded process-CPU calibration samples. Validation
+recomputes every ledger, summary, overhead value, reference ratio, calibration
+distribution, and artifact digest before the file is published.
+
+The calibration hashes the exact copied workload bytes enough times to process
+at least 256 MiB per sample and measures the controller process with
+`CLOCK_PROCESS_CPUTIME_ID`. Workload size, iteration count, total bytes, sample
+count, and digest are bounded and checked. The synthetic calibration is
+diagnostic in v0.3. The hard CPU decision instead divides candidate daemon CPU
+by exact-reference daemon CPU for the same profile and VM, then evaluates the
+p95 of those pairwise ratios. Raw current/reference daemon CPU, the legacy
+calibration ratio, and all calibration samples remain in the artifact.
 
 ## Bounded profiles
 
@@ -47,31 +65,153 @@ and artifact digest before the file is published.
 
 Each process remains alive for 300 ms so the production asynchronous resolver
 can open and hash the executable before exit. The required CI profile uses one
-warm-up and 20 measured pairs. The release profile is only available through
+warm-up and 20 measured groups. The release profile is only available through
 explicit workflow dispatch or `--profile release`; it is not scheduled.
 
 ## Budget lifecycle
 
-The first exact-head hosted-runner run is baseline evidence and reports
-`gate_status: not_evaluated`. Reviewers inspect its raw pairs, environment,
-loss ledgers, and artifact digest before committing:
+The v0.3 workflow compares the candidate daemon with an exact target-branch
+reference on the same VM. Pull requests use the event's exact base SHA; `dev`
+pushes use the exact pre-push SHA; manual evidence runs use the candidate
+branch's merge-base with `dev`. Both source SHAs and both executed binary
+digests are part of the artifact.
 
-- the reviewed baseline report as an explicit public evidence fixture; and
-- `go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.1.json`.
+Automatic pull-request and `dev` CI must load
+`agent-recognition-benchmark-budget-v0.3.json`. The committed budget is bound to
+three independently dispatched exact-head reports. A missing budget fails at a
+preflight step before spending benchmark time. An explicit
+`workflow_dispatch` with profile `ci` is the only hosted evidence-only path for
+collecting a replacement evidence set; reviewers must inspect at least three
+independent exact-head artifacts before replacing both those reports and the
+budget bound to their artifact digests. Manual `release` runs remain
+budget-independent experiments.
 
-The budget records the evidence artifact digest and per-profile evidence p50,
-p95 daemon CPU, peak RSS, and explicit tolerances. Once the file exists, the CI
-workflow automatically loads it for the `ci` profile. The command exits 1 when
-a budget is exceeded and exits 2 for invalid input, unavailable measurement,
-schema drift, digest mismatch, or report-publication failure.
+`not_evaluated` applies only to performance. Even without a budget, any drop,
+malformed or unexplained capture, recognition rejection, fingerprint mismatch,
+saturation, unavailable/in-flight work, partial reference accounting, or an
+unexplained fingerprint outcome in either enabled arm produces a failing
+artifact and exit 1. Evidence collection cannot turn a correctness failure into
+a green calibration run.
+
+The v0.3 budget records every evidence artifact digest and per-profile wall p50
+and p95, candidate/reference daemon CPU p95 ratio, peak RSS, and explicit
+tolerances. The hard wall decision uses p50; p95 remains visible diagnostic
+evidence because a small number of hosted-runner scheduling stalls can dominate
+a 20-sample tail. The CPU decision uses the p95 same-VM ratio. A missing,
+renamed, schema-mixed, non-finite, overflowing, or invalid budget fails closed
+instead of falling back to `not_evaluated`. The command exits 1 when a budget
+or correctness gate is exceeded and exits 2 for invalid input, unavailable
+measurement, schema drift, digest mismatch, or report-publication failure.
 
 Budget evaluation always fails on a missing profile, too few samples, producer
 drops, malformed records, unexplained capture, rejection, fingerprint queue
-saturation, unavailable fingerprint work, in-flight work, or unexplained
-fingerprint outcomes. Tolerances cover runner variance; they never convert
-loss into a pass.
+mismatch, saturation, unavailable fingerprint work, in-flight work, or
+unexplained fingerprint outcomes. Tolerances cover runner variance; they never
+convert loss or incorrect fingerprinting into a pass.
 
-### Reviewed CI evidence
+The historical v0.1 and v0.2 reports and budgets remain strictly loadable and
+digest-verifiable. They retain their original absolute or synthetic-calibrated
+CPU rules and are not silently reinterpreted as same-VM reference evidence.
+
+### Reviewed v0.3 same-VM reference evidence
+
+Three independent, first-attempt manual `ci` dispatches compared source
+`9c5f16b2356f77bd63b3db6711c50e16e2407745` with exact `dev` reference
+`5df32e257d2e9c9a6750fa65638f43c8b0707484`. No attempt was rerun. All three
+executed candidate daemon digest
+`46a1d6ecfebe984a1952aeb47652f5ec19e8bbf8906644427686a98a7fe57737`
+and reference daemon digest
+`02352ba197866c120395d75a4ff06bec52c8444691da4e406c94b7a799e3d8af`
+on the same VM for each report.
+
+| Run | Reviewed report | CPU model | Calibration p50 | Artifact digest |
+|---:|---|---|---:|---|
+| [29580498313](https://github.com/ArdurAI/ardur/actions/runs/29580498313) | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json) | AMD EPYC 7763 | 170.023 ms | `a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4` |
+| [29580918057](https://github.com/ArdurAI/ardur/actions/runs/29580918057) | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json) | AMD EPYC 9V74 | 191.558 ms | `b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e` |
+| [29581341003](https://github.com/ArdurAI/ardur/actions/runs/29581341003) | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json) | AMD EPYC 7763 | 169.963 ms | `32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317` |
+
+Each report delivered, recognized, and fingerprinted all 2,080 candidate and
+all 2,080 reference events. Across the evidence set that is 6,240 exact
+candidate successes plus 6,240 exact reference successes, with zero producer
+drop, malformed record, rejection, mismatch, saturation, unavailable or
+in-flight work, or unexplained outcome.
+
+| Profile | Wall p50 range | Diagnostic wall p95 maximum | Candidate/reference CPU p95 range | Maximum RSS |
+|---|---:|---:|---:|---:|
+| low | 0.0082–0.0564% | 0.0978% | 1.03667–1.08923 | 13,452 KiB |
+| sustained | 0.0931–0.1162% | 0.2453% | 1.02637–1.03465 | 13,496 KiB |
+| storm | 0.6041–0.6660% | 0.9916% | 1.01344–1.05941 | 13,632 KiB |
+
+Budget version `github-ubuntu-24.04-amd64.9c5f16b.v1` records the maximum
+reviewed value for every evidence field. Its wall allowances are tight upward
+roundings of more than twice the cross-run p50 spread: 0.10 percentage points
+for low, 0.05 for sustained, and 0.15 for storm. Its relative CPU allowances
+likewise exceed twice the cross-run relative p95-ratio spread: 12% for low, 3%
+for sustained, and 10% for storm, with a 0.02 absolute floor that does not
+dominate those thresholds. RSS retains the historical 4,096 KiB allowance.
+The committed provenance test strictly reloads all reports, recomputes their
+digests, derives these maxima and spreads, verifies both CPU models and all
+correctness totals, and proves every reviewed report passes the bound budget.
+These limits are regression evidence, not an SLO or a cross-host capacity
+claim. A future failure requires artifact review, never retry voting or blind
+tolerance widening.
+
+### Retired v0.2 synthetic-calibration evidence
+
+[GitHub Actions run
+29575721818](https://github.com/ArdurAI/ardur/actions/runs/29575721818)
+executed source `a0bdcd981107631a45476ac27f84ed17da2d221d` three times on
+fresh `ubuntu-24.04` hosted VMs. Attempts 1 and 3 used an AMD EPYC 9V74 and
+attempt 2 used an Intel Xeon Platinum 8573C. All three recorded runner image
+`ubuntu24` version `20260714.240.1`, kernel `6.17.0-1020-azure`, Go `1.26.5`,
+four effective CPUs, unlimited cgroup CPU bandwidth, and effective CPU set
+`0-3`.
+
+| Attempt | Reviewed report | CPU model | Calibration p50 | Artifact digest |
+|---:|---|---|---:|---|
+| 1 | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt1.json) | AMD EPYC 9V74 | 191.873 ms | `02b15844718be0ec716397b8b1d17b4efcfe9e6ecb19a40c8e424e1a7f658b06` |
+| 2 | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt2.json) | Intel Xeon Platinum 8573C | 155.492 ms | `3150fd7e1a66fa8f9f958df9efcf64a550a1bac2d03061c724154aed7a385d5b` |
+| 3 | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-a0bdcd9-run29575721818-attempt3.json) | AMD EPYC 9V74 | 191.909 ms | `6989c8b13c3f4bd68968be576c4adc708401e436c21afc6c30a3dfc2384b97e7` |
+
+Each attempt delivered, recognized, and fingerprinted all 2,080 enabled events.
+Across the evidence set that is 6,240 exact successes with zero producer drop,
+malformed record, rejection, mismatch, saturation, unavailable or in-flight
+work, or unexplained outcome. The committed provenance test strictly reloads
+each report, recomputes its artifact digest, verifies that the budget lists all
+three distinct digests, derives the per-profile maxima, and proves that every
+reviewed report passes the resulting budget.
+
+| Profile | Maximum wall p50 | Diagnostic wall p95 maximum | Normalized CPU p95 range | Budget evidence normalized CPU p95 | Maximum RSS |
+|---|---:|---:|---:|---:|---:|
+| low | 0.0461% | 0.1033% | 0.06153–0.06499 | 0.06499 | 13,568 KiB |
+| sustained | 0.0651% | 0.2045% | 0.24197–0.27459 | 0.27459 | 13,592 KiB |
+| storm | 0.6100% | 1.1457% | 0.86626–0.98490 | 0.98490 | 15,532 KiB |
+
+Budget version `github-ubuntu-24.04-amd64.a0bdcd9.v1` uses the maximum reviewed
+value for every evidence field. The 0.1-percentage-point wall tolerance is more
+than twice the largest cross-attempt p50 spread (0.0330 points; twice is 0.0659)
+and is rounded upward. The normalized CPU tolerance is the larger of 30% or
+0.01; 30% is more than twice the largest cross-attempt relative range (13.7%)
+and dominates the 0.01 floor for every current profile. RSS retains the
+historical 4,096 KiB allowance. These limits are designed to detect regression
+across the observed hosted-runner CPU classes. They are not an SLO, a capacity
+claim, or permission to ignore a new runner class; unexpected failures require
+artifact review, never retry voting.
+
+The first mandatory-budget run, [GitHub Actions run
+29577544792](https://github.com/ArdurAI/ardur/actions/runs/29577544792),
+falsified that normalization on its first attempt; it was not rerun. On an AMD
+EPYC 7763, all 2,080 candidate events were delivered, recognized, and
+fingerprinted and all wall-p50/RSS checks passed, but normalized CPU failed for
+low (`0.086400 > 0.084482`), sustained (`0.373746 > 0.356972`), and storm
+(`1.379734 > 1.280371`). The single-thread SHA calibration did not co-scale
+with the concurrent production daemon path. Widening the v0.2 tolerance or
+retry voting would hide that model failure, so the v0.2 budget is retained only
+as historical, digest-verifiable evidence and is no longer used by CI. The
+[failed raw report](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-aaac953-run29577544792.json)
+is committed so the methodology falsification remains reproducible.
+
+### Historical v0.1 CI evidence
 
 The initial exact-head x86 evidence is [GitHub Actions run
 29321373911](https://github.com/ArdurAI/ardur/actions/runs/29321373911) for
@@ -113,31 +253,34 @@ rejection, unavailable, saturation, in-flight, or unexplained work.
 | sustained | 0.0419% | 0.1257% | 44.24 ms | 13,432 KiB |
 | storm | 0.5646% | 0.8334% | 158.63 ms | 13,464 KiB |
 
-The wall tolerance remains 0.5 percentage points. It was selected from the
+The historical v0.1 wall tolerance remains 0.5 percentage points. It was selected from the
 initial measurement as greater than twice its largest observed p95-minus-p50
 within-run spread (0.2371 points for storm; twice that is 0.4742), rounded
 upward. CPU allows the
 larger of 30% or 5 ms; 30% is more than twice the largest observed
 p95-normalized initial-run range. RSS allows 4,096 KiB. The correction retained
 all tolerances unchanged; it did not use the methodology change to widen a
-gate. These are conservative regression limits, not an SLO or a universal
+gate. These are historical regression limits, not an SLO or a universal
 performance claim. They should be tightened only after additional exact-hosted-
 runner evidence, never loosened to conceal loss.
 
-The public site mirrors the historical baseline, corrected-method evidence,
-and budget JSON files. After changing any fixture, run
+The public site mirrors every committed report and versioned budget fixture.
+After changing any fixture, run
 `python3 site/scripts/sync_source_docs.py` and commit the generated artifact
 copies and routes with the source change.
 
 ## Local real-Linux run
 
-Build all three exact artifacts from the same checkout:
+Build the candidate controller, workload, and daemon from the candidate
+checkout, then build the reference daemon from a separate exact checkout:
 
 ```bash
 cd go
 go build -trimpath -o /tmp/ardur-kernelcaptured ./cmd/ardur-kernelcaptured
 go build -trimpath -o /tmp/ardur-agent-recognition-benchmark ./cmd/ardur-agent-recognition-benchmark
 go build -trimpath -o /tmp/ardur-agent-recognition-workload ./cmd/ardur-agent-recognition-workload
+(cd /path/to/reference-checkout/go && \
+  go build -trimpath -o /tmp/ardur-kernelcaptured-reference ./cmd/ardur-kernelcaptured)
 ```
 
 Run only on an isolated disposable Linux host with BTF, bpffs, tracefs, root,
@@ -148,34 +291,57 @@ collision risk.
 ```bash
 sudo /tmp/ardur-agent-recognition-benchmark \
   --daemon-bin /tmp/ardur-kernelcaptured \
+  --reference-daemon-bin /tmp/ardur-kernelcaptured-reference \
   --workload-bin /tmp/ardur-agent-recognition-workload \
   --source-sha "$(git rev-parse HEAD)" \
+  --reference-source-sha "$(git -C /path/to/reference-checkout rev-parse HEAD)" \
   --output-dir /tmp/ardur-agent-recognition-report \
   --profile ci \
+  --runner-image-os local \
+  --runner-image-version unknown \
   --warmup-pairs 1 \
   --measured-pairs 20
 ```
 
 The output directory is `0700`; the JSON report is written atomically as
-`0600`. The report contains no full host path, argv, environment, process
-identifier, computed host-executable digest, or payload. It does include the
-digest of the copied deterministic workload and the canonical registry digest.
+`0600`. The report contains no full host path, argv, arbitrary environment,
+process identifier, arbitrary host-executable digest, or payload. It does
+include both copied daemon digests, the copied deterministic workload digest,
+the canonical registry digest, and the bounded scheduling identity described
+above. Runner image arguments are sanitized to printable, single-line,
+128-byte values; local runs may use `unknown`.
 
 ## CI, privilege, and cost boundary
 
 The dedicated workflow uses a fresh `ubuntu-24.04` GitHub-hosted VM, read-only
-repository permission, commit-pinned actions, and no secrets. It mounts bpffs
-or tracefs only when absent, runs the exact PR-head artifacts with `sudo`, then
-uploads the owner-readable JSON report for 14 days. GitHub documents standard
+repository permission, commit-pinned actions, non-persistent checkout
+credentials, and no secrets. It checks out and builds the exact current and
+reference commits, verifies both checkout HEADs, and disables Go workspace
+auto-discovery so candidate-controlled parent files cannot alter the reference
+module build. Candidate tests and builds finish before the fresh reference
+checkout; that tree must be clean and its daemon is built immediately with new
+private module and build caches plus `go mod verify`. It mounts bpffs or tracefs
+only when absent, runs the copied
+artifacts with `sudo`, then uploads the owner-readable JSON report for 14 days.
+The official checkout action supports exact refs and multiple side-by-side
+checkouts: [actions/checkout](https://github.com/actions/checkout). GitHub
+documents standard
 hosted runners as fresh VMs and Linux runners as providing passwordless sudo:
 [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+The official runner-image build records `ImageOS` and `ImageVersion` in the
+runner environment; the workflow passes only those two bounded values:
+[Ubuntu runner-image environment configuration](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/configure-environment.sh).
 
-The required profile consumes several CI minutes and performs 4,160 measured
-workload execs plus warm-up across both arms. The longer profile increases CPU
-and runner time substantially and is manual. Public-repository hosted-runner
-minutes are currently not billed, but self-hosted/private execution still has
-real compute, queueing, energy, and possible per-minute cost. Do not schedule
-the release profile without a longitudinal experiment design.
+The required profile consumes several CI minutes and performs 6,240 measured
+workload execs plus warm-up across all three arms. That is roughly 50% more
+measurement work than v0.2. Calibration adds exactly three
+bounded 256-MiB-class hashing samples on the same VM; automatic CI does not
+retry or launch multiple VMs to obtain a passing vote. The longer profile
+increases CPU and runner time substantially and is manual. Public-repository
+hosted-runner minutes are currently not billed, but self-hosted/private
+execution still has real compute, queueing, energy, and possible per-minute
+cost. Do not schedule the release profile without a longitudinal experiment
+design.
 
 ## Primary-source basis
 
@@ -192,6 +358,16 @@ the release profile without a longitudinal experiment design.
   harness resets it immediately before each profile so per-profile peaks do
   not inherit an earlier profile's high-water mark:
   [proc filesystem](https://docs.kernel.org/next/filesystems/proc.html).
+- Linux documents `CLOCK_PROCESS_CPUTIME_ID` as process-wide CPU time and cgroup
+  v2 `cpu.max` as the CPU bandwidth limit. The calibration and runner context
+  use those kernel interfaces rather than elapsed wall time or an inferred
+  runner class:
+  [clock_gettime(2)](https://man7.org/linux/man-pages/man2/clock_gettime.2.html),
+  [cgroup v2](https://docs.kernel.org/admin-guide/cgroup-v2.html).
+- NIST documents the sample median as robust against a small fraction of
+  extreme observations. The hard wall decision therefore uses the already
+  recorded p50 while retaining p95, maximum, and raw groups for diagnosis:
+  [Measures of location](https://www.itl.nist.gov/div898/handbook/eda/section3/eda351.htm).
 - Linux documents that `poll(2)` may return `EINTR` when a signal arrives
   before an event. The pidfd exit check retries that transient interruption
   instead of misclassifying it as an unsupported fingerprint target:

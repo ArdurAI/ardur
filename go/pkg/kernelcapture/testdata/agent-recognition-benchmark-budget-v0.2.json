@@ -1,0 +1,45 @@
+{
+  "schema_version": "ardur.agent_recognition_benchmark_budget.v0.2",
+  "budget_version": "github-ubuntu-24.04-amd64.a0bdcd9.v1",
+  "evidence_artifact_sha256s": [
+    "02b15844718be0ec716397b8b1d17b4efcfe9e6ecb19a40c8e424e1a7f658b06",
+    "3150fd7e1a66fa8f9f958df9efcf64a550a1bac2d03061c724154aed7a385d5b",
+    "6989c8b13c3f4bd68968be576c4adc708401e436c21afc6c30a3dfc2384b97e7"
+  ],
+  "minimum_measured_pairs": 20,
+  "profiles": [
+    {
+      "profile_name": "low",
+      "evidence_p50_wall_overhead_percent": 0.04612516513852006,
+      "evidence_p95_wall_overhead_percent": 0.10334176756997233,
+      "wall_overhead_tolerance_percentage_points": 0.1,
+      "evidence_p95_enabled_daemon_cpu_calibration_ratio": 0.06498597617424616,
+      "daemon_cpu_calibration_ratio_relative_tolerance_percent": 30,
+      "daemon_cpu_calibration_ratio_absolute_tolerance": 0.01,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13568,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "storm",
+      "evidence_p50_wall_overhead_percent": 0.6100081893053794,
+      "evidence_p95_wall_overhead_percent": 1.145674295051939,
+      "wall_overhead_tolerance_percentage_points": 0.1,
+      "evidence_p95_enabled_daemon_cpu_calibration_ratio": 0.9849010782620601,
+      "daemon_cpu_calibration_ratio_relative_tolerance_percent": 30,
+      "daemon_cpu_calibration_ratio_absolute_tolerance": 0.01,
+      "evidence_max_enabled_daemon_peak_rss_kib": 15532,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "sustained",
+      "evidence_p50_wall_overhead_percent": 0.06507967033162491,
+      "evidence_p95_wall_overhead_percent": 0.20445175192217593,
+      "wall_overhead_tolerance_percentage_points": 0.1,
+      "evidence_p95_enabled_daemon_cpu_calibration_ratio": 0.27459383274512683,
+      "daemon_cpu_calibration_ratio_relative_tolerance_percent": 30,
+      "daemon_cpu_calibration_ratio_absolute_tolerance": 0.01,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13592,
+      "peak_rss_tolerance_kib": 4096
+    }
+  ]
+}
