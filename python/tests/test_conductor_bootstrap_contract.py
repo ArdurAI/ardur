@@ -53,6 +53,12 @@ def _fixture_repo(
     shutil.copy2(BOOTSTRAP, scripts / BOOTSTRAP.name)
     (repo / ".gitignore").write_text(".context/\n", encoding="utf-8")
     if complete_graph is not None:
+        graph_markdown = (
+            "" if empty_graph_artifact == "ardur-graph.md" else "# Graph\n"
+        )
+        graph_mermaid = (
+            "" if empty_graph_artifact == "ardur-graph.mmd" else "graph TD\n"
+        )
         (scripts / "build-knowledge-graph.py").write_text(
             f"""\
 import json
@@ -74,11 +80,11 @@ output.mkdir(parents=True, exist_ok=True)
 )
 if {complete_graph!r}:
     (output / "ardur-graph.md").write_text(
-        {"" if empty_graph_artifact == "ardur-graph.md" else "# Graph\\n"!r},
+        {graph_markdown!r},
         encoding="utf-8",
     )
     (output / "ardur-graph.mmd").write_text(
-        {"" if empty_graph_artifact == "ardur-graph.mmd" else "graph TD\\n"!r},
+        {graph_mermaid!r},
         encoding="utf-8",
     )
 """,
