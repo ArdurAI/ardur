@@ -49,7 +49,9 @@ class TestScopeNarrowing:
         )
         claims = verify_passport(child, public_key, parent_token=parent_token)
         parent_claims = verify_passport(parent_token, public_key)
-        assert set(claims["allowed_tools"]).issubset(set(parent_claims["allowed_tools"]))
+        assert set(claims["allowed_tools"]).issubset(
+            set(parent_claims["allowed_tools"])
+        )
 
     def test_child_scope_cannot_equal_but_exceed_parent(
         self, parent_token, private_key, public_key
@@ -134,22 +136,22 @@ class TestMultiLevel:
         # The parent_jti check catches this first (child_b has a different jti
         # than child_a_prime). The chain[0].token_hash check is defense-in-depth
         # for cases where jti values could collide in multi-key deployments.
-        with pytest.raises(PermissionError, match="parent_jti does not match|chain splice"):
+        with pytest.raises(
+            PermissionError, match="parent_jti does not match|chain splice"
+        ):
             verify_passport(grand_c, public_key, parent_token=child_b)
 
         # Legitimate: verify grand_c with correct parent → should pass
         claims = verify_passport(grand_c, public_key, parent_token=child_a_prime)
         assert claims["sub"] == "grand-c"
 
-    def test_grandchild_cannot_re_escalate(
-        self, parent_token, private_key, public_key
-    ):
+    def test_grandchild_cannot_re_escalate(self, parent_token, private_key, public_key):
         child = derive_child_passport(
             parent_token=parent_token,
             public_key=public_key,
             private_key=private_key,
             child_agent_id="child",
-            child_allowed_tools=["read"],        # child is already narrowed
+            child_allowed_tools=["read"],  # child is already narrowed
             child_mission="child",
             child_ttl_s=300,
         )
@@ -357,7 +359,9 @@ class TestResourceScopeNarrowing:
         claims = verify_passport(child_token, public_key, parent_token=parent_token)
         assert claims["resource_scope"] == ["/data/*", "/logs/*"]
 
-    def test_unrestricted_parent_can_delegate_narrowed_child_scope(self, private_key, public_key):
+    def test_unrestricted_parent_can_delegate_narrowed_child_scope(
+        self, private_key, public_key
+    ):
         parent_token = issue_passport(
             MissionPassport(
                 agent_id="p",
@@ -408,7 +412,9 @@ class TestResourceScopeNarrowing:
                 child_resource_scope=["/tmp/*"],
             )
 
-    def test_restricted_parent_can_delegate_empty_child_scope(self, private_key, public_key):
+    def test_restricted_parent_can_delegate_empty_child_scope(
+        self, private_key, public_key
+    ):
         parent_token = issue_passport(
             MissionPassport(
                 agent_id="p",
@@ -500,7 +506,8 @@ class TestDelegationChainAdversarial:
         }
         if extra_claims:
             claims.update(extra_claims)
-        return issue_passport(
+        jti_override = claims.pop("jti", None)
+        token = issue_passport(
             MissionPassport(
                 agent_id="child",
                 mission="forged child",
@@ -514,6 +521,11 @@ class TestDelegationChainAdversarial:
             ttl_s=60,
             extra_claims=claims,
         )
+        if not isinstance(jti_override, str):
+            return token
+        payload = jwt.decode(token, options={"verify_signature": False})
+        payload["jti"] = jti_override
+        return jwt.encode(payload, private_key, algorithm="ES256")
 
     def test_orphan_child_without_chain_rejected_even_without_parent_token(
         self, private_key, public_key
@@ -548,9 +560,7 @@ class TestDelegationChainAdversarial:
         with pytest.raises(PermissionError, match="inconsistent delegation_chain"):
             verify_passport(forged, public_key)
 
-    def test_cycle_rejected_even_without_parent_token(
-        self, private_key, public_key
-    ):
+    def test_cycle_rejected_even_without_parent_token(self, private_key, public_key):
         parent_token = self._parent(private_key)
         parent_claims = verify_passport(parent_token, public_key)
         forged = self._signed_child(
@@ -643,22 +653,22 @@ class TestEscrowRights:
             child_agent_id="c3",
             child_allowed_tools=["read"],
             child_mission="third sibling",
-            child_max_tool_calls=15,                     # asks for 15
-            parent_reserved_for_descendants=20,           # 2 prior sibs * 10
+            child_max_tool_calls=15,  # asks for 15
+            parent_reserved_for_descendants=20,  # 2 prior sibs * 10
         )
         claims = verify_passport(third, public_key, parent_token=root_token)
         # Clamped to escrow_remaining = ceiling(30) - reserved(20) = 10
         assert claims["max_tool_calls"] == 10
         assert claims["reserved_budget_share"] == 10
 
-    def test_ceiling_exhausted_rejects_delegation(
-        self, private_key, public_key
-    ):
+    def test_ceiling_exhausted_rejects_delegation(self, private_key, public_key):
         """If parent_reserved_for_descendants == ceiling, no further
         delegation may occur even if parent_calls_remaining is silent
         about the exhaustion."""
         root_token = self._root(private_key, ceiling=30)
-        with pytest.raises(PermissionError, match="descendant-reservation pool exhausted"):
+        with pytest.raises(
+            PermissionError, match="descendant-reservation pool exhausted"
+        ):
             derive_child_passport(
                 parent_token=root_token,
                 public_key=public_key,
@@ -670,9 +680,7 @@ class TestEscrowRights:
                 parent_reserved_for_descendants=30,  # already at ceiling
             )
 
-    def test_over_allocated_reservation_rejected(
-        self, private_key, public_key
-    ):
+    def test_over_allocated_reservation_rejected(self, private_key, public_key):
         """Defensive: a caller that reports more reserved than the ceiling
         is mathematically impossible — refuse rather than accept and
         compute a negative escrow_remaining."""
@@ -689,9 +697,7 @@ class TestEscrowRights:
                 parent_reserved_for_descendants=31,  # > ceiling
             )
 
-    def test_negative_reservation_rejected(
-        self, private_key, public_key
-    ):
+    def test_negative_reservation_rejected(self, private_key, public_key):
         root_token = self._root(private_key, ceiling=30)
         with pytest.raises(PermissionError, match="must be non-negative"):
             derive_child_passport(
@@ -723,9 +729,7 @@ class TestEscrowRights:
             child_max_tool_calls=10,
             # parent_reserved_for_descendants omitted — defaults to 0
         )
-        claims = verify_passport(
-            child_token, public_key, parent_token=root_token
-        )
+        claims = verify_passport(child_token, public_key, parent_token=root_token)
         assert claims["max_tool_calls"] == 10
         assert claims["reserved_budget_share"] == 10
 
@@ -934,9 +938,7 @@ class TestColdLineageVerification:
             child_mission="subtask",
             child_ttl_s=120,
         )
-        claims = verify_passport(
-            child_token, public_key, parent_token=parent_token
-        )
+        claims = verify_passport(child_token, public_key, parent_token=parent_token)
         assert claims["sub"] == "child"
         assert claims["parent_jti"]  # chain intact
 

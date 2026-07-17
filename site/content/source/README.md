@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "dbdab1827fa922d6da719a9bb1c4499925458a2335612367d85caebcb8a060f9"
+source_sha256: "688f143e9030066a8e3cb53f99408a8ff0457229848255cf27ff856166eb22bd"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -21,6 +21,14 @@ Ardur governs AI-agent tool calls that pass through a configured adapter or
 proxy. It checks mission, resource, budget, and delegation constraints before
 that integration dispatches the call, then emits an issuer-signed,
 hash-linked receipt for the decision.
+
+For issuer-selected dangerous tools, an optional signed `risk_budget` claim
+binds authenticated tool schemas to typed per-action impact caps and atomic
+session, agent, and lineage ceilings. The executor must explicitly close every
+permitted reservation as committed once execution may have started, or as
+released only when execution never started. This does not infer semantic risk
+or hidden side effects; see the
+[typed risk-budget reference](/__ardur_internal__/source/docs/reference/risk-budgets/).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--release-blue)](/__ardur_internal__/source/status/)
@@ -238,6 +246,7 @@ Concretely — these are the design principles the repo is being built to meet, 
 - **Composable with what already exists.** Designed around SPIFFE for workload identity, Biscuit for first-party-attenuation credentials, Cedar for policy, the individual AAT Internet-Draft for delegation-token semantics, and EAT (RFC 9711) for attestation-token semantics. We didn't reinvent the substrate.
 - **Cryptographically bound by design.** Mission credentials are designed to be signed by an issuer key and produce signed receipts chain-hashed to the previous one. The Python Biscuit path reports SPIFFE holder binding only when the proxy has a server-owned Biscuit issuer key, JWT-SVID trust bundle, and audience and the presented credentials verify against them; request payloads cannot choose those verifier inputs. JWT-SVID itself remains a replayable bearer credential, so this is bounded holder evidence rather than universal replay prevention. The design is documented in the [ADRs](/__ardur_internal__/source/docs/decisions/readme/); the public code that implements it is being curated in phases.
 - **Delegation that narrows, never widens.** Child sessions get strictly narrower authority than their parent — fewer tools, smaller resource scope, smaller budget. The narrowing discipline is formalised in [ADR-017](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/).
+- **Impact caps before dangerous actions.** Opted-in Mission Passports bind trusted tool contracts to typed action caps and atomically conserved session/agent/lineage ceilings. Crash reservations quarantine instead of silently refunding authority; the design is recorded in [ADR-026](/__ardur_internal__/source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/).
 - **No authority by omission.** An absent or empty `resource_scope` grants no resource authority. Operators who intentionally permit every resource must sign the sole explicit wildcard `resource_scope: ["**"]`; issuance and governed-run surfaces warn when they do. The decision and format-specific attenuation rules are documented in [ADR-023](/__ardur_internal__/source/docs/decisions/adr-023-explicit-resource-scope-authority/).
 - **Explicit about what it doesn't do.** Scope-level governance can't catch semantic misuse — if an allowed tool is used on an allowed resource for the wrong reason, that's a different layer's job.
 - **MIT licensed.** The research foundation (the Silence Theorem, the protocol formalism, the benchmark methodology) will be linked from this repo when the paper's public identifier is assigned. Articles in this repo paraphrase the research in original prose; they do not reproduce paper content.
@@ -251,6 +260,7 @@ This repo currently includes:
 - current status and what is still being resolved
 - public v0.1 specs for mission declarations, execution receipts, verifier contracts, conformance profiles, and related protocol surfaces, plus a draft-10-pinned DRP mapping and executable profile with RFC 8785/P-256 emit, external-trust full-chain and critical-bound verification, and a portable seven-scenario implementation self-test bundle/report (not an IETF or independent interoperability claim), the v0.2 Execution Receipt hardening profile with versioned RFC 8785 payloads and legacy verification, a transparency-anchor sidecar profile with offline-verifiable Rekor v1 and separately keyed self-hosted proofs, a receiver-attestation profile with a two-key offline verifier and MCP shim fixture, a full offline-verification bundle/profile with redacted CLI/JSON/static HTML explorer reports, and a verified-receipt governance telemetry profile with redacted JSONL plus OTLP/HTTP trace/log export
 - Python governance runtime under `python/`; Go eBPF/K8s packages and version-dispatched JWT AAT credential attenuation under `go/`: the existing draft-00 DG v0.1 contract plus the explicit `ardur.dg.aat-draft-01.v0.2` profile with chain-position roles, audience-bound PoP, fresh per-hop holder keys, approval gates, and a deterministic self-test fixture (CWT and independent interoperability are not claimed)
+- optional Python typed dangerous-action risk budgets with authenticated schema/extractor digests, signed attenuation, fsync-backed multi-scope reservations, explicit executor outcomes, and privacy-bounded signed receipts; the existing DRP profile does not project this extension
 - a Linux governance-overhead harness with a closed report schema, PR smoke workflow, manual stress profile, owner-only artifacts, and an opt-in shell-free paired-sensor mode
 - the Ardur Personal Hub service and CLI under `python/vibap/` (`ardur hub`, `ardur setup`, `ardur status`, `ardur protect claude-code`, `ardur profile init`, `ardur doctor-claude-code`, full offline evidence verification, verified redacted receipt telemetry export, receiver-envelope verification, detached normalized/Tetragon/Falco runtime-evidence correlation, static non-executing MCP/tool-server preflight, and no-key DRP/receiver/offline-verification fixtures), plus deterministic `ardur-drp-fixtures` and `ardur-policy-conformance` runners
 - the Claude Code plugin under `plugins/claude-code/` with `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop` hooks emitting signed receipts
