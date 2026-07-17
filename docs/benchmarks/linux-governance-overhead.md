@@ -43,6 +43,12 @@ The command writes owner-only JSON and Markdown reports. On non-Linux hosts,
 development-only shape checks require `--allow-non-linux`; those reports carry
 `claim_eligible: false` and `claim_status: non_linux_smoke_only`.
 
+If a generated report violates the schema, the command keeps the stable
+`report_schema_invalid` error code and prints up to five deterministic JSON
+paths with their failed schema keywords, followed by `+N more` when needed.
+Diagnostics are capped and do not include rejected values or unknown property
+names, so a useful CI failure does not disclose host metadata or operator input.
+
 ## Stress mode
 
 Stress mode requires Linux and at least 100 latency samples. Run it on a quiet,

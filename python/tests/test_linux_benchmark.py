@@ -151,6 +151,55 @@ def test_tiny_report_is_schema_valid_and_does_not_leak_private_paths(
     )
 
 
+def test_report_schema_failure_names_path_and_rule_without_echoing_value(
+    tmp_path: Path,
+) -> None:
+    report = benchmark.run_benchmark(_tiny_config(), allow_non_linux=True)
+    private_marker = str(tmp_path / "private-report-value")
+    report["environment"]["cpu_count"] = private_marker
+    report[private_marker] = "unknown private field"
+
+    with pytest.raises(benchmark.BenchmarkError) as error:
+        benchmark.validate_report(report)
+
+    assert error.value.code == "report_schema_invalid"
+    assert "$ [additionalProperties]" in error.value.detail
+    assert "$.environment.cpu_count [type]" in error.value.detail
+    assert private_marker not in error.value.detail
+    assert "unknown private field" not in error.value.detail
+    assert "\n" not in error.value.detail
+
+
+def test_report_schema_failure_details_are_deterministic_and_bounded() -> None:
+    report = benchmark.run_benchmark(_tiny_config(), allow_non_linux=True)
+    report["config"]["evidence_event_count"] = 0
+    report["config"]["sample_count"] = 0
+    report["environment"]["architecture"] = ""
+    report["environment"]["cpu_count"] = 0
+    report["environment"]["kernel_release"] = ""
+    report["mode"] = "invalid"
+
+    details = []
+    for _ in range(2):
+        with pytest.raises(benchmark.BenchmarkError) as error:
+            benchmark.validate_report(report)
+        details.append(error.value.detail)
+
+    assert (
+        details
+        == [
+            "generated report violated its JSON Schema: "
+            "$.config.evidence_event_count [minimum]; "
+            "$.config.sample_count [minimum]; "
+            "$.environment.architecture [minLength]; "
+            "$.environment.cpu_count [minimum]; "
+            "$.environment.kernel_release [minLength]; +1 more"
+        ]
+        * 2
+    )
+    assert len(details[0]) < 512
+
+
 def test_write_outputs_are_owner_only_and_stdout_is_path_free(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

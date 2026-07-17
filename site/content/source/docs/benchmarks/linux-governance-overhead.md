@@ -2,7 +2,7 @@
 title: "Linux Governance Overhead Harness"
 description: "Ardur ships a repeatable local harness for measuring governance work without"
 source_path: "docs/benchmarks/linux-governance-overhead.md"
-source_sha256: "95180aeac84f17850f25d3f26b56a532d343128ca2b76e14e72d6d22b5b3eb0c"
+source_sha256: "784475204d5b7ac2c7324fbedbef547e04b84f1292b520920101ea7bf194e077"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -59,6 +59,12 @@ python scripts/run-linux-governance-benchmark.py \
 The command writes owner-only JSON and Markdown reports. On non-Linux hosts,
 development-only shape checks require `--allow-non-linux`; those reports carry
 `claim_eligible: false` and `claim_status: non_linux_smoke_only`.
+
+If a generated report violates the schema, the command keeps the stable
+`report_schema_invalid` error code and prints up to five deterministic JSON
+paths with their failed schema keywords, followed by `+N more` when needed.
+Diagnostics are capped and do not include rejected values or unknown property
+names, so a useful CI failure does not disclose host metadata or operator input.
 
 ## Stress mode
 
