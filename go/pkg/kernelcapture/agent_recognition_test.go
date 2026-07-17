@@ -1,44 +1,56 @@
 package kernelcapture
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 )
 
-func TestEmbeddedAgentRecognizerCorpus(t *testing.T) {
-	raw, err := os.ReadFile("testdata/agent_recognition_corpus.json")
+func TestEmbeddedAgentRecognitionCorpusGate(t *testing.T) {
+	corpus, corpusSHA256, err := EmbeddedAgentRecognitionCorpus()
 	if err != nil {
-		t.Fatalf("read corpus: %v", err)
+		t.Fatalf("load embedded corpus: %v", err)
 	}
-	var corpus []struct {
-		Name               string `json:"name"`
-		Comm               string `json:"comm"`
-		ExecutableBasename string `json:"executable_basename"`
-		ExpectedStatus     string `json:"expected_status"`
-		ExpectedAgentType  string `json:"expected_agent_type"`
-	}
-	if err := json.Unmarshal(raw, &corpus); err != nil {
-		t.Fatalf("decode corpus: %v", err)
+	thresholds, err := EmbeddedAgentRecognitionThresholds()
+	if err != nil {
+		t.Fatalf("load embedded thresholds: %v", err)
 	}
 	recognizer, err := NewEmbeddedAgentRecognizer(AgentRecognizerOptions{})
 	if err != nil {
 		t.Fatalf("new embedded recognizer: %v", err)
 	}
-	for _, item := range corpus {
-		t.Run(item.Name, func(t *testing.T) {
-			result := recognizer.Classify(AgentRecognitionInput{Comm: item.Comm, ExecutableBasename: item.ExecutableBasename})
-			if result.Status != item.ExpectedStatus || result.AgentType != item.ExpectedAgentType {
-				t.Fatalf("classify(%q) = status %q type %q, want %q %q", item.Comm, result.Status, result.AgentType, item.ExpectedStatus, item.ExpectedAgentType)
-			}
-			if result.GovernanceAction != "observe_only" || result.IdentityAssurance != "heuristic_process_metadata" {
-				t.Fatalf("unsafe recognition boundary: %+v", result)
-			}
-		})
+	report, err := EvaluateAgentRecognitionCorpus(recognizer, corpus, corpusSHA256, thresholds)
+	if err != nil {
+		t.Fatalf("evaluate embedded corpus: %v", err)
+	}
+	if !report.Gate.Passed {
+		t.Fatalf("embedded corpus gate failed: %v", report.Gate.Reasons)
+	}
+	if report.SampleCount != 28 || report.EvaluatedCount != 27 || report.UnavailableCount != 1 || report.UnknownCount != 12 || report.AmbiguousCount != 2 {
+		t.Fatalf("unexpected corpus accounting: %+v", report)
+	}
+	if report.AggregatePrecision.Numerator != 13 || report.AggregatePrecision.Denominator != 13 || report.AggregateRecall.Numerator != 13 || report.AggregateRecall.Denominator != 17 {
+		t.Fatalf("unexpected aggregate metrics: precision=%+v recall=%+v", report.AggregatePrecision, report.AggregateRecall)
+	}
+	if report.SupportedRecall.Numerator != 9 || report.SupportedRecall.Denominator != 9 || report.HardNegativeAccuracy.Numerator != 8 || report.HardNegativeAccuracy.Denominator != 8 {
+		t.Fatalf("unexpected gated metrics: supported_recall=%+v hard_negative_accuracy=%+v", report.SupportedRecall, report.HardNegativeAccuracy)
+	}
+	wantFalseNegatives := []string{"claude.renamed", "codex.renamed", "gemini.renamed", "kimi.renamed"}
+	if !reflect.DeepEqual(report.FalseNegativeSampleIDs, wantFalseNegatives) || len(report.FalsePositiveSampleIDs) != 0 || len(report.ExpectationMismatches) != 0 {
+		t.Fatalf("unexpected error accounting: false_negatives=%v false_positives=%v expectation_mismatches=%v", report.FalseNegativeSampleIDs, report.FalsePositiveSampleIDs, report.ExpectationMismatches)
+	}
+	first, err := MarshalAgentRecognitionEvaluationReport(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := MarshalAgentRecognitionEvaluationReport(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatal("evaluation report serialization is not deterministic")
 	}
 }
 
@@ -113,6 +125,18 @@ func TestAgentRegistryDigestIsOrderIndependent(t *testing.T) {
 	}
 	if a.digest != b.digest || len(a.digest) != 64 {
 		t.Fatalf("registry digests differ: %q != %q", a.digest, b.digest)
+	}
+	removed, err := NewAgentRecognizer("registry.v1", rulesA[:1], AgentRecognizerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addedRules := append(append([]AgentRecognitionRule(nil), rulesA...), AgentRecognitionRule{RuleID: "rule.c", AgentType: "type_c", ExactComms: []string{"charlie"}})
+	added, err := NewAgentRecognizer("registry.v1", addedRules, AgentRecognizerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.digest == a.digest || added.digest == a.digest || removed.digest == added.digest {
+		t.Fatalf("adding or removing registry rules did not change the digest: original=%q removed=%q added=%q", a.digest, removed.digest, added.digest)
 	}
 }
 

@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "431b566f435abce2b6e4a51343ed2160d8ea2c80fec921d1200078bdbeb6da7d"
+source_sha256: "8813fc489745849ace625a5d531f1327541f234e93679586ba03a00c8a6b4236"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
+  side-effect, budget, time, delegation, lineage-parent, or working-directory
+  authority while preserving valid transitive attenuation
 - Label exported actor/verifier identity as signed receipt claims while
   explicitly reporting that the detached exporter did not verify SPIFFE
   workload identity
@@ -57,6 +60,9 @@ All notable changes to Ardur will be documented in this file.
   recognition, with a daemon-owned versioned registry, pidfd plus
   `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health
   counters, and privacy-safe observe-only results
+- Add a versioned sanitized agent-recognition corpus, deterministic evaluator,
+  95% Wilson intervals, stable error IDs, exact corpus/registry digests, and a
+  maintained-corpus CI gate without making population-accuracy claims
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
   exact-name registry, separate in-kernel `comm` and successful-exec basename
   prefilters, operator class overrides, script-launcher smoke coverage, and
@@ -82,6 +88,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Keep seccomp listener ownership in one goroutine and wake cancellation through
+  a dedicated eventfd, preventing listener teardown from closing a reused
+  control-connection descriptor
 - Prevent torn `PolicyMaps` reads and use-after-close during BPF-LSM guard
   startup, degradation, and shutdown; reject late guards after seccomp fallback
 - Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the

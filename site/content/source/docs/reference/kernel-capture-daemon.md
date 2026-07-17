@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "72d2615986018f0363059fdb03d4ad45475a605c8b9d26b21d200e8aaaa2d489"
+source_sha256: "c093319d252c756700dc5c85955fef2f2c4eea04ebff9e726ae82f3603f5a84b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -357,8 +357,12 @@ optional native fingerprint worker privately computes a bounded SHA-256 under
 the stricter contract above. Neither mode issues a passport, adopts a process,
 selects policy, or enforces an action. Any
 process can reuse one of these names, and unlisted launch shapes remain false
-negatives. Issue #67 remains open for the measured precision/recall gate and
-the separate script, attestation, and governance slices.
+negatives. The [agent-recognition evaluation
+reference](agent-recognition-evaluation.md) documents the versioned sanitized
+corpus, deterministic report, maintained-corpus threshold, Wilson intervals,
+and known renamed-binary false negatives. Issue #67 remains open for stronger
+fingerprints and additional signal strata, and the script, attestation, and
+governance slices remain separate.
 
 Kernel contract references: [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html),
 [`/proc/<pid>/exe`](https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html),

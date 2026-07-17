@@ -37,7 +37,7 @@ rather than trivially agreeing.
 
 ## Reproducing the results
 
-**Prerequisites**: Go ≥ 1.23, `make`.
+**Prerequisites**: Go ≥ 1.26.5, `make`.
 
 ```sh
 # 1. Clone (or pull) the repository

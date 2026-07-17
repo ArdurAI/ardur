@@ -44,6 +44,13 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - exposes only bounded outcome counters and canonical registry metadata,
     never computed executable digests, full paths, argv, environment, or file
     content; matches remain heuristic and observe-only.
+- Includes a deterministic maintained-corpus evaluation gate:
+  - validates versioned samples, reviewed thresholds, sanitized provenance,
+    stable IDs, and explicit signal availability;
+  - reports confusion cells, per-class and aggregate ratios with numerator,
+    denominator, and 95% Wilson intervals, plus exact corpus/registry digests;
+  - gates supported-shape recall at 0.90 and hard-negative false positives at
+    zero without claiming population accuracy or identity assurance.
 - Includes a local-only dry-run daemon custody scaffold and read-only preflight
   inspector for the root-owned config/state/socket/bpffs boundary, plus bounded
   Linux Slice 2 installer surfaces: a privileged `ardur-sensor install`

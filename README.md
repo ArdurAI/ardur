@@ -58,8 +58,13 @@ compare recognized native executables through a fixed asynchronous pidfd plus
 heuristic content signal; computed digests, full paths, argv, environment, and
 file contents are never emitted. It does not attest, adopt, authorize, or
 enforce the observed process, and neither an exact name nor an ordinary SHA-256
-match proves agent identity or provenance. Script-backed identity, measured
-precision/recall, attestation, and governance remain separate follow-up work.
+match proves agent identity or provenance. A [maintained sanitized corpus and
+deterministic gate](docs/reference/agent-recognition-evaluation.md) publishes
+exact corpus and registry digests, sample-counted precision/recall, Wilson
+intervals, and stable false-positive/false-negative IDs. The gate is regression
+evidence for the maintained corpus—not population accuracy—and stronger
+fingerprints remain tracked separately under issue #67. Script-backed identity,
+attestation, and governance remain separate follow-up work.
 
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)

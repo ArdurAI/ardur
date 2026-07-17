@@ -91,9 +91,25 @@ from .codex_app_server_fixture import (
     _fixture_path_failure_response as codex_fixture_path_failure_response,
     handle_host_event as handle_codex_host_event,
 )
-from .posture_index import build_posture_index, format_posture_report, posture_receipts_failure_response, PostureReceiptsError, posture_input_failure_response, PostureInputError
-from .claude_code_daemon import install_native_pre_tool_use_command, resolve_native_pre_tool_use_command_path
-from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
+from .posture_index import (
+    build_posture_index,
+    format_posture_report,
+    posture_receipts_failure_response,
+    PostureReceiptsError,
+    posture_input_failure_response,
+    PostureInputError,
+)
+from .claude_code_daemon import (
+    install_native_pre_tool_use_command,
+    resolve_native_pre_tool_use_command_path,
+)
+from .proxy import (
+    DEFAULT_STATE_DIR,
+    GovernanceProxy,
+    GovernanceSession,
+    TLSConfigurationError,
+    serve_proxy,
+)
 from .run_bridge import VALID_VIA_MODES, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
 from .tool_preflight import (
@@ -104,6 +120,7 @@ from .tool_preflight import (
     render_tool_preflight_markdown,
     scan_tool_server_config,
 )
+from .tls import tls_disabled_by_environment
 
 
 _ATTEST_SESSION_ID_RE = re.compile(
@@ -243,7 +260,9 @@ def _keys_dir_failure_next_steps(condition: str) -> list[dict[str, str]]:
 
 def _keys_dir_failure_response(exc: KeyDirectoryError) -> dict:
     condition = _keys_dir_failure_condition(exc)
-    detail = getattr(exc, "detail", "The selected Mission Passport key path is not a directory.")
+    detail = getattr(
+        exc, "detail", "The selected Mission Passport key path is not a directory."
+    )
     return {
         "ok": False,
         "error": condition,
@@ -810,7 +829,8 @@ def _start_tls_material_failure_response() -> dict:
         "condition": condition,
         "message": "Ardur start TLS material is invalid.",
         "detail": (
-            "Explicit --tls-cert and --tls-key values must both point to existing files "
+            "TLS stays enabled unless --no-tls is explicitly supplied. When explicit "
+            "--tls-cert and --tls-key values are used, both must point to existing files "
             "before Ardur starts the local governance proxy."
         ),
         "next_steps": _start_tls_material_failure_next_steps(condition),
@@ -820,12 +840,17 @@ def _start_tls_material_failure_response() -> dict:
 def _start_tls_material_invalid(args: argparse.Namespace) -> bool:
     if args.no_tls:
         return False
+    if tls_disabled_by_environment():
+        return True
     if args.tls_cert is None and args.tls_key is None:
         return False
     if args.tls_cert is None or args.tls_key is None:
         return True
     try:
-        return not Path(args.tls_cert).expanduser().is_file() or not Path(args.tls_key).expanduser().is_file()
+        return (
+            not Path(args.tls_cert).expanduser().is_file()
+            or not Path(args.tls_key).expanduser().is_file()
+        )
     except OSError:
         return True
 
@@ -966,7 +991,9 @@ def _start_api_token_invalid_response() -> dict[str, object]:
     }
 
 
-def _start_api_token_invalid_failure(args: argparse.Namespace) -> dict[str, object] | None:
+def _start_api_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
     """Return the api-token-invalid response when --api-token is whitespace-only.
 
     ``None`` means the argument is acceptable: either unset (None), an empty
@@ -1135,18 +1162,22 @@ def cmd_start(args: argparse.Namespace) -> int:
             }
         )
 
-    serve_proxy(
-        proxy=proxy,
-        private_key=private_key,
-        host=args.host,
-        port=args.port,
-        initial_session_id=initial_session_id,
-        require_auth=args.require_auth,
-        api_token=args.api_token,
-        tls_cert=args.tls_cert,
-        tls_key=args.tls_key,
-        no_tls=args.no_tls,
-    )
+    try:
+        serve_proxy(
+            proxy=proxy,
+            private_key=private_key,
+            host=args.host,
+            port=args.port,
+            initial_session_id=initial_session_id,
+            require_auth=args.require_auth,
+            api_token=args.api_token,
+            tls_cert=args.tls_cert,
+            tls_key=args.tls_key,
+            no_tls=args.no_tls,
+        )
+    except TLSConfigurationError:
+        _print_json(_start_tls_material_failure_response())
+        return 1
     return 0
 
 
@@ -1179,7 +1210,9 @@ def _issue_budget_failure_response(condition: str, detail: str) -> dict:
     }
 
 
-def _issue_budget_int(value: str | int, condition: str, detail: str) -> tuple[int | None, tuple[dict, int] | None]:
+def _issue_budget_int(
+    value: str | int, condition: str, detail: str
+) -> tuple[int | None, tuple[dict, int] | None]:
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -1316,10 +1349,9 @@ def cmd_issue(args: argparse.Namespace) -> int:
         _print_json(response)
         return exit_code
     requested_scope = list(args.resource_scope or [])
-    if (
-        UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope
-        and requested_scope != [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
-    ):
+    if UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope and requested_scope != [
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN
+    ]:
         _print_json(
             {
                 "ok": False,
@@ -1500,7 +1532,9 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
         )
     except jwt.PyJWTError:
         _print_json(
-            _verify_failure_response(jwt.DecodeError("Mission Passport token is malformed."))
+            _verify_failure_response(
+                jwt.DecodeError("Mission Passport token is malformed.")
+            )
         )
         return 1
     return None
@@ -1594,7 +1628,9 @@ def _load_transparency_public_key(path: Path):  # type: ignore[no-untyped-def]
     with path.open("rb") as handle:
         data = handle.read(64 * 1024 + 1)
     if not data or len(data) > 64 * 1024:
-        raise ValueError("transparency log public key is empty or exceeds the size limit")
+        raise ValueError(
+            "transparency log public key is empty or exceeds the size limit"
+        )
     key = serialization.load_pem_public_key(data)
     if not isinstance(key, (ec.EllipticCurvePublicKey, ed25519.Ed25519PublicKey)):
         raise ValueError("transparency log public key must be ECDSA or Ed25519")
@@ -2005,9 +2041,7 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
 
     try:
         receipt_public_key = (
-            _load_p256_public_key(
-                args.receipt_public_key, label="receipt public key"
-            )
+            _load_p256_public_key(args.receipt_public_key, label="receipt public key")
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
@@ -2072,7 +2106,9 @@ def _load_local_log_private_key(path: Path):  # type: ignore[no-untyped-def]
     if not path.is_file():
         raise FileNotFoundError(f"local transparency-log private key not found: {path}")
     if os.name == "posix" and path.stat().st_mode & 0o077:
-        raise PermissionError("local transparency-log private key must use mode 0600 or stricter")
+        raise PermissionError(
+            "local transparency-log private key must use mode 0600 or stricter"
+        )
     key = serialization.load_pem_private_key(path.read_bytes(), password=None)
     if not isinstance(key, ed25519.Ed25519PrivateKey):
         raise ValueError("local transparency-log private key must be Ed25519")
@@ -2097,7 +2133,11 @@ def cmd_anchor(args: argparse.Namespace) -> int:
     try:
         receipt_private_key = None
         if args.backend == BACKEND_LOCAL_SIGNED:
-            if args.local_log is None or args.log_private_key is None or not args.origin:
+            if (
+                args.local_log is None
+                or args.log_private_key is None
+                or not args.origin
+            ):
                 raise TransparencyError(
                     "local anchoring requires --local-log, --log-private-key, and --origin"
                 )
@@ -2245,9 +2285,15 @@ def _validate_attest_session_file_before_artifacts(session_path: Path) -> int | 
     return None
 
 
-def _attest_session_failure_exit_code(session_id: str, state_dir: Path | None) -> int | None:
+def _attest_session_failure_exit_code(
+    session_id: str, state_dir: Path | None
+) -> int | None:
     if not _ATTEST_SESSION_ID_RE.match(session_id):
-        _print_json(_attest_failure_response(ValueError("invalid session ID format: must be UUID")))
+        _print_json(
+            _attest_failure_response(
+                ValueError("invalid session ID format: must be UUID")
+            )
+        )
         return 1
     session_path = _attest_session_file_path(session_id, state_dir)
     try:
@@ -2317,8 +2363,20 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
         command_title="Claude Code report",
         specs=(
             ("home", "--home", "home", "claude_code_report_home_empty", False),
-            ("chain_dir", "--chain-dir", "chain dir", "claude_code_report_chain_dir_empty", False),
-            ("keys_dir", "--keys-dir", "keys dir", "claude_code_report_keys_dir_empty", False),
+            (
+                "chain_dir",
+                "--chain-dir",
+                "chain dir",
+                "claude_code_report_chain_dir_empty",
+                False,
+            ),
+            (
+                "keys_dir",
+                "--keys-dir",
+                "keys dir",
+                "claude_code_report_keys_dir_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -2338,7 +2396,9 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
         _print_json(report)
         return 0
 
-    print(f"Ardur Claude Code receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains")
+    print(
+        f"Ardur Claude Code receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains"
+    )
     print(f"Home: {report['home']}")
     print(f"Chains: {report['chain_dir']}")
     print(f"Tools: {report['totals']['tools']}")
@@ -2356,13 +2416,17 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     )
     print(f"Per-child attribution: {report['coverage']['per_child_attribution']}")
     print(f"Attribution: {report['coverage']['attribution']}")
-    actions = [action for chain in report["chains"] for action in chain.get("actions", [])]
+    actions = [
+        action for chain in report["chains"] for action in chain.get("actions", [])
+    ]
     if actions:
         print("Actions:")
         for action in actions[-20:]:
             request = action["request"]
             remaining = action.get("budget_remaining", {}).get("tool_calls")
-            budget_text = f"; {remaining} governed calls remain" if remaining is not None else ""
+            budget_text = (
+                f"; {remaining} governed calls remain" if remaining is not None else ""
+            )
             print(
                 f"- {action['verdict'].upper()} {request['tool']} "
                 f"({request['action_class']}/{request['side_effect_class']}): "
@@ -2415,8 +2479,12 @@ def _receiver_attestation_fixture_output_invalid_response(condition: str) -> dic
         "ok": False,
         "error": condition,
         "condition": condition,
-        "message": messages.get(condition, "Receiver attestation fixture output path is invalid."),
-        "detail": details.get(condition, "Provide a directory path for the --output argument."),
+        "message": messages.get(
+            condition, "Receiver attestation fixture output path is invalid."
+        ),
+        "detail": details.get(
+            condition, "Provide a directory path for the --output argument."
+        ),
         "next_steps": [
             {
                 "condition": condition,
@@ -2466,8 +2534,12 @@ def _drp_profile_fixture_output_invalid_response(condition: str) -> dict:
         "ok": False,
         "error": condition,
         "condition": condition,
-        "message": messages.get(condition, "DRP profile fixture output path is invalid."),
-        "detail": details.get(condition, "Provide a directory path for the --output argument."),
+        "message": messages.get(
+            condition, "DRP profile fixture output path is invalid."
+        ),
+        "detail": details.get(
+            condition, "Provide a directory path for the --output argument."
+        ),
         "next_steps": [
             {
                 "condition": condition,
@@ -2517,8 +2589,12 @@ def _offline_verification_fixture_output_invalid_response(condition: str) -> dic
         "ok": False,
         "error": condition,
         "condition": condition,
-        "message": messages.get(condition, "Offline verification fixture output path is invalid."),
-        "detail": details.get(condition, "Provide a directory path for the --output argument."),
+        "message": messages.get(
+            condition, "Offline verification fixture output path is invalid."
+        ),
+        "detail": details.get(
+            condition, "Provide a directory path for the --output argument."
+        ),
         "next_steps": [
             {
                 "condition": condition,
@@ -2562,9 +2638,7 @@ def cmd_drp_profile_fixture(args: argparse.Namespace) -> int:
     try:
         report = run_drp_profile_fixture(args.output)
     except DrpFixtureOutputError as exc:
-        _print_json(
-            _drp_profile_fixture_output_invalid_response(exc.condition)
-        )
+        _print_json(_drp_profile_fixture_output_invalid_response(exc.condition))
         return 1
     except (OSError, TypeError, ValueError) as exc:
         _print_json(
@@ -2625,18 +2699,26 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
         _print_json(gemini_fixture_project_dir_failure_response(exc.condition))
         return 1
     except GeminiFixturePathError as exc:
-        _print_json(gemini_fixture_path_failure_response(
-            condition=exc.condition,
-            label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
-            arg_name="--" + exc.condition.replace("gemini_cli_fixture_", "").replace("_not_directory", "").replace("_empty", "").replace("_", "-"),
-        ))
+        _print_json(
+            gemini_fixture_path_failure_response(
+                condition=exc.condition,
+                label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
+                arg_name="--"
+                + exc.condition.replace("gemini_cli_fixture_", "")
+                .replace("_not_directory", "")
+                .replace("_empty", "")
+                .replace("_", "-"),
+            )
+        )
         return 1
     except KeyDirectoryError:
-        _print_json(gemini_fixture_path_failure_response(
-            condition="gemini_cli_fixture_keys_dir_not_directory",
-            label="keys dir",
-            arg_name="--keys-dir",
-        ))
+        _print_json(
+            gemini_fixture_path_failure_response(
+                condition="gemini_cli_fixture_keys_dir_not_directory",
+                label="keys dir",
+                arg_name="--keys-dir",
+            )
+        )
         return 1
     _print_json(build_gemini_shareable_context(fixture))
     return 0
@@ -2722,8 +2804,20 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
         command_title="Gemini CLI report",
         specs=(
             ("home", "--home", "home", "gemini_cli_report_home_empty", False),
-            ("chain_dir", "--chain-dir", "chain dir", "gemini_cli_report_chain_dir_empty", False),
-            ("keys_dir", "--keys-dir", "keys dir", "gemini_cli_report_keys_dir_empty", False),
+            (
+                "chain_dir",
+                "--chain-dir",
+                "chain dir",
+                "gemini_cli_report_chain_dir_empty",
+                False,
+            ),
+            (
+                "keys_dir",
+                "--keys-dir",
+                "keys dir",
+                "gemini_cli_report_keys_dir_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -2742,7 +2836,9 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0
-    print(f"Ardur Gemini CLI receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains")
+    print(
+        f"Ardur Gemini CLI receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains"
+    )
     print(f"Chains: {report['chain_dir']}")
     print(f"Verdicts: {report['policy_verdict_counts']}")
     print(f"Coverage gaps: {report['coverage_gaps']}")
@@ -2831,18 +2927,26 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
         _print_json(codex_fixture_project_dir_failure_response(exc.condition))
         return 1
     except CodexFixturePathError as exc:
-        _print_json(codex_fixture_path_failure_response(
-            condition=exc.condition,
-            label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
-            arg_name="--" + exc.condition.replace("codex_app_server_fixture_", "").replace("_not_directory", "").replace("_empty", "").replace("_", "-"),
-        ))
+        _print_json(
+            codex_fixture_path_failure_response(
+                condition=exc.condition,
+                label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
+                arg_name="--"
+                + exc.condition.replace("codex_app_server_fixture_", "")
+                .replace("_not_directory", "")
+                .replace("_empty", "")
+                .replace("_", "-"),
+            )
+        )
         return 1
     except KeyDirectoryError:
-        _print_json(codex_fixture_path_failure_response(
-            condition="codex_app_server_fixture_keys_dir_not_directory",
-            label="keys dir",
-            arg_name="--keys-dir",
-        ))
+        _print_json(
+            codex_fixture_path_failure_response(
+                condition="codex_app_server_fixture_keys_dir_not_directory",
+                label="keys dir",
+                arg_name="--keys-dir",
+            )
+        )
         return 1
     _print_json(build_codex_shareable_context(fixture))
     return 0
@@ -2855,8 +2959,20 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
         command_title="Codex app-server report",
         specs=(
             ("home", "--home", "home", "codex_app_server_report_home_empty", False),
-            ("chain_dir", "--chain-dir", "chain dir", "codex_app_server_report_chain_dir_empty", False),
-            ("keys_dir", "--keys-dir", "keys dir", "codex_app_server_report_keys_dir_empty", False),
+            (
+                "chain_dir",
+                "--chain-dir",
+                "chain dir",
+                "codex_app_server_report_chain_dir_empty",
+                False,
+            ),
+            (
+                "keys_dir",
+                "--keys-dir",
+                "keys dir",
+                "codex_app_server_report_keys_dir_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -2875,7 +2991,9 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0
-    print(f"Ardur Codex app-server receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains")
+    print(
+        f"Ardur Codex app-server receipt report: {report['receipt_count']} receipts across {report['chain_count']} chains"
+    )
     print(f"Chains: {report['chain_dir']}")
     print(f"Verdicts: {report['policy_verdict_counts']}")
     print(f"Coverage gaps: {report['coverage_gaps']}")
@@ -2990,7 +3108,9 @@ def _posture_report_input_failure_response(exc: Exception) -> dict:
     else:
         condition = "posture_report_input_unreadable"
         message = "Posture report input file could not be read."
-        detail = f"Reading the supplied --input file failed with {exc.__class__.__name__}."
+        detail = (
+            f"Reading the supplied --input file failed with {exc.__class__.__name__}."
+        )
     return {
         "ok": False,
         "error": condition,
@@ -3017,7 +3137,15 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
         posture = json.loads(args.input.read_text(encoding="utf-8"))
         if not isinstance(posture, dict):
             raise ValueError("posture report input must be a JSON object")
-    except (FileNotFoundError, PermissionError, IsADirectoryError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+    except (
+        FileNotFoundError,
+        PermissionError,
+        IsADirectoryError,
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
         response = _posture_report_input_failure_response(exc)
         if args.format == "json":
             _print_json(response)
@@ -3124,7 +3252,12 @@ def _kill_switch_next_steps_for_failure(
     )
     endpoint_problem = status_text in {"404", "405"} or "not found" in normalized_error
 
-    if not proxy_unavailable and not tls_problem and not token_problem and not endpoint_problem:
+    if (
+        not proxy_unavailable
+        and not tls_problem
+        and not token_problem
+        and not endpoint_problem
+    ):
         return []
 
     steps: list[dict[str, str]] = []
@@ -3279,7 +3412,9 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_token}",
     }
-    req = urlreq.Request(f"{proxy_base_url}/admin/kill-switch", data=payload, headers=headers)
+    req = urlreq.Request(
+        f"{proxy_base_url}/admin/kill-switch", data=payload, headers=headers
+    )
     ctx = _kill_switch_ssl_context(proxy_base_url)
     try:
         with urlreq.urlopen(req, timeout=5, context=ctx) as resp:
@@ -3383,7 +3518,9 @@ def cmd_desktop_observe(args: argparse.Namespace) -> int:
     return 0 if response.get("ok") else 1
 
 
-def _personal_native_host_once_json_input_next_steps(condition: str) -> list[dict[str, str]]:
+def _personal_native_host_once_json_input_next_steps(
+    condition: str,
+) -> list[dict[str, str]]:
     return [
         {
             "condition": condition,
@@ -3421,7 +3558,9 @@ def _personal_native_host_once_json_failure_response(exc: Exception) -> dict:
     elif isinstance(exc, FileNotFoundError):
         condition = "personal_native_host_once_json_missing"
         message = "Native Messaging --once-json input file could not be read."
-        detail = "No native-message JSON file was found at the supplied --once-json path."
+        detail = (
+            "No native-message JSON file was found at the supplied --once-json path."
+        )
     else:
         condition = "personal_native_host_once_json_unreadable"
         message = "Native Messaging --once-json input file could not be read."
@@ -3458,10 +3597,18 @@ def cmd_personal_native_host(args: argparse.Namespace) -> int:
         ) as exc:
             _print_json(_personal_native_host_once_json_failure_response(exc))
             return 1
-        response = handle_native_host_message(message, hub_url=args.hub_url, hub_token=args.hub_token, home=args.home)
+        response = handle_native_host_message(
+            message, hub_url=args.hub_url, hub_token=args.hub_token, home=args.home
+        )
         _print_json(response)
         return 0 if response.get("ok") else 1
-    run_native_host(sys.stdin.buffer, sys.stdout.buffer, hub_url=args.hub_url, hub_token=args.hub_token, home=args.home)
+    run_native_host(
+        sys.stdin.buffer,
+        sys.stdout.buffer,
+        hub_url=args.hub_url,
+        hub_token=args.hub_token,
+        home=args.home,
+    )
     return 0
 
 
@@ -3483,7 +3630,9 @@ def cmd_personal_firewall_demo(args: argparse.Namespace) -> int:
     try:
         result = run_personal_firewall_demo(
             timeout_s=args.timeout_s,
-            temp_parent=args.temp_parent.expanduser().resolve() if args.temp_parent else None,
+            temp_parent=args.temp_parent.expanduser().resolve()
+            if args.temp_parent
+            else None,
             emit=not args.json,
         )
     except PersonalFirewallDemoError as exc:
@@ -3548,7 +3697,9 @@ def _claude_code_doctor_file_uri_placeholder(_value: str) -> str:
     return "<local-file-uri>"
 
 
-def _claude_code_plugin_validation_detail(raw_detail: str, *, plugin: Path, home: Path) -> str:
+def _claude_code_plugin_validation_detail(
+    raw_detail: str, *, plugin: Path, home: Path
+) -> str:
     detail = raw_detail.strip()
     if not detail:
         return "Claude Code plugin validation failed; inspect the validation output."
@@ -3614,7 +3765,9 @@ def _claude_code_plugin_checks(plugin_dir: Path) -> list[dict[str, object]]:
 
 
 def _validate_claude_code_plugin_dir(plugin_dir: Path) -> None:
-    failed = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
+    failed = [
+        check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]
+    ]
     if failed:
         details = ", ".join(str(item["detail"]) for item in failed)
         raise FileNotFoundError(f"Claude Code plugin is incomplete: {details}")
@@ -3655,7 +3808,9 @@ _CLAUDE_CODE_REQUIRED_HOOK_EVENTS = (
 )
 
 
-def _claude_code_plugin_json_object_check(path: Path, check_name: str, label: str) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+def _claude_code_plugin_json_object_check(
+    path: Path, check_name: str, label: str
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
     try:
         raw = path.read_text("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -3723,10 +3878,14 @@ def _claude_code_plugin_content_checks(plugin_dir: Path) -> list[dict[str, objec
             if not isinstance(field_value, str) or not field_value.strip():
                 missing_manifest_fields.append(field_name)
         if missing_manifest_fields:
-            failures.append({
-                "name": "plugin_manifest",
-                "detail": "Claude Code plugin manifest is missing non-empty fields: " + ", ".join(missing_manifest_fields) + ".",
-            })
+            failures.append(
+                {
+                    "name": "plugin_manifest",
+                    "detail": "Claude Code plugin manifest is missing non-empty fields: "
+                    + ", ".join(missing_manifest_fields)
+                    + ".",
+                }
+            )
 
     hooks_manifest, hooks_failure = _claude_code_plugin_json_object_check(
         plugin_dir / "hooks" / "hooks.json",
@@ -3735,15 +3894,19 @@ def _claude_code_plugin_content_checks(plugin_dir: Path) -> list[dict[str, objec
     )
     if hooks_failure:
         failures.append(hooks_failure)
-    elif hooks_manifest is not None and not _claude_code_hooks_manifest_valid(hooks_manifest):
-        failures.append({
-            "name": "plugin_hooks",
-            "detail": (
-                "Claude Code hooks manifest must define command hooks for "
-                + ", ".join(_CLAUDE_CODE_REQUIRED_HOOK_EVENTS)
-                + "."
-            ),
-        })
+    elif hooks_manifest is not None and not _claude_code_hooks_manifest_valid(
+        hooks_manifest
+    ):
+        failures.append(
+            {
+                "name": "plugin_hooks",
+                "detail": (
+                    "Claude Code hooks manifest must define command hooks for "
+                    + ", ".join(_CLAUDE_CODE_REQUIRED_HOOK_EVENTS)
+                    + "."
+                ),
+            }
+        )
     return failures
 
 
@@ -3751,7 +3914,11 @@ def _protect_claude_code_plugin_invalid_response(
     failed_checks: list[dict[str, object]],
 ) -> dict[str, object]:
     invalid_checks = [str(check["name"]) for check in failed_checks]
-    details = [str(check.get("detail", "")).strip() for check in failed_checks if str(check.get("detail", "")).strip()]
+    details = [
+        str(check.get("detail", "")).strip()
+        for check in failed_checks
+        if str(check.get("detail", "")).strip()
+    ]
     detail = "Invalid Claude Code plugin checks: " + ", ".join(invalid_checks)
     if details:
         detail += ". " + " ".join(details)
@@ -3794,51 +3961,65 @@ def _protect_policy_input_placeholder(option: str) -> str:
     }.get(option, "<policy-input-file>")
 
 
-def _protect_policy_input_next_steps(option: str, condition: str) -> list[dict[str, str]]:
+def _protect_policy_input_next_steps(
+    option: str, condition: str
+) -> list[dict[str, str]]:
     placeholder = _protect_policy_input_placeholder(option)
     steps: list[dict[str, str]] = []
     is_empty = condition.endswith("_empty")
     if is_empty:
-        steps.append({
-            "condition": condition,
-            "action": "provide_policy_path",
-            "command": f"ardur protect claude-code {option} {placeholder}",
-            "detail": f"Replace {placeholder} with an explicit, non-empty path to a local policy input file.",
-        })
+        steps.append(
+            {
+                "condition": condition,
+                "action": "provide_policy_path",
+                "command": f"ardur protect claude-code {option} {placeholder}",
+                "detail": f"Replace {placeholder} with an explicit, non-empty path to a local policy input file.",
+            }
+        )
     elif option in {"--forbid-rules", "--cedar-entities"}:
-        steps.append({
-            "condition": condition,
-            "action": "validate_policy_json",
-            "command": f"python -m json.tool {placeholder}",
-            "detail": "Validate the local policy JSON file before rerunning Claude Code protection.",
-        })
+        steps.append(
+            {
+                "condition": condition,
+                "action": "validate_policy_json",
+                "command": f"python -m json.tool {placeholder}",
+                "detail": "Validate the local policy JSON file before rerunning Claude Code protection.",
+            }
+        )
     else:
-        steps.append({
-            "condition": condition,
-            "action": "check_policy_file",
-            "command": f"test -r {placeholder}",
-            "detail": "Confirm the local policy file exists and is readable before rerunning protection.",
-        })
+        steps.append(
+            {
+                "condition": condition,
+                "action": "check_policy_file",
+                "command": f"test -r {placeholder}",
+                "detail": "Confirm the local policy file exists and is readable before rerunning protection.",
+            }
+        )
 
     if option == "--forbid-rules":
         rerun_suffix = "--forbid-rules <forbid-rules.json>"
     elif option == "--cedar-entities":
-        rerun_suffix = "--cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>"
+        rerun_suffix = (
+            "--cedar-policy <policy.cedar> --cedar-entities <cedar-entities.json>"
+        )
     else:
         rerun_suffix = "--cedar-policy <policy.cedar>"
-    steps.append({
-        "condition": condition,
-        "action": "rerun_protect",
-        "command": (
-            "ardur protect claude-code --scope <your-project> --home <ardur-home> "
-            f"--plugin-dir <claude-code-plugin> {rerun_suffix}"
-        ),
-        "detail": "Rerun protection after the local policy input file is present, readable, and valid.",
-    })
+    steps.append(
+        {
+            "condition": condition,
+            "action": "rerun_protect",
+            "command": (
+                "ardur protect claude-code --scope <your-project> --home <ardur-home> "
+                f"--plugin-dir <claude-code-plugin> {rerun_suffix}"
+            ),
+            "detail": "Rerun protection after the local policy input file is present, readable, and valid.",
+        }
+    )
     return steps
 
 
-def _protect_policy_input_failure_response(exc: _ProtectPolicyInputError) -> dict[str, object]:
+def _protect_policy_input_failure_response(
+    exc: _ProtectPolicyInputError,
+) -> dict[str, object]:
     return {
         "ok": False,
         "agent": "claude-code",
@@ -3868,7 +4049,9 @@ def _read_protect_policy_text(path: Path, option: str) -> str:
         ) from exc
 
 
-def _validate_protect_cedar_policy_syntax(policy_src: str, option: str = "--cedar-policy") -> None:
+def _validate_protect_cedar_policy_syntax(
+    policy_src: str, option: str = "--cedar-policy"
+) -> None:
     try:
         import cedarpy  # type: ignore[import-not-found]
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated install
@@ -3892,7 +4075,9 @@ def _validate_protect_cedar_policy_syntax(policy_src: str, option: str = "--ceda
         ) from exc
 
 
-def _validate_protect_cedar_entities(entities: object, option: str = "--cedar-entities") -> None:
+def _validate_protect_cedar_entities(
+    entities: object, option: str = "--cedar-entities"
+) -> None:
     try:
         import cedarpy  # type: ignore[import-not-found]
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency-gated install
@@ -3919,7 +4104,10 @@ def _validate_protect_cedar_entities(entities: object, option: str = "--cedar-en
         # `is_authorized` is the cedarpy surface that parses entity payloads.
         # Keep this setup-time parser probe quiet so malformed local files
         # cannot corrupt `--json` output with validator diagnostics.
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
             result = cedarpy.is_authorized(
                 request=request,
                 policies="permit(principal, action, resource);\n",
@@ -3966,7 +4154,9 @@ def _write_private_text(path: Path, text: str) -> None:
             os.close(fd)
 
 
-def _claude_code_doctor_next_steps(checks: list[dict[str, object]]) -> list[dict[str, str]]:
+def _claude_code_doctor_next_steps(
+    checks: list[dict[str, object]],
+) -> list[dict[str, str]]:
     by_name = {str(check["name"]): check for check in checks}
     steps: list[dict[str, str]] = []
     plugin_check_names = [
@@ -3990,7 +4180,8 @@ def _claude_code_doctor_next_steps(checks: list[dict[str, object]]) -> list[dict
                     "ardur doctor-claude-code --plugin-dir "
                     f"{_CLAUDE_CODE_PLUGIN_PLACEHOLDER} --home {_ARDUR_HOME_PLACEHOLDER}"
                 ),
-                "detail": "Missing Claude Code plugin checks: " + ", ".join(missing_plugin_checks),
+                "detail": "Missing Claude Code plugin checks: "
+                + ", ".join(missing_plugin_checks),
             }
         )
 
@@ -4040,42 +4231,56 @@ def _claude_code_doctor_next_steps(checks: list[dict[str, object]]) -> list[dict
     return steps
 
 
-def claude_code_doctor(plugin_dir: Path | None = None, home: Path | None = None) -> dict[str, object]:
+def claude_code_doctor(
+    plugin_dir: Path | None = None, home: Path | None = None
+) -> dict[str, object]:
     plugin = (plugin_dir or _default_claude_plugin_dir()).expanduser().resolve()
     checks = _claude_code_plugin_checks(plugin)
     claude_binary = shutil.which("claude")
-    checks.append({
-        "name": "claude_binary",
-        "ok": bool(claude_binary),
-        "detail": "claude found on PATH" if claude_binary else "claude not found on PATH",
-    })
-    active_passport = (home.expanduser() if home else DEFAULT_HOME) / "active_mission.jwt"
-    checks.append({
-        "name": "active_passport",
-        "ok": active_passport.is_file(),
-        "detail": f"expected file at {_ARDUR_HOME_PLACEHOLDER}/active_mission.jwt",
-    })
+    checks.append(
+        {
+            "name": "claude_binary",
+            "ok": bool(claude_binary),
+            "detail": "claude found on PATH"
+            if claude_binary
+            else "claude not found on PATH",
+        }
+    )
+    active_passport = (
+        home.expanduser() if home else DEFAULT_HOME
+    ) / "active_mission.jwt"
+    checks.append(
+        {
+            "name": "active_passport",
+            "ok": active_passport.is_file(),
+            "detail": f"expected file at {_ARDUR_HOME_PLACEHOLDER}/active_mission.jwt",
+        }
+    )
     if claude_binary and all(check["ok"] for check in checks[:5]):
         result = subprocess.run(
             [claude_binary, "plugin", "validate", str(plugin)],
             capture_output=True,
             text=True,
         )
-        checks.append({
-            "name": "plugin_validate",
-            "ok": result.returncode == 0,
-            "detail": _claude_code_plugin_validation_detail(
-                result.stdout.strip() or result.stderr.strip(),
-                plugin=plugin,
-                home=active_passport.parent,
-            ),
-        })
+        checks.append(
+            {
+                "name": "plugin_validate",
+                "ok": result.returncode == 0,
+                "detail": _claude_code_plugin_validation_detail(
+                    result.stdout.strip() or result.stderr.strip(),
+                    plugin=plugin,
+                    home=active_passport.parent,
+                ),
+            }
+        )
     else:
-        checks.append({
-            "name": "plugin_validate",
-            "ok": False,
-            "detail": "skipped; missing claude binary or plugin files",
-        })
+        checks.append(
+            {
+                "name": "plugin_validate",
+                "ok": False,
+                "detail": "skipped; missing claude binary or plugin files",
+            }
+        )
     ok = all(bool(check["ok"]) for check in checks)
     return {
         "ok": ok,
@@ -4130,52 +4335,64 @@ def _resolve_protect_policies(
         rules = _read_protect_policy_json(Path(forbid_rules_raw), "--forbid-rules")
         if not isinstance(rules, list):
             rules = [rules]
-        policies.append({
-            "backend": "forbid_rules",
-            "label": "cli-forbid-rules",
-            "policy_inline": "",
-            "policy_sha256": forbid_rules_sha256(rules),
-            "data_inline": rules,
-        })
+        policies.append(
+            {
+                "backend": "forbid_rules",
+                "label": "cli-forbid-rules",
+                "policy_inline": "",
+                "policy_sha256": forbid_rules_sha256(rules),
+                "data_inline": rules,
+            }
+        )
     if cedar_policy_raw is not None:
         policy_src = _read_protect_policy_text(Path(cedar_policy_raw), "--cedar-policy")
         _validate_protect_cedar_policy_syntax(policy_src)
         entities: object = []
         if cedar_entities_raw is not None:
-            entities = _read_protect_policy_json(Path(cedar_entities_raw), "--cedar-entities")
+            entities = _read_protect_policy_json(
+                Path(cedar_entities_raw), "--cedar-entities"
+            )
             _validate_protect_cedar_entities(entities)
-        policies.append({
-            "backend": "cedar",
-            "label": "cli-cedar-policy",
-            "policy_inline": policy_src,
-            "policy_sha256": hashlib.sha256(policy_src.encode()).hexdigest(),
-            "data_inline": entities,
-        })
+        policies.append(
+            {
+                "backend": "cedar",
+                "label": "cli-cedar-policy",
+                "policy_inline": policy_src,
+                "policy_sha256": hashlib.sha256(policy_src.encode()).hexdigest(),
+                "data_inline": entities,
+            }
+        )
 
     # Profile policies
     if profile and profile.forbid_rules:
-        policies.append({
-            "backend": "forbid_rules",
-            "label": "profile-forbid-rules",
-            "policy_inline": "",
-            "policy_sha256": forbid_rules_sha256(profile.forbid_rules),
-            "data_inline": profile.forbid_rules,
-        })
+        policies.append(
+            {
+                "backend": "forbid_rules",
+                "label": "profile-forbid-rules",
+                "policy_inline": "",
+                "policy_sha256": forbid_rules_sha256(profile.forbid_rules),
+                "data_inline": profile.forbid_rules,
+            }
+        )
     if profile and profile.cedar_policy:
-        policies.append({
-            "backend": "cedar",
-            "label": "profile-cedar-policy",
-            "policy_inline": profile.cedar_policy,
-            "policy_sha256": hashlib.sha256(
-                profile.cedar_policy.encode()
-            ).hexdigest(),
-            "data_inline": [],
-        })
+        policies.append(
+            {
+                "backend": "cedar",
+                "label": "profile-cedar-policy",
+                "policy_inline": profile.cedar_policy,
+                "policy_sha256": hashlib.sha256(
+                    profile.cedar_policy.encode()
+                ).hexdigest(),
+                "data_inline": [],
+            }
+        )
 
     return policies
 
 
-def _protect_claude_code_missing_scope_response(profile_present: bool) -> dict[str, object]:
+def _protect_claude_code_missing_scope_response(
+    profile_present: bool,
+) -> dict[str, object]:
     profile_detail = (
         "The selected profile does not define `Protect folder:`."
         if profile_present
@@ -4583,7 +4800,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         profile = load_ardur_profile(args.profile) if args.profile else None
     except (FileNotFoundError, IsADirectoryError):
         return _protect_claude_code_missing_profile_response()
-    mode_name = _normalize_protect_mode(args.mode or (profile.mode if profile and profile.mode else "safe-coding"))
+    mode_name = _normalize_protect_mode(
+        args.mode or (profile.mode if profile and profile.mode else "safe-coding")
+    )
     if mode_name not in CLAUDE_CODE_PROTECT_MODES:
         raise ValueError(f"unsupported Claude Code protection mode: {mode_name}")
     mode = CLAUDE_CODE_PROTECT_MODES[mode_name]
@@ -4595,7 +4814,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         else:
             raw_scope = Path(args.profile).expanduser().parent / profile_scope
     if raw_scope is None:
-        return _protect_claude_code_missing_scope_response(profile_present=bool(args.profile))
+        return _protect_claude_code_missing_scope_response(
+            profile_present=bool(args.profile)
+        )
     # Reject empty/whitespace-only --scope before any key generation or directory
     # creation. ``args.scope`` is ``type=str`` so an empty or whitespace-only
     # value survives here as-is (previously ``type=Path`` normalized ``""`` to
@@ -4619,7 +4840,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # whitespace-only string so that ``--mission ""`` cannot silently create
     # an active mission with keys.
     if isinstance(args.agent_id, str) and not args.agent_id.strip():
-        return _protect_claude_code_identity_invalid_response("protect_agent_id_invalid")
+        return _protect_claude_code_identity_invalid_response(
+            "protect_agent_id_invalid"
+        )
     if isinstance(args.mission, str) and not args.mission.strip():
         return _protect_claude_code_identity_invalid_response("protect_mission_invalid")
     # Reject empty/whitespace-only --home before any directory creation or key
@@ -4686,7 +4909,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     else:
         _ensure_default_home_dir()
     plugin_dir = Path(args.plugin_dir).expanduser().resolve()
-    failed_plugin_checks = [check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]]
+    failed_plugin_checks = [
+        check for check in _claude_code_plugin_checks(plugin_dir) if not check["ok"]
+    ]
     if failed_plugin_checks:
         return _protect_claude_code_plugin_incomplete_response(failed_plugin_checks)
     invalid_plugin_checks = _claude_code_plugin_content_checks(plugin_dir)
@@ -4698,7 +4923,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         additional_policies = _resolve_protect_policies(args, profile, home)
     except _ProtectPolicyInputError as exc:
         return _protect_policy_input_failure_response(exc)
-    keys_dir_resolved = Path(args.keys_dir).expanduser().resolve() if args.keys_dir else (home / "keys")
+    keys_dir_resolved = (
+        Path(args.keys_dir).expanduser().resolve() if args.keys_dir else (home / "keys")
+    )
     private_key, public_key = generate_keypair(keys_dir=keys_dir_resolved)
     if profile and profile.allowed_tools:
         # A profile with an explicit allowlist is authoritative: if the author
@@ -4709,12 +4936,25 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         forbidden_tools = list(profile.forbidden_tools)
     else:
         allowed_tools = list(mode["allowed_tools"])
-        forbidden_tools = list(profile.forbidden_tools if profile and profile.forbidden_tools else mode["forbidden_tools"])
-    max_tool_calls = profile.max_tool_calls if profile and profile.max_tool_calls is not None else args.max_tool_calls
-    max_duration_s = profile.max_duration_s if profile and profile.max_duration_s is not None else args.max_duration_s
+        forbidden_tools = list(
+            profile.forbidden_tools
+            if profile and profile.forbidden_tools
+            else mode["forbidden_tools"]
+        )
+    max_tool_calls = (
+        profile.max_tool_calls
+        if profile and profile.max_tool_calls is not None
+        else args.max_tool_calls
+    )
+    max_duration_s = (
+        profile.max_duration_s
+        if profile and profile.max_duration_s is not None
+        else args.max_duration_s
+    )
     mission = MissionPassport(
         agent_id=args.agent_id,
-        mission=args.mission or (profile.mission if profile and profile.mission else mode["mission"]),
+        mission=args.mission
+        or (profile.mission if profile and profile.mission else mode["mission"]),
         allowed_tools=allowed_tools,
         forbidden_tools=forbidden_tools,
         resource_scope=[str(scope), f"{scope}/*"],
@@ -4730,6 +4970,7 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # resolved from CLI flags first, then from the profile.
     if additional_policies:
         from vibap.backed_policy_store import FileBackedPolicyStore
+
         store = FileBackedPolicyStore(home)
         store.put_policies(
             mission_id=str(
@@ -4759,7 +5000,9 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         # ``active_passport`` key for existing callers.
         "active_mission_path": str(active_passport),
         "hook_python": str(hook_python),
-        "native_pre_hook_command": str(native_pre_hook_command) if native_pre_hook_command else None,
+        "native_pre_hook_command": str(native_pre_hook_command)
+        if native_pre_hook_command
+        else None,
         "native_pre_hook_command_expected": str(native_pre_hook_command_expected),
         "plugin_dir": str(plugin_dir),
         "run_command": run_command,
@@ -4815,7 +5058,9 @@ def _profile_init_existing_profile_response() -> dict[str, object]:
     }
 
 
-def _profile_init_path_invalid_response(exc: InvalidProfilePathError) -> dict[str, object]:
+def _profile_init_path_invalid_response(
+    exc: InvalidProfilePathError,
+) -> dict[str, object]:
     condition = "profile_path_invalid"
     return {
         "ok": False,
@@ -4871,7 +5116,9 @@ def _profile_init_path_failure_response(exc: OSError) -> dict[str, object]:
 
 def cmd_profile_init(args: argparse.Namespace) -> int:
     try:
-        path = write_profile_template(args.path, template=args.template, force=args.force)
+        path = write_profile_template(
+            args.path, template=args.template, force=args.force
+        )
     except InvalidProfilePathError as exc:
         result = _profile_init_path_invalid_response(exc)
         if args.json:
@@ -4927,21 +5174,34 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ardur",
         description="Ardur governance proxy and mission-passport tooling",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     start = subparsers.add_parser("start", help="start the VIBAP proxy HTTP service")
     start.add_argument("--host", default="127.0.0.1", help="bind address")
     start.add_argument("--port", type=int, default=8080, help="listen port")
-    start.add_argument("--mission", type=str, help="optional mission JSON to issue and start immediately")
-    start.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    start.add_argument(
+        "--mission",
+        type=str,
+        help="optional mission JSON to issue and start immediately",
+    )
+    start.add_argument(
+        "--keys-dir", type=str, help="directory containing VIBAP signing keys"
+    )
     start.add_argument("--state-dir", type=str, help="directory for persisted sessions")
     start.add_argument("--log-path", type=str, help="JSONL audit log path")
-    start.add_argument("--api-token", help="Bearer token for clients; VIBAP_API_TOKEN still takes precedence")
+    start.add_argument(
+        "--api-token",
+        help="Bearer token for clients; VIBAP_API_TOKEN still takes precedence",
+    )
     start.add_argument("--tls-cert", type=str, help="TLS certificate PEM file")
     start.add_argument("--tls-key", type=str, help="TLS private key PEM file")
-    start.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
+    start.add_argument(
+        "--no-tls", action="store_true", help="disable TLS (plain HTTP only)"
+    )
     auth_group = start.add_mutually_exclusive_group()
     auth_group.add_argument(
         "--require-auth",
@@ -4960,8 +5220,12 @@ def build_parser() -> argparse.ArgumentParser:
     issue = subparsers.add_parser("issue", help="issue a mission passport JWT")
     issue.add_argument("--agent-id", required=True, help="agent subject identifier")
     issue.add_argument("--mission", required=True, help="declared mission string")
-    issue.add_argument("--allowed-tools", nargs="*", default=[], help="allowed tool names")
-    issue.add_argument("--forbidden-tools", nargs="*", default=[], help="forbidden tool names")
+    issue.add_argument(
+        "--allowed-tools", nargs="*", default=[], help="allowed tool names"
+    )
+    issue.add_argument(
+        "--forbidden-tools", nargs="*", default=[], help="forbidden tool names"
+    )
     issue.add_argument(
         "--resource-scope",
         nargs="*",
@@ -4969,11 +5233,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="resource patterns; empty grants none, sole '**' explicitly grants all",
     )
     issue.add_argument("--max-tool-calls", default=50, help="max permitted tool calls")
-    issue.add_argument("--max-duration-s", default=600, help="max mission duration in seconds")
-    issue.add_argument("--delegation-allowed", action="store_true", help="allow one-step delegation")
-    issue.add_argument("--max-delegation-depth", default=0, help="delegation depth budget")
+    issue.add_argument(
+        "--max-duration-s", default=600, help="max mission duration in seconds"
+    )
+    issue.add_argument(
+        "--delegation-allowed", action="store_true", help="allow one-step delegation"
+    )
+    issue.add_argument(
+        "--max-delegation-depth", default=0, help="delegation depth budget"
+    )
     issue.add_argument("--ttl-s", help="override token TTL in seconds")
-    issue.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    issue.add_argument(
+        "--keys-dir", type=str, help="directory containing VIBAP signing keys"
+    )
     issue.set_defaults(func=cmd_issue)
 
     verify = subparsers.add_parser(
@@ -4998,7 +5270,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="portable receiver-attestation receipt envelope",
     )
-    verify.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
+    verify.add_argument(
+        "--keys-dir", type=str, help="directory containing VIBAP signing keys"
+    )
     verify.add_argument(
         "--receipt-public-key",
         type=Path,
@@ -5062,7 +5336,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also enforce short receipt expiry windows during archival verification",
     )
-    verify.add_argument("--json", action="store_true", help="print a machine-readable explorer report")
+    verify.add_argument(
+        "--json", action="store_true", help="print a machine-readable explorer report"
+    )
     verify.add_argument(
         "--html-report",
         type=Path,
@@ -5103,9 +5379,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="explicit adapter for the JSONL event source",
     )
-    evidence_key_source = evidence_correlate.add_mutually_exclusive_group(
-        required=True
-    )
+    evidence_key_source = evidence_correlate.add_mutually_exclusive_group(required=True)
     evidence_key_source.add_argument(
         "--keys-dir",
         type=str,
@@ -5158,9 +5432,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="signed receipt JSONL journal to verify before export",
     )
-    telemetry_key_source = telemetry_export.add_mutually_exclusive_group(
-        required=True
-    )
+    telemetry_key_source = telemetry_export.add_mutually_exclusive_group(required=True)
     telemetry_key_source.add_argument(
         "--keys-dir",
         type=str,
@@ -5217,10 +5489,18 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="transparency backend used for pending anchors",
     )
-    anchor.add_argument("--keys-dir", type=str, help="receipt signing keys (required by Rekor v1)")
-    anchor.add_argument("--local-log", type=Path, help="self-hosted append-only log JSONL path")
-    anchor.add_argument("--log-private-key", type=Path, help="self-hosted log Ed25519 private key PEM")
-    anchor.add_argument("--origin", help="C2SP checkpoint origin for the self-hosted log")
+    anchor.add_argument(
+        "--keys-dir", type=str, help="receipt signing keys (required by Rekor v1)"
+    )
+    anchor.add_argument(
+        "--local-log", type=Path, help="self-hosted append-only log JSONL path"
+    )
+    anchor.add_argument(
+        "--log-private-key", type=Path, help="self-hosted log Ed25519 private key PEM"
+    )
+    anchor.add_argument(
+        "--origin", help="C2SP checkpoint origin for the self-hosted log"
+    )
     anchor.add_argument(
         "--rekor-url",
         default="https://rekor.sigstore.dev",
@@ -5269,10 +5549,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     offline_fixture.set_defaults(func=cmd_offline_verification_fixture)
 
-    attest = subparsers.add_parser("attest", help="issue a behavioral attestation for a saved session")
-    attest.add_argument("--session", required=True, help="session identifier / passport jti")
-    attest.add_argument("--keys-dir", type=str, help="directory containing VIBAP signing keys")
-    attest.add_argument("--state-dir", type=str, help="directory containing persisted sessions")
+    attest = subparsers.add_parser(
+        "attest", help="issue a behavioral attestation for a saved session"
+    )
+    attest.add_argument(
+        "--session", required=True, help="session identifier / passport jti"
+    )
+    attest.add_argument(
+        "--keys-dir", type=str, help="directory containing VIBAP signing keys"
+    )
+    attest.add_argument(
+        "--state-dir", type=str, help="directory containing persisted sessions"
+    )
     attest.add_argument("--log-path", type=str, help="JSONL audit log path")
     attest.set_defaults(func=cmd_attest)
 
@@ -5296,22 +5584,30 @@ def build_parser() -> argparse.ArgumentParser:
         "claude-code-report",
         help="verify Claude Code hook receipt chains and summarize observability",
     )
-    cc_report.add_argument("--home", type=str, help="Ardur home containing claude-code-hook receipts")
-    cc_report.add_argument("--chain-dir", type=str, help="explicit Claude Code receipt chain directory")
+    cc_report.add_argument(
+        "--home", type=str, help="Ardur home containing claude-code-hook receipts"
+    )
+    cc_report.add_argument(
+        "--chain-dir", type=str, help="explicit Claude Code receipt chain directory"
+    )
     cc_report.add_argument("--keys-dir", type=str, help="signing public-key directory")
     cc_report.add_argument(
         "--verify-expiry",
         action="store_true",
         help="also enforce short receipt expiry windows while verifying",
     )
-    cc_report.add_argument("--json", action="store_true", help="print machine-readable report")
+    cc_report.add_argument(
+        "--json", action="store_true", help="print machine-readable report"
+    )
     cc_report.set_defaults(func=cmd_claude_code_report)
 
     gemini_hook = subparsers.add_parser(
         "gemini-cli-hook",
         help="run the local-only Gemini CLI hook adapter",
     )
-    gemini_hook.add_argument("phase_pos", nargs="?", choices=["pre"], help="hook lifecycle phase")
+    gemini_hook.add_argument(
+        "phase_pos", nargs="?", choices=["pre"], help="hook lifecycle phase"
+    )
     gemini_hook.add_argument("--phase", choices=["pre"], help="hook lifecycle phase")
     gemini_hook.add_argument("--keys-dir", type=Path, help="signing keys directory")
     gemini_hook.set_defaults(func=cmd_gemini_cli_hook)
@@ -5325,8 +5621,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="explicit Gemini home/settings directory to populate; defaults to isolated Ardur local fixture state",
     )
-    gemini_fixture.add_argument("--project-dir", type=str, help="project directory that receives GEMINI.md")
-    gemini_fixture.add_argument("--chain-dir", type=str, help="Ardur Gemini receipt chain directory")
+    gemini_fixture.add_argument(
+        "--project-dir", type=str, help="project directory that receives GEMINI.md"
+    )
+    gemini_fixture.add_argument(
+        "--chain-dir", type=str, help="Ardur Gemini receipt chain directory"
+    )
     gemini_fixture.add_argument("--keys-dir", type=str, help="signing keys directory")
     gemini_fixture.set_defaults(func=cmd_gemini_cli_fixture)
 
@@ -5334,15 +5634,23 @@ def build_parser() -> argparse.ArgumentParser:
         "gemini-cli-report",
         help="verify Gemini CLI hook receipt chains and summarize local-only observability",
     )
-    gemini_report.add_argument("--home", type=str, help="Gemini/Ardur home used for redaction context")
-    gemini_report.add_argument("--chain-dir", type=str, help="explicit Gemini CLI receipt chain directory")
-    gemini_report.add_argument("--keys-dir", type=str, help="signing public-key directory")
+    gemini_report.add_argument(
+        "--home", type=str, help="Gemini/Ardur home used for redaction context"
+    )
+    gemini_report.add_argument(
+        "--chain-dir", type=str, help="explicit Gemini CLI receipt chain directory"
+    )
+    gemini_report.add_argument(
+        "--keys-dir", type=str, help="signing public-key directory"
+    )
     gemini_report.add_argument(
         "--verify-expiry",
         action="store_true",
         help="also enforce short receipt expiry windows while verifying",
     )
-    gemini_report.add_argument("--json", action="store_true", help="print machine-readable report")
+    gemini_report.add_argument(
+        "--json", action="store_true", help="print machine-readable report"
+    )
     gemini_report.set_defaults(func=cmd_gemini_cli_report)
 
     codex_event = subparsers.add_parser(
@@ -5361,8 +5669,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="explicit Codex home/config directory to populate; defaults to isolated Ardur local fixture state",
     )
-    codex_fixture.add_argument("--project-dir", type=str, help="project directory that receives CODEX.md")
-    codex_fixture.add_argument("--chain-dir", type=str, help="Ardur Codex receipt chain directory")
+    codex_fixture.add_argument(
+        "--project-dir", type=str, help="project directory that receives CODEX.md"
+    )
+    codex_fixture.add_argument(
+        "--chain-dir", type=str, help="Ardur Codex receipt chain directory"
+    )
     codex_fixture.add_argument("--keys-dir", type=str, help="signing keys directory")
     codex_fixture.set_defaults(func=cmd_codex_app_server_fixture)
 
@@ -5370,15 +5682,25 @@ def build_parser() -> argparse.ArgumentParser:
         "codex-app-server-report",
         help="verify Codex app-server receipt chains and summarize local-only observability",
     )
-    codex_report.add_argument("--home", type=str, help="Codex/Ardur home used for redaction context")
-    codex_report.add_argument("--chain-dir", type=str, help="explicit Codex app-server receipt chain directory")
-    codex_report.add_argument("--keys-dir", type=str, help="signing public-key directory")
+    codex_report.add_argument(
+        "--home", type=str, help="Codex/Ardur home used for redaction context"
+    )
+    codex_report.add_argument(
+        "--chain-dir",
+        type=str,
+        help="explicit Codex app-server receipt chain directory",
+    )
+    codex_report.add_argument(
+        "--keys-dir", type=str, help="signing public-key directory"
+    )
     codex_report.add_argument(
         "--verify-expiry",
         action="store_true",
         help="also enforce short receipt expiry windows while verifying",
     )
-    codex_report.add_argument("--json", action="store_true", help="print machine-readable report")
+    codex_report.add_argument(
+        "--json", action="store_true", help="print machine-readable report"
+    )
     codex_report.set_defaults(func=cmd_codex_app_server_report)
 
     posture = subparsers.add_parser(
@@ -5390,10 +5712,25 @@ def build_parser() -> argparse.ArgumentParser:
         "scan",
         help="scan receipt/profile/evidence artifacts into a posture JSON document",
     )
-    posture_scan.add_argument("--receipts", type=str, required=True, help="receipt chain directory or receipts.jsonl file")
-    posture_scan.add_argument("--keys-dir", type=str, help="directory containing passport_public.pem for read-only verification")
-    posture_scan.add_argument("--profile", type=str, help="optional ARDUR.md profile to digest")
-    posture_scan.add_argument("--evidence-bundle", type=str, help="optional redacted no-key evidence bundle to summarize")
+    posture_scan.add_argument(
+        "--receipts",
+        type=str,
+        required=True,
+        help="receipt chain directory or receipts.jsonl file",
+    )
+    posture_scan.add_argument(
+        "--keys-dir",
+        type=str,
+        help="directory containing passport_public.pem for read-only verification",
+    )
+    posture_scan.add_argument(
+        "--profile", type=str, help="optional ARDUR.md profile to digest"
+    )
+    posture_scan.add_argument(
+        "--evidence-bundle",
+        type=str,
+        help="optional redacted no-key evidence bundle to summarize",
+    )
     posture_scan.add_argument(
         "--verify-expiry",
         action="store_true",
@@ -5411,7 +5748,12 @@ def build_parser() -> argparse.ArgumentParser:
         "report",
         help="render a posture JSON document as a concise report",
     )
-    posture_report.add_argument("--input", type=str, required=True, help="posture JSON produced by ardur posture scan")
+    posture_report.add_argument(
+        "--input",
+        type=str,
+        required=True,
+        help="posture JSON produced by ardur posture scan",
+    )
     posture_report.add_argument(
         "--format",
         choices=["markdown", "json"],
@@ -5462,7 +5804,9 @@ def build_parser() -> argparse.ArgumentParser:
     hub.add_argument("--home", type=str, help="Ardur Personal home directory")
     hub.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
     hub.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
-    hub.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
+    hub.add_argument(
+        "--no-tls", action="store_true", help="disable TLS (plain HTTP only)"
+    )
     hub.set_defaults(func=cmd_hub)
 
     setup = subparsers.add_parser("setup", help="configure Ardur Personal on this Mac")
@@ -5484,28 +5828,55 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
     status.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
-    status.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
+    status.add_argument(
+        "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
     status.add_argument("--home", type=str, help="Ardur Personal home directory")
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
     doctor.add_argument("--home", type=str, help="Ardur Personal home directory")
     doctor.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
-    doctor.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
+    doctor.add_argument(
+        "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
     doctor.set_defaults(func=cmd_doctor)
 
-    doctor_cc = subparsers.add_parser("doctor-claude-code", help="check Claude Code plugin and active passport setup")
-    doctor_cc.add_argument("--home", type=Path, help="Ardur home containing active_mission.jwt")
-    doctor_cc.add_argument("--plugin-dir", type=Path, default=_default_claude_plugin_dir(), help="Claude Code plugin directory")
+    doctor_cc = subparsers.add_parser(
+        "doctor-claude-code", help="check Claude Code plugin and active passport setup"
+    )
+    doctor_cc.add_argument(
+        "--home", type=Path, help="Ardur home containing active_mission.jwt"
+    )
+    doctor_cc.add_argument(
+        "--plugin-dir",
+        type=Path,
+        default=_default_claude_plugin_dir(),
+        help="Claude Code plugin directory",
+    )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
 
-    kill_switch = subparsers.add_parser("kill-switch", help="activate/deactivate the emergency kill switch")
-    kill_switch.add_argument("--deactivate", action="store_true", help="deactivate the kill switch")
-    kill_switch.add_argument("--proxy-url", default=None, help="proxy base URL (defaults to ARDUR_PROXY_URL env or https://127.0.0.1:8443)")
-    kill_switch.add_argument("--api-token", default=None, help="proxy bearer token (defaults to ARDUR_API_TOKEN env)")
+    kill_switch = subparsers.add_parser(
+        "kill-switch", help="activate/deactivate the emergency kill switch"
+    )
+    kill_switch.add_argument(
+        "--deactivate", action="store_true", help="deactivate the kill switch"
+    )
+    kill_switch.add_argument(
+        "--proxy-url",
+        default=None,
+        help="proxy base URL (defaults to ARDUR_PROXY_URL env or https://127.0.0.1:8443)",
+    )
+    kill_switch.add_argument(
+        "--api-token",
+        default=None,
+        help="proxy bearer token (defaults to ARDUR_API_TOKEN env)",
+    )
     kill_switch.set_defaults(func=cmd_kill_switch)
 
-    uninstall = subparsers.add_parser("uninstall", help="remove Ardur Personal launch files")
+    uninstall = subparsers.add_parser(
+        "uninstall", help="remove Ardur Personal launch files"
+    )
     uninstall.add_argument("--home", type=str, help="Ardur Personal home directory")
     uninstall.add_argument(
         "--remove-data",
@@ -5524,13 +5895,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="run a command through Ardur — governed launcher (with --mission/--allowed-tools) "
         "or Ardur Personal Hub streaming (legacy)",
     )
-    run.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL (legacy hub path)")
-    run.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
+    run.add_argument(
+        "--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL (legacy hub path)"
+    )
+    run.add_argument(
+        "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
     # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
     # values survive to the handler instead of being normalized to
     # ``Path('.')`` (the CWD) by argparse.  The handler rejects empty/whitespace
     # values before any ``Path()`` conversion or governance execution.
-    run.add_argument("--home", type=str, help="Ardur home directory (ephemeral by default for governance)")
+    run.add_argument(
+        "--home",
+        type=str,
+        help="Ardur home directory (ephemeral by default for governance)",
+    )
     # Governance-bridge flags. Supplying any of these switches `ardur run` from
     # the legacy hub-streaming path to the zero-setup governance launcher.
     run.add_argument("--mission", help="mission text for the governed agent run")
@@ -5591,7 +5970,9 @@ def build_parser() -> argparse.ArgumentParser:
         "a mission that also carries a file-scope dimension can never be fully "
         "enforceable on that tier",
     )
-    run.add_argument("command", nargs=argparse.REMAINDER, help="command to run after --")
+    run.add_argument(
+        "command", nargs=argparse.REMAINDER, help="command to run after --"
+    )
     run.set_defaults(func=cmd_run)
 
     desktop = subparsers.add_parser(
@@ -5599,11 +5980,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="record a Mac desktop app observation through Ardur Personal Hub",
     )
     desktop.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
-    desktop.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
+    desktop.add_argument(
+        "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
     desktop.add_argument("--home", type=str, help="Ardur Personal home directory")
     desktop.add_argument("--session-id", help="stable desktop session id")
-    desktop.add_argument("--app", help="application name; autodetected on macOS when omitted")
-    desktop.add_argument("--title", help="window title; autodetected on macOS when omitted")
+    desktop.add_argument(
+        "--app", help="application name; autodetected on macOS when omitted"
+    )
+    desktop.add_argument(
+        "--title", help="window title; autodetected on macOS when omitted"
+    )
     desktop.add_argument(
         "--text",
         help="explicit-consent visible text excerpt to include in the session review",
@@ -5614,9 +6001,15 @@ def build_parser() -> argparse.ArgumentParser:
         "personal-native-host",
         help="run the Ardur Personal native messaging bridge",
     )
-    personal_native_host.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
-    personal_native_host.add_argument("--hub-token", default=None, help="Hub bearer token (defaults to config/env)")
-    personal_native_host.add_argument("--home", type=str, help="Ardur Personal home directory")
+    personal_native_host.add_argument(
+        "--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL"
+    )
+    personal_native_host.add_argument(
+        "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
+    personal_native_host.add_argument(
+        "--home", type=str, help="Ardur Personal home directory"
+    )
     personal_native_host.add_argument(
         "--once-json",
         type=Path,
@@ -5678,9 +6071,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="read-only",
         help="starter profile to write",
     )
-    profile_init.add_argument("--path", type=Path, default=Path("ARDUR.md"), help="profile file to create")
-    profile_init.add_argument("--force", action="store_true", help="replace an existing profile")
-    profile_init.add_argument("--json", action="store_true", help="print machine-readable setup details")
+    profile_init.add_argument(
+        "--path", type=Path, default=Path("ARDUR.md"), help="profile file to create"
+    )
+    profile_init.add_argument(
+        "--force", action="store_true", help="replace an existing profile"
+    )
+    profile_init.add_argument(
+        "--json", action="store_true", help="print machine-readable setup details"
+    )
     profile_init.set_defaults(func=cmd_profile_init)
 
     protect = subparsers.add_parser(
@@ -5692,41 +6091,66 @@ def build_parser() -> argparse.ArgumentParser:
         "claude-code",
         help="issue an active Mission Passport and print the Claude Code plugin command",
     )
-    protect_cc.add_argument("--scope", type=str, help="folder Claude Code is allowed to work in")
+    protect_cc.add_argument(
+        "--scope", type=str, help="folder Claude Code is allowed to work in"
+    )
     # ``--profile`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
     # values survive to the handler instead of being normalized to
     # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
     # stripped string before any key generation or profile loading.
-    protect_cc.add_argument("--profile", type=str, help="Markdown Ardur profile, such as ARDUR.md")
+    protect_cc.add_argument(
+        "--profile", type=str, help="Markdown Ardur profile, such as ARDUR.md"
+    )
     protect_cc.add_argument(
         "--mode",
         choices=sorted(CLAUDE_CODE_PROTECT_MODES),
         default=None,
         help="plain-English policy template",
     )
-    protect_cc.add_argument("--json", action="store_true", help="print machine-readable setup details")
+    protect_cc.add_argument(
+        "--json", action="store_true", help="print machine-readable setup details"
+    )
     # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
     # values survive to the handler instead of being normalized to
     # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
     # stripped string before any directory creation or key generation.
-    protect_cc.add_argument("--home", type=str, help="Ardur home that receives active_mission.jwt")
-    protect_cc.add_argument("--plugin-dir", type=Path, default=_default_claude_plugin_dir(), help="Claude Code plugin directory")
+    protect_cc.add_argument(
+        "--home", type=str, help="Ardur home that receives active_mission.jwt"
+    )
+    protect_cc.add_argument(
+        "--plugin-dir",
+        type=Path,
+        default=_default_claude_plugin_dir(),
+        help="Claude Code plugin directory",
+    )
     # ``--keys-dir`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
     # only values survive to the handler instead of being normalized to
     # ``PosixPath('.')`` (the CWD) at parse time. The handler validates the
     # stripped string before any directory creation or key generation.
     protect_cc.add_argument("--keys-dir", type=str, help="signing keys directory")
-    protect_cc.add_argument("--agent-id", default="local-user:claude-code", help="Mission Passport subject")
-    protect_cc.add_argument("--mission", help="override the default mission text for the selected mode")
-    protect_cc.add_argument("--max-tool-calls", type=int, default=250, help="maximum governed tool calls")
-    protect_cc.add_argument("--max-duration-s", type=int, default=86400, help="mission duration budget in seconds")
+    protect_cc.add_argument(
+        "--agent-id", default="local-user:claude-code", help="Mission Passport subject"
+    )
+    protect_cc.add_argument(
+        "--mission", help="override the default mission text for the selected mode"
+    )
+    protect_cc.add_argument(
+        "--max-tool-calls", type=int, default=250, help="maximum governed tool calls"
+    )
+    protect_cc.add_argument(
+        "--max-duration-s",
+        type=int,
+        default=86400,
+        help="mission duration budget in seconds",
+    )
     protect_cc.add_argument("--ttl-s", type=int, help="override token TTL in seconds")
     protect_cc.add_argument(
         # ``type=str`` (not ``Path``) so an empty or whitespace-only value
         # survives parsing and can be rejected explicitly below. ``type=Path``
         # normalises ``""`` to ``PosixPath(".")`` which silently resolves to the
         # CWD and masks the empty-argument defect.
-        "--forbid-rules", type=str,
+        "--forbid-rules",
+        type=str,
         help="JSON file containing forbid_rules policy specifications",
     )
     protect_cc.add_argument(
@@ -5734,7 +6158,8 @@ def build_parser() -> argparse.ArgumentParser:
         # survives parsing and can be rejected explicitly below. ``type=Path``
         # normalises ``""`` to ``PosixPath(".")`` which silently resolves to the
         # CWD and masks the empty-argument defect.
-        "--cedar-policy", type=str,
+        "--cedar-policy",
+        type=str,
         help="Cedar policy file (.cedar)",
     )
     protect_cc.add_argument(
@@ -5742,7 +6167,8 @@ def build_parser() -> argparse.ArgumentParser:
         # survives parsing and can be rejected explicitly below. ``type=Path``
         # normalises ``""`` to ``PosixPath(".")`` which silently resolves to the
         # CWD and masks the empty-argument defect.
-        "--cedar-entities", type=str,
+        "--cedar-entities",
+        type=str,
         help="Cedar entities JSON file (used with --cedar-policy)",
     )
     protect_cc.set_defaults(func=cmd_protect_claude_code)

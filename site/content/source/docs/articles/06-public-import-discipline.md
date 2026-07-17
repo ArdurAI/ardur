@@ -2,7 +2,7 @@
 title: "Public Import Discipline"
 description: "We had a private research repo with three years of history, a paper,"
 source_path: "docs/articles/06-public-import-discipline.md"
-source_sha256: "42edc3ae5860d01bdc6063bb54615f45b7d704004ed76edccf9eefed83f4ba68"
+source_sha256: "7086b650d92cb623df02117f0ec1762db8e13f275ec6f9c1a11c63a5d41871c8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["article"]
@@ -159,7 +159,7 @@ The graduation gates we run before promoting a `dev` commit to
    (the runtime's embedded copy). A CI gate fails the build on
    drift between them.
 4. **Tests.** Python on 3.10 and 3.13; Go at the version pinned
-   in `go.mod` (currently 1.25.9).
+   in `go.mod` (currently 1.26.5).
 5. **CodeQL** for both Python and Go.
 6. **A 24-hour cool-off re-read** of the diff by the maintainer
    before the merge. The graduation gate isn't just CI — it's

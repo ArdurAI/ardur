@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -331,6 +332,151 @@ func TestSeccompNotificationLifecycleBarrierBlocksEndUntilEvidenceCompletes(t *t
 	}
 	if err := root.cmd.Wait(); err != nil {
 		t.Fatalf("notification child failed: %v\n%s", err, root.output.String())
+	}
+}
+
+func TestSeccompListenerCancellationWakesWithoutClosingListener(t *testing.T) {
+	listenerRead, listenerWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create listener stand-in pipe: %v", err)
+	}
+	defer listenerRead.Close()
+	defer listenerWrite.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelFD, cleanup, err := newSeccompListenerCancellation(ctx)
+	if err != nil {
+		t.Fatalf("create cancellation event: %v", err)
+	}
+	defer cleanup()
+	cancel()
+	cancelPoll := []unix.PollFd{{Fd: int32(cancelFD), Events: unix.POLLIN}}
+	count, err := unix.Poll(cancelPoll, 1000)
+	if err != nil {
+		t.Fatalf("wait for cancellation descriptor readiness: %v", err)
+	}
+	if count != 1 || cancelPoll[0].Revents&unix.POLLIN == 0 {
+		t.Fatalf("cancellation descriptor did not become readable: count=%d events=%#x", count, cancelPoll[0].Revents)
+	}
+
+	ready, err := waitForSeccompListenerEvent(int(listenerRead.Fd()), cancelFD)
+	if err != nil {
+		t.Fatalf("wait for cancellation event: %v", err)
+	}
+	if ready {
+		t.Fatal("listener reported ready when cancellation should win")
+	}
+
+	// The cancellation watcher must not close the listener descriptor. Prove
+	// that the original owner can still use it after the wait has returned.
+	if _, err := listenerWrite.Write([]byte{0x7a}); err != nil {
+		t.Fatalf("write listener stand-in after cancellation: %v", err)
+	}
+	buf := make([]byte, 1)
+	if _, err := listenerRead.Read(buf); err != nil {
+		t.Fatalf("read listener stand-in after cancellation: %v", err)
+	}
+	if buf[0] != 0x7a {
+		t.Fatalf("listener stand-in byte = %#x, want 0x7a", buf[0])
+	}
+}
+
+func TestSeccompListenerPollReportsReadyListener(t *testing.T) {
+	listenerRead, listenerWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create listener stand-in pipe: %v", err)
+	}
+	defer listenerRead.Close()
+	defer listenerWrite.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelFD, cleanup, err := newSeccompListenerCancellation(ctx)
+	if err != nil {
+		t.Fatalf("create cancellation event: %v", err)
+	}
+	defer cleanup()
+	if _, err := listenerWrite.Write([]byte{0x01}); err != nil {
+		t.Fatalf("make listener stand-in readable: %v", err)
+	}
+
+	ready, err := waitForSeccompListenerEvent(int(listenerRead.Fd()), cancelFD)
+	if err != nil {
+		t.Fatalf("wait for listener event: %v", err)
+	}
+	if !ready {
+		t.Fatal("cancellation reported before context was cancelled")
+	}
+}
+
+func TestSeccompListenerCancellationWinsWhenBothDescriptorsAreReady(t *testing.T) {
+	listenerRead, listenerWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create listener stand-in pipe: %v", err)
+	}
+	defer listenerRead.Close()
+	defer listenerWrite.Close()
+	if _, err := listenerWrite.Write([]byte{0x01}); err != nil {
+		t.Fatalf("make listener stand-in readable: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelFD, cleanup, err := newSeccompListenerCancellation(ctx)
+	if err != nil {
+		t.Fatalf("create cancellation event: %v", err)
+	}
+	defer cleanup()
+	cancel()
+	cancelPoll := []unix.PollFd{{Fd: int32(cancelFD), Events: unix.POLLIN}}
+	count, err := unix.Poll(cancelPoll, 1000)
+	if err != nil {
+		t.Fatalf("wait for cancellation descriptor readiness: %v", err)
+	}
+	if count != 1 || cancelPoll[0].Revents&unix.POLLIN == 0 {
+		t.Fatalf("cancellation descriptor did not become readable: count=%d events=%#x", count, cancelPoll[0].Revents)
+	}
+
+	ready, err := waitForSeccompListenerEvent(int(listenerRead.Fd()), cancelFD)
+	if err != nil {
+		t.Fatalf("wait for simultaneous events: %v", err)
+	}
+	if ready {
+		t.Fatal("listener readiness won over cancellation")
+	}
+}
+
+func TestSeccompListenerPollRejectsInvalidListenerDescriptor(t *testing.T) {
+	listenerRead, listenerWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create listener stand-in pipe: %v", err)
+	}
+	defer listenerWrite.Close()
+	listenerFD := int(listenerRead.Fd())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelFD, cleanup, err := newSeccompListenerCancellation(ctx)
+	if err != nil {
+		t.Fatalf("create cancellation event: %v", err)
+	}
+	defer cleanup()
+	// Allocate the cancellation descriptor before closing listenerFD. If the
+	// order is reversed, eventfd can immediately reuse listenerFD and the test
+	// stops exercising POLLNVAL—the exact numeric-fd reuse this regression is
+	// intended to guard against.
+	if err := listenerRead.Close(); err != nil {
+		t.Fatalf("close listener stand-in: %v", err)
+	}
+
+	ready, err := waitForSeccompListenerEvent(listenerFD, cancelFD)
+	if err == nil {
+		t.Fatal("invalid listener descriptor returned no error")
+	}
+	if ready {
+		t.Fatal("invalid listener descriptor reported ready")
+	}
+	if !strings.Contains(err.Error(), "seccomp listener reported poll events") {
+		t.Fatalf("invalid listener error = %q", err)
 	}
 }
 

@@ -86,7 +86,7 @@ ollama pull <your-model>
 ollama serve
 
 # Run the governance proxy
-PYTHONPATH=python python -m vibap.cli hub start
+PYTHONPATH=python python -m vibap.cli hub
 ```
 
 ### With Ollama (cloud models)
@@ -97,7 +97,7 @@ For larger models via Ollama's cloud API:
 export OLLAMA_API_KEY="your-api-key"
 
 # Run the full governance test
-PYTHONPATH=python python tests/run_cloud_model_test.py "$MODEL_NAME"
+PYTHONPATH=python python python/tests/run_cloud_model_test.py "$MODEL_NAME"
 ```
 
 This optional harness routes its configured tool requests through Ardur's

@@ -2,7 +2,7 @@
 title: "Ardur Helm chart — skeleton"
 description: "Status: **SKELETON**. `Chart.yaml` + `values.yaml` + `_helpers.tpl`"
 source_path: "deploy/helm/ardur/README.md"
-source_sha256: "53aef24980af634f660a23c50edd05791602e3583ccca549e70c4bbcfb8418f2"
+source_sha256: "b238f5e29a628be585973059c91667c7e2f7d6609e3997936dd92f3621322784"
 weight: 100
 maturity: ["in-progress"]
 claim_types: ["deployment"]
@@ -116,7 +116,7 @@ production-ready" future effort. That lane would:
 2. Produce a real `values.production.yaml` example
 3. Run on a kind cluster end-to-end (MissionDeclaration CR →
    Reconcile verdict)
-4. Add an ADR (next available number after ADR-021, e.g. `docs/decisions/ADR-022-ardur-helm-chart.md`)
+4. Add an ADR (next available number after ADR-024, e.g. `docs/decisions/ADR-025-ardur-helm-chart.md`)
    documenting chart design decisions — ADR-016 is already taken
    (delegation lineage hash index)
 5. Publish to a Helm repo (possibly GitHub Pages under

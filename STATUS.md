@@ -33,8 +33,12 @@ successful-exec basename matches the embedded `claude`, `codex`, `gemini`, or
 writes an unrouted candidate into governed session evidence. It emits the
 basename but not its parent path and does not collect argv, hashes, uid,
 environment, or file content. It does not attest or enforce. Issue #67 remains
-in progress for stronger fingerprints and corpus-backed precision/recall
-thresholds.
+in progress for stronger fingerprints and additional signal strata. A
+versioned, sanitized 28-sample corpus now gates exact-name regressions at
+least 0.90 supported-shape recall and zero hard-negative false positives. Its
+deterministic report includes sample counts, Wilson intervals, stable error
+IDs, and exact corpus/registry digests; these are maintained-corpus results,
+not population accuracy or identity assurance.
 
 Operators can now add a daemon-owned native-executable fingerprint registry to
 that opt-in preview. A fixed worker pool binds recognized PIDs with pidfds and
@@ -124,7 +128,8 @@ complete sensor coverage.
 - broader deployment material beyond the SPIRE design surface
 - completion of agent recognition issue #67 beyond the exact-name,
   observe-only Linux foundation: binary hashes and argv/interpreter signals,
-  maintained corpus thresholds, and cross-platform launch sources
+  multi-signal corpus strata, cross-platform launch sources, and exec-storm
+  overhead/loss-budget evidence
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 

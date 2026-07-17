@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "adf33954532ed76fe0846b8411519bb1fa561c76f53294ed6e2fa7981ceb562c"
+source_sha256: "dbdab1827fa922d6da719a9bb1c4499925458a2335612367d85caebcb8a060f9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -75,8 +75,13 @@ compare recognized native executables through a fixed asynchronous pidfd plus
 heuristic content signal; computed digests, full paths, argv, environment, and
 file contents are never emitted. It does not attest, adopt, authorize, or
 enforce the observed process, and neither an exact name nor an ordinary SHA-256
-match proves agent identity or provenance. Script-backed identity, measured
-precision/recall, attestation, and governance remain separate follow-up work.
+match proves agent identity or provenance. A [maintained sanitized corpus and
+deterministic gate](docs/reference/agent-recognition-evaluation.md) publishes
+exact corpus and registry digests, sample-counted precision/recall, Wilson
+intervals, and stable false-positive/false-negative IDs. The gate is regression
+evidence for the maintained corpus—not population accuracy—and stronger
+fingerprints remain tracked separately under issue #67. Script-backed identity,
+attestation, and governance remain separate follow-up work.
 
 For performance engineering, the
 [Linux governance overhead harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)

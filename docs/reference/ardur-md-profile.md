@@ -109,6 +109,9 @@ Passport:
   new users.
 - `safe-coding` — allow Read, Search, Edit, Write inside the protected
   folder; block shell commands.
+- `personal-firewall` — allow Read, Search, Edit, Write; block shell commands
+  and external network access; adds a forbid rule that blocks secret-like
+  arguments (API keys, tokens, private key material).
 
 Template source is in
 [`python/vibap/ardur_profile.py`](../../python/vibap/ardur_profile.py)

@@ -2,7 +2,7 @@
 title: "Ardur Proxy OCI Image Contract"
 description: "The first supported OCI surface is the governance proxy:"
 source_path: "docs/reference/proxy-oci-image.md"
-source_sha256: "9d046acc8ac2809d9b2a20a067f9d3a228c86a1ef8c06923a3bfe8c17f6c42ac"
+source_sha256: "80cc27f0622b712c0b1c68f462d0fdfd38327dcaf4cfc96dbce4157701962ae7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -60,9 +60,12 @@ should use encrypted storage with access controls appropriate for signing-key
 material. Do not put API tokens, private keys, or development certificates in
 the image, build arguments, labels, or Kubernetes manifests.
 
-`ARDUR_NO_TLS=1` is supported only when a trusted local reverse proxy, sidecar,
-or service mesh terminates TLS before traffic reaches the container. Bearer
-tokens must not cross an unencrypted or untrusted network.
+Plain HTTP is supported only when a trusted local reverse proxy, sidecar, or
+service mesh terminates TLS before traffic reaches the container. Append the
+explicit `--no-tls` argument to the image command and set `ARDUR_NO_TLS=1` so
+the container healthcheck probes HTTP. The environment variable selects only
+the healthcheck scheme; by itself it cannot disable proxy TLS. Bearer tokens
+must not cross an unencrypted or untrusted network.
 
 An equivalent hardened Docker invocation is:
 
