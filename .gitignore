@@ -56,6 +56,23 @@ site/.hugo_build.lock
 # as defense-in-depth so an accidental `git add .` does not stage them even
 # if the gitleaks PEM rule were to miss a format variant.
 keys/
+*.pem
+*.key
+
+# Reviewed public-key fixtures remain normal source artifacts. Keep these
+# exceptions narrower than the generated-key rules so a new PEM elsewhere
+# requires an explicit security review before it can be added.
+!/docs/specs/**/*.pem
+!/site/static/repo/docs/specs/**/*.pem
+
+# Legacy/default-in-CWD proxy state. Standard managed state under `.ardur/`
+# and `.vibap/` is already ignored above; root anchors avoid hiding an
+# unrelated JSON fixture with the same basename in another source directory.
+/passport_state.lock
+/replay_cache.json
+/revoked.json
+/lineage_hashes.json
+
 active_mission.jwt
 claude-code-pre_tool_use
 claude-code-pre_tool_use.sha256
