@@ -2,7 +2,7 @@
 title: "Public Import Plan"
 description: "This plan converted the private source tree into the public Ardur repo without"
 source_path: "docs/public-import-plan.md"
-source_sha256: "669f9b325e65afaea908f009d46a6c00b32356cd0c568f5a13b51edfe3f3028f"
+source_sha256: "f0a42f67de9f7e06c29d55ccfc9fc962a1dbb1246073cbdcad6f63153e4e797c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -117,7 +117,7 @@ ardur/
 5. **Go runtime and protocol schemas — done.**
    `go/` is a coherent module covering credential, governance, policy, SPIFFE,
    AAT (draft-00/draft-01 profile dispatch, constraint engine, derivation, PoP,
-   chain verification, and deterministic fixture regression — 74 package tests),
+   chain verification, and deterministic fixture regression — 76 package tests),
    provenance, issuer, trust, transparency, and CLI surfaces.
 
 6. **Deployment material — partly done.**

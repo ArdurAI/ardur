@@ -2,7 +2,7 @@
 title: "Ardur — Go Runtime"
 description: "Go handles the parts of Ardur where Python falls short: Linux eBPF kernel"
 source_path: "go/README.md"
-source_sha256: "e3bc7418f4418c9fa1a31f6f7e6c598cfb63970d58524736e9f27e273e0fd025"
+source_sha256: "95c8a6265e7485facdd3b2b8917d19c92ab78ee61e5fd071341d568792fb1cf2"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -124,8 +124,9 @@ governance HTTP API.
 - **Governance HTTP proxy** — lives in `python/vibap/proxy.py`.
 - **CLI** — lives in `python/vibap/cli.py`.
 - **Personal Hub** — lives in `python/vibap/personal_hub.py`.
-- **Benchmark harness binaries** — the `cmd/benchmark*` and `cmd/benchcheck`
-  binaries were removed; benchmark scenario types live in `benchmark/`.
+- **Benchmark harness binaries** — the `cmd/benchmark*` binaries were removed;
+  benchmark scenario types live in `benchmark/`. The `cmd/benchcheck` AuditBench
+  evaluation harness remains present.
 - **Vendor-specific telemetry connectors** — stay private.
 - **Live benchmark fixtures** — AgentDojo, InjecAgent, R-Judge, STAC remain
   in the internal research tree.
