@@ -17,12 +17,20 @@ func TestWriteReportUsesOwnerOnlyAtomicOutputAndRejectsSymlinkDirectory(t *testi
 	if err := writeReport(output, report); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(output); err != nil || info.Mode().Perm() != 0o700 {
-		t.Fatalf("output mode=%v error=%v", info.Mode().Perm(), err)
+	outputInfo, err := os.Stat(output)
+	if err != nil {
+		t.Fatalf("stat output directory: %v", err)
+	}
+	if outputInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("output mode=%v, want 0700", outputInfo.Mode().Perm())
 	}
 	path := filepath.Join(output, reportFilename)
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("report mode=%v error=%v", info.Mode().Perm(), err)
+	reportInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat report: %v", err)
+	}
+	if reportInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("report mode=%v, want 0600", reportInfo.Mode().Perm())
 	}
 
 	link := filepath.Join(t.TempDir(), "output-link")
