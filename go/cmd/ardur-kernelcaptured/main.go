@@ -483,7 +483,7 @@ func (d *daemon) observeAgentLaunch(evt kernelcapture.ProcessEvent) {
 }
 
 func (d *daemon) observeAgentFingerprint(evt kernelcapture.ProcessEvent, candidate kernelcapture.AgentRecognitionResult, observation kernelcapture.AgentFingerprintObservation) {
-	d.log.Info("AI agent native executable fingerprint observed",
+	d.log.Info("AI agent executable fingerprint observed",
 		"fingerprint_outcome", observation.Outcome,
 		"fingerprint_method", observation.Method,
 		"object_state", observation.ObjectState,
@@ -505,6 +505,21 @@ func (d *daemon) observeAgentFingerprint(evt kernelcapture.ProcessEvent, candida
 	d.agentRecognitionMu.RUnlock()
 	if observer != nil {
 		observer(evt, candidate, observation)
+	}
+}
+
+func (d *daemon) agentLauncherIdentityRequired() bool {
+	d.agentRecognitionMu.RLock()
+	defer d.agentRecognitionMu.RUnlock()
+	return d.agentFingerprintWorker != nil && d.agentFingerprintWorker.HasLauncherRules()
+}
+
+func (d *daemon) setAgentLauncherIdentityAvailable(available bool) {
+	d.agentRecognitionMu.RLock()
+	worker := d.agentFingerprintWorker
+	d.agentRecognitionMu.RUnlock()
+	if worker != nil {
+		worker.SetLauncherIdentityAvailable(available)
 	}
 }
 
@@ -2257,7 +2272,7 @@ func main() {
 		agentRecognition         = flag.Bool("agent-recognition", false, "Observe release-bound AI agent launch candidates using bounded process metadata")
 		agentRecognitionAllow    = flag.String("agent-recognition-allow", "", "Comma-separated agent types allowed in the recognition prefilter")
 		agentRecognitionDeny     = flag.String("agent-recognition-deny", "", "Comma-separated agent types denied from the recognition prefilter")
-		agentFingerprintRegistry = flag.String("agent-recognition-fingerprint-registry", "", "Daemon-owned native executable fingerprint registry (Linux only; requires --agent-recognition)")
+		agentFingerprintRegistry = flag.String("agent-recognition-fingerprint-registry", "", "Daemon-owned native/launcher executable fingerprint registry (Linux only; requires --agent-recognition)")
 	)
 	flag.Parse()
 	if !*agentRecognition && (strings.TrimSpace(*agentRecognitionAllow) != "" || strings.TrimSpace(*agentRecognitionDeny) != "" || strings.TrimSpace(*agentFingerprintRegistry) != "") {
@@ -2312,7 +2327,7 @@ func main() {
 				os.Exit(2)
 			}
 			health := d.agentFingerprintHealth()
-			log.Info("agent native executable fingerprinting enabled",
+			log.Info("agent executable fingerprinting enabled",
 				"identity_assurance", "heuristic_executable_content",
 				"governance_action", "observe_only",
 				"registry_version", health.RegistryVersion,
@@ -2321,6 +2336,9 @@ func main() {
 				"worker_count", health.WorkerCount,
 				"timeout_ms", health.TimeoutMS,
 				"max_file_bytes", health.MaxFileBytes,
+				"max_argument_bytes", health.MaxArgumentBytes,
+				"max_arguments", health.MaxArguments,
+				"launcher_rules", registry.HasLauncherRules(),
 			)
 		}
 	}

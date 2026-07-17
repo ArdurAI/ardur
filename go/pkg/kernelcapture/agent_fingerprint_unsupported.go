@@ -12,11 +12,11 @@ func newPlatformAgentFingerprintResolver() agentFingerprintResolver {
 	return unsupportedAgentFingerprintResolver{}
 }
 
-func (unsupportedAgentFingerprintResolver) Bind(uint32) (agentFingerprintTarget, string) {
+func (unsupportedAgentFingerprintResolver) Bind(ProcessEvent) (agentFingerprintTarget, string) {
 	return nil, AgentFingerprintOutcomeUnsupported
 }
 
-func (unsupportedAgentFingerprintResolver) Resolve(context.Context, agentFingerprintTarget, int64) (agentFingerprintDigest, string) {
+func (unsupportedAgentFingerprintResolver) Resolve(context.Context, agentFingerprintTarget, agentFingerprintResolveLimits) (agentFingerprintDigest, string) {
 	return agentFingerprintDigest{}, AgentFingerprintOutcomeUnsupported
 }
 

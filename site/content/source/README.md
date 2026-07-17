@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "33fe853f2bbc7595d92b0f0f86efcc219cce7aa33d87f3b07979a29a622ac773"
+source_sha256: "f09f8809ab270fc53bd9ab7dccc12a1d04102c83bb30ab6722ad91b272683b61"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -78,18 +78,24 @@ logs matching execs as low-confidence, observe-only launch candidates. The
 default cgroup-scoped capture path is unchanged. The producer derives only a
 bounded basename and never emits the parent path. Operators may additionally
 provide a daemon-owned `--agent-recognition-fingerprint-registry` on Linux to
-compare recognized native executables through a fixed asynchronous pidfd plus
-`/proc/<pid>/exe` worker pool. A configured match is only a medium-confidence
-heuristic content signal; computed digests, full paths, argv, environment, and
-file contents are never emitted. It does not attest, adopt, authorize, or
-enforce the observed process, and neither an exact name nor an ordinary SHA-256
-match proves agent identity or provenance. A [maintained sanitized corpus and
-deterministic gate](docs/reference/agent-recognition-evaluation.md) publishes
-exact corpus and registry digests, sample-counted precision/recall, Wilson
-intervals, and stable false-positive/false-negative IDs. The gate is regression
-evidence for the maintained corpus—not population accuracy—and stronger
-fingerprints remain tracked separately under issue #67. Script-backed identity,
-attestation, and governance remain separate follow-up work.
+compare recognized native executables and script-backed launchers through a
+fixed asynchronous pidfd worker pool. Native candidates use the live
+`/proc/<pid>/exe` object. Script candidates require an optional non-enforcing
+BPF-LSM observer to bind the original exec object; bounded cmdline fields are
+only locators and must reopen beneath the observed process root with matching
+device, inode, and mount ID before hashing. Unsupported kernels fail the script
+lane low without disabling native fingerprinting or ordinary lifecycle
+capture. A configured match is only a medium-confidence heuristic content
+signal; computed digests, full paths, argv, environment, and file contents are
+never emitted. It does not attest, adopt, authorize, or enforce the observed
+process, and neither an exact name nor an ordinary SHA-256 match proves agent
+identity or provenance. A [maintained sanitized corpus and deterministic
+gate](docs/reference/agent-recognition-evaluation.md) publishes exact corpus and
+registry digests, sample-counted precision/recall, Wilson intervals, and stable
+false-positive/false-negative IDs. The gate is regression evidence for the
+maintained corpus—not population accuracy—and stronger fingerprints remain
+tracked separately under issue #67. Attestation and governance remain separate
+follow-up work.
 
 For performance engineering, the
 [Linux governance overhead harness](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/)

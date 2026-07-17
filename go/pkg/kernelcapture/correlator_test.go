@@ -575,6 +575,6 @@ func buildRingbufSample(rawType uint8, monotonicNS uint64, pid, ppid, tid, pidNa
 	binary.LittleEndian.PutUint32(sample[24:28], tid)
 	binary.LittleEndian.PutUint32(sample[28:32], pidNamespaceID)
 	binary.LittleEndian.PutUint64(sample[32:40], cgroupID)
-	copy(sample[44:60], []byte(comm))
+	copy(sample[72:88], []byte(comm))
 	return sample
 }

@@ -33,9 +33,26 @@ type ProcessEvent struct {
 	CgroupID                uint64
 	Comm                    string
 	ExecutableBasename      string
+	InterpreterBacked       bool                   `json:"-"`
+	LauncherScript          bool                   `json:"-"`
+	LauncherIdentity        LauncherObjectIdentity `json:"-"`
+	LauncherInterpreter     string                 `json:"-"`
 	ExitCode                int32
 	ObservedAt              time.Time
 	ObservedMonotonicNS     uint64
+}
+
+// LauncherObjectIdentity is the bounded, non-path identity captured for the
+// original script object before the kernel replaces the live executable with
+// its interpreter. It is internal evidence for locator equality, not public
+// provenance and not serialized into receipts or fingerprint observations.
+type LauncherObjectIdentity struct {
+	Present     bool
+	DeviceMajor uint32
+	DeviceMinor uint32
+	Inode       uint64
+	MountID     uint64
+	LinkCount   uint32
 }
 
 // ToolReceipt is the synthetic tool-call receipt we correlate kernel events to.

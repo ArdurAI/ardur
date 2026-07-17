@@ -295,6 +295,38 @@ func TestLinuxEBPFAgentRecognitionSmoke(t *testing.T) {
 	)
 }
 
+func TestLinuxEBPFLauncherIdentitySmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF launcher-identity smoke")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := RunLinuxEBPFLauncherIdentitySmoke(ctx, 15*time.Second)
+	if err != nil {
+		t.Fatalf("RunLinuxEBPFLauncherIdentitySmoke failed: %v", err)
+	}
+	if result.Platform != "linux" || !result.LSMObserverAttached {
+		t.Fatalf("launcher observer labels = platform %q attached %t, want linux/true", result.Platform, result.LSMObserverAttached)
+	}
+	if result.PositiveMethod != AgentFingerprintMethodSHA256KernelLauncher || result.PositiveOutcome != AgentFingerprintOutcomeSuccess || result.PositiveObjectState != AgentFingerprintObjectLinked || result.PositiveMatchedRuleCount != 1 {
+		t.Fatalf("positive labels = method %q outcome %q object_state %q matched_rules %d", result.PositiveMethod, result.PositiveOutcome, result.PositiveObjectState, result.PositiveMatchedRuleCount)
+	}
+	if result.SpoofMethod != AgentFingerprintMethodSHA256KernelLauncher || result.SpoofOutcome != AgentFingerprintOutcomeLocatorMismatch || result.SpoofObjectState != AgentFingerprintObjectLinked {
+		t.Fatalf("spoof labels = method %q outcome %q object_state %q", result.SpoofMethod, result.SpoofOutcome, result.SpoofObjectState)
+	}
+	t.Logf("launcher_observer_attached=%t positive_method=%q positive_outcome=%q positive_object_state=%q positive_matched_rules=%d spoof_method=%q spoof_outcome=%q spoof_object_state=%q",
+		result.LSMObserverAttached,
+		result.PositiveMethod,
+		result.PositiveOutcome,
+		result.PositiveObjectState,
+		result.PositiveMatchedRuleCount,
+		result.SpoofMethod,
+		result.SpoofOutcome,
+		result.SpoofObjectState,
+	)
+}
+
 func TestLinuxEBPFCgroupFilterNegativeSmoke(t *testing.T) {
 	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
 		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF cgroup-filter smoke")
