@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "96b50ba6c61a2dedf0bcda3aee59cc4824d69c193831da0d5a1507d5df1af335"
+source_sha256: "330d9522a5d47a28e43be71088afc8f5a8111b9121c4852c240f934b79014c34"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -139,8 +139,12 @@ while Linux benchmark stress is manual.
 
 [`/.github/workflows/link-check.yml`](/__ardur_internal__/repo/.github/workflows/link-check.yml)
 
-- Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.9.0` (commit-pinned).
+- Runs on every pull request and weekly via cron, scanning `**/*.md`. Uses `lycheeverse/lychee-action@v2.9.0` (commit-pinned).
 - Currently excludes five URL patterns/domains. One (`security/advisories/new`) requires being signed in to GitHub, so an unauthenticated checker gets a 404. Four bot-blocking domains (`developers.redhat.com`, `medium.com`, `answers.uillinois.edu`, `theregister.com`) return 403 to automated requests; these are legitimate research citations excluded rather than removed. The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
+- Timeouts remain failures. Prefer an immutable upstream primary reference over
+  excluding a slow mirror or enabling `--accept-timeouts`; exclusions are for
+  sources that are legitimate but structurally unavailable to automation, not
+  a substitute for maintaining citations.
 
 ### `validate-formats` — JSON and YAML parsers
 
