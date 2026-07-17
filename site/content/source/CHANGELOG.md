@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8c69468dc7656a79739a37fcc05bff056ed40b811eb661fdd3fa1c2b7131db86"
+source_sha256: "e2397852a3cf91e7e1dd6e5c90809ae1bc848c51dabafb7abab220c60514b3c5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
+  side-effect, budget, time, delegation, lineage-parent, or working-directory
+  authority while preserving valid transitive attenuation
 - Label exported actor/verifier identity as signed receipt claims while
   explicitly reporting that the detached exporter did not verify SPIFFE
   workload identity
@@ -53,6 +56,9 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Add a versioned sanitized agent-recognition corpus, deterministic evaluator,
+  95% Wilson intervals, stable error IDs, exact corpus/registry digests, and a
+  maintained-corpus CI gate without making population-accuracy claims
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
   exact-name registry, separate in-kernel `comm` and successful-exec basename
   prefilters, operator class overrides, script-launcher smoke coverage, and
@@ -78,6 +84,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Keep seccomp listener ownership in one goroutine and wake cancellation through
+  a dedicated eventfd, preventing listener teardown from closing a reused
+  control-connection descriptor
 - Prevent torn `PolicyMaps` reads and use-after-close during BPF-LSM guard
   startup, degradation, and shutdown; reject late guards after seccomp fallback
 - Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the

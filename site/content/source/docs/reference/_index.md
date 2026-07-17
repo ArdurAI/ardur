@@ -17,6 +17,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 - [`README.md`](/__ardur_internal__/source/docs/reference/readme/)
 - [`advisory-ai-controls.md`](/__ardur_internal__/source/docs/reference/advisory-ai-controls/)
+- [`agent-recognition-evaluation.md`](/__ardur_internal__/source/docs/reference/agent-recognition-evaluation/)
 - [`ardur-md-profile.md`](/__ardur_internal__/source/docs/reference/ardur-md-profile/)
 - [`cli.md`](/__ardur_internal__/source/docs/reference/cli/)
 - [`governed-subagent-adapter.md`](/__ardur_internal__/source/docs/reference/governed-subagent-adapter/)
