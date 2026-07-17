@@ -307,7 +307,9 @@ itself.
 Authenticated `health` responses add `agent_fingerprint` with the canonical
 registry version/SHA-256, queue capacity/depth, worker count, timeout, maximum
 file size, and monotonic counters for saturation, denied resolution, exited
-processes, unsupported objects, size/deadline limits, mismatches, and matches.
+processes, unsupported objects, size/deadline limits, mismatches, matches, and
+attempts the worker was unavailable for (submitted while closing or closed, or
+abandoned because processing panicked and was contained).
 The registry SHA-256 identifies the canonical configuration; it is not a
 computed executable digest. Logs, results, receipts, health data, and fixtures
 never include the computed executable digest, full host path, argv, environment,

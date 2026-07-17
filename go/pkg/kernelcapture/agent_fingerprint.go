@@ -279,6 +279,10 @@ type AgentFingerprintCounters struct {
 	DeadlineExceeded uint64 `json:"deadline_exceeded"`
 	DigestMismatch   uint64 `json:"digest_mismatch"`
 	Success          uint64 `json:"success"`
+	// WorkerUnavailable counts attempts the worker refused or abandoned
+	// because it was closing, already closed, or because processing
+	// panicked and was contained.
+	WorkerUnavailable uint64 `json:"worker_unavailable"`
 }
 
 // AgentFingerprintHealth is exposed only through the authenticated local
@@ -330,14 +334,15 @@ type agentFingerprintJob struct {
 }
 
 type agentFingerprintAtomicCounters struct {
-	queueSaturated   atomic.Uint64
-	resolutionDenied atomic.Uint64
-	processExited    atomic.Uint64
-	unsupported      atomic.Uint64
-	sizeExceeded     atomic.Uint64
-	deadlineExceeded atomic.Uint64
-	digestMismatch   atomic.Uint64
-	success          atomic.Uint64
+	queueSaturated    atomic.Uint64
+	resolutionDenied  atomic.Uint64
+	processExited     atomic.Uint64
+	unsupported       atomic.Uint64
+	sizeExceeded      atomic.Uint64
+	deadlineExceeded  atomic.Uint64
+	digestMismatch    atomic.Uint64
+	success           atomic.Uint64
+	workerUnavailable atomic.Uint64
 }
 
 // AgentFingerprintWorker owns a fixed queue and fixed worker set. Submit never
@@ -412,6 +417,7 @@ func (w *AgentFingerprintWorker) Submit(event ProcessEvent, candidate AgentRecog
 	w.submitMu.RLock()
 	defer w.submitMu.RUnlock()
 	if w.closed.Load() {
+		w.recordOutcome(AgentFingerprintOutcomeWorkerUnavailable)
 		observation := w.observation(candidate, AgentFingerprintOutcomeWorkerUnavailable, "", AgentFingerprintObjectUnknown, nil)
 		return &observation
 	}
@@ -447,6 +453,23 @@ func (w *AgentFingerprintWorker) run() {
 
 func (w *AgentFingerprintWorker) process(job agentFingerprintJob) {
 	defer job.target.Close()
+	// This lane is advisory and observe-only, but it shares a process with
+	// lifecycle capture and enforcement. An unrecovered panic here unwinds
+	// out of run() and takes the whole daemon down, so a bug in the least
+	// privileged component would disable the most critical one: the guard
+	// is pinned, so the kernel keeps enforcing while apply_policy, the
+	// kill switch, and the tamper-audit chain all become unreachable.
+	// Contain it and account for it in the counters instead. Same backstop
+	// as the per-connection recover in daemon_socket_server.go; as there,
+	// the real fix for any given panic is to make the code fail cleanly.
+	// This handler deliberately does NOT publish: the observer callback is
+	// itself a panic source, so re-entering it from here would repanic and
+	// defeat the backstop.
+	defer func() {
+		if r := recover(); r != nil {
+			w.recordOutcome(AgentFingerprintOutcomeWorkerUnavailable)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(w.ctx, w.opts.Timeout)
 	defer cancel()
 	digest, outcome := w.resolver.Resolve(ctx, job.target, w.opts.MaxFileBytes)
@@ -513,6 +536,8 @@ func (w *AgentFingerprintWorker) recordOutcome(outcome string) {
 		w.counters.digestMismatch.Add(1)
 	case AgentFingerprintOutcomeSuccess:
 		w.counters.success.Add(1)
+	case AgentFingerprintOutcomeWorkerUnavailable:
+		w.counters.workerUnavailable.Add(1)
 	}
 }
 
@@ -530,14 +555,15 @@ func (w *AgentFingerprintWorker) Health() AgentFingerprintHealth {
 		TimeoutMS:       w.opts.Timeout.Milliseconds(),
 		MaxFileBytes:    w.opts.MaxFileBytes,
 		Counters: AgentFingerprintCounters{
-			QueueSaturated:   w.counters.queueSaturated.Load(),
-			ResolutionDenied: w.counters.resolutionDenied.Load(),
-			ProcessExited:    w.counters.processExited.Load(),
-			Unsupported:      w.counters.unsupported.Load(),
-			SizeExceeded:     w.counters.sizeExceeded.Load(),
-			DeadlineExceeded: w.counters.deadlineExceeded.Load(),
-			DigestMismatch:   w.counters.digestMismatch.Load(),
-			Success:          w.counters.success.Load(),
+			QueueSaturated:    w.counters.queueSaturated.Load(),
+			ResolutionDenied:  w.counters.resolutionDenied.Load(),
+			ProcessExited:     w.counters.processExited.Load(),
+			Unsupported:       w.counters.unsupported.Load(),
+			SizeExceeded:      w.counters.sizeExceeded.Load(),
+			DeadlineExceeded:  w.counters.deadlineExceeded.Load(),
+			DigestMismatch:    w.counters.digestMismatch.Load(),
+			Success:           w.counters.success.Load(),
+			WorkerUnavailable: w.counters.workerUnavailable.Load(),
 		},
 	}
 }

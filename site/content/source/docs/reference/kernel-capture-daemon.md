@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "8cd1d7d85b6319a134fae958607fca866d14c3bde6bccbab7bfd11f98491f5a3"
+source_sha256: "72d2615986018f0363059fdb03d4ad45475a605c8b9d26b21d200e8aaaa2d489"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -324,7 +324,9 @@ itself.
 Authenticated `health` responses add `agent_fingerprint` with the canonical
 registry version/SHA-256, queue capacity/depth, worker count, timeout, maximum
 file size, and monotonic counters for saturation, denied resolution, exited
-processes, unsupported objects, size/deadline limits, mismatches, and matches.
+processes, unsupported objects, size/deadline limits, mismatches, matches, and
+attempts the worker was unavailable for (submitted while closing or closed, or
+abandoned because processing panicked and was contained).
 The registry SHA-256 identifies the canonical configuration; it is not a
 computed executable digest. Logs, results, receipts, health data, and fixtures
 never include the computed executable digest, full host path, argv, environment,

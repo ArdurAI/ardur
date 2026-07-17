@@ -304,6 +304,7 @@ type fakeAgentFingerprintResolver struct {
 	started        chan struct{}
 	release        chan struct{}
 	waitForContext bool
+	panicOnResolve bool
 	mu             sync.Mutex
 	targets        []*fakeAgentFingerprintTarget
 }
@@ -320,6 +321,9 @@ func (r *fakeAgentFingerprintResolver) Bind(uint32) (agentFingerprintTarget, str
 }
 
 func (r *fakeAgentFingerprintResolver) Resolve(ctx context.Context, _ agentFingerprintTarget, _ int64) (agentFingerprintDigest, string) {
+	if r.panicOnResolve {
+		panic("resolver blew up")
+	}
 	if r.started != nil {
 		select {
 		case r.started <- struct{}{}:
@@ -397,6 +401,101 @@ func closeAgentFingerprintWorker(t *testing.T, worker *AgentFingerprintWorker) {
 	defer cancel()
 	if err := worker.Close(ctx); err != nil {
 		t.Errorf("close worker: %v", err)
+	}
+}
+
+// A panic in this observe-only lane must not unwind out of the worker
+// goroutine and kill the capture daemon: the guard is pinned, so the kernel
+// would keep enforcing while the kill switch and tamper chain became
+// unreachable.
+func TestAgentFingerprintWorkerContainsResolverPanic(t *testing.T) {
+	digest := sha256.Sum256([]byte("trusted"))
+	registry := mustAgentFingerprintRegistry(t, "codex_cli", digest)
+	resolver := &fakeAgentFingerprintResolver{panicOnResolve: true}
+	worker, err := newAgentFingerprintWorker(registry, resolver, AgentFingerprintWorkerOptions{
+		QueueCapacity: 2,
+		WorkerCount:   1,
+		Timeout:       time.Second,
+		MaxFileBytes:  1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := recognizedAgentCandidate("codex_cli")
+	if got := worker.Submit(ProcessEvent{PID: 1, Type: ProcessEventExec}, candidate); got != nil {
+		t.Fatalf("submit = %+v, want queued", got)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if worker.Health().Counters.WorkerUnavailable == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := worker.Health().Counters.WorkerUnavailable; got != 1 {
+		t.Fatalf("worker_unavailable = %d, want 1 (panic not contained or not counted)", got)
+	}
+
+	// The pool must keep draining after a contained panic, not wedge.
+	resolver.panicOnResolve = false
+	if got := worker.Submit(ProcessEvent{PID: 2, Type: ProcessEventExec}, candidate); got != nil {
+		t.Fatalf("submit after panic = %+v, want queued", got)
+	}
+	closeAgentFingerprintWorker(t, worker)
+}
+
+// The Observer is caller-supplied, so it is itself a panic source. A recover
+// handler that republished the observation would re-enter it and repanic, so
+// this asserts containment without that re-entry.
+func TestAgentFingerprintWorkerContainsObserverPanic(t *testing.T) {
+	digest := sha256.Sum256([]byte("trusted"))
+	registry := mustAgentFingerprintRegistry(t, "codex_cli", digest)
+	resolver := &fakeAgentFingerprintResolver{digest: agentFingerprintDigest{
+		digest: digest, method: AgentFingerprintMethodSHA256ProcExe, objectState: AgentFingerprintObjectLinked,
+	}}
+	observed := make(chan struct{}, 1)
+	worker, err := newAgentFingerprintWorker(registry, resolver, AgentFingerprintWorkerOptions{
+		QueueCapacity: 2,
+		WorkerCount:   1,
+		Timeout:       time.Second,
+		MaxFileBytes:  1024,
+		Observer: func(_ ProcessEvent, _ AgentRecognitionResult, _ AgentFingerprintObservation) {
+			select {
+			case observed <- struct{}{}:
+			default:
+			}
+			panic("observer blew up")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := worker.Submit(ProcessEvent{PID: 1, Type: ProcessEventExec}, recognizedAgentCandidate("codex_cli")); got != nil {
+		t.Fatalf("submit = %+v, want queued", got)
+	}
+	select {
+	case <-observed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("observer never ran")
+	}
+	closeAgentFingerprintWorker(t, worker)
+}
+
+func TestAgentFingerprintWorkerCountsSubmitAfterClose(t *testing.T) {
+	digest := sha256.Sum256([]byte("trusted"))
+	registry := mustAgentFingerprintRegistry(t, "codex_cli", digest)
+	worker, err := newAgentFingerprintWorker(registry, &fakeAgentFingerprintResolver{}, AgentFingerprintWorkerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeAgentFingerprintWorker(t, worker)
+	got := worker.Submit(ProcessEvent{PID: 1, Type: ProcessEventExec}, recognizedAgentCandidate("codex_cli"))
+	if got == nil || got.Outcome != AgentFingerprintOutcomeWorkerUnavailable {
+		t.Fatalf("submit after close = %+v", got)
+	}
+	if counted := worker.Health().Counters.WorkerUnavailable; counted != 1 {
+		t.Fatalf("worker_unavailable = %d, want 1", counted)
 	}
 }
 
