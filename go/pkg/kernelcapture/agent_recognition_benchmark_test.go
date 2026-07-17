@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,17 +66,213 @@ func TestAgentRecognitionBenchmarkBudgetFailsClosedOnLossAndDrift(t *testing.T) 
 	}
 
 	report.Summaries[0].TotalCapture.ProducerDropped = 1
-	report.Summaries[1].PairedWallOverheadPercent.P95 += 1000
+	report.Summaries[1].PairedWallOverheadPercent.P50 += 1000
 	gate = EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest)
 	if gate.Status != AgentRecognitionBenchmarkGateFail {
 		t.Fatalf("failing gate = %+v", gate)
 	}
 	want := []string{
-		"budget." + report.Summaries[1].ProfileName + ".p95_wall_overhead",
+		"budget." + report.Summaries[1].ProfileName + ".p50_wall_overhead",
 		"loss." + report.Summaries[0].ProfileName + ".capture_nonzero",
 	}
 	if !reflect.DeepEqual(gate.Violations, want) {
 		t.Fatalf("violations = %v, want %v", gate.Violations, want)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV2GateNormalizesRunnerCPUAndIgnoresWallTailOnly(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromReport(report)
+	budgetJSON, err := json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetDigest := benchmarkSHA256Hex(budgetJSON)
+
+	// Model an unchanged workload on a runner whose CPU is exactly twice as
+	// slow. Both daemon CPU and the independent process-CPU calibration scale;
+	// the normalized gate must remain stable.
+	for pairIndex := range report.Pairs {
+		report.Pairs[pairIndex].Baseline.DaemonCPUNanoseconds *= 2
+		report.Pairs[pairIndex].Enabled.DaemonCPUNanoseconds *= 2
+		report.Pairs[pairIndex].DaemonCPUDeltaNanoseconds *= 2
+	}
+	for sampleIndex := range report.Calibration.ProcessCPUSamplesNanoseconds {
+		report.Calibration.ProcessCPUSamplesNanoseconds[sampleIndex] *= 2
+	}
+	report.Calibration.ProcessCPUNanoseconds = benchmarkDistributionFromUint64(report.Calibration.ProcessCPUSamplesNanoseconds)
+
+	// Two scheduling stalls move nearest-rank p95 but not p50 for 20 samples.
+	// The v0.2 hard wall decision is intentionally median-only; p95 remains in
+	// the artifact for diagnosis.
+	profileName := report.Pairs[0].Profile.Name
+	changed := 0
+	for pairIndex := range report.Pairs {
+		if report.Pairs[pairIndex].Profile.Name != profileName || changed == 2 {
+			continue
+		}
+		report.Pairs[pairIndex].Enabled.WorkloadElapsedNanoseconds = report.Pairs[pairIndex].Baseline.WorkloadElapsedNanoseconds * 3
+		report.Pairs[pairIndex].WallOverhead.NumeratorNanoseconds = int64(report.Pairs[pairIndex].Enabled.WorkloadElapsedNanoseconds - report.Pairs[pairIndex].Baseline.WorkloadElapsedNanoseconds)
+		report.Pairs[pairIndex].WallOverhead.Percent = 200
+		changed++
+	}
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, &budget, budgetDigest); err != nil {
+		t.Fatal(err)
+	}
+	if report.Gate.Status != AgentRecognitionBenchmarkGatePass {
+		t.Fatalf("normalized slow-runner gate = %+v", report.Gate)
+	}
+	for _, summary := range report.Summaries {
+		if summary.ProfileName == profileName && summary.PairedWallOverheadPercent.P95 <= 100 {
+			t.Fatalf("tail evidence was not preserved: %+v", summary.PairedWallOverheadPercent)
+		}
+	}
+
+	// Median drift is a regression and must fail.
+	changed = 0
+	for pairIndex := range report.Pairs {
+		if report.Pairs[pairIndex].Profile.Name != profileName || changed == 11 {
+			continue
+		}
+		report.Pairs[pairIndex].Enabled.WorkloadElapsedNanoseconds = report.Pairs[pairIndex].Baseline.WorkloadElapsedNanoseconds * 4
+		report.Pairs[pairIndex].WallOverhead.NumeratorNanoseconds = int64(report.Pairs[pairIndex].Enabled.WorkloadElapsedNanoseconds - report.Pairs[pairIndex].Baseline.WorkloadElapsedNanoseconds)
+		report.Pairs[pairIndex].WallOverhead.Percent = 300
+		changed++
+	}
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, &budget, budgetDigest); err != nil {
+		t.Fatal(err)
+	}
+	wantViolation := "budget." + profileName + ".p50_wall_overhead"
+	if report.Gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(report.Gate.Violations, []string{wantViolation}) {
+		t.Fatalf("median regression gate = %+v, want %q", report.Gate, wantViolation)
+	}
+
+	// Loss remains fail-closed and is never normalized away.
+	report.Summaries[0].TotalCapture.ProducerDropped = 1
+	report.Summaries[1].TotalFingerprint.Mismatch = 1
+	gate := EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest)
+	if gate.Status != AgentRecognitionBenchmarkGateFail ||
+		!containsString(gate.Violations, "loss."+report.Summaries[0].ProfileName+".capture_nonzero") ||
+		!containsString(gate.Violations, "loss."+report.Summaries[1].ProfileName+".fingerprint_nonzero") {
+		t.Fatalf("loss gate = %+v", gate)
+	}
+}
+
+func TestAgentRecognitionBenchmarkEvidenceOnlyModeFailsClosedOnCorrectness(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReport(t)
+	pair := &report.Pairs[0]
+	pair.Enabled.Capture.Delivered--
+	pair.Enabled.Capture.ProducerDropped++
+	pair.Enabled.Recognition.Candidates--
+	pair.Enabled.Recognition.Recognized--
+	pair.Enabled.Fingerprint.Recognized--
+	pair.Enabled.Fingerprint.Success--
+
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"loss." + pair.Profile.Name + ".capture_nonzero"}
+	if report.Gate.Status != AgentRecognitionBenchmarkGateFail || report.Gate.BudgetSHA256 != "" || !reflect.DeepEqual(report.Gate.Violations, want) {
+		t.Fatalf("evidence-only correctness gate = %+v, want %v", report.Gate, want)
+	}
+	if err := ValidateAgentRecognitionBenchmarkReport(&report); err != nil {
+		t.Fatalf("failed evidence must remain publishable: %v", err)
+	}
+}
+
+func TestValidateAgentRecognitionBenchmarkV2RequiresCalibrationAndRunnerContext(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV2 || report.Calibration == nil {
+		t.Fatalf("v0.2 report contract missing: %+v", report)
+	}
+
+	for name, mutate := range map[string]func(*AgentRecognitionBenchmarkReport){
+		"calibration":          func(value *AgentRecognitionBenchmarkReport) { value.Calibration = nil },
+		"cpu model":            func(value *AgentRecognitionBenchmarkReport) { value.Environment.CPUModel = "" },
+		"cgroup cpu max":       func(value *AgentRecognitionBenchmarkReport) { value.Environment.CgroupCPUMax = "" },
+		"effective cpu set":    func(value *AgentRecognitionBenchmarkReport) { value.Environment.EffectiveCPUSet = "" },
+		"runner image os":      func(value *AgentRecognitionBenchmarkReport) { value.Environment.RunnerImageOS = "" },
+		"runner image version": func(value *AgentRecognitionBenchmarkReport) { value.Environment.RunnerImageVersion = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			tampered := report
+			mutate(&tampered)
+			if err := ValidateAgentRecognitionBenchmarkReport(&tampered); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("missing %s error = %v", name, err)
+			}
+		})
+	}
+}
+
+func TestAgentRecognitionBenchmarkV1EvidenceRemainsStrictlyLoadable(t *testing.T) {
+	report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", "agent-recognition-benchmark-evidence-203c101.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV1 || report.Calibration != nil {
+		t.Fatalf("legacy report was reinterpreted: schema=%q calibration=%+v", report.SchemaVersion, report.Calibration)
+	}
+	for _, summary := range report.Summaries {
+		if summary.EnabledDaemonCPUCalibrationRatio != nil {
+			t.Fatalf("legacy summary gained normalized data: %+v", summary)
+		}
+	}
+}
+
+func TestAgentRecognitionBenchmarkV2BudgetRejectsAmbiguousEvidenceAndSchemaMixing(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromReport(report)
+
+	duplicated := budget
+	duplicated.EvidenceArtifactSHA256s = append([]string(nil), budget.EvidenceArtifactSHA256s...)
+	duplicated.EvidenceArtifactSHA256s[2] = duplicated.EvidenceArtifactSHA256s[1]
+	if err := ValidateAgentRecognitionBenchmarkBudget(&duplicated); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("duplicated evidence error = %v", err)
+	}
+
+	ambiguous := budget
+	ambiguous.Profiles = append([]AgentRecognitionBenchmarkBudgetProfile(nil), budget.Profiles...)
+	ambiguous.Profiles[0].EvidenceP95EnabledDaemonCPUNanoseconds = 1
+	if err := ValidateAgentRecognitionBenchmarkBudget(&ambiguous); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("mixed normalized/absolute budget error = %v", err)
+	}
+
+	for name, mutate := range map[string]func(*AgentRecognitionBenchmarkBudgetProfile){
+		"wall threshold overflow": func(profile *AgentRecognitionBenchmarkBudgetProfile) {
+			profile.EvidenceP50WallOverheadPercent = math.MaxFloat64
+			profile.WallOverheadTolerancePercentagePoints = math.MaxFloat64
+		},
+		"normalized CPU threshold overflow": func(profile *AgentRecognitionBenchmarkBudgetProfile) {
+			profile.EvidenceP95EnabledDaemonCPUCalibrationRatio = math.MaxFloat64
+			profile.DaemonCPUCalibrationRatioRelativeTolerancePercent = 100
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			overflow := budget
+			overflow.Profiles = append([]AgentRecognitionBenchmarkBudgetProfile(nil), budget.Profiles...)
+			mutate(&overflow.Profiles[0])
+			if err := ValidateAgentRecognitionBenchmarkBudget(&overflow); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("overflowing budget error = %v", err)
+			}
+		})
+	}
+
+	legacyBudget, legacyDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := EvaluateAgentRecognitionBenchmarkBudget(&report, legacyBudget, legacyDigest)
+	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{"budget.invalid"}) {
+		t.Fatalf("mixed v0.2 report/v0.1 budget gate = %+v", gate)
 	}
 }
 
@@ -209,16 +407,26 @@ func validAgentRecognitionBenchmarkReport(t *testing.T) AgentRecognitionBenchmar
 		{Name: "storm", EventCount: 80, Concurrency: 16, InterArrivalMicroseconds: 0, HoldMilliseconds: 5},
 	}
 	report := AgentRecognitionBenchmarkReport{
-		SchemaVersion: AgentRecognitionBenchmarkReportSchema,
+		SchemaVersion: AgentRecognitionBenchmarkReportSchemaV2,
 		GeneratedAt:   time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
 		SourceSHA:     "0123456789abcdef0123456789abcdef01234567",
 		Seed:          302, WarmupPairs: 1, MeasuredPairs: MinAgentRecognitionBenchmarkPairs,
-		PairOrder:       "deterministic_ab_ba_alternation",
-		Environment:     AgentRecognitionBenchmarkEnvironment{OS: "linux", Architecture: "amd64", KernelRelease: "6.8.0", GoVersion: "go1.26.5", CPUCount: 2},
+		PairOrder: "deterministic_ab_ba_alternation",
+		Environment: AgentRecognitionBenchmarkEnvironment{
+			OS: "linux", Architecture: "amd64", KernelRelease: "6.8.0", GoVersion: "go1.26.5", CPUCount: 2,
+			CPUModel: "Synthetic CPU", CgroupCPUMax: "200000 100000", EffectiveCPUSet: "0-1",
+			RunnerImageOS: "ubuntu24", RunnerImageVersion: "20260714.1.0",
+		},
 		WorkloadSHA256:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		RegistryVersion: "benchmark.registry.v1",
 		RegistrySHA256:  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		Limitations:     []string{"Paired host evidence is not a universal performance claim."},
+		Calibration: &AgentRecognitionBenchmarkCalibration{
+			Algorithm:     AgentRecognitionBenchmarkCalibrationAlgorithm,
+			WorkloadBytes: 2 << 20, IterationsPerSample: 128, BytesPerSample: 256 << 20,
+			ProcessCPUSamplesNanoseconds: []uint64{100_000_000, 101_000_000, 99_000_000},
+			ProcessCPUNanoseconds:        benchmarkDistributionFromUint64([]uint64{100_000_000, 101_000_000, 99_000_000}),
+		},
 	}
 	for pairIndex := 0; pairIndex < report.MeasuredPairs; pairIndex++ {
 		order := "baseline_then_enabled"
@@ -251,25 +459,36 @@ func validAgentRecognitionBenchmarkReport(t *testing.T) AgentRecognitionBenchmar
 
 func budgetFromReport(report AgentRecognitionBenchmarkReport) AgentRecognitionBenchmarkBudget {
 	budget := AgentRecognitionBenchmarkBudget{
-		SchemaVersion:          AgentRecognitionBenchmarkBudgetSchema,
-		BudgetVersion:          "test.v1",
-		EvidenceArtifactSHA256: report.ArtifactSHA256,
-		MinimumMeasuredPairs:   MinAgentRecognitionBenchmarkPairs,
+		SchemaVersion: AgentRecognitionBenchmarkBudgetSchemaV2,
+		BudgetVersion: "test.v2",
+		EvidenceArtifactSHA256s: []string{
+			strings.Repeat("1", 64), strings.Repeat("2", 64), strings.Repeat("3", 64),
+		},
+		MinimumMeasuredPairs: MinAgentRecognitionBenchmarkPairs,
 	}
 	for _, summary := range report.Summaries {
 		budget.Profiles = append(budget.Profiles, AgentRecognitionBenchmarkBudgetProfile{
-			ProfileName:                            summary.ProfileName,
-			EvidenceP50WallOverheadPercent:         summary.PairedWallOverheadPercent.P50,
-			EvidenceP95WallOverheadPercent:         summary.PairedWallOverheadPercent.P95,
-			WallOverheadTolerancePercentagePoints:  5,
-			EvidenceP95EnabledDaemonCPUNanoseconds: summary.EnabledDaemonCPUNanoseconds.P95,
-			DaemonCPURelativeTolerancePercent:      25,
-			DaemonCPUAbsoluteToleranceNanoseconds:  1000,
-			EvidenceMaxEnabledDaemonPeakRSSKiB:     summary.MaxEnabledDaemonPeakRSSKiB,
-			PeakRSSToleranceKiB:                    1024,
+			ProfileName:                                       summary.ProfileName,
+			EvidenceP50WallOverheadPercent:                    summary.PairedWallOverheadPercent.P50,
+			EvidenceP95WallOverheadPercent:                    summary.PairedWallOverheadPercent.P95,
+			WallOverheadTolerancePercentagePoints:             5,
+			EvidenceP95EnabledDaemonCPUCalibrationRatio:       summary.EnabledDaemonCPUCalibrationRatio.P95,
+			DaemonCPUCalibrationRatioRelativeTolerancePercent: 25,
+			DaemonCPUCalibrationRatioAbsoluteTolerance:        0.01,
+			EvidenceMaxEnabledDaemonPeakRSSKiB:                summary.MaxEnabledDaemonPeakRSSKiB,
+			PeakRSSToleranceKiB:                               1024,
 		})
 	}
 	return budget
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func benchmarkSHA256Hex(raw []byte) string {

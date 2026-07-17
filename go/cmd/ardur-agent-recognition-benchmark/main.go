@@ -37,6 +37,8 @@ func run(args []string, stdout io.Writer) int {
 	sourceSHA := flags.String("source-sha", "", "exact 40-character source commit SHA")
 	outputDirectory := flags.String("output-dir", "", "private output directory")
 	budgetPath := flags.String("budget", "", "optional reviewed benchmark budget JSON")
+	runnerImageOS := flags.String("runner-image-os", "unknown", "bounded hosted-runner image OS label")
+	runnerImageVersion := flags.String("runner-image-version", "unknown", "bounded hosted-runner image version")
 	profileSet := flags.String("profile", "ci", "bounded workload profile: ci or release")
 	seed := flags.Uint64("seed", 302, "deterministic pair-order seed")
 	warmupPairs := flags.Int("warmup-pairs", 1, "excluded warm-up pair count")
@@ -54,6 +56,7 @@ func run(args []string, stdout io.Writer) int {
 	}
 	report, err := kernelcapture.RunAgentRecognitionBenchmark(ctx, kernelcapture.AgentRecognitionBenchmarkOptions{
 		DaemonPath: *daemonPath, WorkloadExecutablePath: *workloadPath, SourceSHA: *sourceSHA,
+		RunnerImageOS: *runnerImageOS, RunnerImageVersion: *runnerImageVersion,
 		Seed: *seed, WarmupPairs: *warmupPairs, MeasuredPairs: *measuredPairs, Profiles: profiles,
 	})
 	if err != nil {

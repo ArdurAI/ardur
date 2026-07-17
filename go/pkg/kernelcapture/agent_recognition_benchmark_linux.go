@@ -69,6 +69,10 @@ func RunAgentRecognitionBenchmark(ctx context.Context, opts AgentRecognitionBenc
 	if err != nil {
 		return nil, err
 	}
+	calibration, err := calibrateAgentRecognitionBenchmarkProcessCPU(ctx, workloadPath, workloadSHA256)
+	if err != nil {
+		return nil, err
+	}
 	registry, registryPath, err := writeBenchmarkFingerprintRegistry(root, workloadSHA256)
 	if err != nil {
 		return nil, err
@@ -82,10 +86,11 @@ func RunAgentRecognitionBenchmark(ctx context.Context, opts AgentRecognitionBenc
 		WarmupPairs:     opts.WarmupPairs,
 		MeasuredPairs:   opts.MeasuredPairs,
 		PairOrder:       "deterministic_ab_ba_alternation",
-		Environment:     agentRecognitionBenchmarkEnvironment(),
+		Environment:     agentRecognitionBenchmarkEnvironment(opts.RunnerImageOS, opts.RunnerImageVersion),
 		WorkloadSHA256:  workloadSHA256,
 		RegistryVersion: registry.version,
 		RegistrySHA256:  registry.digest,
+		Calibration:     calibration,
 		Limitations: []string{
 			"Paired host evidence does not establish a universal recognition-overhead percentage.",
 			"Shared-runner scheduling and CPU-frequency variation remain outside the daemon's control.",
@@ -132,6 +137,8 @@ func normalizeAgentRecognitionBenchmarkOptions(opts *AgentRecognitionBenchmarkOp
 	if len(opts.Profiles) == 0 {
 		opts.Profiles = DefaultAgentRecognitionBenchmarkProfiles()
 	}
+	opts.RunnerImageOS = safeBenchmarkHostText(opts.RunnerImageOS)
+	opts.RunnerImageVersion = safeBenchmarkHostText(opts.RunnerImageVersion)
 	if opts.WarmupPairs < 1 || opts.WarmupPairs > 10 || opts.MeasuredPairs < MinAgentRecognitionBenchmarkPairs || opts.MeasuredPairs > 100 || opts.ArmStartupTimeout > time.Minute || opts.AccountingTimeout > time.Minute {
 		return fmt.Errorf("%w: benchmark sample or timeout bounds are invalid", ErrAgentRecognitionBenchmark)
 	}
@@ -721,7 +728,7 @@ func resetProcessPeakRSSKiB(pid int) error {
 	return nil
 }
 
-func agentRecognitionBenchmarkEnvironment() AgentRecognitionBenchmarkEnvironment {
+func agentRecognitionBenchmarkEnvironment(runnerImageOS, runnerImageVersion string) AgentRecognitionBenchmarkEnvironment {
 	var uts unix.Utsname
 	kernel := "unknown"
 	if unix.Uname(&uts) == nil {
@@ -730,7 +737,141 @@ func agentRecognitionBenchmarkEnvironment() AgentRecognitionBenchmarkEnvironment
 	return AgentRecognitionBenchmarkEnvironment{
 		OS: "linux", Architecture: safeBenchmarkHostText(runtime.GOARCH), KernelRelease: safeBenchmarkHostText(kernel),
 		GoVersion: safeBenchmarkHostText(runtime.Version()), CPUCount: runtime.NumCPU(),
+		CPUModel:        safeBenchmarkHostText(readAgentRecognitionBenchmarkCPUModel()),
+		CgroupCPUMax:    safeBenchmarkHostText(readAgentRecognitionBenchmarkCgroupCPUMax()),
+		EffectiveCPUSet: safeBenchmarkHostText(readAgentRecognitionBenchmarkEffectiveCPUSet()),
+		RunnerImageOS:   safeBenchmarkHostText(runnerImageOS), RunnerImageVersion: safeBenchmarkHostText(runnerImageVersion),
 	}
+}
+
+func calibrateAgentRecognitionBenchmarkProcessCPU(ctx context.Context, workloadPath, workloadSHA256 string) (*AgentRecognitionBenchmarkCalibration, error) {
+	payload, err := os.ReadFile(workloadPath)
+	if err != nil || len(payload) < minAgentRecognitionBenchmarkCalibrationWorkloadBytes || len(payload) > DefaultAgentFingerprintMaxFileBytes {
+		return nil, fmt.Errorf("%w: calibration workload is outside the bounded size contract", ErrAgentRecognitionBenchmark)
+	}
+	digest := sha256.Sum256(payload)
+	if hex.EncodeToString(digest[:]) != workloadSHA256 {
+		return nil, fmt.Errorf("%w: calibration workload digest drifted", ErrAgentRecognitionBenchmark)
+	}
+	iterations := int((AgentRecognitionBenchmarkCalibrationTargetBytes + uint64(len(payload)) - 1) / uint64(len(payload)))
+	if iterations < 1 || iterations > maxAgentRecognitionBenchmarkCalibrationIterations {
+		return nil, fmt.Errorf("%w: calibration iteration bound is invalid", ErrAgentRecognitionBenchmark)
+	}
+	samples := make([]uint64, 0, AgentRecognitionBenchmarkCalibrationSamples)
+	for sampleIndex := 0; sampleIndex < AgentRecognitionBenchmarkCalibrationSamples; sampleIndex++ {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("%w: benchmark context ended during calibration", ErrAgentRecognitionBenchmark)
+		}
+		before, err := agentRecognitionBenchmarkProcessCPUNanoseconds()
+		if err != nil {
+			return nil, err
+		}
+		var observed [sha256.Size]byte
+		for iteration := 0; iteration < iterations; iteration++ {
+			if iteration%64 == 0 {
+				select {
+				case <-ctx.Done():
+					return nil, fmt.Errorf("%w: benchmark context ended during calibration", ErrAgentRecognitionBenchmark)
+				default:
+				}
+			}
+			observed = sha256.Sum256(payload)
+		}
+		after, err := agentRecognitionBenchmarkProcessCPUNanoseconds()
+		if err != nil || after <= before || observed != digest {
+			return nil, fmt.Errorf("%w: process-CPU calibration measurement is invalid", ErrAgentRecognitionBenchmark)
+		}
+		samples = append(samples, after-before)
+	}
+	calibration := &AgentRecognitionBenchmarkCalibration{
+		Algorithm:     AgentRecognitionBenchmarkCalibrationAlgorithm,
+		WorkloadBytes: uint64(len(payload)), IterationsPerSample: iterations,
+		BytesPerSample:               uint64(len(payload)) * uint64(iterations),
+		ProcessCPUSamplesNanoseconds: samples,
+		ProcessCPUNanoseconds:        benchmarkDistributionFromUint64(samples),
+	}
+	if err := validateAgentRecognitionBenchmarkCalibration(calibration); err != nil {
+		return nil, err
+	}
+	return calibration, nil
+}
+
+func agentRecognitionBenchmarkProcessCPUNanoseconds() (uint64, error) {
+	var value unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_PROCESS_CPUTIME_ID, &value); err != nil || value.Sec < 0 || value.Nsec < 0 || value.Nsec >= int64(time.Second) {
+		return 0, fmt.Errorf("%w: process CPU clock is unavailable", ErrAgentRecognitionBenchmark)
+	}
+	seconds := uint64(value.Sec)
+	if seconds > (^uint64(0)-uint64(value.Nsec))/uint64(time.Second) {
+		return 0, fmt.Errorf("%w: process CPU clock overflowed", ErrAgentRecognitionBenchmark)
+	}
+	return seconds*uint64(time.Second) + uint64(value.Nsec), nil
+}
+
+func readAgentRecognitionBenchmarkCPUModel() string {
+	raw, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return "unknown"
+	}
+	return parseAgentRecognitionBenchmarkCPUModel(raw)
+}
+
+func parseAgentRecognitionBenchmarkCPUModel(raw []byte) string {
+	for _, line := range strings.Split(string(raw), "\n") {
+		name, value, found := strings.Cut(line, ":")
+		if found && strings.TrimSpace(name) == "model name" && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "unknown"
+}
+
+func readAgentRecognitionBenchmarkCgroupCPUMax() string {
+	raw, err := os.ReadFile("/proc/self/cgroup")
+	if err == nil {
+		if relative, found := parseAgentRecognitionBenchmarkCgroupV2Path(raw); found {
+			value, readErr := os.ReadFile(filepath.Join("/sys/fs/cgroup", relative, "cpu.max"))
+			if readErr == nil && strings.TrimSpace(string(value)) != "" {
+				return strings.TrimSpace(string(value))
+			}
+		}
+	}
+	if value, fallbackErr := os.ReadFile("/sys/fs/cgroup/cpu.max"); fallbackErr == nil && strings.TrimSpace(string(value)) != "" {
+		return strings.TrimSpace(string(value))
+	}
+	return "unknown"
+}
+
+func parseAgentRecognitionBenchmarkCgroupV2Path(raw []byte) (string, bool) {
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(line, "0::") {
+			continue
+		}
+		path := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+		if !strings.HasPrefix(path, "/") {
+			return "", false
+		}
+		return strings.TrimPrefix(filepath.Clean(path), "/"), true
+	}
+	return "", false
+}
+
+func readAgentRecognitionBenchmarkEffectiveCPUSet() string {
+	raw, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return "unknown"
+	}
+	return parseAgentRecognitionBenchmarkEffectiveCPUSet(raw)
+}
+
+func parseAgentRecognitionBenchmarkEffectiveCPUSet(raw []byte) string {
+	for _, line := range strings.Split(string(raw), "\n") {
+		name, value, found := strings.Cut(line, ":")
+		if found && name == "Cpus_allowed_list" && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "unknown"
 }
 
 func safeBenchmarkHostText(value string) string {

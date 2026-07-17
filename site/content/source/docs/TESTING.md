@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "1e2831af42ca865d13e1238028e56b672da9a842b2ecb5c671ef06d03f6d3108"
+source_sha256: "c0893936aa7ea4d2eeb8ef559430941c1b08e3e4e982ccb33940a090b2a7ae42"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -79,10 +79,15 @@ go test -race -count=1 \
 The dedicated `agent-recognition-benchmark` workflow builds the exact PR-head
 daemon, controller, and native workload, then runs one warm-up plus 20 paired
 recognition-off/on samples on a fresh privileged `ubuntu-24.04` runner. It
-uploads the privacy-bounded raw JSON report and enforces the committed reviewed
-budget. CI fails on metric drift, loss, rejection, unavailable fingerprint
-work, missing counters, schema drift, or digest mismatch. The larger release
-profile is manual and never substitutes for the required CI profile. See the
+records bounded CPU/scheduling identity, performs three process-CPU calibration
+samples, uploads the privacy-bounded raw JSON report, and enforces the committed
+reviewed v0.2 budget once that evidence-bound file is present. CI fails on median wall or normalized daemon-CPU drift,
+RSS drift, loss, rejection, unavailable fingerprint work, missing counters,
+schema drift, or digest mismatch. Raw CPU, wall p95, and every calibration
+sample remain diagnostic evidence; automatic CI does not retry into a pass. The
+budget-absent calibration phase leaves only performance unevaluated; correctness
+and loss still fail the job while preserving the report. The
+larger release profile is manual and never substitutes for the required CI profile. See the
 [agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
 
 When changing the AuditBench evaluation-protocol artifact pipeline, run:
@@ -123,7 +128,9 @@ while Linux benchmark stress is manual.
   one warm-up and 20 deterministic AB/BA pairs.
 - The required job uses authenticated daemon health to enforce exclusive
   lifecycle, classification, and fingerprint accounting; any unreported or
-  unavailable work fails the reviewed budget gate.
+  unavailable work fails the reviewed budget gate. Per-VM process-CPU
+  calibration normalizes the CPU regression signal without weakening those
+  ledgers.
 - Manual dispatch defaults to the longer release profile. There is no schedule,
   because privileged performance work consumes runner CPU and shared-runner
   variation is not longitudinal evidence.

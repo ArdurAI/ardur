@@ -44,7 +44,7 @@ jobs:
     env:
       BENCHMARK_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }}
       SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.1.json
+      BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.2.json
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -99,6 +99,8 @@ jobs:
             --source-sha "$SOURCE_SHA"
             --output-dir "$report_dir"
             --profile "$BENCHMARK_PROFILE"
+            --runner-image-os "${ImageOS:-unknown}"
+            --runner-image-version "${ImageVersion:-unknown}"
             --warmup-pairs 1
             --measured-pairs 20
             --timeout 25m
