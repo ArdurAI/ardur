@@ -48,6 +48,9 @@ If a generated report violates the schema, the command keeps the stable
 paths with their failed schema keywords, followed by `+N more` when needed.
 Diagnostics are capped and do not include rejected values or unknown property
 names, so a useful CI failure does not disclose host metadata or operator input.
+The Python heap peak is a nonnegative byte count with its own wide integer
+bound rather than the one-million operation-count ceiling; temporary traced
+allocations can legitimately exceed one million bytes.
 
 ## Stress mode
 

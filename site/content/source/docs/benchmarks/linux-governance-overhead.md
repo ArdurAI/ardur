@@ -2,7 +2,7 @@
 title: "Linux Governance Overhead Harness"
 description: "Ardur ships a repeatable local harness for measuring governance work without"
 source_path: "docs/benchmarks/linux-governance-overhead.md"
-source_sha256: "784475204d5b7ac2c7324fbedbef547e04b84f1292b520920101ea7bf194e077"
+source_sha256: "20b9c1c1afd64b292ae2eed1a213b80617301d60c7f2890d92e60c9cd9244eda"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -65,6 +65,9 @@ If a generated report violates the schema, the command keeps the stable
 paths with their failed schema keywords, followed by `+N more` when needed.
 Diagnostics are capped and do not include rejected values or unknown property
 names, so a useful CI failure does not disclose host metadata or operator input.
+The Python heap peak is a nonnegative byte count with its own wide integer
+bound rather than the one-million operation-count ceiling; temporary traced
+allocations can legitimately exceed one million bytes.
 
 ## Stress mode
 

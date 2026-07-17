@@ -982,22 +982,26 @@ def _schema_error_sort_key(error: ValidationError) -> tuple[str, str, tuple[str,
 
 
 def _schema_failure_detail(errors: Sequence[ValidationError]) -> str:
+    seen_details: set[str] = set()
     details: list[str] = []
     for error in errors:
         rule = _schema_error_token(error.validator, fallback="unknown")
         detail = f"{_schema_error_path(error)} [{rule}]"
-        if detail not in details:
+        if detail in seen_details:
+            continue
+        seen_details.add(detail)
+        if len(details) < MAX_SCHEMA_ERROR_DETAILS:
             details.append(detail)
-        if len(details) == MAX_SCHEMA_ERROR_DETAILS:
-            break
 
-    omitted = len(errors) - len(details)
+    omitted = len(seen_details) - len(details)
     summary = "generated report violated its JSON Schema: " + "; ".join(details)
+    suffix = ""
     if omitted > 0:
-        summary += f"; +{omitted} more"
-    if len(summary) > MAX_SCHEMA_ERROR_TEXT_CHARS:
-        summary = summary[: MAX_SCHEMA_ERROR_TEXT_CHARS - 3] + "..."
-    return summary
+        suffix = f"; +{omitted} more"
+    if len(summary) + len(suffix) <= MAX_SCHEMA_ERROR_TEXT_CHARS:
+        return summary + suffix
+    body_limit = MAX_SCHEMA_ERROR_TEXT_CHARS - len(suffix)
+    return summary[: body_limit - 3] + "..." + suffix
 
 
 def validate_report(report: Mapping[str, Any]) -> None:
