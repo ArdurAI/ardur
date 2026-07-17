@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "734f3be5c5da3120e5d9b36d7c233c0503d48f2171e849e430db8ba35726c487"
+source_sha256: "af9b9b934aa2a12bef4c6c4e22b380cbeed6e2b82a91b0c3253418b6569fa9ac"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -48,14 +48,17 @@ exec events whose exact 15-byte-or-shorter Linux `comm` or bounded
 successful-exec basename matches the embedded `claude`, `codex`, `gemini`, or
 `kimi` registry. It reports low-confidence, observe-only candidates and never
 writes an unrouted candidate into governed session evidence. It emits the
-basename but not its parent path and does not collect argv, hashes, uid,
-environment, or file content. It does not attest or enforce. Issue #67 remains
-in progress for stronger fingerprints and additional signal strata. A
-versioned, sanitized 28-sample corpus now gates exact-name regressions at
-least 0.90 supported-shape recall and zero hard-negative false positives. Its
-deterministic report includes sample counts, Wilson intervals, stable error
-IDs, and exact corpus/registry digests; these are maintained-corpus results,
-not population accuracy or identity assurance.
+basename but not its parent path and does not emit argv, hashes, uid,
+environment, or file content. It does not attest or enforce. A versioned,
+sanitized v0.2 corpus keeps 28 exact-name samples separate from eight synthetic
+native/launcher content transitions. The gate requires at least 0.90
+name-only supported-shape recall, zero name-only hard-negative false positives,
+8/8 reviewed content transitions, independent launcher-interpreter inputs, and
+zero mismatch confidence promotions.
+Its deterministic report includes sample counts, Wilson intervals, stable error
+IDs, and exact corpus/name-registry/content-registry digests; these are
+maintained-corpus results, not population accuracy, provenance, or identity
+assurance.
 
 Operators can now add a daemon-owned executable fingerprint registry to that
 opt-in preview. A fixed worker pool binds recognized PIDs with pidfds. Native
@@ -67,10 +70,11 @@ only after exact object-identity equality. Unsupported launcher observation
 fails low without breaking native matching or lifecycle capture. Saturation,
 denial, exit, unsupported kernel/filesystem, missing identity/locator, locator
 mismatch, interpreter denial, argv/size/deadline limits, digest mismatch, and
-success remain explicit health outcomes. A match raises the observation only
-to `medium` heuristic content evidence; it is not provenance, attestation, or
-authorization. No computed digest, full host path, argv, environment, or file
-content is exposed, and no fingerprint cache is used.
+success remain explicit health outcomes; contained worker or observer failures
+are counted as worker unavailability, never success. A match raises the
+observation only to `medium` heuristic content evidence; it is not provenance,
+attestation, or authorization. No computed digest, full host path, argv,
+environment, or file content is exposed, and no fingerprint cache is used.
 
 The opt-in recognition preview now also has a bounded real-Linux AB/BA overhead
 harness. It records raw paired wall observations, daemon thread-group CPU,
@@ -156,9 +160,9 @@ complete sensor coverage.
 - broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
-- completion of agent recognition issue #67 beyond the exact-name and native
-  fingerprint Linux foundation: argv/interpreter signals, multi-signal corpus
-  strata, and cross-platform launch sources
+- macOS and Windows launch sources under #70, #71, and the external Apple
+  entitlement track #106; these remain separate from the completed bounded
+  Linux classifier and content-fingerprint evidence contract in #67
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 

@@ -93,6 +93,72 @@ func TestAgentRecognitionCorpusParserRejectsUnreviewedOrContradictorySamples(t *
 				}
 			},
 		},
+		{
+			name: "content fixture without availability",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				for index := range candidate.Samples {
+					if candidate.Samples[index].SignalStratum == AgentRecognitionSignalStratumContentFingerprint {
+						candidate.Samples[index].Signals.ContentFingerprintAvailable = false
+						return
+					}
+				}
+			},
+		},
+		{
+			name: "unknown content fixture",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				for index := range candidate.Samples {
+					if candidate.Samples[index].SignalStratum == AgentRecognitionSignalStratumContentFingerprint {
+						candidate.Samples[index].ContentFingerprint.FixtureID = "unknown.fixture.v1"
+						return
+					}
+				}
+			},
+		},
+		{
+			name: "content mismatch promoted",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				for index := range candidate.Samples {
+					if candidate.Samples[index].Expected.FingerprintOutcome == AgentFingerprintOutcomeDigestMismatch {
+						candidate.Samples[index].Expected.Confidence = AgentRecognitionConfidenceMedium
+						return
+					}
+				}
+			},
+		},
+		{
+			name: "launcher missing observed interpreter",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				for index := range candidate.Samples {
+					if candidate.Samples[index].SampleID == "content.codex.launcher.match" {
+						candidate.Samples[index].ContentFingerprint.ObservedInterpreter = ""
+						return
+					}
+				}
+			},
+		},
+		{
+			name: "launcher unsafe observed interpreter",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				for index := range candidate.Samples {
+					if candidate.Samples[index].SampleID == "content.codex.launcher.match" {
+						candidate.Samples[index].ContentFingerprint.ObservedInterpreter = "/usr/bin/node"
+						return
+					}
+				}
+			},
+		},
+		{
+			name: "native observed interpreter",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				for index := range candidate.Samples {
+					if candidate.Samples[index].SampleID == "content.claude.native.match" {
+						candidate.Samples[index].ContentFingerprint.ObservedInterpreter = "node"
+						return
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -138,6 +204,8 @@ func TestAgentRecognitionThresholdsRequireReviewedIntervalContract(t *testing.T)
 		func(candidate *AgentRecognitionThresholds) { candidate.ConfidenceLevel = 0.99 },
 		func(candidate *AgentRecognitionThresholds) { candidate.MinimumSupportedRecall = 1.01 },
 		func(candidate *AgentRecognitionThresholds) { candidate.MaximumHardNegativeFalsePositives = -1 },
+		func(candidate *AgentRecognitionThresholds) { candidate.MinimumContentFingerprintAccuracy = 1.01 },
+		func(candidate *AgentRecognitionThresholds) { candidate.MaximumContentMismatchPromotions = -1 },
 	} {
 		candidate := *thresholds
 		mutate(&candidate)
@@ -185,12 +253,104 @@ func TestAgentRecognitionEvaluationGateFailsBelowSupportedRecall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Gate.Passed || report.SupportedRecall.Numerator != 8 || report.SupportedRecall.Denominator != 9 {
+	if report.Gate.Passed || report.NameOnly.SupportedRecall.Numerator != 8 || report.NameOnly.SupportedRecall.Denominator != 9 {
 		t.Fatalf("below-threshold corpus unexpectedly passed: %+v", report.Gate)
 	}
 	if !slices.Contains(report.Gate.Reasons, "supported-shape recall is below the maintained-corpus threshold") {
 		t.Fatalf("gate omitted recall reason: %v", report.Gate.Reasons)
 	}
+}
+
+func TestAgentRecognitionContentFingerprintStratumFailsClosedAndNeverBlendsConfidence(t *testing.T) {
+	corpus, digest, err := EmbeddedAgentRecognitionCorpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thresholds, err := EmbeddedAgentRecognitionThresholds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recognizer, err := NewEmbeddedAgentRecognizer(AgentRecognizerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := EvaluateAgentRecognitionCorpus(recognizer, corpus, digest, thresholds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range report.Samples {
+		if result.SignalStratum != AgentRecognitionSignalStratumContentFingerprint {
+			continue
+		}
+		switch result.FingerprintOutcome {
+		case AgentFingerprintOutcomeSuccess:
+			if result.ActualConfidence != AgentRecognitionConfidenceMedium {
+				t.Fatalf("content match did not promote only to medium: %+v", result)
+			}
+		case AgentFingerprintOutcomeDigestMismatch:
+			if result.ActualConfidence != AgentRecognitionConfidenceLow {
+				t.Fatalf("content mismatch changed low-confidence candidate: %+v", result)
+			}
+		default:
+			t.Fatalf("content sample was not accounted as match or mismatch: %+v", result)
+		}
+	}
+
+	mutated := cloneTestAgentRecognitionCorpus(t, corpus)
+	for index := range mutated.Samples {
+		if mutated.Samples[index].SampleID == "content.claude.native.match" {
+			mutated.Samples[index].Input = AgentRecognitionInput{Comm: "codex", ExecutableBasename: "codex"}
+			break
+		}
+	}
+	parsed, mutatedDigest := parseTestAgentRecognitionCorpus(t, mutated)
+	failed, err := EvaluateAgentRecognitionCorpus(recognizer, parsed, mutatedDigest, thresholds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Gate.Passed || failed.ContentFingerprint.CorrectCount != 7 || !slices.Contains(failed.ContentFingerprint.ExpectationMismatches, "content.claude.native.match") {
+		t.Fatalf("mutated content transition unexpectedly passed: %+v", failed.ContentFingerprint)
+	}
+}
+
+func TestAgentRecognitionLauncherEvaluationUsesIndependentObservedInterpreter(t *testing.T) {
+	corpus, _, err := EmbeddedAgentRecognitionCorpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := cloneTestAgentRecognitionCorpus(t, corpus)
+	for index := range mutated.Samples {
+		if mutated.Samples[index].SampleID == "content.codex.launcher.match" {
+			mutated.Samples[index].ContentFingerprint.ObservedInterpreter = "python3"
+			break
+		}
+	}
+	parsed, digest := parseTestAgentRecognitionCorpus(t, mutated)
+	thresholds, err := EmbeddedAgentRecognitionThresholds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recognizer, err := NewEmbeddedAgentRecognizer(AgentRecognizerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := EvaluateAgentRecognitionCorpus(recognizer, parsed, digest, thresholds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Gate.Passed {
+		t.Fatal("launcher sample with a disallowed observed interpreter unexpectedly passed")
+	}
+	for _, result := range report.Samples {
+		if result.SampleID != "content.codex.launcher.match" {
+			continue
+		}
+		if result.FingerprintOutcome != AgentFingerprintOutcomeInterpreterDenied || result.ActualConfidence != AgentRecognitionConfidenceLow || result.ExpectationMatched {
+			t.Fatalf("mutated launcher result = %+v, want fail-closed interpreter denial", result)
+		}
+		return
+	}
+	t.Fatal("mutated launcher sample result was not emitted")
 }
 
 func TestAgentRecognitionEvaluationAccountsForEverySample(t *testing.T) {
@@ -210,14 +370,14 @@ func TestAgentRecognitionEvaluationAccountsForEverySample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SampleCount != len(report.Samples) || report.SampleCount != report.EvaluatedCount+report.UnavailableCount {
-		t.Fatalf("sample accounting mismatch: samples=%d results=%d evaluated=%d unavailable=%d", report.SampleCount, len(report.Samples), report.EvaluatedCount, report.UnavailableCount)
+	if report.CorpusSampleCount != len(report.Samples) || report.NameOnly.SampleCount != report.NameOnly.EvaluatedCount+report.NameOnly.UnavailableCount || report.CorpusSampleCount != report.NameOnly.SampleCount+report.ContentFingerprint.SampleCount {
+		t.Fatalf("sample accounting mismatch: corpus=%d results=%d name_only=%d evaluated=%d unavailable=%d content=%d", report.CorpusSampleCount, len(report.Samples), report.NameOnly.SampleCount, report.NameOnly.EvaluatedCount, report.NameOnly.UnavailableCount, report.ContentFingerprint.SampleCount)
 	}
-	if report.ClaimBoundary != "maintained_corpus_only_not_population_accuracy_or_identity_assurance" {
+	if report.ClaimBoundary != "maintained_corpus_contract_only_not_population_accuracy_provenance_or_identity_assurance" {
 		t.Fatalf("unsafe claim boundary: %q", report.ClaimBoundary)
 	}
-	ratios := []AgentRecognitionRatio{report.AggregatePrecision, report.AggregateRecall, report.SupportedRecall, report.HardNegativeAccuracy}
-	for _, class := range report.PerClass {
+	ratios := []AgentRecognitionRatio{report.NameOnly.AggregatePrecision, report.NameOnly.AggregateRecall, report.NameOnly.SupportedRecall, report.NameOnly.HardNegativeAccuracy, report.ContentFingerprint.Accuracy}
+	for _, class := range report.NameOnly.PerClass {
 		ratios = append(ratios, class.Precision, class.Recall)
 	}
 	for _, ratio := range ratios {

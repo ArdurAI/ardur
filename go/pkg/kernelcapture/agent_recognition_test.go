@@ -28,18 +28,25 @@ func TestEmbeddedAgentRecognitionCorpusGate(t *testing.T) {
 	if !report.Gate.Passed {
 		t.Fatalf("embedded corpus gate failed: %v", report.Gate.Reasons)
 	}
-	if report.SampleCount != 28 || report.EvaluatedCount != 27 || report.UnavailableCount != 1 || report.UnknownCount != 12 || report.AmbiguousCount != 2 {
+	if report.CorpusSampleCount != 36 || report.NameOnly.SampleCount != 28 || report.NameOnly.EvaluatedCount != 27 || report.NameOnly.UnavailableCount != 1 || report.NameOnly.UnknownCount != 12 || report.NameOnly.AmbiguousCount != 2 {
 		t.Fatalf("unexpected corpus accounting: %+v", report)
 	}
-	if report.AggregatePrecision.Numerator != 13 || report.AggregatePrecision.Denominator != 13 || report.AggregateRecall.Numerator != 13 || report.AggregateRecall.Denominator != 17 {
-		t.Fatalf("unexpected aggregate metrics: precision=%+v recall=%+v", report.AggregatePrecision, report.AggregateRecall)
+	if report.NameOnly.AggregatePrecision.Numerator != 13 || report.NameOnly.AggregatePrecision.Denominator != 13 || report.NameOnly.AggregateRecall.Numerator != 13 || report.NameOnly.AggregateRecall.Denominator != 17 {
+		t.Fatalf("unexpected aggregate metrics: precision=%+v recall=%+v", report.NameOnly.AggregatePrecision, report.NameOnly.AggregateRecall)
 	}
-	if report.SupportedRecall.Numerator != 9 || report.SupportedRecall.Denominator != 9 || report.HardNegativeAccuracy.Numerator != 8 || report.HardNegativeAccuracy.Denominator != 8 {
-		t.Fatalf("unexpected gated metrics: supported_recall=%+v hard_negative_accuracy=%+v", report.SupportedRecall, report.HardNegativeAccuracy)
+	if report.NameOnly.SupportedRecall.Numerator != 9 || report.NameOnly.SupportedRecall.Denominator != 9 || report.NameOnly.HardNegativeAccuracy.Numerator != 8 || report.NameOnly.HardNegativeAccuracy.Denominator != 8 {
+		t.Fatalf("unexpected gated metrics: supported_recall=%+v hard_negative_accuracy=%+v", report.NameOnly.SupportedRecall, report.NameOnly.HardNegativeAccuracy)
 	}
 	wantFalseNegatives := []string{"claude.renamed", "codex.renamed", "gemini.renamed", "kimi.renamed"}
-	if !reflect.DeepEqual(report.FalseNegativeSampleIDs, wantFalseNegatives) || len(report.FalsePositiveSampleIDs) != 0 || len(report.ExpectationMismatches) != 0 {
-		t.Fatalf("unexpected error accounting: false_negatives=%v false_positives=%v expectation_mismatches=%v", report.FalseNegativeSampleIDs, report.FalsePositiveSampleIDs, report.ExpectationMismatches)
+	if !reflect.DeepEqual(report.NameOnly.FalseNegativeSampleIDs, wantFalseNegatives) || len(report.NameOnly.FalsePositiveSampleIDs) != 0 || len(report.NameOnly.ExpectationMismatches) != 0 {
+		t.Fatalf("unexpected error accounting: false_negatives=%v false_positives=%v expectation_mismatches=%v", report.NameOnly.FalseNegativeSampleIDs, report.NameOnly.FalsePositiveSampleIDs, report.NameOnly.ExpectationMismatches)
+	}
+	content := report.ContentFingerprint
+	if content.SampleCount != 8 || content.NativeSampleCount != 2 || content.LauncherSampleCount != 6 || content.MatchSampleCount != 4 || content.MismatchSampleCount != 4 || content.CorrectCount != 8 || content.MismatchPromotions != 0 || content.Accuracy.Numerator != 8 || content.Accuracy.Denominator != 8 || len(content.ExpectationMismatches) != 0 {
+		t.Fatalf("unexpected content-fingerprint accounting: %+v", content)
+	}
+	if !reflect.DeepEqual(report.SignalStrata, []string{AgentRecognitionSignalStratumNameOnly, AgentRecognitionSignalStratumContentFingerprint}) {
+		t.Fatalf("signal strata = %v", report.SignalStrata)
 	}
 	first, err := MarshalAgentRecognitionEvaluationReport(report)
 	if err != nil {

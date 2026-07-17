@@ -21,7 +21,7 @@ func TestRunEmbeddedCorpusProducesDeterministicPassingReport(t *testing.T) {
 	if err := json.Unmarshal(firstOut.Bytes(), &report); err != nil {
 		t.Fatalf("decode report: %v", err)
 	}
-	if !report.Gate.Passed || report.SampleCount != 28 || report.ClaimBoundary != "maintained_corpus_only_not_population_accuracy_or_identity_assurance" {
+	if !report.Gate.Passed || report.CorpusSampleCount != 36 || report.NameOnly.SampleCount != 28 || report.ContentFingerprint.SampleCount != 8 || report.ClaimBoundary != "maintained_corpus_contract_only_not_population_accuracy_provenance_or_identity_assurance" {
 		t.Fatalf("unsafe or incomplete report: %+v", report)
 	}
 	var secondOut, secondErr bytes.Buffer
@@ -60,7 +60,7 @@ func TestRunReturnsGateFailureWithCompleteReport(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("gate failure did not emit a complete report: %v", err)
 	}
-	if report.Gate.Passed || report.SupportedRecall.Numerator != 8 || report.SupportedRecall.Denominator != 9 {
+	if report.Gate.Passed || report.NameOnly.SupportedRecall.Numerator != 8 || report.NameOnly.SupportedRecall.Denominator != 9 {
 		t.Fatalf("unexpected failing report: %+v", report.Gate)
 	}
 }

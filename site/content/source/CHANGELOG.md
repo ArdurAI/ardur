@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "306db70632afa2a8bd71360570a433201a52a4945e4f197b561b16a5bca0600f"
+source_sha256: "4ed143c3bc5e2c15aa0975af19b5818108f0873137883db6437bc94bb8ce5b41"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -90,6 +90,10 @@ All notable changes to Ardur will be documented in this file.
 - Posture detector for agent behavioral profiling
 
 ### Changed
+- Complete the bounded Linux agent-recognition evidence contract with separate
+  name-only and synthetic content-fingerprint corpus strata, fail-closed
+  match/mismatch transition gates, independently supplied launcher-interpreter
+  inputs, and exclusive same-worker post-panic terminal-accounting proofs
 - Claude Code hook rewired to stdlib hashlib/datetime
 - Gemini CLI hook generalized beyond hardcoded version contracts
 - Proxy kernel capture integration removed

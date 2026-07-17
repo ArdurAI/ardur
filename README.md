@@ -75,10 +75,14 @@ process, and neither an exact name nor an ordinary SHA-256 match proves agent
 identity or provenance. A [maintained sanitized corpus and deterministic
 gate](docs/reference/agent-recognition-evaluation.md) publishes exact corpus and
 registry digests, sample-counted precision/recall, Wilson intervals, and stable
-false-positive/false-negative IDs. The gate is regression evidence for the
-maintained corpus—not population accuracy—and stronger fingerprints remain
-tracked separately under issue #67. Attestation and governance remain separate
-follow-up work.
+false-positive/false-negative IDs. Its v0.2 report keeps 28 exact-name samples
+separate from eight synthetic native/launcher content transitions, requires
+zero mismatch confidence promotions, grades launcher fixtures against an
+independent observed-interpreter input, and never blends content matches into
+name-only accuracy. The gate is regression evidence for the maintained
+corpus—not population accuracy, provenance, or identity assurance. Attestation,
+adoption, governance, and non-Linux launch sources remain separate follow-up
+work.
 
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)

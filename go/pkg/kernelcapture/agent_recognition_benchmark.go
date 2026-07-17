@@ -91,18 +91,19 @@ type AgentRecognitionBenchmarkCaptureLedger struct {
 }
 
 type AgentRecognitionBenchmarkFingerprintLedger struct {
-	Recognized       uint64 `json:"recognized"`
-	Success          uint64 `json:"success"`
-	Mismatch         uint64 `json:"mismatch"`
-	Saturated        uint64 `json:"saturated"`
-	Unavailable      uint64 `json:"unavailable"`
-	ResolutionDenied uint64 `json:"resolution_denied"`
-	ProcessExited    uint64 `json:"process_exited"`
-	Unsupported      uint64 `json:"unsupported"`
-	SizeExceeded     uint64 `json:"size_exceeded"`
-	DeadlineExceeded uint64 `json:"deadline_exceeded"`
-	InFlight         uint64 `json:"in_flight"`
-	Unexplained      uint64 `json:"unexplained"`
+	Recognized        uint64 `json:"recognized"`
+	Success           uint64 `json:"success"`
+	Mismatch          uint64 `json:"mismatch"`
+	Saturated         uint64 `json:"saturated"`
+	Unavailable       uint64 `json:"unavailable"`
+	ResolutionDenied  uint64 `json:"resolution_denied"`
+	ProcessExited     uint64 `json:"process_exited"`
+	Unsupported       uint64 `json:"unsupported"`
+	SizeExceeded      uint64 `json:"size_exceeded"`
+	DeadlineExceeded  uint64 `json:"deadline_exceeded"`
+	WorkerUnavailable uint64 `json:"worker_unavailable,omitempty"`
+	InFlight          uint64 `json:"in_flight"`
+	Unexplained       uint64 `json:"unexplained"`
 }
 
 type AgentRecognitionBenchmarkRecognitionLedger struct {
@@ -926,7 +927,7 @@ func validateAgentRecognitionBenchmarkArm(arm AgentRecognitionBenchmarkArm, prof
 	if arm.Fingerprint.Recognized != arm.Fingerprint.Success+arm.Fingerprint.Mismatch+arm.Fingerprint.Saturated+arm.Fingerprint.Unavailable+arm.Fingerprint.InFlight+arm.Fingerprint.Unexplained {
 		return fmt.Errorf("%w: fingerprint ledger is not exclusive and complete", ErrAgentRecognitionBenchmark)
 	}
-	if arm.Fingerprint.Unavailable != arm.Fingerprint.ResolutionDenied+arm.Fingerprint.ProcessExited+arm.Fingerprint.Unsupported+arm.Fingerprint.SizeExceeded+arm.Fingerprint.DeadlineExceeded {
+	if arm.Fingerprint.Unavailable != arm.Fingerprint.ResolutionDenied+arm.Fingerprint.ProcessExited+arm.Fingerprint.Unsupported+arm.Fingerprint.SizeExceeded+arm.Fingerprint.DeadlineExceeded+arm.Fingerprint.WorkerUnavailable {
 		return fmt.Errorf("%w: fingerprint unavailable causes are not exclusive and complete", ErrAgentRecognitionBenchmark)
 	}
 	if enabled && (arm.Capture.Delivered != arm.Recognition.Candidates || arm.Recognition.Recognized != arm.Fingerprint.Recognized || arm.Capture.Unexplained != 0 || arm.Recognition.Unexplained != 0 || arm.Fingerprint.InFlight != 0 || arm.Fingerprint.Unexplained != 0) {
@@ -964,6 +965,7 @@ func addFingerprintLedger(total *AgentRecognitionBenchmarkFingerprintLedger, val
 	total.Unsupported += value.Unsupported
 	total.SizeExceeded += value.SizeExceeded
 	total.DeadlineExceeded += value.DeadlineExceeded
+	total.WorkerUnavailable += value.WorkerUnavailable
 	total.InFlight += value.InFlight
 	total.Unexplained += value.Unexplained
 }

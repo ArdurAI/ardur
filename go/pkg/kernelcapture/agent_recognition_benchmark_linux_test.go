@@ -140,3 +140,20 @@ func TestAgentRecognitionBenchmarkRunnerContextParsersAreBounded(t *testing.T) {
 		t.Fatalf("runner image context was not sanitized: %+v", environment)
 	}
 }
+
+func TestDeltaFingerprintCountersAccountsForWorkerUnavailable(t *testing.T) {
+	before := AgentFingerprintCounters{Success: 4, WorkerUnavailable: 2}
+	after := AgentFingerprintCounters{Success: 5, WorkerUnavailable: 3}
+	ledger, err := deltaFingerprintCounters(before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Success != 1 || ledger.Unavailable != 1 || ledger.WorkerUnavailable != 1 {
+		t.Fatalf("fingerprint ledger = %+v, want one success and one worker_unavailable", ledger)
+	}
+
+	after.WorkerUnavailable = 1
+	if _, err := deltaFingerprintCounters(before, after); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("backwards worker_unavailable error = %v", err)
+	}
+}

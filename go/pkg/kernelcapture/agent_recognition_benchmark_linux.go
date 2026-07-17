@@ -539,7 +539,7 @@ func deltaRecognitionCounters(before, after AgentRecognitionCounters) (AgentReco
 }
 
 func deltaFingerprintCounters(before, after AgentFingerprintCounters) (AgentRecognitionBenchmarkFingerprintLedger, error) {
-	if after.QueueSaturated < before.QueueSaturated || after.ResolutionDenied < before.ResolutionDenied || after.ProcessExited < before.ProcessExited || after.Unsupported < before.Unsupported || after.SizeExceeded < before.SizeExceeded || after.DeadlineExceeded < before.DeadlineExceeded || after.DigestMismatch < before.DigestMismatch || after.Success < before.Success {
+	if after.QueueSaturated < before.QueueSaturated || after.ResolutionDenied < before.ResolutionDenied || after.ProcessExited < before.ProcessExited || after.Unsupported < before.Unsupported || after.SizeExceeded < before.SizeExceeded || after.DeadlineExceeded < before.DeadlineExceeded || after.DigestMismatch < before.DigestMismatch || after.Success < before.Success || after.WorkerUnavailable < before.WorkerUnavailable {
 		return AgentRecognitionBenchmarkFingerprintLedger{}, fmt.Errorf("%w: fingerprint counter moved backwards", ErrAgentRecognitionBenchmark)
 	}
 	resolutionDenied := after.ResolutionDenied - before.ResolutionDenied
@@ -547,16 +547,18 @@ func deltaFingerprintCounters(before, after AgentFingerprintCounters) (AgentReco
 	unsupported := after.Unsupported - before.Unsupported
 	sizeExceeded := after.SizeExceeded - before.SizeExceeded
 	deadlineExceeded := after.DeadlineExceeded - before.DeadlineExceeded
+	workerUnavailable := after.WorkerUnavailable - before.WorkerUnavailable
 	return AgentRecognitionBenchmarkFingerprintLedger{
-		Success:          after.Success - before.Success,
-		Mismatch:         after.DigestMismatch - before.DigestMismatch,
-		Saturated:        after.QueueSaturated - before.QueueSaturated,
-		Unavailable:      resolutionDenied + processExited + unsupported + sizeExceeded + deadlineExceeded,
-		ResolutionDenied: resolutionDenied,
-		ProcessExited:    processExited,
-		Unsupported:      unsupported,
-		SizeExceeded:     sizeExceeded,
-		DeadlineExceeded: deadlineExceeded,
+		Success:           after.Success - before.Success,
+		Mismatch:          after.DigestMismatch - before.DigestMismatch,
+		Saturated:         after.QueueSaturated - before.QueueSaturated,
+		Unavailable:       resolutionDenied + processExited + unsupported + sizeExceeded + deadlineExceeded + workerUnavailable,
+		ResolutionDenied:  resolutionDenied,
+		ProcessExited:     processExited,
+		Unsupported:       unsupported,
+		SizeExceeded:      sizeExceeded,
+		DeadlineExceeded:  deadlineExceeded,
+		WorkerUnavailable: workerUnavailable,
 	}, nil
 }
 
