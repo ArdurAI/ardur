@@ -33,8 +33,10 @@ func run(args []string, stdout io.Writer) int {
 	flags := flag.NewFlagSet("ardur-agent-recognition-benchmark", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	daemonPath := flags.String("daemon-bin", "", "absolute path to ardur-kernelcaptured")
+	referenceDaemonPath := flags.String("reference-daemon-bin", "", "absolute path to the exact reference ardur-kernelcaptured")
 	workloadPath := flags.String("workload-bin", "", "absolute path to the deterministic native benchmark workload")
 	sourceSHA := flags.String("source-sha", "", "exact 40-character source commit SHA")
+	referenceSourceSHA := flags.String("reference-source-sha", "", "exact 40-character reference commit SHA")
 	outputDirectory := flags.String("output-dir", "", "private output directory")
 	budgetPath := flags.String("budget", "", "optional reviewed benchmark budget JSON")
 	runnerImageOS := flags.String("runner-image-os", "unknown", "bounded hosted-runner image OS label")
@@ -44,7 +46,7 @@ func run(args []string, stdout io.Writer) int {
 	warmupPairs := flags.Int("warmup-pairs", 1, "excluded warm-up pair count")
 	measuredPairs := flags.Int("measured-pairs", kernelcapture.MinAgentRecognitionBenchmarkPairs, "measured pair count")
 	overallTimeout := flags.Duration("timeout", 15*time.Minute, "overall benchmark timeout")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *daemonPath == "" || *workloadPath == "" || *sourceSHA == "" || *outputDirectory == "" || (*profileSet != "ci" && *profileSet != "release") {
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *daemonPath == "" || *referenceDaemonPath == "" || *workloadPath == "" || *sourceSHA == "" || *referenceSourceSHA == "" || *outputDirectory == "" || (*profileSet != "ci" && *profileSet != "release") {
 		writeSummary(stdout, commandSummary{Condition: "agent_recognition_benchmark_failed", ErrorCode: "arguments_invalid"})
 		return 2
 	}
@@ -55,7 +57,8 @@ func run(args []string, stdout io.Writer) int {
 		profiles = kernelcapture.ReleaseAgentRecognitionBenchmarkProfiles()
 	}
 	report, err := kernelcapture.RunAgentRecognitionBenchmark(ctx, kernelcapture.AgentRecognitionBenchmarkOptions{
-		DaemonPath: *daemonPath, WorkloadExecutablePath: *workloadPath, SourceSHA: *sourceSHA,
+		DaemonPath: *daemonPath, ReferenceDaemonPath: *referenceDaemonPath, WorkloadExecutablePath: *workloadPath,
+		SourceSHA: *sourceSHA, ReferenceSourceSHA: *referenceSourceSHA,
 		RunnerImageOS: *runnerImageOS, RunnerImageVersion: *runnerImageVersion,
 		Seed: *seed, WarmupPairs: *warmupPairs, MeasuredPairs: *measuredPairs, Profiles: profiles,
 	})

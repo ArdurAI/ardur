@@ -161,6 +161,127 @@ func TestAgentRecognitionBenchmarkV2GateNormalizesRunnerCPUAndIgnoresWallTailOnl
 	}
 }
 
+func TestAgentRecognitionBenchmarkV3GateUsesSameVMReferenceCPU(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromReferenceReport(report)
+	budgetJSON, err := json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetDigest := benchmarkSHA256Hex(budgetJSON)
+	if gate := EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest); gate.Status != AgentRecognitionBenchmarkGatePass || len(gate.Violations) != 0 {
+		t.Fatalf("passing same-VM gate = %+v", gate)
+	}
+
+	// A uniformly slower VM changes all raw daemon CPU values while the
+	// current/reference ratio remains stable. Synthetic calibration is retained
+	// as evidence but is not the v0.3 hard CPU decision.
+	for pairIndex := range report.Pairs {
+		pair := &report.Pairs[pairIndex]
+		pair.Baseline.DaemonCPUNanoseconds *= 2
+		pair.Enabled.DaemonCPUNanoseconds *= 2
+		pair.ReferenceEnabled.DaemonCPUNanoseconds *= 2
+		pair.DaemonCPUDeltaNanoseconds *= 2
+		pair.EnabledToReferenceDaemonCPURatio = float64(pair.Enabled.DaemonCPUNanoseconds) / float64(pair.ReferenceEnabled.DaemonCPUNanoseconds)
+	}
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, &budget, budgetDigest); err != nil {
+		t.Fatal(err)
+	}
+	if report.Gate.Status != AgentRecognitionBenchmarkGatePass {
+		t.Fatalf("same-VM slow-runner gate = %+v", report.Gate)
+	}
+
+	// Current-only CPU growth remains a regression on the same VM.
+	profileName := report.Pairs[0].Profile.Name
+	for pairIndex := range report.Pairs {
+		pair := &report.Pairs[pairIndex]
+		if pair.Profile.Name != profileName {
+			continue
+		}
+		pair.Enabled.DaemonCPUNanoseconds *= 2
+		pair.DaemonCPUDeltaNanoseconds = int64(pair.Enabled.DaemonCPUNanoseconds) - int64(pair.Baseline.DaemonCPUNanoseconds)
+		pair.EnabledToReferenceDaemonCPURatio = float64(pair.Enabled.DaemonCPUNanoseconds) / float64(pair.ReferenceEnabled.DaemonCPUNanoseconds)
+	}
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, &budget, budgetDigest); err != nil {
+		t.Fatal(err)
+	}
+	wantViolation := "budget." + profileName + ".p95_enabled_to_reference_daemon_cpu"
+	if report.Gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(report.Gate.Violations, []string{wantViolation}) {
+		t.Fatalf("same-VM CPU regression gate = %+v, want %q", report.Gate, wantViolation)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV3ReferenceCorrectnessFailsClosed(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	pair := &report.Pairs[0]
+	pair.ReferenceEnabled.Capture.Delivered--
+	pair.ReferenceEnabled.Capture.ProducerDropped++
+	pair.ReferenceEnabled.Recognition.Candidates--
+	pair.ReferenceEnabled.Recognition.Recognized--
+	pair.ReferenceEnabled.Fingerprint.Recognized--
+	pair.ReferenceEnabled.Fingerprint.Success--
+
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reference_loss." + pair.Profile.Name + ".capture_nonzero"}
+	if report.Gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(report.Gate.Violations, want) {
+		t.Fatalf("reference correctness gate = %+v, want %v", report.Gate, want)
+	}
+	if err := ValidateAgentRecognitionBenchmarkReport(&report); err != nil {
+		t.Fatalf("failed reference evidence must remain publishable: %v", err)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV3PartialReferenceAccountingFailsClosed(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	report.Summaries[0].ReferenceTotalFingerprint = nil
+
+	gate := EvaluateAgentRecognitionBenchmarkBudget(&report, nil, "")
+	want := []string{"budget.invalid", "reference_loss." + report.Summaries[0].ProfileName + ".accounting_missing"}
+	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, want) {
+		t.Fatalf("partial reference accounting gate = %+v, want %v", gate, want)
+	}
+}
+
+func TestValidateAgentRecognitionBenchmarkV3RequiresReferenceProvenanceAndOrder(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV3 || report.ReferenceSourceSHA == "" || report.PairOrder != "deterministic_six_arm_order_rotation" {
+		t.Fatalf("v0.3 report contract missing: %+v", report)
+	}
+
+	for name, mutate := range map[string]func(*AgentRecognitionBenchmarkReport){
+		"reference source":        func(value *AgentRecognitionBenchmarkReport) { value.ReferenceSourceSHA = "" },
+		"current daemon digest":   func(value *AgentRecognitionBenchmarkReport) { value.DaemonSHA256 = "" },
+		"reference daemon digest": func(value *AgentRecognitionBenchmarkReport) { value.ReferenceDaemonSHA256 = "" },
+		"reference arm": func(value *AgentRecognitionBenchmarkReport) {
+			value.Pairs = append([]AgentRecognitionBenchmarkPair(nil), value.Pairs...)
+			value.Pairs[0].ReferenceEnabled = nil
+		},
+		"pair order": func(value *AgentRecognitionBenchmarkReport) {
+			value.Pairs = append([]AgentRecognitionBenchmarkPair(nil), value.Pairs...)
+			value.Pairs[0].Order = "baseline_then_enabled"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tampered := report
+			mutate(&tampered)
+			if err := ValidateAgentRecognitionBenchmarkReport(&tampered); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("missing %s error = %v", name, err)
+			}
+		})
+	}
+}
+
 func TestAgentRecognitionBenchmarkEvidenceOnlyModeFailsClosedOnCorrectness(t *testing.T) {
 	report := validAgentRecognitionBenchmarkReport(t)
 	pair := &report.Pairs[0]
@@ -273,6 +394,67 @@ func TestAgentRecognitionBenchmarkV2BudgetRejectsAmbiguousEvidenceAndSchemaMixin
 	gate := EvaluateAgentRecognitionBenchmarkBudget(&report, legacyBudget, legacyDigest)
 	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{"budget.invalid"}) {
 		t.Fatalf("mixed v0.2 report/v0.1 budget gate = %+v", gate)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV3BudgetRejectsLegacyFieldsOverflowAndSchemaMixing(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromReferenceReport(report)
+
+	for name, mutate := range map[string]func(*AgentRecognitionBenchmarkBudgetProfile){
+		"absolute CPU field": func(profile *AgentRecognitionBenchmarkBudgetProfile) {
+			profile.EvidenceP95EnabledDaemonCPUNanoseconds = 1
+		},
+		"calibrated CPU field": func(profile *AgentRecognitionBenchmarkBudgetProfile) {
+			profile.EvidenceP95EnabledDaemonCPUCalibrationRatio = 1
+		},
+		"reference CPU threshold overflow": func(profile *AgentRecognitionBenchmarkBudgetProfile) {
+			profile.EvidenceP95EnabledToReferenceDaemonCPURatio = math.MaxFloat64
+			profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent = 100
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tampered := budget
+			tampered.Profiles = append([]AgentRecognitionBenchmarkBudgetProfile(nil), budget.Profiles...)
+			mutate(&tampered.Profiles[0])
+			if err := ValidateAgentRecognitionBenchmarkBudget(&tampered); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("invalid v0.3 budget error = %v", err)
+			}
+		})
+	}
+
+	v2Budget := budgetFromReport(validAgentRecognitionBenchmarkReport(t))
+	v2Raw, err := json.Marshal(v2Budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := EvaluateAgentRecognitionBenchmarkBudget(&report, &v2Budget, benchmarkSHA256Hex(v2Raw))
+	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{"budget.invalid"}) {
+		t.Fatalf("mixed v0.3 report/v0.2 budget gate = %+v", gate)
+	}
+}
+
+func TestAgentRecognitionBenchmarkReferenceOrderRotatesAllArms(t *testing.T) {
+	want := []string{
+		"baseline_then_reference_then_enabled",
+		"baseline_then_enabled_then_reference",
+		"reference_then_baseline_then_enabled",
+		"reference_then_enabled_then_baseline",
+		"enabled_then_baseline_then_reference",
+		"enabled_then_reference_then_baseline",
+	}
+	got := make([]string, 0, len(want))
+	for pairIndex := 0; pairIndex < len(want); pairIndex++ {
+		got = append(got, agentRecognitionBenchmarkReferenceOrder(pairIndex, 6))
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reference order rotation = %v, want %v", got, want)
+	}
+	if got := agentRecognitionBenchmarkReferenceOrder(-1, 6); got != want[len(want)-1] {
+		t.Fatalf("negative warmup order = %q, want %q", got, want[len(want)-1])
 	}
 }
 
@@ -535,6 +717,30 @@ func validAgentRecognitionBenchmarkReport(t *testing.T) AgentRecognitionBenchmar
 	return report
 }
 
+func validAgentRecognitionBenchmarkReferenceReport(t *testing.T) AgentRecognitionBenchmarkReport {
+	t.Helper()
+	report := validAgentRecognitionBenchmarkReport(t)
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV3
+	report.ReferenceSourceSHA = "fedcba9876543210fedcba9876543210fedcba98"
+	report.DaemonSHA256 = strings.Repeat("c", 64)
+	// The candidate may change only the benchmark harness, leaving the exact
+	// current and reference production daemon bytes equal. That remains valid
+	// and is still provenance-bound by two explicit digests.
+	report.ReferenceDaemonSHA256 = report.DaemonSHA256
+	report.PairOrder = "deterministic_six_arm_order_rotation"
+	for pairIndex := range report.Pairs {
+		pair := &report.Pairs[pairIndex]
+		reference := pair.Enabled
+		reference.DaemonCPUNanoseconds = pair.Enabled.DaemonCPUNanoseconds + 100
+		reference.DaemonPeakRSSKiB = pair.Enabled.DaemonPeakRSSKiB + 64
+		reference.WorkloadElapsedNanoseconds = pair.Enabled.WorkloadElapsedNanoseconds + 1000
+		pair.ReferenceEnabled = &reference
+		pair.EnabledToReferenceDaemonCPURatio = float64(pair.Enabled.DaemonCPUNanoseconds) / float64(reference.DaemonCPUNanoseconds)
+		pair.Order = agentRecognitionBenchmarkReferenceOrder(pair.PairIndex, report.Seed)
+	}
+	return report
+}
+
 func budgetFromReport(report AgentRecognitionBenchmarkReport) AgentRecognitionBenchmarkBudget {
 	budget := AgentRecognitionBenchmarkBudget{
 		SchemaVersion: AgentRecognitionBenchmarkBudgetSchemaV2,
@@ -555,6 +761,31 @@ func budgetFromReport(report AgentRecognitionBenchmarkReport) AgentRecognitionBe
 			DaemonCPUCalibrationRatioAbsoluteTolerance:        0.01,
 			EvidenceMaxEnabledDaemonPeakRSSKiB:                summary.MaxEnabledDaemonPeakRSSKiB,
 			PeakRSSToleranceKiB:                               1024,
+		})
+	}
+	return budget
+}
+
+func budgetFromReferenceReport(report AgentRecognitionBenchmarkReport) AgentRecognitionBenchmarkBudget {
+	budget := AgentRecognitionBenchmarkBudget{
+		SchemaVersion: AgentRecognitionBenchmarkBudgetSchemaV3,
+		BudgetVersion: "test.v3",
+		EvidenceArtifactSHA256s: []string{
+			strings.Repeat("4", 64), strings.Repeat("5", 64), strings.Repeat("6", 64),
+		},
+		MinimumMeasuredPairs: MinAgentRecognitionBenchmarkPairs,
+	}
+	for _, summary := range report.Summaries {
+		budget.Profiles = append(budget.Profiles, AgentRecognitionBenchmarkBudgetProfile{
+			ProfileName:                                              summary.ProfileName,
+			EvidenceP50WallOverheadPercent:                           summary.PairedWallOverheadPercent.P50,
+			EvidenceP95WallOverheadPercent:                           summary.PairedWallOverheadPercent.P95,
+			WallOverheadTolerancePercentagePoints:                    0.1,
+			EvidenceP95EnabledToReferenceDaemonCPURatio:              summary.EnabledToReferenceDaemonCPURatio.P95,
+			EnabledToReferenceDaemonCPURatioRelativeTolerancePercent: 10,
+			EnabledToReferenceDaemonCPURatioAbsoluteTolerance:        0.02,
+			EvidenceMaxEnabledDaemonPeakRSSKiB:                       summary.MaxEnabledDaemonPeakRSSKiB,
+			PeakRSSToleranceKiB:                                      4096,
 		})
 	}
 	return budget

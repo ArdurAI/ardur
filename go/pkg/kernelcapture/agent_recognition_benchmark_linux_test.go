@@ -81,6 +81,35 @@ func TestCalibrateAgentRecognitionBenchmarkProcessCPUIsBoundedAndDigestBound(t *
 	}
 }
 
+func TestCopyBenchmarkExecutableBindsBytesAndRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	payload := []byte("#!/bin/sh\nexit 0\n")
+	source := filepath.Join(root, "source")
+	if err := os.WriteFile(source, payload, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(root, "destination")
+	digest, err := copyBenchmarkExecutable(source, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := sha256.Sum256(payload)
+	if digest != hex.EncodeToString(wantDigest[:]) {
+		t.Fatalf("copied executable digest = %q", digest)
+	}
+	if copied, err := os.ReadFile(destination); err != nil || !bytes.Equal(copied, payload) {
+		t.Fatalf("copied executable = %q, error = %v", copied, err)
+	}
+
+	link := filepath.Join(root, "source-link")
+	if err := os.Symlink(source, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := copyBenchmarkExecutable(link, filepath.Join(root, "link-destination")); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("symlink copy error = %v", err)
+	}
+}
+
 func TestAgentRecognitionBenchmarkRunnerContextParsersAreBounded(t *testing.T) {
 	if got := parseAgentRecognitionBenchmarkCPUModel([]byte("processor: 0\nmodel name: Example Hosted CPU\n")); got != "Example Hosted CPU" {
 		t.Fatalf("CPU model = %q", got)
