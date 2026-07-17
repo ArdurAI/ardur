@@ -7,8 +7,6 @@ the user's real ~/.vibap directory.
 
 from __future__ import annotations
 
-collect_ignore = ["run_cloud_model_test.py", "run_all_models.py", "run_adversarial_suite.py", "run_advanced_adversarial.py", "test_ardur_overhead_ab.py"]
-
 import socket
 from pathlib import Path
 from typing import Any, Callable
@@ -18,6 +16,14 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.passport import MissionPassport, generate_keypair, issue_passport
 from vibap.proxy import GovernanceProxy
+
+collect_ignore = [
+    "run_cloud_model_test.py",
+    "run_all_models.py",
+    "run_adversarial_suite.py",
+    "run_advanced_adversarial.py",
+    "test_ardur_overhead_ab.py",
+]
 
 
 # v0.1 spec required-members helper (FIX-3 from S2 audit, 2026-04-28).
@@ -46,6 +52,7 @@ def v01_default_status_url(mission_id: str) -> str:
     """
     # mission_id is typically an opaque URN; hash to keep URL paths sane.
     import hashlib
+
     digest = hashlib.sha256(mission_id.encode("utf-8")).hexdigest()[:16]
     return f"https://issuer.example/status/v01-default-{digest}.jwt"
 
@@ -64,9 +71,7 @@ def v01_default_status_list_token(private_key, mission_id: str) -> str:
     import jwt
 
     raw = bytes([0])  # 1 byte covers idx=0; bit at idx=0 is 0 → not revoked.
-    encoded = (
-        base64.urlsafe_b64encode(zlib.compress(raw)).rstrip(b"=").decode("ascii")
-    )
+    encoded = base64.urlsafe_b64encode(zlib.compress(raw)).rstrip(b"=").decode("ascii")
     now = int(time.time())
     claims = {
         "iss": "test-status-authority",
@@ -97,13 +102,11 @@ def v01_required_md_extras(
     (``test_approval_governance``) pass it explicitly.
     """
     extras: dict[str, Any] = {
-        "mission_id": mission_id,
         "receipt_policy": {"level": receipt_level},
         "conformance_profile": conformance_profile,
         "tool_manifest_digest": "sha-256:" + ("a" * 64),
         "revocation_ref": (
-            revocation_ref
-            or f"{v01_default_status_url(mission_id)}#idx=0"
+            revocation_ref or f"{v01_default_status_url(mission_id)}#idx=0"
         ),
         "governed_memory_stores": [],
         "probing_rate_limit": probing_rate_limit,
@@ -123,7 +126,9 @@ def session_keys_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def keypair(session_keys_dir: Path) -> tuple[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]:
+def keypair(
+    session_keys_dir: Path,
+) -> tuple[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]:
     return generate_keypair(keys_dir=session_keys_dir)
 
 
@@ -176,12 +181,16 @@ def delegating_mission() -> MissionPassport:
 
 @pytest.fixture
 def issued_passport(example_mission, private_key) -> str:
-    return issue_passport(example_mission, private_key, ttl_s=example_mission.max_duration_s)
+    return issue_passport(
+        example_mission, private_key, ttl_s=example_mission.max_duration_s
+    )
 
 
 @pytest.fixture
 def issued_delegating_passport(delegating_mission, private_key) -> str:
-    return issue_passport(delegating_mission, private_key, ttl_s=delegating_mission.max_duration_s)
+    return issue_passport(
+        delegating_mission, private_key, ttl_s=delegating_mission.max_duration_s
+    )
 
 
 @pytest.fixture
@@ -196,7 +205,9 @@ def proxy(tmp_path: Path, public_key, session_keys_dir: Path) -> GovernanceProxy
 
 
 @pytest.fixture
-def proxy_factory(tmp_path: Path, public_key, session_keys_dir: Path) -> Callable[[], GovernanceProxy]:
+def proxy_factory(
+    tmp_path: Path, public_key, session_keys_dir: Path
+) -> Callable[[], GovernanceProxy]:
     """Create independent proxy instances sharing the session keypair."""
     counter = {"n": 0}
 

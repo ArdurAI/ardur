@@ -29,7 +29,8 @@ members:
    `authorization_details`, argument-constraint members, `mission_ref`,
    `reserved_budget_share`, and `lineage_budget_share`;
 2. the JWT mission passport emitted by `python/vibap/passport.py`, including
-   child-lineage claims added by `derive_child_passport`; and
+   child-lineage claims added by `derive_child_passport` and the optional
+   runtime-only `risk_budget` extension; and
 3. every top-level property in
    `docs/specs/execution-receipt-v0.2.schema.json`.
 
@@ -76,6 +77,7 @@ transformations are:
 | `cnf.jwk` | `metadata.x-ardur.capabilityTokenRef.holderConfirmation.jwk` | The holder key is not the DRP receipt-signing key. |
 | depth and delegation policy | `metadata.x-ardur.redelegation` | DRP describes depth behavior but has no Authorization Object fields for mode, depth, or maximum depth. |
 | budgets and policy references | `metadata.x-ardur.budget`, `metadata.x-ardur.policy` | Security-critical extensions that participate in attenuation checks. |
+| Python `risk_budget` | No projection in the current profile | The current emitter/verifier does not implement typed fact contracts or atomic session/agent/lineage risk accounting. An emitter presented with this claim MUST deny/fail closed instead of dropping it. A future profile may define a critical `metadata.x-ardur.riskBudget` extension. |
 | `mission_ref` | `metadata.x-ardur.missionRef` | DRP instruction commitment does not replace the governing Mission Declaration reference. |
 
 ### 3.1. Critical Extension Rule
