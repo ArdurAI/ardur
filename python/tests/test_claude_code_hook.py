@@ -11,6 +11,8 @@ from typing import Any
 
 import pytest
 
+import jwt
+
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.claude_code_hook import (
@@ -54,7 +56,9 @@ def _deny_reason(output: dict) -> str:
     return hook_output["permissionDecisionReason"]
 
 
-def _pre_hook_input(*, tool_name: str, tool_input: dict[str, Any], suffix: str) -> dict[str, Any]:
+def _pre_hook_input(
+    *, tool_name: str, tool_input: dict[str, Any], suffix: str
+) -> dict[str, Any]:
     return {
         "session_id": "personal-firewall-test",
         "hook_event_name": "PreToolUse",
@@ -161,9 +165,7 @@ def test_direct_hook_denies_workspace_symlink_escape_and_signs_violation(
     ]
 
 
-def test_direct_hook_denies_resource_when_signed_scope_is_empty(
-    tmp_path, monkeypatch
-):
+def test_direct_hook_denies_resource_when_signed_scope_is_empty(tmp_path, monkeypatch):
     from vibap.claude_code_hook import handle_pre_tool_use
     from vibap.claude_code_report import build_claude_code_report
 
@@ -288,9 +290,7 @@ def test_direct_hook_fails_closed_for_malformed_additional_policies_claim(
         keys_dir=tmp_path,
     )
 
-    assert "unknown policy backend: invalid_additional_policies" in _deny_reason(
-        output
-    )
+    assert "unknown policy backend: invalid_additional_policies" in _deny_reason(output)
 
 
 def test_direct_hook_fails_closed_for_oversized_budget_chain(tmp_path, monkeypatch):
@@ -396,7 +396,19 @@ def _issue_wildcard_test_passport(
         max_tool_calls=20,
         max_duration_s=600,
     )
-    return issue_passport(mission, private_key, ttl_s=3600, extra_claims=extra_claims)
+    claims = dict(extra_claims or {})
+    jti_override = claims.pop("jti", None)
+    token = issue_passport(
+        mission,
+        private_key,
+        ttl_s=3600,
+        extra_claims=claims,
+    )
+    if not isinstance(jti_override, str):
+        return token
+    payload = jwt.decode(token, options={"verify_signature": False})
+    payload["jti"] = jti_override
+    return jwt.encode(payload, private_key, algorithm="ES256")
 
 
 def _exercise_receipt_lock_and_subagent_sinks(
@@ -409,7 +421,11 @@ def _exercise_receipt_lock_and_subagent_sinks(
     monkeypatch.setenv("VIBAP_HOME", str(tmp_path))
     monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(chain_dir))
 
-    from vibap.claude_code_hook import handle_post_tool_use, handle_pre_tool_use, handle_subagent_start
+    from vibap.claude_code_hook import (
+        handle_post_tool_use,
+        handle_pre_tool_use,
+        handle_subagent_start,
+    )
 
     pre_output = handle_pre_tool_use(
         {
@@ -516,7 +532,10 @@ def test_returns_error_on_signature_mismatch(tmp_path, monkeypatch):
 
     with pytest.raises(MissionLoadError) as exc_info:
         load_active_passport(keys_dir=other_keys)
-    assert "signature" in str(exc_info.value).lower() or "verify" in str(exc_info.value).lower()
+    assert (
+        "signature" in str(exc_info.value).lower()
+        or "verify" in str(exc_info.value).lower()
+    )
 
 
 def test_empty_vibap_home_falls_back_to_default_home(tmp_path, monkeypatch):
@@ -538,7 +557,9 @@ def test_empty_vibap_home_falls_back_to_default_home(tmp_path, monkeypatch):
     assert "no active mission passport" in str(exc_info.value).lower()
 
 
-def test_jwt_heuristic_does_not_misclassify_path_starting_with_ey(tmp_path, monkeypatch):
+def test_jwt_heuristic_does_not_misclassify_path_starting_with_ey(
+    tmp_path, monkeypatch
+):
     # A path-like value starting with "ey" but not "eyJ" must be treated
     # as a path, not a literal JWT. Without keys we expect either a
     # missing-keys MissionLoadError or a no-passport MissionLoadError —
@@ -583,8 +604,14 @@ def test_chain_per_trace_does_not_collide(tmp_path):
     state_b = ChainState(chain_dir=tmp_path, trace_id="trace-b")
     append_receipt(state_a, "a-only.jwt")
     append_receipt(state_b, "b-only.jwt")
-    assert previous_receipt_hash(state_a) == "sha-256:" + hashlib.sha256("a-only.jwt".encode()).hexdigest()
-    assert previous_receipt_hash(state_b) == "sha-256:" + hashlib.sha256("b-only.jwt".encode()).hexdigest()
+    assert (
+        previous_receipt_hash(state_a)
+        == "sha-256:" + hashlib.sha256("a-only.jwt".encode()).hexdigest()
+    )
+    assert (
+        previous_receipt_hash(state_b)
+        == "sha-256:" + hashlib.sha256("b-only.jwt".encode()).hexdigest()
+    )
 
 
 def test_child_receipt_summary_streams_chain_file(tmp_path, monkeypatch):
@@ -594,7 +621,9 @@ def test_child_receipt_summary_streams_chain_file(tmp_path, monkeypatch):
     def unsigned_jwt(claims: dict[str, Any]) -> str:
         def encode(segment: dict[str, Any]) -> str:
             encoded = base64.urlsafe_b64encode(
-                json.dumps(segment, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                json.dumps(segment, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
             )
             return encoded.rstrip(b"=").decode("ascii")
 
@@ -661,7 +690,9 @@ def test_unsafe_env_trace_ids_do_not_escape_or_collapse_chain_paths_across_hook_
     assert "\\" not in trace_dir.name
 
 
-def test_unsafe_passport_jti_fallback_material_is_contained_and_single_segment(tmp_path, monkeypatch):
+def test_unsafe_passport_jti_fallback_material_is_contained_and_single_segment(
+    tmp_path, monkeypatch
+):
     cases = {
         "dotdot": "../passport-out",
         "slash": "bad/trace",
@@ -675,7 +706,9 @@ def test_unsafe_passport_jti_fallback_material_is_contained_and_single_segment(t
         token = _issue_wildcard_test_passport(case_dir, extra_claims={"jti": bad_jti})
         monkeypatch.delenv("ARDUR_TRACE_ID", raising=False)
 
-        chain_dir = _exercise_receipt_lock_and_subagent_sinks(case_dir, monkeypatch, token)
+        chain_dir = _exercise_receipt_lock_and_subagent_sinks(
+            case_dir, monkeypatch, token
+        )
 
         assert not (case_dir / "receipts.jsonl").exists()
         assert not (case_dir / ".lock").exists()
@@ -684,10 +717,19 @@ def test_unsafe_passport_jti_fallback_material_is_contained_and_single_segment(t
         assert trace_dir.name.startswith("trace-")
         assert "/" not in trace_dir.name
         assert "\\" not in trace_dir.name
-        assert trace_dir.name not in {".", "..", "bad", "trace", "passport-out", "absolute-out"}
+        assert trace_dir.name not in {
+            ".",
+            "..",
+            "bad",
+            "trace",
+            "passport-out",
+            "absolute-out",
+        }
 
 
-def test_safe_dot_containing_env_trace_id_is_preserved_as_single_segment(tmp_path, monkeypatch):
+def test_safe_dot_containing_env_trace_id_is_preserved_as_single_segment(
+    tmp_path, monkeypatch
+):
     token = _issue_wildcard_test_passport(tmp_path)
     monkeypatch.setenv("ARDUR_TRACE_ID", "trace.v1-alpha_2")
 
@@ -697,7 +739,9 @@ def test_safe_dot_containing_env_trace_id_is_preserved_as_single_segment(tmp_pat
     assert trace_dir.name == "trace.v1-alpha_2"
 
 
-def test_resolve_chain_state_rejects_path_material_before_artifact_creation(tmp_path, monkeypatch):
+def test_resolve_chain_state_rejects_path_material_before_artifact_creation(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chain"))
     from vibap.claude_code_hook import resolve_chain_state
 
@@ -749,6 +793,7 @@ def test_allow_path_returns_continue_true_and_chains_receipt(tmp_path, monkeypat
     # the signature — the test isn't asserting receipt validity here, just
     # the chain semantics.
     import jwt as pyjwt
+
     claims = pyjwt.decode(lines[0].strip(), options={"verify_signature": False})
     assert claims.get("parent_receipt_hash") is None
 
@@ -770,7 +815,9 @@ def test_allow_path_returns_continue_true_and_chains_receipt(tmp_path, monkeypat
     ]
 
 
-def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(tmp_path, monkeypatch):
+def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(
+    tmp_path, monkeypatch
+):
     private_key, _public_key = generate_keypair(keys_dir=tmp_path)
     mission = MissionPassport(
         agent_id="alice",
@@ -881,7 +928,9 @@ def test_empty_claude_code_report_human_output_prints_next_steps(tmp_path, capsy
     assert str(tmp_path) not in next_steps_output
 
 
-def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(tmp_path, monkeypatch):
+def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
+    tmp_path, monkeypatch
+):
     private_key, _public_key = generate_keypair(keys_dir=tmp_path)
     mission = MissionPassport(
         agent_id="alice",
@@ -967,11 +1016,21 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(tmp_pat
 
     receipts = list((tmp_path / "chain").rglob("receipts.jsonl"))
     assert len(receipts) == 1
-    lines = [line.strip() for line in receipts[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in receipts[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) == 4
     import jwt as pyjwt
+
     claims = [pyjwt.decode(line, options={"verify_signature": False}) for line in lines]
-    assert [claim["tool"] for claim in claims] == ["SubagentStart", "Read", "Read", "SubagentStop"]
+    assert [claim["tool"] for claim in claims] == [
+        "SubagentStart",
+        "Read",
+        "Read",
+        "SubagentStop",
+    ]
     start_meta = claims[0]["measurements"]["claude_code"]
     assert start_meta["claude_agent_id"] == "agent-child-1"
     assert start_meta["actor_kind"] == "subagent"
@@ -1027,7 +1086,11 @@ def test_report_keeps_unmatched_child_tools_trace_only(tmp_path, monkeypatch):
     parent_transcript = tmp_path / "parent.jsonl"
     parent_transcript.write_text("{}\n", encoding="utf-8")
 
-    from vibap.claude_code_hook import handle_pre_tool_use, handle_subagent_start, handle_subagent_stop
+    from vibap.claude_code_hook import (
+        handle_pre_tool_use,
+        handle_subagent_start,
+        handle_subagent_stop,
+    )
     from vibap.claude_code_report import build_claude_code_report
 
     handle_subagent_start(
@@ -1074,10 +1137,15 @@ def test_report_keeps_unmatched_child_tools_trace_only(tmp_path, monkeypatch):
     )
     assert report["coverage"]["per_child_attribution"] == "trace_only"
     assert report["totals"]["unattributed_tool_receipt_count"] == 1
-    assert report["chains"][0]["unattributed_tool_receipts"][0]["tool_use_id"] == "toolu_unmatched"
+    assert (
+        report["chains"][0]["unattributed_tool_receipts"][0]["tool_use_id"]
+        == "toolu_unmatched"
+    )
 
 
-def test_long_scoped_bash_command_is_not_denied_by_truncated_target(tmp_path, monkeypatch):
+def test_long_scoped_bash_command_is_not_denied_by_truncated_target(
+    tmp_path, monkeypatch
+):
     private_key, _public_key = generate_keypair(keys_dir=tmp_path)
     scope = tmp_path / "scope"
     nested = scope / "a" / "b" / "c" / "d"
@@ -1180,7 +1248,11 @@ def test_parallel_pre_tool_use_processes_serialize_receipt_chain(tmp_path):
 
     receipts = list((tmp_path / "chain").rglob("receipts.jsonl"))
     assert len(receipts) == 1
-    lines = [line.strip() for line in receipts[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in receipts[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) == 5
 
     from vibap.receipt import verify_chain
@@ -1196,6 +1268,7 @@ def test_deny_path_returns_continue_false_with_stop_reason(tmp_path, monkeypatch
     monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chain"))
 
     from vibap.claude_code_hook import handle_pre_tool_use
+
     output = handle_pre_tool_use(
         {
             "session_id": "sess-1",
@@ -1215,6 +1288,7 @@ def test_deny_path_returns_continue_false_with_stop_reason(tmp_path, monkeypatch
     # Audit trail: the appended receipt MUST carry a non-compliant verdict.
     # Inspect without verifying signature — we only care about chain semantics.
     import jwt as pyjwt
+
     claims = pyjwt.decode(lines[0].strip(), options={"verify_signature": False})
     assert claims.get("verdict") == "violation"
     assert claims.get("policy_decisions") == [
@@ -1234,6 +1308,7 @@ def test_post_tool_use_chains_to_pre_and_records_result_hash(tmp_path, monkeypat
 
     # First, run PreToolUse to seed the chain.
     from vibap.claude_code_hook import handle_pre_tool_use, handle_post_tool_use
+
     handle_pre_tool_use(
         {
             "tool_name": "Read",
@@ -1264,6 +1339,7 @@ def test_post_tool_use_chains_to_pre_and_records_result_hash(tmp_path, monkeypat
     # so that verify_chain can compare it directly against its own computed hash.
     import hashlib as _hashlib
     import jwt as pyjwt
+
     pre_jwt = lines[0].strip()
     post_jwt = lines[1].strip()
     expected_parent = _hashlib.sha256(pre_jwt.encode("utf-8")).hexdigest()
@@ -1301,14 +1377,22 @@ def test_main_pre_reads_stdin_writes_stdout(tmp_path, monkeypatch):
     env["VIBAP_HOME"] = str(tmp_path)
     env["ARDUR_CC_HOOK_DIR"] = str(tmp_path / "chain")
 
-    hook_input = json.dumps({
-        "tool_name": "Read",
-        "tool_input": {"file_path": "/tmp/x.txt"},
-    })
+    hook_input = json.dumps(
+        {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/x.txt"},
+        }
+    )
     repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
-        [sys.executable, "-m", "vibap.claude_code_hook", "pre",
-         "--keys-dir", str(tmp_path)],
+        [
+            sys.executable,
+            "-m",
+            "vibap.claude_code_hook",
+            "pre",
+            "--keys-dir",
+            str(tmp_path),
+        ],
         input=hook_input,
         capture_output=True,
         text=True,
@@ -1382,8 +1466,14 @@ def test_claude_code_hook_cli_returns_structured_input_error_next_steps(
         "configure_claude_code_protection",
         "rerun_with_hook_event_json_file",
     ]
-    assert "ardur protect claude-code --scope <your-project> --home <ardur-home>" in output_text
-    assert "ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>" in output_text
+    assert (
+        "ardur protect claude-code --scope <your-project> --home <ardur-home>"
+        in output_text
+    )
+    assert (
+        "ardur claude-code-hook pre --keys-dir <keys-dir> < <claude-code-hook-event-json-file>"
+        in output_text
+    )
     assert "Traceback" not in output_text
     assert stdin_payload not in output_text
     assert str(tmp_path) not in output_text
@@ -1418,7 +1508,9 @@ def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
     )
 
     def _local_should_not_run(*_args, **_kwargs):
-        raise AssertionError("local pre handler should not run when daemon returns output")
+        raise AssertionError(
+            "local pre handler should not run when daemon returns output"
+        )
 
     monkeypatch.setattr(hook_module, "handle_pre_tool_use", _local_should_not_run)
     output = hook_module._handle_pre_tool_use_daemon_first(
@@ -1455,14 +1547,19 @@ def test_pre_daemon_first_falls_back_when_daemon_unavailable(tmp_path, monkeypat
     assert observed == {"tool_name": "Read", "keys_dir": tmp_path}
 
 
-def test_pre_daemon_first_falls_back_when_daemon_output_is_malformed(tmp_path, monkeypatch):
+def test_pre_daemon_first_falls_back_when_daemon_output_is_malformed(
+    tmp_path, monkeypatch
+):
     from vibap import claude_code_daemon_client as daemon_client_module
     from vibap import claude_code_hook as hook_module
 
     monkeypatch.setattr(
         daemon_client_module,
         "dispatch_pre_tool_use",
-        lambda hook_input, *, keys_dir=None: {"ok": True, "output": {"not": "hook-output"}},
+        lambda hook_input, *, keys_dir=None: {
+            "ok": True,
+            "output": {"not": "hook-output"},
+        },
     )
 
     observed: dict[str, Any] = {}
@@ -1470,7 +1567,10 @@ def test_pre_daemon_first_falls_back_when_daemon_output_is_malformed(tmp_path, m
     def _local_fallback(hook_input, *, keys_dir=None):
         observed["tool_name"] = hook_input["tool_name"]
         observed["keys_dir"] = keys_dir
-        return {"continue": True, "systemMessage": "ardur: local fallback from malformed daemon output"}
+        return {
+            "continue": True,
+            "systemMessage": "ardur: local fallback from malformed daemon output",
+        }
 
     monkeypatch.setattr(hook_module, "handle_pre_tool_use", _local_fallback)
     output = hook_module._handle_pre_tool_use_daemon_first(
@@ -1494,7 +1594,9 @@ def test_claude_daemon_hook_import_topology_is_acyclic():
     edges: set[tuple[str, str]] = set()
 
     for module_name in modules:
-        tree = ast.parse((package_root / f"{module_name}.py").read_text(encoding="utf-8"))
+        tree = ast.parse(
+            (package_root / f"{module_name}.py").read_text(encoding="utf-8")
+        )
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom) or node.level != 1:
                 continue
@@ -1566,7 +1668,9 @@ def test_dispatch_pre_tool_use_rejects_malformed_ok_envelope(tmp_path, monkeypat
     from vibap import claude_code_daemon as daemon_module
 
     token, _ = _issue_test_passport(tmp_path)
-    socket_parent = Path(f"/tmp/ardur-daemon-malformed-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-daemon-malformed-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -1707,7 +1811,9 @@ def test_daemon_ignores_response_write_failures(tmp_path, monkeypatch):
     from vibap import claude_code_daemon as daemon_module
 
     token, _ = _issue_test_passport(tmp_path)
-    socket_parent = Path(f"/tmp/ardur-daemon-broken-pipe-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-daemon-broken-pipe-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
     monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
@@ -1789,7 +1895,9 @@ def test_daemon_unlinks_stale_unix_socket_path(tmp_path):
 
     # AF_UNIX paths are short on macOS, so use /tmp rather than pytest's deep
     # tmp_path for this socket-specific regression.
-    stale_path = Path(f"/tmp/ardur-stale-socket-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock")
+    stale_path = Path(
+        f"/tmp/ardur-stale-socket-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock"
+    )
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         server.bind(str(stale_path))
@@ -1812,7 +1920,9 @@ def test_daemon_cleanup_unlinks_stale_unix_socket_path(tmp_path):
 
     from vibap import claude_code_daemon as daemon_module
 
-    stale_path = Path(f"/tmp/ardur-stale-cleanup-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock")
+    stale_path = Path(
+        f"/tmp/ardur-stale-cleanup-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock"
+    )
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         server.bind(str(stale_path))
@@ -1837,7 +1947,9 @@ def test_daemon_socket_probe_treats_starting_listener_as_active(tmp_path):
 
     from vibap import claude_code_daemon as daemon_module
 
-    socket_path = Path(f"/tmp/ardur-starting-socket-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock")
+    socket_path = Path(
+        f"/tmp/ardur-starting-socket-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock"
+    )
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     observed = {"accepted": False}
     failures: list[Exception] = []
@@ -1879,7 +1991,9 @@ def test_daemon_creates_private_socket_parent_when_missing(tmp_path, monkeypatch
     from vibap import claude_code_daemon as daemon_module
 
     token, _ = _issue_test_passport(tmp_path)
-    socket_parent = Path(f"/tmp/ardur-daemon-private-created-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-daemon-private-created-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_path = socket_parent / "hook.sock"
     assert not socket_parent.exists()
 
@@ -1955,7 +2069,9 @@ def test_daemon_refuses_preexisting_shared_socket_parent_without_chmod(tmp_path)
 
     from vibap import claude_code_daemon as daemon_module
 
-    socket_path = Path(f"/tmp/ardur-daemon-shared-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock")
+    socket_path = Path(
+        f"/tmp/ardur-daemon-shared-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock"
+    )
     tmp_dir = Path("/tmp")
     original_mode = stat_module.S_IMODE(tmp_dir.stat().st_mode)
 
@@ -1992,7 +2108,9 @@ def test_daemon_refuses_to_replace_active_socket(tmp_path, monkeypatch):
     from vibap import claude_code_daemon as daemon_module
 
     token, _ = _issue_test_passport(tmp_path)
-    socket_parent = Path(f"/tmp/ardur-daemon-active-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-daemon-active-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2065,14 +2183,16 @@ def test_wrapper_accepts_native_client_env_alias_before_python_fallback(tmp_path
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-native-alias-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-wrapper-native-alias-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
     capture_path = tmp_path / "native-stdin.txt"
     native_client = tmp_path / "fake-native-client"
     native_client.write_text(
         "#!/usr/bin/env sh\n"
-        "cat > \"$ARDUR_NATIVE_ALIAS_CAPTURE\"\n"
+        'cat > "$ARDUR_NATIVE_ALIAS_CAPTURE"\n'
         "printf '{\"continue\":true}\\n'\n",
         encoding="utf-8",
     )
@@ -2122,7 +2242,6 @@ def test_wrapper_accepts_native_client_env_alias_before_python_fallback(tmp_path
             socket_parent.rmdir()
 
 
-
 def test_wrapper_accepts_pretty_printed_hook_json_when_daemon_disabled(tmp_path):
     import os
     import subprocess
@@ -2166,7 +2285,6 @@ def test_wrapper_accepts_pretty_printed_hook_json_when_daemon_disabled(tmp_path)
     assert output["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
 
 
-
 def test_wrapper_falls_back_when_daemon_returns_error_payload(tmp_path):
     import os
     import socket
@@ -2181,11 +2299,15 @@ def test_wrapper_falls_back_when_daemon_returns_error_payload(tmp_path):
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-error-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-wrapper-error-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2210,7 +2332,9 @@ def test_wrapper_falls_back_when_daemon_returns_error_payload(tmp_path):
                     with conn:
                         _ = conn.recv(8192)
                         observed["requests"] += 1
-                        conn.sendall(b'{"ok":false,"error":"simulated daemon failure"}\\n')
+                        conn.sendall(
+                            b'{"ok":false,"error":"simulated daemon failure"}\\n'
+                        )
         except Exception as exc:  # pragma: no cover - surfaced via assertion
             failures.append(exc)
 
@@ -2292,11 +2416,15 @@ def test_wrapper_and_python_fallback_rejects_malformed_pretooluse_shape(
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-invalid-output-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-wrapper-invalid-output-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2388,20 +2516,29 @@ def test_native_pre_tool_use_client_rejects_truncated_ok_envelope(tmp_path):
 
     from vibap import claude_code_daemon as daemon_module
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
     # Exercise the installed non-force path: legacy installs can predate current
     # source and miss provenance metadata. Removing the stamp here ensures this
     # test covers reinstalling a stale/unstamped command before probe execution.
-    command_stamp = native_pre_tool_use_command.parent / f"{native_pre_tool_use_command.name}.sha256"
+    command_stamp = (
+        native_pre_tool_use_command.parent
+        / f"{native_pre_tool_use_command.name}.sha256"
+    )
     if command_stamp.exists():
         command_stamp.unlink()
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=False)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=False
+    )
     assert native_pre_tool_use_command is not None
 
-    socket_parent = Path(f"/tmp/ardur-native-malformed-envelope-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-native-malformed-envelope-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2463,7 +2600,9 @@ def test_native_pre_tool_use_client_rejects_truncated_ok_envelope(tmp_path):
             socket_parent.rmdir()
 
 
-def test_native_pre_tool_use_client_rejects_spaced_false_ok_envelope_with_hook_output(tmp_path):
+def test_native_pre_tool_use_client_rejects_spaced_false_ok_envelope_with_hook_output(
+    tmp_path,
+):
     import os
     import socket
     import subprocess
@@ -2472,11 +2611,15 @@ def test_native_pre_tool_use_client_rejects_spaced_false_ok_envelope_with_hook_o
 
     from vibap import claude_code_daemon as daemon_module
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
-    socket_parent = Path(f"/tmp/ardur-native-spaced-ok-false-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-native-spaced-ok-false-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2538,14 +2681,21 @@ def test_native_pre_tool_use_client_rejects_spaced_false_ok_envelope_with_hook_o
             socket_parent.rmdir()
 
 
-def test_install_native_pre_tool_use_command_rebuilds_tampered_executable_with_intact_stamp(tmp_path):
+def test_install_native_pre_tool_use_command_rebuilds_tampered_executable_with_intact_stamp(
+    tmp_path,
+):
     from vibap import claude_code_daemon as daemon_module
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
-    command_stamp = native_pre_tool_use_command.parent / f"{native_pre_tool_use_command.name}.sha256"
+    command_stamp = (
+        native_pre_tool_use_command.parent
+        / f"{native_pre_tool_use_command.name}.sha256"
+    )
     assert command_stamp.exists()
 
     tampered = b"#!/bin/sh\necho tampered\n"
@@ -2553,14 +2703,17 @@ def test_install_native_pre_tool_use_command_rebuilds_tampered_executable_with_i
     native_pre_tool_use_command.chmod(0o700)
     assert native_pre_tool_use_command.read_bytes() == tampered
 
-    rebuilt = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=False)
+    rebuilt = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=False
+    )
     assert rebuilt is not None
     assert rebuilt == native_pre_tool_use_command
     assert native_pre_tool_use_command.read_bytes() != tampered
 
 
-
-def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelope(tmp_path):
+def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelope(
+    tmp_path,
+):
     import os
     import socket
     import subprocess
@@ -2574,18 +2727,27 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelop
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
     # Ensure wrapper coverage uses the installed command refresh path as well.
-    command_stamp = native_pre_tool_use_command.parent / f"{native_pre_tool_use_command.name}.sha256"
+    command_stamp = (
+        native_pre_tool_use_command.parent
+        / f"{native_pre_tool_use_command.name}.sha256"
+    )
     if command_stamp.exists():
         command_stamp.unlink()
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=False)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=False
+    )
     assert native_pre_tool_use_command is not None
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-truncated-envelope-deny-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-wrapper-truncated-envelope-deny-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2661,7 +2823,9 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelop
 
         output = json.loads(result.stdout)
         assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "ardur:" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        assert (
+            "ardur:" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        )
     finally:
         if socket_path.exists():
             socket_path.unlink()
@@ -2669,7 +2833,9 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelop
             socket_parent.rmdir()
 
 
-def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_envelope(tmp_path):
+def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_envelope(
+    tmp_path,
+):
     import os
     import socket
     import subprocess
@@ -2683,11 +2849,15 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_enve
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-spaced-ok-false-deny-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-wrapper-spaced-ok-false-deny-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2763,7 +2933,9 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_enve
 
         output = json.loads(result.stdout)
         assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "ardur:" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        assert (
+            "ardur:" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        )
     finally:
         if socket_path.exists():
             socket_path.unlink()
@@ -2771,7 +2943,9 @@ def test_wrapper_local_fallback_denies_forbidden_tool_after_spaced_false_ok_enve
             socket_parent.rmdir()
 
 
-def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daemon_output(tmp_path):
+def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daemon_output(
+    tmp_path,
+):
     import os
     import socket
     import subprocess
@@ -2785,11 +2959,15 @@ def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daem
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
 
-    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(home=tmp_path, force=True)
+    native_pre_tool_use_command = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
     if native_pre_tool_use_command is None:
         pytest.xfail("native PreToolUse daemon client could not be built on this host")
 
-    socket_parent = Path(f"/tmp/ardur-wrapper-malformed-deny-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    socket_parent = Path(
+        f"/tmp/ardur-wrapper-malformed-deny-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -2864,7 +3042,9 @@ def test_wrapper_local_fallback_still_denies_forbidden_tool_after_malformed_daem
 
         output = json.loads(result.stdout)
         assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "ardur:" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        assert (
+            "ardur:" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+        )
     finally:
         if socket_path.exists():
             socket_path.unlink()
@@ -2965,22 +3145,49 @@ def test_three_call_session_chain_verifies(tmp_path, monkeypatch):
     from vibap.claude_code_hook import handle_pre_tool_use, handle_post_tool_use
 
     # Call 1: Read (allowed) — pre + post.
-    handle_pre_tool_use({"tool_name": "Read", "tool_input": {"file_path": "/tmp/a.txt"}}, keys_dir=tmp_path)
-    handle_post_tool_use({"tool_name": "Read", "tool_input": {"file_path": "/tmp/a.txt"}, "tool_response": {"content": "a", "exit_code": 0}}, keys_dir=tmp_path)
+    handle_pre_tool_use(
+        {"tool_name": "Read", "tool_input": {"file_path": "/tmp/a.txt"}},
+        keys_dir=tmp_path,
+    )
+    handle_post_tool_use(
+        {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/a.txt"},
+            "tool_response": {"content": "a", "exit_code": 0},
+        },
+        keys_dir=tmp_path,
+    )
 
     # Call 2: Bash (denied) — pre only (post never fires when blocked).
-    out = handle_pre_tool_use({"tool_name": "Bash", "tool_input": {"command": "echo hi"}}, keys_dir=tmp_path)
+    out = handle_pre_tool_use(
+        {"tool_name": "Bash", "tool_input": {"command": "echo hi"}}, keys_dir=tmp_path
+    )
     assert "ardur:" in _deny_reason(out).lower()
 
     # Call 3: Read (allowed) — pre + post.
-    handle_pre_tool_use({"tool_name": "Read", "tool_input": {"file_path": "/tmp/b.txt"}}, keys_dir=tmp_path)
-    handle_post_tool_use({"tool_name": "Read", "tool_input": {"file_path": "/tmp/b.txt"}, "tool_response": {"content": "b", "exit_code": 0}}, keys_dir=tmp_path)
+    handle_pre_tool_use(
+        {"tool_name": "Read", "tool_input": {"file_path": "/tmp/b.txt"}},
+        keys_dir=tmp_path,
+    )
+    handle_post_tool_use(
+        {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/b.txt"},
+            "tool_response": {"content": "b", "exit_code": 0},
+        },
+        keys_dir=tmp_path,
+    )
 
     receipts = list((tmp_path / "chain").rglob("receipts.jsonl"))
     assert len(receipts) == 1
-    lines = [l.strip() for l in receipts[0].read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [
+        line.strip()
+        for line in receipts[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     # 5 entries: Pre1 + Post1 + Deny2 + Pre3 + Post3
     assert len(lines) == 5
 
     from vibap.receipt import verify_chain
+
     verify_chain(lines, public_key)  # raises ReceiptChainError if chain is broken

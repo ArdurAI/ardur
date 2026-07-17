@@ -25,7 +25,7 @@
     },
     "legacy_python_passport": {
       "contract": "python/vibap/passport.py",
-      "scope": "JWT mission-passport claims emitted by issue_passport plus derive_child_passport lineage extensions."
+      "scope": "JWT mission-passport claims emitted by issue_passport plus derive_child_passport lineage extensions, including explicit inventory of runtime-only claims that the current DRP profile must reject."
     },
     "execution_receipt_v0.2": {
       "contract": "docs/specs/execution-receipt-v0.2.schema.json",
@@ -96,6 +96,7 @@
     "child_time_window_contained": "A child notBefore MUST be no earlier than its parent and child notAfter MUST be no later.",
     "widening_rejected": "Tools, resources, argument constraints, budgets, time, and delegation depth MUST never widen.",
     "unknown_critical_extension_rejected": "A verifier that does not understand every path listed in metadata.x-ardur.critical MUST DENY and MUST NOT downgrade to base DRP authorization.",
+    "unprojected_risk_budget_rejected": "A source credential carrying risk_budget MUST NOT be emitted or verified by this profile because typed contract and multi-scope ledger semantics are not implemented; dropping the claim is forbidden.",
     "tri_state_extension": "Ardur insufficient_evidence MUST project to DRP DENY while remaining distinguishable in the signed extension.",
     "no_redelegation": "redelegation.mode=none MUST prohibit creation of any sub-receipt.",
     "bounded_redelegation": "redelegation.mode=bounded MUST require depth below maxDepth and child maxDepth no greater than the parent.",
@@ -520,6 +521,13 @@
       "classification": "extension",
       "drp_path": "metadata.x-ardur.policy.additional",
       "rationale": "Policy engine references and digests remain critical extensions."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "risk_budget",
+      "classification": "out_of_scope",
+      "drp_path": null,
+      "rationale": "The Python runtime enforces typed contract digests and atomic session, agent, and lineage risk accounting, but the current DRP emitter/verifier does not. Input carrying this claim must fail closed rather than drop authority-narrowing semantics."
     },
     {
       "source_surface": "legacy_python_passport",

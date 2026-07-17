@@ -23,3 +23,4 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`kernel-capture-daemon.md`](/__ardur_internal__/source/docs/reference/kernel-capture-daemon/)
 - [`personal-hub-api.md`](/__ardur_internal__/source/docs/reference/personal-hub-api/)
 - [`proxy-oci-image.md`](/__ardur_internal__/source/docs/reference/proxy-oci-image/)
+- [`risk-budgets.md`](/__ardur_internal__/source/docs/reference/risk-budgets/)

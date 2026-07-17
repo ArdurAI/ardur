@@ -48,6 +48,7 @@ conformance designation.
 | Strict scope attenuation | `supported` | Every child effective allowed-action set must be a strict proper subset; signed widening denies. |
 | No and bounded re-delegation | `extension` | `metadata.x-ardur.redelegation` carries mode, depth, and maximum depth because draft-10 does not serialize all of them. |
 | Resource, argument, cwd, and budget attenuation | `extension` | Critical Ardur fields are verified transitively and against the concrete requested action. Unknown critical fields deny. |
+| Typed dangerous-action risk budgets | `not-yet` | The Python Mission Passport/runtime supports `risk_budget`, but this DRP emitter/verifier does not project its contract digest, typed facts, or multi-scope ledger. Input carrying the claim must fail closed; no DRP compatibility is claimed. |
 | Operator instruction commitment | `supported` | Signed text/hash are compared with current externally supplied instructions. |
 | Tool schema commitment | `partial` | A finite tool-universe digest is verified. Broader model/provider state attestation is not implemented here. |
 | Delegation-log policy | `partial` | Signed backend/subject policy and preverified inclusion facts are required. Raw RFC 3161 response parsing and trust validation are not implemented by this module. |

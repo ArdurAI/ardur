@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "0a48e07a21ab40fc4ca976c4f4fb2d003efb77730ee0d7238777256454843e65"
+source_sha256: "0a4ebde09be93448f7944ebb9e61541967941d4e2c9c6d9fced4f1db063c4acf"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -211,12 +211,26 @@ python/
 │   ├── policy_backend.py        # PolicyBackend protocol
 │   ├── proxy.py                 # Governance proxy + session lifecycle
 │   ├── receipt.py               # Execution Receipt issuance + verify
+│   ├── risk_budget.py           # Typed impact contracts + atomic risk ledger
 │   ├── runtime_evidence.py      # Offline normalized/Tetragon/Falco correlation
 │   └── ...
 └── tests/                  # Curated runtime, adapter, security, and release tests
 ```
 
 A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+
+## Typed dangerous-action budgets
+
+Library callers can register authenticated `ToolRiskContract` definitions
+before constructing `GovernanceProxy`. An optional signed `risk_budget`
+Mission Passport claim then enforces typed per-action caps and atomic
+session/agent/lineage ceilings before dispatch. Each governed call requires a
+unique `risk_request_id`; after `PERMIT`, the executor must call
+`record_risk_outcome(..., outcome="committed")` once execution may have
+started, or use `outcome="released"` only when it never started. Unresolved or
+quarantined reservations block session finalization. See the full
+[risk-budget reference](/__ardur_internal__/source/docs/reference/risk-budgets/) for schemas,
+failure behavior, privacy, and cost boundaries.
 
 Library deployments that enable Biscuit JWT-SVID holder binding configure a
 server-owned Biscuit issuer key, `TrustBundle`, and expected audience on

@@ -10,6 +10,7 @@ import os
 import stat
 import sys
 import time
+import uuid
 import unicodedata
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -231,7 +232,7 @@ def _evaluate_delegation_scenario(
         parent,
         private_key,
         ttl_s=300,
-        extra_claims={"jti": str(claims["jti"])},
+        jti_override=str(uuid.uuid5(uuid.NAMESPACE_URL, str(claims["jti"]))),
     )
     try:
         derive_child_passport(
