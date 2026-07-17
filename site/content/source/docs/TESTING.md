@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "330d9522a5d47a28e43be71088afc8f5a8111b9121c4852c240f934b79014c34"
+source_sha256: "1e2831af42ca865d13e1238028e56b672da9a842b2ecb5c671ef06d03f6d3108"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -177,6 +177,11 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
   directories unless a test explicitly directs output elsewhere. Coverage data
   and the uploaded XML report are written to the GitHub runner temp directory.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
+- **Windows portability compile**: the Go job also cross-compiles
+  `pkg/kernelcapture`, `ardur-kernelcaptured`, and the agent-recognition
+  benchmark command for `windows/amd64` without executing them. This guards
+  portable import boundaries; it does not claim Windows kernel capture or
+  enforcement support.
 - **Demo stack smoke**: starts the exact `make demo` target from fresh Compose
   volumes in detached/wait mode, then runs `scripts/verify-mvp.sh`. The job
   requires healthy public endpoints, authenticated issue/start, one `PERMIT`,
