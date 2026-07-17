@@ -52,7 +52,9 @@ from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
+    HUB_TLS_MATERIAL_INVALID_CONDITION,
     HubError,
+    HubTLSConfigurationError,
     SETUP_HOME_INVALID_CONDITION,
     desktop_observe,
     doctor_personal,
@@ -781,6 +783,50 @@ def _hub_host_failure_exit_code(host: str) -> int | None:
         _print_json(_hub_host_failure_response())
         return 1
     return None
+
+
+def _hub_tls_material_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_readable_hub_tls_files",
+            "command": (
+                "ardur hub --host <loopback-host> --port <port> --home <ardur-home> "
+                "--tls-cert <tls-cert.pem> --tls-key <tls-key.pem>"
+            ),
+            "detail": (
+                "When providing explicit Hub TLS material, use an existing certificate "
+                "and matching private-key file. Keep raw paths, tokens, and key material "
+                "out of shared logs."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "use_hub_auto_tls_or_explicit_no_tls",
+            "command": "ardur hub --host <loopback-host> --port <port> --home <ardur-home>",
+            "detail": (
+                "Omit --tls-cert/--tls-key to create local self-signed TLS, or add "
+                "--no-tls only when plain loopback HTTP is explicitly intended. "
+                "Environment variables alone cannot authorize a TLS downgrade."
+            ),
+        },
+    ]
+
+
+def _hub_tls_material_failure_response() -> dict:
+    condition = HUB_TLS_MATERIAL_INVALID_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur Personal Hub TLS material is invalid.",
+        "detail": (
+            "TLS remains enabled unless --no-tls is explicitly supplied. Explicit "
+            "certificate and key values must identify a usable matching pair."
+        ),
+        "next_steps": _hub_tls_material_failure_next_steps(condition),
+    }
 
 
 def _start_tls_material_failure_condition() -> str:
@@ -3177,6 +3223,9 @@ def cmd_hub(args: argparse.Namespace) -> int:
             tls_key=args.tls_key,
             no_tls=args.no_tls,
         )
+    except HubTLSConfigurationError:
+        _print_json(_hub_tls_material_failure_response())
+        return 1
     except HubError as exc:
         return _path_failure_exit_code(exc)
     return 0
