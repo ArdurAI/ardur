@@ -2,7 +2,7 @@
 title: "Known Limitations"
 description: "This page distinguishes documented product boundaries from implementation bugs."
 source_path: "docs/known-limitations.md"
-source_sha256: "12c3bd4b2f90ec65e0f4f6d13937515ef0f1e6937d0dfd88607ea4b1c1624de8"
+source_sha256: "1b12458b1dfbdb486470bb3521ac5518288b4a87869b5919d370f44074f795c1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["limitation"]
@@ -200,7 +200,7 @@ The full set of bounded-iat surfaces is now:
 - `vibap.attestation.verify_attestation` (round-4 FIX-R4-3)
 - `vibap.spiffe_identity.verify_jwt_svid` (round-4 FIX-R4-4)
 - `vibap.memory.GovernedMemoryStore.read` (round-5 FIX-R5-M3)
-- `vibap.tool_response_provenance.verify_tool_response_envelope` (round-5 FIX-R5-M4; uses tighter ±60s future window for short-lived tokens)
+- `vibap.tool_response_provenance.verify_envelope` (round-5 FIX-R5-M4; uses tighter ±60s future window for short-lived tokens)
 
 **Python parallel-format / non-JWT verifiers:**
 - `vibap.biscuit_passport.verify_biscuit_passport` (round-4 FIX-R4-1; round-5 FIX-R5-H5 walks every block, not just leaf)
@@ -270,42 +270,32 @@ sidecar today. Production deployments MUST configure one. This is
 documented here as a known limitation rather than a code-level fix
 because the right answer is deployment-environment-specific.
 
-## Bearer-token authentication on Go control-plane services (2026-04-29 round-5)
+## Python proxy bearer authentication is a shared-secret boundary
 
-Round-4 audit flagged that the Go Authority and Governor HTTP services
-were unauthenticated — anyone with network reach could mint credentials
-or ingest fabricated governance events. Round-5 closes both:
+The public tree does not ship the Go Authority or Governor HTTP services
+described by earlier audit-round documentation. The shipped HTTP control plane
+is `vibap.proxy.serve_proxy`. It requires authentication by default on every
+endpoint except `/health`, `/healthz`, and `/.well-known/jwks.json`.
 
-- `go/cmd/authority`: `/sign` and `/status` require
-  `Authorization: Bearer <authority-token>` matching `ARDUR_AUTHORITY_TOKEN`
-  (≥32 bytes). The binary refuses to start unless the token is set or
-  `--no-require-auth` is passed for explicit local-dev opt-out. Public
-  endpoints (`/attestation`, `/public-key`, `/healthz`) remain
-  unauthenticated since they advertise the trust anchor.
-- `go/pkg/governance.NewHandlerWithAuth` wires every `/v1/*` route
-  through a constant-time bearer-check. `cmd/governor/main.go` reads
-  `ARDUR_GOVERNOR_TOKEN` from env; `Validate()` refuses to start
-  without it (or without explicit `ARDUR_GOVERNOR_NO_REQUIRE_AUTH=1`
-  opt-out). `/healthz` and `/readyz` stay public for K8s probes.
+`VIBAP_API_TOKEN` takes precedence over the `--api-token` argument. When neither
+is supplied, the proxy generates a random 32-byte token. Expected and presented
+tokens are stripped at their entry points, the bearer scheme is accepted
+case-insensitively, and `vibap.proxy._api_token_compare_material` converts both
+values to equal-length material before `hmac.compare_digest` compares them. An
+explicit `--no-require-auth` remains available only for trusted local
+development.
 
-Both services use `crypto/subtle.ConstantTimeCompare` to defeat timing
-side-channel inference of the token. **Round-7+ also SHA-256-normalizes
-both presented and expected tokens before the constant-time compare**
-(`sha256.Sum256(token)` on each side, comparison over the 32-byte
-digests) — this defeats the length oracle that
-`subtle.ConstantTimeCompare` short-circuits on length-mismatched
-inputs. The Python proxy's `hmac.compare_digest` path does the same
-SHA-256 normalization. Production deployments SHOULD also front the
-services with mTLS at the ingress / service-mesh layer for
-defense-in-depth.
-
-Operator-supplied bearer tokens are `strings.TrimSpace`-ed (Go) /
-`.strip()`-ed (Python) at every entry point — env vars
-(`ARDUR_AUTHORITY_TOKEN`, `ARDUR_GOVERNOR_TOKEN`, `VIBAP_API_TOKEN`)
-and CLI args (`--api-token`) — so YAML-quoted secrets with leading
-or trailing whitespace authenticate correctly without operator
-debugging time. The bearer-scheme parse is RFC 9110-compliant
-case-insensitive (`Bearer`, `bearer`, `BEARER` all accepted).
+This is one process-wide bearer secret, not per-client identity or delegated
+authorization. The proxy does not assign client-specific scopes or expiry, and
+rotation requires restarting it with a new token. Any party holding the token
+can call every protected endpoint. Protect it in storage and in transit: bearer
+possession alone grants access, as defined by
+[RFC 6750](https://www.rfc-editor.org/rfc/rfc6750.html#section-1.2), and the RFC
+requires transport confidentiality. Ardur enables TLS by default; do not use
+`--no-tls` across an untrusted network. Python also documents that different
+input lengths can expose length information even when using
+[`hmac.compare_digest`](https://docs.python.org/3/library/hmac.html#hmac.compare_digest),
+which is why Ardur compares fixed-width material.
 
 ## `_pinned_urlopen` semantics (2026-04-28 round-3)
 
@@ -322,7 +312,8 @@ error.
 
 ## AAT proof-of-possession default (2026-04-28 hardening)
 
-`material_from_aat_grant` and `GovernanceProxy.start_session_from_aat`
+`vibap.aat_adapter.material_from_aat_grant` and
+`vibap.proxy.GovernanceProxy.start_session_from_aat`
 default to `require_pop=True`. A cnf-bearing AAT presented without
 `holder_public_key` + `kb_jwt` now fails closed. Bearer-mode AATs
 (no `cnf` claim) continue to be accepted; library callers that
