@@ -228,13 +228,65 @@ def test_explicit_valid_hub_tls_pair_serves_real_https(tmp_path: Path) -> None:
     assert "TLS disabled" not in stderr
 
 
+def test_tilde_relative_hub_tls_pair_serves_real_https(tmp_path: Path) -> None:
+    # A valid but ``~``-relative pair must not be rejected. The startup check
+    # expands ``~`` while ``resolve_tls_paths`` does not, so passing the raw
+    # path downstream failed closed on a perfectly good cert and echoed the
+    # raw path to stderr.
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    key_path, cert_path, _fingerprint = generate_self_signed_cert(fake_home / "hub-tls")
+    environment = _hub_environment()
+    environment["HOME"] = str(fake_home)
+
+    port = _free_port()
+    process = subprocess.Popen(
+        _hub_command(
+            tmp_path,
+            port,
+            "--tls-cert",
+            f"~/hub-tls/{cert_path.name}",
+            "--tls-key",
+            f"~/hub-tls/{key_path.name}",
+        ),
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        assert (
+            _wait_for_health(
+                process,
+                f"https://127.0.0.1:{port}/health",
+                context=context,
+            )
+            == 200
+        )
+    finally:
+        _stdout, stderr = _stop_process(process)
+
+    assert "cert fingerprint" in stderr
+    assert "TLS disabled" not in stderr
+    # The un-expanded path must never reach the operator-facing error path.
+    assert "TLS cert not found" not in stderr
+
+
 def test_existing_but_invalid_hub_tls_pair_fails_before_bind(
     tmp_path: Path,
 ) -> None:
     cert_path = tmp_path / "invalid-cert.pem"
     key_path = tmp_path / "invalid-key.pem"
-    cert_path.write_text("not a certificate", encoding="utf-8")
-    key_path.write_text("not a private key", encoding="utf-8")
+    # Distinctive sentinels so the redaction assertions below cannot pass by
+    # coincidence on generic text.
+    cert_body = "not-a-certificate-CERTSENTINEL"
+    key_body = "not-a-private-key-KEYSENTINEL"
+    cert_path.write_text(cert_body, encoding="utf-8")
+    key_path.write_text(key_body, encoding="utf-8")
     port = _free_port()
     result = subprocess.run(
         _hub_command(
@@ -258,7 +310,13 @@ def test_existing_but_invalid_hub_tls_pair_fails_before_bind(
     payload = json.loads(result.stdout)
     assert payload["condition"] == "hub_tls_material_invalid"
     assert "Traceback" not in result.stdout
+    # Redaction must cover more than the containing directory: the bare
+    # filenames and the supplied material itself must not leak either.
     assert str(tmp_path) not in result.stdout
+    assert cert_path.name not in result.stdout
+    assert key_path.name not in result.stdout
+    assert cert_body not in result.stdout
+    assert key_body not in result.stdout
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as replacement:
         replacement.bind(("127.0.0.1", port))
 

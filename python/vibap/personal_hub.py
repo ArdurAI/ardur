@@ -1606,11 +1606,14 @@ def serve_hub(
         try:
             if (tls_cert is None) != (tls_key is None):
                 raise HubTLSConfigurationError()
+            # Expand once and pass the SAME resolved paths downstream.
+            # ``resolve_tls_paths`` does not expand ``~`` itself, so checking an
+            # expanded path here and then handing it the raw one would reject a
+            # valid ``~/cert.pem`` pair and echo the raw path to stderr.
             if tls_cert is not None and tls_key is not None:
-                if (
-                    not Path(tls_cert).expanduser().is_file()
-                    or not Path(tls_key).expanduser().is_file()
-                ):
+                tls_cert = Path(tls_cert).expanduser()
+                tls_key = Path(tls_key).expanduser()
+                if not tls_cert.is_file() or not tls_key.is_file():
                     raise HubTLSConfigurationError()
             tls_result = resolve_tls_paths(
                 tls_cert,
