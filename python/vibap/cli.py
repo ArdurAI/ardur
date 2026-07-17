@@ -4284,7 +4284,8 @@ def claude_code_doctor(
     plugin_dir: Path | None = None, home: Path | None = None
 ) -> dict[str, object]:
     plugin = (plugin_dir or _default_claude_plugin_dir()).expanduser().resolve()
-    checks = _claude_code_plugin_checks(plugin)
+    plugin_checks = _claude_code_plugin_checks(plugin)
+    checks = list(plugin_checks)
     claude_binary = shutil.which("claude")
     checks.append(
         {
@@ -4305,7 +4306,7 @@ def claude_code_doctor(
             "detail": f"expected file at {_ARDUR_HOME_PLACEHOLDER}/active_mission.jwt",
         }
     )
-    if claude_binary and all(check["ok"] for check in checks[:5]):
+    if claude_binary and all(check["ok"] for check in plugin_checks):
         result = subprocess.run(
             [claude_binary, "plugin", "validate", str(plugin)],
             capture_output=True,

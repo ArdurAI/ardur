@@ -2182,7 +2182,7 @@ class GovernanceProxy:
         # When any path falls through to a DEFAULT_HOME-derived default,
         # materialise the home with 0o700 before we start creating state
         # directories inside it.
-        if log_path is None or state_dir is None or receipts_log_path is None:
+        if log_path is None or state_dir is None:
             _ensure_default_home_dir()
         self._ensure_private_state_directory(self.state_dir, label="state_dir")
         self.sessions_dir = self.state_dir / "sessions"

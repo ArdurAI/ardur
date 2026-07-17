@@ -33,6 +33,24 @@ def _default_tls_dir(home: Path | None = None) -> Path:
     return (home or DEFAULT_HOME) / "tls"
 
 
+def _certificate_identity(hostname: str) -> tuple[str, x509.GeneralName]:
+    """Return a usable certificate identity and its matching SAN value."""
+
+    identity = hostname.strip()
+    if not identity:
+        raise ValueError("certificate identity must not be empty")
+
+    try:
+        address = ipaddress.ip_address(identity)
+    except ValueError:
+        return identity, x509.DNSName(identity)
+
+    # A wildcard bind address is not an identity that a client can verify.
+    if address.is_unspecified:
+        return "localhost", x509.DNSName("localhost")
+    return identity, x509.IPAddress(address)
+
+
 def generate_self_signed_cert(
     tls_dir: Path,
     *,
@@ -42,6 +60,8 @@ def generate_self_signed_cert(
 ) -> tuple[Path, Path, str]:
     """Generate a self-signed EC P-256 cert with a SHA-256 fingerprint."""
     from .passport import _ensure_default_home_dir, _is_under_default_home
+
+    certificate_identity, subject_alternative_name = _certificate_identity(hostname)
 
     # When tls_dir is under DEFAULT_HOME, materialise the home with 0o700
     # first so the mkdir(parents=True) doesn't create it with the process umask.
@@ -65,7 +85,7 @@ def generate_self_signed_cert(
     key_path.write_bytes(key_pem)
     key_path.chmod(0o600)
 
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, certificate_identity)])
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -80,9 +100,7 @@ def generate_self_signed_cert(
         )
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
-            x509.SubjectAlternativeName(
-                [x509.IPAddress(ipaddress.IPv4Address(hostname))]
-            ),
+            x509.SubjectAlternativeName([subject_alternative_name]),
             critical=False,
         )
         .sign(private_key, hashes.SHA256())
@@ -135,10 +153,14 @@ def resolve_tls_paths(
 
     if not tls_cert and not tls_key and not no_tls:
         tls_dir = _default_tls_dir(home)
+        certificate_identity, _ = _certificate_identity(hostname)
         key_path, cert_path, fingerprint = generate_self_signed_cert(
-            tls_dir, hostname=hostname
+            tls_dir, hostname=certificate_identity
         )
-        print(f"[tls] auto-generated self-signed cert for {hostname}", file=sys.stderr)
+        print(
+            f"[tls] auto-generated self-signed cert for {certificate_identity}",
+            file=sys.stderr,
+        )
         print(f"[tls] fingerprint: {fingerprint}", file=sys.stderr)
         return cert_path, key_path, fingerprint
 
