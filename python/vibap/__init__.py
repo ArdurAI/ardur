@@ -16,6 +16,16 @@ from .drp import (
     verify_drp_chain,
 )
 from .mission import MissionCache, MissionDeclaration, load_mission_declaration
+from .governed_subagent import (
+    GovernedSubagentAdapter,
+    GovernedSubagentCloseResult,
+    GovernedSubagentConflictError,
+    GovernedSubagentError,
+    GovernedSubagentHandle,
+    GovernedSubagentRecovery,
+    GovernedSubagentRequest,
+    GovernedToolResult,
+)
 from .passport import (
     ALGORITHM,
     DEFAULT_AUDIENCE,
@@ -29,6 +39,14 @@ from .passport import (
 )
 from .proxy import Decision, GovernanceProxy, GovernanceSession, PolicyEvent
 from .receipt import ExecutionReceipt, build_receipt, sign_receipt, verify_receipt
+from .risk_budget import (
+    FileRiskBudgetLedger,
+    RiskBudgetError,
+    ToolRiskContract,
+    ToolRiskRegistry,
+    attenuate_risk_budget,
+    normalize_risk_budget,
+)
 
 __all__ = [
     "ALGORITHM",
@@ -44,12 +62,25 @@ __all__ = [
     "DRPVerifiedReceiptChainEvidence",
     "DRPVerifiedRevocationEvidence",
     "ExecutionReceipt",
+    "FileRiskBudgetLedger",
     "GovernanceProxy",
     "GovernanceSession",
+    "GovernedSubagentAdapter",
+    "GovernedSubagentCloseResult",
+    "GovernedSubagentConflictError",
+    "GovernedSubagentError",
+    "GovernedSubagentHandle",
+    "GovernedSubagentRecovery",
+    "GovernedSubagentRequest",
+    "GovernedToolResult",
     "MissionPassport",
     "MissionCache",
     "MissionDeclaration",
     "PolicyEvent",
+    "RiskBudgetError",
+    "ToolRiskContract",
+    "ToolRiskRegistry",
+    "attenuate_risk_budget",
     "build_receipt",
     "compute_log_digest",
     "derive_child_passport",
@@ -59,6 +90,7 @@ __all__ = [
     "issue_passport",
     "load_mission_declaration",
     "load_mission_file",
+    "normalize_risk_budget",
     "sign_receipt",
     "tool_universe_digest",
     "validate_drp_receipt",

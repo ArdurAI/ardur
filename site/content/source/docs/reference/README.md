@@ -2,7 +2,7 @@
 title: "Technical Reference"
 description: "Flat technical reference pages for the public Ardur surface. These describe"
 source_path: "docs/reference/README.md"
-source_sha256: "21c273bfe22e8db42fea61b7c7799ba85db7ec33df09dac6616673563d41c815"
+source_sha256: "890c549127f99894fb685df657a03a2fb0eb5dd297ebd2c8ba549178ceb7ca28"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -39,12 +39,24 @@ walkthroughs see [`../guides/`](/__ardur_internal__/source/docs/guides/); for pr
 - [Advisory AI Controls](/__ardur_internal__/source/docs/reference/advisory-ai-controls/) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Typed Dangerous-Action Risk Budgets](/__ardur_internal__/source/docs/reference/risk-budgets/) — authenticated tool
+  contracts, signed impact caps, atomic session/agent/lineage accounting,
+  executor outcomes, receipts, and crash recovery
+- [Agent Recognition Evaluation](/__ardur_internal__/source/docs/reference/agent-recognition-evaluation/) — versioned
+  maintained corpus, deterministic metrics, Wilson intervals, CI thresholds,
+  and claim boundaries
 
 ## When To Update These Pages
 
 These pages mirror the public source. When the underlying surface changes
 (`python/vibap/cli.py`, `python/vibap/personal_hub.py`,
 `python/vibap/ardur_profile.py`, `go/cmd/ardur-kernelcaptured`,
+`go/cmd/ardur-agent-recognition-eval`,
+`go/pkg/kernelcapture/agent_recognition.go`,
+`go/pkg/kernelcapture/agent_recognition_evaluation.go`,
+`go/pkg/kernelcapture/testdata/agent_recognition_corpus.json`,
+`go/pkg/kernelcapture/testdata/agent_recognition_thresholds.json`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
+`python/vibap/risk_budget.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.

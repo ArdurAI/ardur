@@ -23,6 +23,16 @@ type processExecArdurExecutableBasenameKey struct {
 	Name [64]int8
 }
 
+type processExecArdurLauncherExecState struct {
+	_           structs.HostLayout
+	Inode       uint64
+	MountId     uint64
+	DeviceMajor uint32
+	DeviceMinor uint32
+	LinkCount   uint32
+	Pad         uint32
+}
+
 // Names of all BPF objects in the ELF.
 //
 // Used for safe lookups in a Collection or CollectionSpec.
@@ -30,6 +40,7 @@ const (
 	processExecMapAllowedCgroups                 = "allowed_cgroups"
 	processExecMapEvents                         = "events"
 	processExecMapFilterControl                  = "filter_control"
+	processExecMapLauncherExecState              = "launcher_exec_state"
 	processExecMapLifecycleEventsDropped         = "lifecycle_events_dropped"
 	processExecMapRecognitionComms               = "recognition_comms"
 	processExecMapRecognitionControl             = "recognition_control"
@@ -91,6 +102,7 @@ type processExecMapSpecs struct {
 	AllowedCgroups                 *ebpf.MapSpec `ebpf:"allowed_cgroups"`
 	Events                         *ebpf.MapSpec `ebpf:"events"`
 	FilterControl                  *ebpf.MapSpec `ebpf:"filter_control"`
+	LauncherExecState              *ebpf.MapSpec `ebpf:"launcher_exec_state"`
 	LifecycleEventsDropped         *ebpf.MapSpec `ebpf:"lifecycle_events_dropped"`
 	RecognitionComms               *ebpf.MapSpec `ebpf:"recognition_comms"`
 	RecognitionControl             *ebpf.MapSpec `ebpf:"recognition_control"`
@@ -126,6 +138,7 @@ type processExecMaps struct {
 	AllowedCgroups                 *ebpf.Map `ebpf:"allowed_cgroups"`
 	Events                         *ebpf.Map `ebpf:"events"`
 	FilterControl                  *ebpf.Map `ebpf:"filter_control"`
+	LauncherExecState              *ebpf.Map `ebpf:"launcher_exec_state"`
 	LifecycleEventsDropped         *ebpf.Map `ebpf:"lifecycle_events_dropped"`
 	RecognitionComms               *ebpf.Map `ebpf:"recognition_comms"`
 	RecognitionControl             *ebpf.Map `ebpf:"recognition_control"`
@@ -137,6 +150,7 @@ func (m *processExecMaps) Close() error {
 		m.AllowedCgroups,
 		m.Events,
 		m.FilterControl,
+		m.LauncherExecState,
 		m.LifecycleEventsDropped,
 		m.RecognitionComms,
 		m.RecognitionControl,

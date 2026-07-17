@@ -105,7 +105,13 @@ from .claude_code_daemon import (
     install_native_pre_tool_use_command,
     resolve_native_pre_tool_use_command_path,
 )
-from .proxy import DEFAULT_STATE_DIR, GovernanceProxy, GovernanceSession, serve_proxy
+from .proxy import (
+    DEFAULT_STATE_DIR,
+    GovernanceProxy,
+    GovernanceSession,
+    TLSConfigurationError,
+    serve_proxy,
+)
 from .run_bridge import VALID_VIA_MODES, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
 from .tool_preflight import (
@@ -116,6 +122,7 @@ from .tool_preflight import (
     render_tool_preflight_markdown,
     scan_tool_server_config,
 )
+from .tls import tls_disabled_by_environment
 
 
 _ATTEST_SESSION_ID_RE = re.compile(
@@ -868,7 +875,8 @@ def _start_tls_material_failure_response() -> dict:
         "condition": condition,
         "message": "Ardur start TLS material is invalid.",
         "detail": (
-            "Explicit --tls-cert and --tls-key values must both point to existing files "
+            "TLS stays enabled unless --no-tls is explicitly supplied. When explicit "
+            "--tls-cert and --tls-key values are used, both must point to existing files "
             "before Ardur starts the local governance proxy."
         ),
         "next_steps": _start_tls_material_failure_next_steps(condition),
@@ -878,6 +886,8 @@ def _start_tls_material_failure_response() -> dict:
 def _start_tls_material_invalid(args: argparse.Namespace) -> bool:
     if args.no_tls:
         return False
+    if tls_disabled_by_environment():
+        return True
     if args.tls_cert is None and args.tls_key is None:
         return False
     if args.tls_cert is None or args.tls_key is None:
@@ -1198,18 +1208,22 @@ def cmd_start(args: argparse.Namespace) -> int:
             }
         )
 
-    serve_proxy(
-        proxy=proxy,
-        private_key=private_key,
-        host=args.host,
-        port=args.port,
-        initial_session_id=initial_session_id,
-        require_auth=args.require_auth,
-        api_token=args.api_token,
-        tls_cert=args.tls_cert,
-        tls_key=args.tls_key,
-        no_tls=args.no_tls,
-    )
+    try:
+        serve_proxy(
+            proxy=proxy,
+            private_key=private_key,
+            host=args.host,
+            port=args.port,
+            initial_session_id=initial_session_id,
+            require_auth=args.require_auth,
+            api_token=args.api_token,
+            tls_cert=args.tls_cert,
+            tls_key=args.tls_key,
+            no_tls=args.no_tls,
+        )
+    except TLSConfigurationError:
+        _print_json(_start_tls_material_failure_response())
+        return 1
     return 0
 
 

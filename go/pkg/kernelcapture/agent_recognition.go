@@ -50,8 +50,8 @@ type AgentRecognizerOptions struct {
 // AgentRecognitionInput contains bounded process metadata. No argv,
 // environment, full path, or file content is accepted by this profile.
 type AgentRecognitionInput struct {
-	Comm               string
-	ExecutableBasename string
+	Comm               string `json:"comm,omitempty"`
+	ExecutableBasename string `json:"executable_basename,omitempty"`
 }
 
 // AgentRecognitionResult is heuristic candidate evidence, not binary identity
@@ -260,6 +260,34 @@ func (r *AgentRecognizer) PrefilterComms() []string {
 		return nil
 	}
 	return append([]string(nil), r.prefilterComms...)
+}
+
+// AgentTypes returns the active agent classes after allow/deny overrides.
+// The defensive copy is sorted so startup validation and diagnostics are
+// deterministic.
+func (r *AgentRecognizer) AgentTypes() []string {
+	if r == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(r.rules))
+	for _, rule := range r.rules {
+		seen[rule.AgentType] = struct{}{}
+	}
+	types := make([]string, 0, len(seen))
+	for agentType := range seen {
+		types = append(types, agentType)
+	}
+	sort.Strings(types)
+	return types
+}
+
+// RegistryMetadata returns the canonical registry identifier used by an
+// evaluation report. The digest is integrity metadata, not a signature.
+func (r *AgentRecognizer) RegistryMetadata() (version, registrySHA256 string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.version, r.digest
 }
 
 // Classify matches bounded names. Exact process names remain low-confidence

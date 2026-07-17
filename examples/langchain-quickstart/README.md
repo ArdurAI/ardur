@@ -23,8 +23,12 @@ langchain-quickstart/
 ## Dependencies
 
 - Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
-- `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
-- `langchain ^0.3.0` plus `langchain-core ^0.3.0`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic`, `langgraph`
+- `python/` editable install with the framework extra
+  (`pip install -e '../../python[dev,langgraph]'`; the CLI is `ardur`, module
+  imports are `vibap`)
+- `langchain >=1.3.13,<2` and `langgraph >=1.2.9,<2`; provider adapters
+  (`langchain-ollama`, `langchain-openai`, or `langchain-anthropic`) remain
+  application-selected
 - LLM access: any provider that LangChain supports — local Ollama, an OpenAI-compatible gateway, an Anthropic API key, etc.
 - Optional: Docker for the recorded asciinema flow (`rahulnutakki/ardur-demo:lang`)
 
@@ -32,7 +36,7 @@ langchain-quickstart/
 
 ```bash
 # 1. Install the runtime
-cd ../../python && pip install -e '.[dev]'
+cd ../../python && pip install -e '.[dev,langgraph]'
 
 # 2. Pick a provider + model id
 export ARDUR_PROVIDER=ollama

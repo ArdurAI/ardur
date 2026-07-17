@@ -85,7 +85,15 @@ def _session_from_path(path: Path) -> GovernanceSession:
     if not isinstance(payload, dict):
         raise ValueError(f"{path.name} must contain a session object")
     payload = dict(payload)
+    forbidden_authority = {"passport_token", "attestation_token"} & payload.keys()
+    if forbidden_authority:
+        names = ", ".join(sorted(forbidden_authority))
+        raise ValueError(f"{path.name} leaks authority-bearing fields: {names}")
     payload.pop("receipt_chain_integrity", None)
+    # GovernanceSession's parser expects its live-runtime shape.  The offline
+    # verifier injects a non-authorizing sentinel only in memory; exported
+    # evidence deliberately contains neither child passport nor attestation.
+    payload["passport_token"] = "<redacted-offline-evidence>"
     return GovernanceSession.from_dict(payload)
 
 

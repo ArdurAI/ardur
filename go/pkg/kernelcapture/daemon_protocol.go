@@ -125,6 +125,37 @@ type DaemonOpPolicy struct {
 
 type DaemonHealthRequest struct{}
 
+// DaemonLifecycleCaptureHealth reports daemon-lifetime process-lifecycle
+// delivery and loss totals on authenticated health responses. These counters
+// are host-global, not session evidence; session_status continues to carry the
+// narrower LifecycleCaptureSummary for an individual session window.
+type DaemonLifecycleCaptureHealth struct {
+	DeliveredTotal              uint64 `json:"delivered_total"`
+	ProducerRingbufDroppedTotal uint64 `json:"producer_ringbuf_dropped_total"`
+	MalformedRecordsTotal       uint64 `json:"malformed_records_total"`
+	ProducerCounterAvailable    bool   `json:"producer_counter_available"`
+	ProducerCounterEvidenceGap  bool   `json:"producer_counter_evidence_gap"`
+}
+
+// AgentRecognitionCounters are monotonic daemon-lifetime candidate outcomes.
+// Unknown exec records are deliberately excluded: they may belong to a
+// registered lifecycle-capture session and are not recognition candidates.
+type AgentRecognitionCounters struct {
+	CandidatesTotal uint64 `json:"candidates_total"`
+	Recognized      uint64 `json:"recognized"`
+	Ambiguous       uint64 `json:"ambiguous"`
+}
+
+// AgentRecognitionHealth exposes bounded classifier state without process
+// data. The registry digest commits to the release-bound exact-name rules; it
+// is not a host executable digest or an identity-attestation claim.
+type AgentRecognitionHealth struct {
+	Enabled         bool                     `json:"enabled"`
+	RegistryVersion string                   `json:"registry_version"`
+	RegistrySHA256  string                   `json:"registry_sha256"`
+	Counters        AgentRecognitionCounters `json:"counters"`
+}
+
 type DaemonRegisterSessionRequest struct {
 	SessionID       string         `json:"session_id"`
 	MissionID       string         `json:"mission_id,omitempty"`
@@ -181,6 +212,16 @@ type DaemonProtocolResponse struct {
 	// this session. It never represents universal file, network, or host-effect
 	// coverage, and its status degrades with LifecycleCapture loss.
 	ObservabilityGap *ObservabilityGapSummary `json:"observability_gap,omitempty"`
+	// AgentFingerprint reports bounded asynchronous native-executable matching
+	// state on authenticated health responses only. It never contains a host
+	// path, computed executable digest, argv, environment, or file content.
+	AgentFingerprint *AgentFingerprintHealth `json:"agent_fingerprint,omitempty"`
+	// LifecycleCaptureHealth and AgentRecognition are daemon-lifetime,
+	// authenticated observability used to distinguish delivered work from
+	// producer/malformed loss and classifier outcomes. They contain no process
+	// identifiers, paths, argv, environment, content, or executable digest.
+	LifecycleCaptureHealth *DaemonLifecycleCaptureHealth `json:"lifecycle_capture_health,omitempty"`
+	AgentRecognition       *AgentRecognitionHealth       `json:"agent_recognition,omitempty"`
 	// EnforcementTier carries which kernel enforcement tier is currently
 	// active — EnforcementTierBPFLSM, EnforcementTierSeccomp, or
 	// EnforcementTierNone — on successful health responses. The daemon

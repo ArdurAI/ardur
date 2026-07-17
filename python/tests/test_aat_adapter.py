@@ -54,10 +54,13 @@ def test_aat_explicit_unrestricted_mission_can_grant_bounded_scope() -> None:
 
 
 def test_aat_bounded_mission_can_grant_empty_scope() -> None:
-    assert aat_adapter_module._extract_resource_scope(
-        {"resource_scope": []},
-        ["/workspace/*"],
-    ) == []
+    assert (
+        aat_adapter_module._extract_resource_scope(
+            {"resource_scope": []},
+            ["/workspace/*"],
+        )
+        == []
+    )
 
 
 def _install_fetch_map(
@@ -100,6 +103,7 @@ def _issue_md(
 ) -> str:
     mission = MissionPassport(
         agent_id="md-authority",
+        mission_id=mission_id,
         mission="authoritative AAT-backed mission",
         allowed_tools=allowed_tools or ["read"],
         forbidden_tools=[],

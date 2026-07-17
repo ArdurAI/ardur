@@ -50,6 +50,13 @@ func TestProcessExecRecognitionMapsUseBoundedExactNameKeys(t *testing.T) {
 	if spec.Maps[processExecMapRecognitionControl] == nil {
 		t.Fatal("process-exec collection spec is missing recognition_control")
 	}
+	launcherState := spec.Maps[processExecMapLauncherExecState]
+	if launcherState == nil {
+		t.Fatal("process-exec collection spec is missing launcher_exec_state")
+	}
+	if got, want := int(launcherState.MaxEntries), DefaultDaemonSessionRegistryMaxSessions; got != want {
+		t.Fatalf("launcher_exec_state max entries = %d, want %d", got, want)
+	}
 }
 
 func TestNormalizePinnedEBPFPathsDerivesLifecycleMapSiblings(t *testing.T) {
@@ -63,6 +70,7 @@ func TestNormalizePinnedEBPFPathsDerivesLifecycleMapSiblings(t *testing.T) {
 		"RecognitionControlMapPath":             "/sys/fs/bpf/ardur/process_recognition_filter_control",
 		"RecognitionCommsMapPath":               "/sys/fs/bpf/ardur/process_recognition_comms",
 		"RecognitionExecutableBasenamesMapPath": "/sys/fs/bpf/ardur/process_recognition_executable_basenames",
+		"LauncherExecStateMapPath":              "/sys/fs/bpf/ardur/process_launcher_exec_state",
 	}
 	gots := map[string]string{
 		"DroppedEventsMapPath":                  paths.DroppedEventsMapPath,
@@ -71,6 +79,7 @@ func TestNormalizePinnedEBPFPathsDerivesLifecycleMapSiblings(t *testing.T) {
 		"RecognitionControlMapPath":             paths.RecognitionControlMapPath,
 		"RecognitionCommsMapPath":               paths.RecognitionCommsMapPath,
 		"RecognitionExecutableBasenamesMapPath": paths.RecognitionExecutableBasenamesMapPath,
+		"LauncherExecStateMapPath":              paths.LauncherExecStateMapPath,
 	}
 	for field, want := range wants {
 		if got := gots[field]; got != want {
@@ -91,6 +100,7 @@ func TestRemovePinnedProcessExecStateRemovesCompleteAndPartialSets(t *testing.T)
 		RecognitionControlMapPath:             filepath.Join(dir, "recognition_control"),
 		RecognitionCommsMapPath:               filepath.Join(dir, "recognition_comms"),
 		RecognitionExecutableBasenamesMapPath: filepath.Join(dir, "recognition_executable_basenames"),
+		LauncherExecStateMapPath:              filepath.Join(dir, "launcher_exec_state"),
 	}
 	for _, path := range pinnedProcessExecPaths(paths) {
 		if err := os.WriteFile(path, []byte("pin"), 0o600); err != nil {

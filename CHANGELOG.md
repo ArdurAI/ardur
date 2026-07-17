@@ -5,6 +5,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
+  side-effect, budget, time, delegation, lineage-parent, or working-directory
+  authority while preserving valid transitive attenuation
 - Label exported actor/verifier identity as signed receipt claims while
   explicitly reporting that the detached exporter did not verify SPIFFE
   workload identity
@@ -36,6 +39,22 @@ All notable changes to Ardur will be documented in this file.
 - Remove internal fixture/hashing helpers in favor of stdlib
 
 ### Added
+- Kernel-bound script-launcher fingerprinting for opt-in Linux agent
+  recognition: an optional non-enforcing BPF-LSM observer captures bounded
+  original-object identity, mutable cmdline is confined to locator duty behind
+  `openat2` plus `statx` equality, launcher digests bind to allowlisted final
+  interpreter profiles, and unsupported shapes return explicit fail-low labels
+- Real-Linux paired agent-recognition overhead and loss benchmarking with
+  deterministic CI/release profiles, authenticated daemon health counters,
+  raw AB/BA observations, privacy-bounded digested reports, and reviewed-budget
+  enforcement
+- Bounded native Linux executable fingerprint matching for opt-in agent
+  recognition, with a daemon-owned versioned registry, pidfd plus
+  `/proc/<pid>/exe` resolution, fixed asynchronous workers, explicit health
+  counters, and privacy-safe observe-only results
+- Add a versioned sanitized agent-recognition corpus, deterministic evaluator,
+  95% Wilson intervals, stable error IDs, exact corpus/registry digests, and a
+  maintained-corpus CI gate without making population-accuracy claims
 - Opt-in, observe-only Linux AI-agent launch recognition with a versioned
   exact-name registry, separate in-kernel `comm` and successful-exec basename
   prefilters, operator class overrides, script-launcher smoke coverage, and
@@ -61,6 +80,9 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Keep seccomp listener ownership in one goroutine and wake cancellation through
+  a dedicated eventfd, preventing listener teardown from closing a reused
+  control-connection descriptor
 - Prevent torn `PolicyMaps` reads and use-after-close during BPF-LSM guard
   startup, degradation, and shutdown; reject late guards after seccomp fallback
 - Reject attacker-signed JWT-SVIDs even when their SPIFFE ID matches the

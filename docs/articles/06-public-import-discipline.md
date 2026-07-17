@@ -142,7 +142,7 @@ The graduation gates we run before promoting a `dev` commit to
    (the runtime's embedded copy). A CI gate fails the build on
    drift between them.
 4. **Tests.** Python on 3.10 and 3.13; Go at the version pinned
-   in `go.mod` (currently 1.25.9).
+   in `go.mod` (currently 1.26.5).
 5. **CodeQL** for both Python and Go.
 6. **A 24-hour cool-off re-read** of the diff by the maintainer
    before the merge. The graduation gate isn't just CI — it's

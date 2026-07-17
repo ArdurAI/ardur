@@ -107,8 +107,9 @@ governance HTTP API.
 - **Governance HTTP proxy** — lives in `python/vibap/proxy.py`.
 - **CLI** — lives in `python/vibap/cli.py`.
 - **Personal Hub** — lives in `python/vibap/personal_hub.py`.
-- **Benchmark harness binaries** — the `cmd/benchmark*` and `cmd/benchcheck`
-  binaries were removed; benchmark scenario types live in `benchmark/`.
+- **Benchmark harness binaries** — the `cmd/benchmark*` binaries were removed;
+  benchmark scenario types live in `benchmark/`. The `cmd/benchcheck` AuditBench
+  evaluation harness remains present.
 - **Vendor-specific telemetry connectors** — stay private.
 - **Live benchmark fixtures** — AgentDojo, InjecAgent, R-Judge, STAC remain
   in the internal research tree.

@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "ebe183636e9211490ad55f7b51531a6b718b3e7423dec15091ef22708b9d455f"
+source_sha256: "734f3be5c5da3120e5d9b36d7c233c0503d48f2171e849e430db8ba35726c487"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -50,8 +50,36 @@ successful-exec basename matches the embedded `claude`, `codex`, `gemini`, or
 writes an unrouted candidate into governed session evidence. It emits the
 basename but not its parent path and does not collect argv, hashes, uid,
 environment, or file content. It does not attest or enforce. Issue #67 remains
-in progress for stronger fingerprints and corpus-backed precision/recall
-thresholds.
+in progress for stronger fingerprints and additional signal strata. A
+versioned, sanitized 28-sample corpus now gates exact-name regressions at
+least 0.90 supported-shape recall and zero hard-negative false positives. Its
+deterministic report includes sample counts, Wilson intervals, stable error
+IDs, and exact corpus/registry digests; these are maintained-corpus results,
+not population accuracy or identity assurance.
+
+Operators can now add a daemon-owned executable fingerprint registry to that
+opt-in preview. A fixed worker pool binds recognized PIDs with pidfds. Native
+candidates hash bounded regular files opened through `/proc/<pid>/exe`.
+Script-backed candidates use a separately loaded, non-enforcing BPF-LSM hook to
+capture the original object's device, inode, mount ID, and link state; mutable
+cmdline is only a bounded locator, opened below the process root and accepted
+only after exact object-identity equality. Unsupported launcher observation
+fails low without breaking native matching or lifecycle capture. Saturation,
+denial, exit, unsupported kernel/filesystem, missing identity/locator, locator
+mismatch, interpreter denial, argv/size/deadline limits, digest mismatch, and
+success remain explicit health outcomes. A match raises the observation only
+to `medium` heuristic content evidence; it is not provenance, attestation, or
+authorization. No computed digest, full host path, argv, environment, or file
+content is exposed, and no fingerprint cache is used.
+
+The opt-in recognition preview now also has a bounded real-Linux AB/BA overhead
+harness. It records raw paired wall observations, daemon thread-group CPU,
+peak RSS, authenticated health, and exclusive lifecycle/classification/
+fingerprint ledgers for low, sustained, and storm profiles. The required CI
+profile uses at least 20 measured pairs after warm-up and fails closed on
+missing counters, loss, rejection, unavailable fingerprint work, schema drift,
+or digest mismatch once a reviewed target-runner budget is present. Its result
+is host-specific observer-effect evidence, not a universal performance claim.
 
 The Linux kernel-capture daemon now publishes its BPF policy-map handle set and
 `bpf_lsm` tier as one synchronized lifecycle transition. Every map operation,
@@ -128,9 +156,9 @@ complete sensor coverage.
 - broader conformance vectors beyond the public DRP and runtime-evidence implementation fixtures already under `docs/specs/conformance/`
 - mission-declared `lineage_budgets` compiler/verifier support — the v0.1 specs define the intended protocol semantics, but the current runtime only supports delegation reservation accounting through `FileLineageBudgetLedger` and rejects non-empty mission-level `lineage_budgets`
 - broader deployment material beyond the SPIRE design surface
-- completion of agent recognition issue #67 beyond the exact-name,
-  observe-only Linux foundation: binary hashes and argv/interpreter signals,
-  maintained corpus thresholds, and cross-platform launch sources
+- completion of agent recognition issue #67 beyond the exact-name and native
+  fingerprint Linux foundation: argv/interpreter signals, multi-signal corpus
+  strata, and cross-platform launch sources
 - cross-host benchmark baselines and independently reproduced sensor-overhead results beyond the current local harness
 - externally governed AuditBench annotation collection and headline scoring; the strict capture/blind-label/content-integrity-seal/score pipeline is implemented, but current public scenarios remain deterministic pipeline fixtures
 

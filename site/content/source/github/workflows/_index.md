@@ -15,6 +15,7 @@ This section lists hosted documentation and mirrored artifacts generated from `.
 
 ## Hosted Artifacts
 
+- [`agent-recognition-benchmark.yml`](/__ardur_internal__/repo/.github/workflows/agent-recognition-benchmark.yml)
 - [`codeql.yml`](/__ardur_internal__/repo/.github/workflows/codeql.yml)
 - [`hugo-site.yml`](/__ardur_internal__/repo/.github/workflows/hugo-site.yml)
 - [`kernel-enforce.yml`](/__ardur_internal__/repo/.github/workflows/kernel-enforce.yml)

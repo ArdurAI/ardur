@@ -12,20 +12,13 @@ import socket
 import ssl
 import threading
 import urllib.parse
+import urllib.request
 import zlib
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-import urllib.request
 from urllib.request import Request
-
-# NOTE: urlopen is accessed as the module-level binding so that
-# monkeypatching `vibap.mission.urlopen` in tests works regardless of
-# test ordering. We assign the production binding (``_pinned_urlopen``,
-# defined below) at the bottom of this module — the variable is
-# re-bound, not just initialized.
-urlopen = urllib.request.urlopen  # placeholder; real binding set at end of module.
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -43,6 +36,13 @@ from .passport import (
     MissionPassport,
     assert_iat_in_window,
 )
+
+# NOTE: urlopen is accessed as the module-level binding so that
+# monkeypatching `vibap.mission.urlopen` in tests works regardless of
+# test ordering. We assign the production binding (``_pinned_urlopen``,
+# defined below) at the bottom of this module — the variable is
+# re-bound, not just initialized.
+urlopen = urllib.request.urlopen  # placeholder; real binding set at end of module.
 
 _FETCH_TIMEOUT_S = 5.0
 MAX_STATUS_LIST_BYTES = 1 << 20
@@ -122,6 +122,8 @@ class MissionDeclaration:
             claims["parent_jti"] = self.passport.parent_jti
         if self.passport.cwd is not None:
             claims["cwd"] = self.passport.cwd
+        if self.passport.risk_budget is not None:
+            claims["risk_budget"] = copy.deepcopy(self.passport.risk_budget)
         if self.approval_policy:
             claims["approval_policy"] = copy.deepcopy(self.approval_policy)
         for name in (
@@ -178,7 +180,9 @@ class MissionCache:
             self._ref_to_id.move_to_end(ref_key)
             return mission
 
-    def put(self, mission: MissionDeclaration, *, ref: MissionReference | None = None) -> MissionDeclaration:
+    def put(
+        self, mission: MissionDeclaration, *, ref: MissionReference | None = None
+    ) -> MissionDeclaration:
         with self._lock:
             self._by_id[mission.mission_id] = mission
             self._by_id.move_to_end(mission.mission_id)
@@ -187,14 +191,18 @@ class MissionCache:
                 self._ref_to_id.move_to_end(ref.cache_key())
             while len(self._by_id) > self.max_entries:
                 evicted_id, _ = self._by_id.popitem(last=False)
-                stale = [key for key, value in self._ref_to_id.items() if value == evicted_id]
+                stale = [
+                    key for key, value in self._ref_to_id.items() if value == evicted_id
+                ]
                 for key in stale:
                     self._ref_to_id.pop(key, None)
             while len(self._ref_to_id) > self.max_entries * 2:
                 self._ref_to_id.popitem(last=False)
             return mission
 
-    def resolve(self, ref: MissionReference, loader: Callable[[], MissionDeclaration]) -> MissionDeclaration:
+    def resolve(
+        self, ref: MissionReference, loader: Callable[[], MissionDeclaration]
+    ) -> MissionDeclaration:
         cached = self.get_by_ref(ref)
         if cached is not None:
             return cached
@@ -259,9 +267,7 @@ _REQUIRED_V01_MEMBERS: tuple[tuple[str, type | tuple[type, ...]], ...] = (
 _VALID_CONFORMANCE_PROFILES = frozenset(
     {"Delegation-Core", "MIC-State", "MIC-Evidence"}
 )
-_VALID_RECEIPT_LEVELS = frozenset(
-    {"minimal", "counter_signed", "transparency_logged"}
-)
+_VALID_RECEIPT_LEVELS = frozenset({"minimal", "counter_signed", "transparency_logged"})
 
 
 def _validate_required_v01_members(claims: dict[str, Any]) -> None:
@@ -378,18 +384,26 @@ def parse_mission_ref(value: Any) -> MissionReference:
             raise MissionBindingError("chain_invalid", "mission_ref is empty")
         return MissionReference(uri=value.strip())
     if not isinstance(value, dict):
-        raise MissionBindingError("chain_invalid", "mission_ref must be a string or object")
+        raise MissionBindingError(
+            "chain_invalid", "mission_ref must be a string or object"
+        )
     uri = value.get("uri", value.get("url"))
     if not isinstance(uri, str) or not uri.strip():
         raise MissionBindingError("chain_invalid", "mission_ref.uri is required")
     mission_id = value.get("mission_id")
-    if mission_id is not None and (not isinstance(mission_id, str) or not mission_id.strip()):
-        raise MissionBindingError("chain_invalid", "mission_ref.mission_id must be a non-empty string")
+    if mission_id is not None and (
+        not isinstance(mission_id, str) or not mission_id.strip()
+    ):
+        raise MissionBindingError(
+            "chain_invalid", "mission_ref.mission_id must be a non-empty string"
+        )
     mission_digest = value.get("mission_digest")
     if mission_digest is not None and (
         not isinstance(mission_digest, str) or not mission_digest.startswith("sha-256:")
     ):
-        raise MissionBindingError("chain_invalid", "mission_ref.mission_digest must use sha-256:<hex>")
+        raise MissionBindingError(
+            "chain_invalid", "mission_ref.mission_digest must use sha-256:<hex>"
+        )
     return MissionReference(
         uri=uri.strip(),
         mission_id=mission_id.strip() if isinstance(mission_id, str) else None,
@@ -438,7 +452,9 @@ def load_mission_declaration(
             },
         )
     except jwt.PyJWTError as exc:
-        raise MissionBindingError("chain_invalid", f"mission declaration verification failed: {exc}") from exc
+        raise MissionBindingError(
+            "chain_invalid", f"mission declaration verification failed: {exc}"
+        ) from exc
     # Bounded-iat gate (round 3, 2026-04-28). Mirrors the receipt-side
     # FIX-6 generalization to mission declarations so a forged MD with
     # iat=year_3000, exp=year_3001 cannot survive verification just
@@ -446,7 +462,9 @@ def load_mission_declaration(
     try:
         assert_iat_in_window(claims.get("iat"), field_name="MD iat")
     except jwt.InvalidTokenError as exc:
-        raise MissionBindingError("chain_invalid", f"mission declaration {exc}") from exc
+        raise MissionBindingError(
+            "chain_invalid", f"mission declaration {exc}"
+        ) from exc
     # Always run the required-members guard. The strict full-schema check
     # is opt-in for clean producers (see docstring).
     _validate_required_v01_members(claims)
@@ -456,30 +474,55 @@ def load_mission_declaration(
         passport = MissionPassport.from_dict(
             {
                 "agent_id": str(claims["sub"]),
-                "mission": str(claims.get("mission", claims.get("mission_id", claims["jti"]))),
-                "allowed_tools": list(claims.get("allowed_tools", claims.get("allowed_tool_classes", []))),
+                "mission": str(
+                    claims.get("mission", claims.get("mission_id", claims["jti"]))
+                ),
+                "allowed_tools": list(
+                    claims.get("allowed_tools", claims.get("allowed_tool_classes", []))
+                ),
                 "forbidden_tools": list(claims.get("forbidden_tools", [])),
                 "resource_scope": _legacy_resource_scope(
                     claims.get("resource_scope"),
                     claims.get("resource_policies"),
                 ),
                 "max_tool_calls": int(claims.get("max_tool_calls", 50)),
-                "max_duration_s": int(claims.get("max_duration_s", max(1, int(claims["exp"]) - int(claims["iat"])))),
+                "max_duration_s": int(
+                    claims.get(
+                        "max_duration_s",
+                        max(1, int(claims["exp"]) - int(claims["iat"])),
+                    )
+                ),
                 "delegation_allowed": bool(
                     claims.get(
                         "delegation_allowed",
-                        bool(((claims.get("delegation_policy") or {}).get("max_depth", 0))),
+                        bool(
+                            (
+                                (claims.get("delegation_policy") or {}).get(
+                                    "max_depth", 0
+                                )
+                            )
+                        ),
                     )
                 ),
                 "max_delegation_depth": int(
-                    claims.get("max_delegation_depth", ((claims.get("delegation_policy") or {}).get("max_depth", 0)))
+                    claims.get(
+                        "max_delegation_depth",
+                        ((claims.get("delegation_policy") or {}).get("max_depth", 0)),
+                    )
                 ),
                 "parent_jti": claims.get("parent_jti"),
                 "cwd": claims.get("cwd"),
+                **(
+                    {"risk_budget": copy.deepcopy(claims["risk_budget"])}
+                    if "risk_budget" in claims
+                    else {}
+                ),
             }
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise MissionBindingError("chain_invalid", f"mission declaration schema invalid: {exc}") from exc
+        raise MissionBindingError(
+            "chain_invalid", f"mission declaration schema invalid: {exc}"
+        ) from exc
 
     return MissionDeclaration(
         mission_id=str(claims["mission_id"]),
@@ -532,13 +575,19 @@ def fetch_mission_declaration(
         strict_schema=strict_schema,
     )
     if ref.mission_id and ref.mission_id != mission.mission_id:
-        raise MissionBindingError("chain_invalid", "mission_ref mission_id does not match loaded mission")
+        raise MissionBindingError(
+            "chain_invalid", "mission_ref mission_id does not match loaded mission"
+        )
     if ref.mission_digest and ref.mission_digest != mission.payload_digest:
-        raise MissionBindingError("chain_invalid", "mission_ref mission_digest does not match loaded mission")
+        raise MissionBindingError(
+            "chain_invalid", "mission_ref mission_digest does not match loaded mission"
+        )
     return mission
 
 
-def mission_is_revoked(mission: MissionDeclaration, public_key: ec.EllipticCurvePublicKey) -> bool:
+def mission_is_revoked(
+    mission: MissionDeclaration, public_key: ec.EllipticCurvePublicKey
+) -> bool:
     if mission.revocation_ref is None:
         return False
     uri, idx = _parse_revocation_ref(mission.revocation_ref)
@@ -556,20 +605,28 @@ def mission_is_revoked(mission: MissionDeclaration, public_key: ec.EllipticCurve
             },
         )
     except jwt.PyJWTError as exc:
-        raise MissionBindingError("chain_invalid", f"status list verification failed: {exc}") from exc
+        raise MissionBindingError(
+            "chain_invalid", f"status list verification failed: {exc}"
+        ) from exc
     try:
         assert_iat_in_window(claims.get("iat"), field_name="status list iat")
     except jwt.InvalidTokenError as exc:
         raise MissionBindingError("chain_invalid", f"status list {exc}") from exc
     container = claims.get("status_list", claims.get("status"))
     if not isinstance(container, dict):
-        raise MissionBindingError("chain_invalid", "status list token missing status_list claim")
+        raise MissionBindingError(
+            "chain_invalid", "status list token missing status_list claim"
+        )
     try:
         bits = int(container.get("bits", 1))
     except (TypeError, ValueError) as exc:
-        raise MissionBindingError("chain_invalid", "status list bits must be an integer") from exc
+        raise MissionBindingError(
+            "chain_invalid", "status list bits must be an integer"
+        ) from exc
     if bits not in (1, 2, 4, 8):
-        raise MissionBindingError("chain_invalid", f"unsupported status list bits={bits}")
+        raise MissionBindingError(
+            "chain_invalid", f"unsupported status list bits={bits}"
+        )
     lst = container.get("lst")
     if not isinstance(lst, str) or not lst:
         raise MissionBindingError("chain_invalid", "status list token missing lst")
@@ -577,9 +634,13 @@ def mission_is_revoked(mission: MissionDeclaration, public_key: ec.EllipticCurve
         decompressor = zlib.decompressobj()
         raw = decompressor.decompress(_b64url_decode(lst), MAX_DECOMPRESSED_BYTES)
     except (ValueError, zlib.error) as exc:
-        raise MissionBindingError("chain_invalid", "status list decompression failed") from exc
+        raise MissionBindingError(
+            "chain_invalid", "status list decompression failed"
+        ) from exc
     if decompressor.unconsumed_tail or decompressor.unused_data:
-        raise MissionStatusUnavailableError("status_list_too_large", "status list exceeded decompression limit")
+        raise MissionStatusUnavailableError(
+            "status_list_too_large", "status list exceeded decompression limit"
+        )
     return _status_value(raw, idx=idx, bits=bits) != 0
 
 
@@ -664,9 +725,7 @@ class _PinnedIPHTTPSConnection(http.client.HTTPSConnection):
             self._tunnel()
         # TLS handshake still uses ``self.host`` for SNI + cert validation.
         if isinstance(self._context, ssl.SSLContext):
-            self.sock = self._context.wrap_socket(
-                self.sock, server_hostname=self.host
-            )
+            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
 def _resolve_to_pinned_public_ip(host: str, port: int) -> str:
@@ -710,7 +769,9 @@ class _PinnedIPResponse:
     minimal urllib-style context-manager interface :func:`_fetch_text`
     expects (``read(size)`` returning bytes, plus ``__enter__``/``__exit__``)."""
 
-    def __init__(self, conn: http.client.HTTPSConnection, resp: http.client.HTTPResponse) -> None:
+    def __init__(
+        self, conn: http.client.HTTPSConnection, resp: http.client.HTTPResponse
+    ) -> None:
         self._conn = conn
         self._resp = resp
 
@@ -816,8 +877,7 @@ def _pinned_urlopen(
         raise HTTPError(
             url,
             resp.status,
-            f"pinned-IP fetch saw HTTP {resp.status}; "
-            f"body preview: {body_preview!r}",
+            f"pinned-IP fetch saw HTTP {resp.status}; body preview: {body_preview!r}",
             dict(resp.getheaders()) if hasattr(resp, "getheaders") else {},
             None,
         )
@@ -828,16 +888,24 @@ def _fetch_text(url: str) -> str:
     _assert_public_target(url)
     request = Request(
         url,
-        headers={"Accept": "application/jwt, application/statuslist+jwt, application/json"},
+        headers={
+            "Accept": "application/jwt, application/statuslist+jwt, application/json"
+        },
     )
     try:
-        with urlopen(request, timeout=_FETCH_TIMEOUT_S, context=ssl.create_default_context()) as response:
+        with urlopen(
+            request, timeout=_FETCH_TIMEOUT_S, context=ssl.create_default_context()
+        ) as response:
             body = response.read(MAX_STATUS_LIST_BYTES + 1)
             if len(body) > MAX_STATUS_LIST_BYTES:
-                raise MissionStatusUnavailableError("status_list_too_large", "status list response exceeded size limit")
+                raise MissionStatusUnavailableError(
+                    "status_list_too_large", "status list response exceeded size limit"
+                )
             return body.decode("utf-8").strip()
     except (HTTPError, URLError, OSError, TimeoutError) as exc:
-        raise MissionStatusUnavailableError("revocation_unavailable", f"fetch failed for {url}") from exc
+        raise MissionStatusUnavailableError(
+            "revocation_unavailable", f"fetch failed for {url}"
+        ) from exc
 
 
 def _parse_revocation_ref(revocation_ref: str) -> tuple[str, int]:
@@ -845,20 +913,30 @@ def _parse_revocation_ref(revocation_ref: str) -> tuple[str, int]:
     if parsed.scheme.lower() != "https":
         raise MissionBindingError("chain_invalid", "revocation_ref must use https")
     if not parsed.fragment:
-        raise MissionBindingError("chain_invalid", "revocation_ref must include #idx=<n>")
+        raise MissionBindingError(
+            "chain_invalid", "revocation_ref must include #idx=<n>"
+        )
     try:
         fragment = urllib.parse.parse_qs(parsed.fragment, strict_parsing=True)
     except ValueError as exc:
-        raise MissionBindingError("chain_invalid", "revocation_ref fragment is malformed") from exc
+        raise MissionBindingError(
+            "chain_invalid", "revocation_ref fragment is malformed"
+        ) from exc
     idx_values = fragment.get("idx")
     if idx_values is None or len(idx_values) != 1:
-        raise MissionBindingError("chain_invalid", "revocation_ref must include exactly one idx")
+        raise MissionBindingError(
+            "chain_invalid", "revocation_ref must include exactly one idx"
+        )
     try:
         idx = int(idx_values[0])
     except ValueError as exc:
-        raise MissionBindingError("chain_invalid", "revocation_ref idx must be an integer") from exc
+        raise MissionBindingError(
+            "chain_invalid", "revocation_ref idx must be an integer"
+        ) from exc
     if idx < 0:
-        raise MissionBindingError("chain_invalid", "revocation_ref idx must be non-negative")
+        raise MissionBindingError(
+            "chain_invalid", "revocation_ref idx must be non-negative"
+        )
     return urllib.parse.urlunparse(parsed._replace(fragment="")), idx
 
 
@@ -875,9 +953,9 @@ def _legacy_resource_scope(resource_scope: Any, resource_policies: Any) -> list[
         if not isinstance(pattern, str) or not pattern:
             raise ValueError("resource_policies[].pattern must be a non-empty string")
         if pattern.startswith("glob:"):
-            patterns.append(pattern[len("glob:"):])
+            patterns.append(pattern[len("glob:") :])
         elif pattern.startswith("exact:"):
-            patterns.append(pattern[len("exact:"):])
+            patterns.append(pattern[len("exact:") :])
         else:
             patterns.append(pattern)
     return patterns
@@ -901,7 +979,9 @@ def _tuple_of_dicts(value: Any) -> tuple[dict[str, Any], ...]:
     items: list[dict[str, Any]] = []
     for entry in value:
         if not isinstance(entry, dict):
-            raise MissionBindingError("chain_invalid", "mission array field must contain objects")
+            raise MissionBindingError(
+                "chain_invalid", "mission array field must contain objects"
+            )
         items.append(copy.deepcopy(entry))
     return tuple(items)
 
@@ -914,7 +994,9 @@ def _tuple_of_strs(value: Any) -> tuple[str, ...]:
     items: list[str] = []
     for entry in value:
         if not isinstance(entry, str) or not entry:
-            raise MissionBindingError("chain_invalid", "required_telemetry must contain strings")
+            raise MissionBindingError(
+                "chain_invalid", "required_telemetry must contain strings"
+            )
         items.append(entry)
     return tuple(items)
 
@@ -923,7 +1005,9 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise MissionBindingError("chain_invalid", "mission object field must be an object")
+        raise MissionBindingError(
+            "chain_invalid", "mission object field must be an object"
+        )
     return copy.deepcopy(value)
 
 
@@ -931,7 +1015,9 @@ def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value:
-        raise MissionBindingError("chain_invalid", "mission string field must be a non-empty string")
+        raise MissionBindingError(
+            "chain_invalid", "mission string field must be a non-empty string"
+        )
     return value
 
 
@@ -941,7 +1027,9 @@ def _optional_int(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise MissionBindingError("chain_invalid", "mission integer field must be an integer") from exc
+        raise MissionBindingError(
+            "chain_invalid", "mission integer field must be an integer"
+        ) from exc
 
 
 def _b64url_decode(value: str) -> bytes:

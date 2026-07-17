@@ -12,7 +12,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 |---|-------|--------|------|
 | 015 | [Production-grade SPIRE deployment design for Kubernetes](./ADR-015-production-spire-deployment.md) | Proposed | 2026-04-19 |
 | 016 | [Delegation lineage hash index](./ADR-016-delegation-lineage-hash-index.md) | Accepted | 2026-04-21 |
-| 017 | [Biscuit attenuation narrowing semantics](./ADR-017-biscuit-attenuation-narrowing-semantics.md) | Proposed | 2026-04-21 |
+| 017 | [Biscuit attenuation narrowing semantics](./ADR-017-biscuit-attenuation-narrowing-semantics.md) | Accepted | 2026-04-21 |
 | 018 | [Delegation lineage hash domain unification](./ADR-018-delegation-lineage-hash-domain-unification.md) | Proposed | 2026-04-21 |
 | 019 | [Parent-token anchors against trusted lineage](./ADR-019-parent-token-anchors-against-trusted-lineage.md) | Proposed | 2026-04-21 |
 | 020 | [Persisted-session reverification on load](./ADR-020-persisted-session-reverification-on-load.md) | Proposed | 2026-04-21 |
@@ -20,9 +20,14 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 022 | [SPIFFE mTLS identity for operator telemetry](./ADR-022-operator-telemetry-spiffe-mtls.md) | Accepted | 2026-07-11 |
 | 023 | [Explicit resource-scope authority](./ADR-023-explicit-resource-scope-authority.md) | Accepted | 2026-07-12 |
 | 024 | [Self-asserted owner identity assurance](./ADR-024-self-asserted-owner-identity-assurance.md) | Accepted | 2026-07-12 |
+| 026 | [Typed dangerous-action risk budgets](./ADR-026-typed-dangerous-action-risk-budgets.md) | Accepted | 2026-07-14 |
+
+ADR-025 is reserved by a concurrently reviewed spend-gate decision. Parallel
+issue branches may therefore show ADR-026 before ADR-025 lands in `dev`; the
+reservation avoids a guaranteed rename conflict between focused changes.
 
 ## Conventions
 
 - **Status**: `Proposed`, `Accepted`, `Superseded by ADR-NNN`, `Deprecated`. A `Proposed` status means the design is documented but not yet landed in code; it can still change.
-- **Numbering**: sequential, no gaps. The formal ADR-file practice began at ADR-015 in the private research repo; earlier design decisions were captured in running decision logs rather than individual ADR files. Public numbering preserves the original sequence so cross-references stay stable.
+- **Numbering**: sequential with no gaps on `dev`. Concurrent branches may reserve the next number when the reservation is documented; an abandoned reservation must be reclaimed or later ADRs renumbered before merge. The formal ADR-file practice began at ADR-015 in the private research repo; earlier design decisions were captured in running decision logs rather than individual ADR files. Public numbering preserves the original sequence so cross-references stay stable.
 - **Scope**: ADRs record decisions about the protocol (MCEP), the runtime (Ardur), and deployment shapes. They do not duplicate spec content — the v0.1 specs live in [`docs/specs/`](../specs/).

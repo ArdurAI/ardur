@@ -170,9 +170,23 @@ jobs:
         working-directory: go
         run: go test -count=1 ./...
 
+      - name: Run maintained agent-recognition corpus gate
+        working-directory: go
+        shell: bash
+        run: go run ./cmd/ardur-agent-recognition-eval | tee "${{ runner.temp }}/agent-recognition-report.json"
+
       - name: Run go vet
         working-directory: go
         run: go vet ./...
+
+      - name: Upload agent-recognition corpus report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-recognition-report
+          path: ${{ runner.temp }}/agent-recognition-report.json
+          if-no-files-found: error
+          retention-days: 14
 
   go-cve:
     name: Go CVE scan
@@ -229,10 +243,7 @@ jobs:
 
       - name: Install ardur
         working-directory: python
-        run: python -m pip install -e '.[dev]'
-
-      - name: Install langchain-core for governed-tool integration tests
-        run: python -m pip install langchain-core
+        run: python -m pip install -e '.[dev,langgraph]'
 
       - name: Run governance integration tests (demo code paths)
         working-directory: python
