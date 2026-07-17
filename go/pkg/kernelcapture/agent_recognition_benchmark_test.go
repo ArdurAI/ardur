@@ -659,6 +659,172 @@ func TestCommittedAgentRecognitionBenchmarkV2EvidenceMatchesBudget(t *testing.T)
 	}
 }
 
+func TestCommittedAgentRecognitionBenchmarkV3EvidenceMatchesBudget(t *testing.T) {
+	evidenceFiles := []string{
+		"agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json",
+		"agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json",
+		"agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json",
+	}
+	wantArtifactDigests := []string{
+		"a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4",
+		"b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e",
+		"32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317",
+	}
+	type reviewedBudgetPolicy struct {
+		wallTolerancePercentagePoints float64
+		cpuRelativeTolerancePercent   float64
+		cpuAbsoluteTolerance          float64
+		peakRSSToleranceKiB           uint64
+	}
+	wantBudgetPolicies := map[string]reviewedBudgetPolicy{
+		"low":       {wallTolerancePercentagePoints: 0.1, cpuRelativeTolerancePercent: 12, cpuAbsoluteTolerance: 0.02, peakRSSToleranceKiB: 4096},
+		"sustained": {wallTolerancePercentagePoints: 0.05, cpuRelativeTolerancePercent: 3, cpuAbsoluteTolerance: 0.02, peakRSSToleranceKiB: 4096},
+		"storm":     {wallTolerancePercentagePoints: 0.15, cpuRelativeTolerancePercent: 10, cpuAbsoluteTolerance: 0.02, peakRSSToleranceKiB: 4096},
+	}
+	type reviewedProfileEvidence struct {
+		minP50WallOverheadPercent              float64
+		maxP50WallOverheadPercent              float64
+		maxP95WallOverheadPercent              float64
+		minP95EnabledToReferenceDaemonCPURatio float64
+		maxP95EnabledToReferenceDaemonCPURatio float64
+		maxEnabledDaemonPeakRSSKiB             uint64
+	}
+	aggregates := make(map[string]reviewedProfileEvidence, 3)
+	reports := make([]*AgentRecognitionBenchmarkReport, 0, len(evidenceFiles))
+	artifactDigests := make([]string, 0, len(evidenceFiles))
+	cpuModels := make(map[string]struct{})
+	currentDaemonSHA256 := ""
+	referenceDaemonSHA256 := ""
+	var currentExpected, currentSuccess, referenceExpected, referenceSuccess uint64
+	for _, evidenceFile := range evidenceFiles {
+		report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", evidenceFile))
+		if err != nil {
+			t.Fatalf("load %s: %v", evidenceFile, err)
+		}
+		if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV3 || report.SourceSHA != "9c5f16b2356f77bd63b3db6711c50e16e2407745" || report.ReferenceSourceSHA != "5df32e257d2e9c9a6750fa65638f43c8b0707484" ||
+			report.Gate.Status != AgentRecognitionBenchmarkGateNotRun || report.Gate.BudgetSHA256 != "" || len(report.Gate.Violations) != 0 {
+			t.Fatalf("reviewed v0.3 evidence provenance drifted for %s", evidenceFile)
+		}
+		if currentDaemonSHA256 == "" {
+			currentDaemonSHA256 = report.DaemonSHA256
+			referenceDaemonSHA256 = report.ReferenceDaemonSHA256
+		} else if report.DaemonSHA256 != currentDaemonSHA256 || report.ReferenceDaemonSHA256 != referenceDaemonSHA256 {
+			t.Fatalf("reviewed daemon digests drifted for %s", evidenceFile)
+		}
+		reports = append(reports, report)
+		artifactDigests = append(artifactDigests, report.ArtifactSHA256)
+		cpuModels[report.Environment.CPUModel] = struct{}{}
+		for _, summary := range report.Summaries {
+			if summary.EnabledToReferenceDaemonCPURatio == nil || summary.ReferenceTotalCapture == nil || summary.ReferenceTotalRecognition == nil || summary.ReferenceTotalFingerprint == nil {
+				t.Fatalf("reviewed v0.3 evidence %s profile %q has incomplete reference data", evidenceFile, summary.ProfileName)
+			}
+			aggregate, exists := aggregates[summary.ProfileName]
+			if !exists {
+				aggregate.minP50WallOverheadPercent = math.Inf(1)
+				aggregate.minP95EnabledToReferenceDaemonCPURatio = math.Inf(1)
+			}
+			aggregate.minP50WallOverheadPercent = math.Min(aggregate.minP50WallOverheadPercent, summary.PairedWallOverheadPercent.P50)
+			aggregate.maxP50WallOverheadPercent = math.Max(aggregate.maxP50WallOverheadPercent, summary.PairedWallOverheadPercent.P50)
+			aggregate.maxP95WallOverheadPercent = math.Max(aggregate.maxP95WallOverheadPercent, summary.PairedWallOverheadPercent.P95)
+			aggregate.minP95EnabledToReferenceDaemonCPURatio = math.Min(aggregate.minP95EnabledToReferenceDaemonCPURatio, summary.EnabledToReferenceDaemonCPURatio.P95)
+			aggregate.maxP95EnabledToReferenceDaemonCPURatio = math.Max(aggregate.maxP95EnabledToReferenceDaemonCPURatio, summary.EnabledToReferenceDaemonCPURatio.P95)
+			if summary.MaxEnabledDaemonPeakRSSKiB > aggregate.maxEnabledDaemonPeakRSSKiB {
+				aggregate.maxEnabledDaemonPeakRSSKiB = summary.MaxEnabledDaemonPeakRSSKiB
+			}
+			aggregates[summary.ProfileName] = aggregate
+			currentExpected += summary.TotalCapture.ExpectedEvents
+			currentSuccess += summary.TotalFingerprint.Success
+			referenceExpected += summary.ReferenceTotalCapture.ExpectedEvents
+			referenceSuccess += summary.ReferenceTotalFingerprint.Success
+		}
+	}
+	if len(cpuModels) < 2 {
+		t.Fatalf("reviewed v0.3 evidence covers %d CPU model(s), want at least 2", len(cpuModels))
+	}
+	if currentDaemonSHA256 != "46a1d6ecfebe984a1952aeb47652f5ec19e8bbf8906644427686a98a7fe57737" || referenceDaemonSHA256 != "02352ba197866c120395d75a4ff06bec52c8444691da4e406c94b7a799e3d8af" {
+		t.Fatalf("reviewed daemon digests drifted: current=%q reference=%q", currentDaemonSHA256, referenceDaemonSHA256)
+	}
+	if !stringSlicesEqual(artifactDigests, wantArtifactDigests) {
+		t.Fatalf("reviewed artifact digests = %v, want %v", artifactDigests, wantArtifactDigests)
+	}
+	if currentExpected != 6240 || currentSuccess != currentExpected || referenceExpected != 6240 || referenceSuccess != referenceExpected {
+		t.Fatalf("reviewed v0.3 correctness totals: current=%d/%d reference=%d/%d", currentSuccess, currentExpected, referenceSuccess, referenceExpected)
+	}
+
+	budget, budgetDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.3.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if budget.BudgetVersion != "github-ubuntu-24.04-amd64.9c5f16b.v1" || budgetDigest != "a70c18f588e1bf3bc7f8de65e75661ca60281b887724ca22d2979f054d46a4bc" {
+		t.Fatalf("reviewed v0.3 budget identity drifted: version=%q digest=%q", budget.BudgetVersion, budgetDigest)
+	}
+	if !stringSlicesEqual(budget.EvidenceArtifactSHA256s, artifactDigests) {
+		t.Fatalf("budget evidence digests = %v, want %v", budget.EvidenceArtifactSHA256s, artifactDigests)
+	}
+	for _, profile := range budget.Profiles {
+		policy, ok := wantBudgetPolicies[profile.ProfileName]
+		if !ok {
+			t.Fatalf("unexpected reviewed v0.3 budget profile %q", profile.ProfileName)
+		}
+		if profile.WallOverheadTolerancePercentagePoints != policy.wallTolerancePercentagePoints ||
+			profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != policy.cpuRelativeTolerancePercent ||
+			profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != policy.cpuAbsoluteTolerance ||
+			profile.PeakRSSToleranceKiB != policy.peakRSSToleranceKiB {
+			t.Fatalf("budget profile %q policy drifted: %+v", profile.ProfileName, profile)
+		}
+		aggregate, ok := aggregates[profile.ProfileName]
+		if !ok || !nearlyEqual(profile.EvidenceP50WallOverheadPercent, aggregate.maxP50WallOverheadPercent) ||
+			!nearlyEqual(profile.EvidenceP95WallOverheadPercent, aggregate.maxP95WallOverheadPercent) ||
+			!nearlyEqual(profile.EvidenceP95EnabledToReferenceDaemonCPURatio, aggregate.maxP95EnabledToReferenceDaemonCPURatio) ||
+			profile.EvidenceMaxEnabledDaemonPeakRSSKiB != aggregate.maxEnabledDaemonPeakRSSKiB {
+			t.Fatalf("budget profile %q drifted from reviewed v0.3 evidence", profile.ProfileName)
+		}
+		wallSpread := aggregate.maxP50WallOverheadPercent - aggregate.minP50WallOverheadPercent
+		if profile.WallOverheadTolerancePercentagePoints < 2*wallSpread || profile.WallOverheadTolerancePercentagePoints > 2*wallSpread+0.03 {
+			t.Fatalf("profile %q wall tolerance %f is not a tight upward rounding of twice spread %f", profile.ProfileName, profile.WallOverheadTolerancePercentagePoints, wallSpread)
+		}
+		relativeRatioSpreadPercent := ((aggregate.maxP95EnabledToReferenceDaemonCPURatio - aggregate.minP95EnabledToReferenceDaemonCPURatio) / aggregate.minP95EnabledToReferenceDaemonCPURatio) * 100
+		if profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent < 2*relativeRatioSpreadPercent || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent > 2*relativeRatioSpreadPercent+2 || profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0.02 {
+			t.Fatalf("profile %q CPU tolerance does not tightly bound twice relative spread %f", profile.ProfileName, relativeRatioSpreadPercent)
+		}
+	}
+	for index, report := range reports {
+		gate := EvaluateAgentRecognitionBenchmarkBudget(report, budget, budgetDigest)
+		if gate.Status != AgentRecognitionBenchmarkGatePass || len(gate.Violations) != 0 {
+			t.Fatalf("reviewed v0.3 evidence %s does not pass its bound budget: %+v", evidenceFiles[index], gate)
+		}
+	}
+}
+
+func TestCommittedAgentRecognitionBenchmarkV2FalsificationRemainsLoadable(t *testing.T) {
+	report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", "agent-recognition-benchmark-evidence-aaac953-run29577544792.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantBudgetDigest = "0af01c486a5bbed5d6b25be12f1948b94bc9fadac67491957f96ce018fa2aeff"
+	wantViolations := []string{
+		"budget.low.p95_normalized_daemon_cpu",
+		"budget.storm.p95_normalized_daemon_cpu",
+		"budget.sustained.p95_normalized_daemon_cpu",
+	}
+	if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV2 || report.SourceSHA != "aaac95363569710d692861e579561d7f4c3619e8" ||
+		report.ArtifactSHA256 != "08a6d4125f11ead3593a5fe68888e28dcd07ee59e837ac8485b718f6749dfce0" || report.Gate.Status != AgentRecognitionBenchmarkGateFail ||
+		!reflect.DeepEqual(report.Gate.Violations, wantViolations) {
+		t.Fatalf("preserved v0.2 falsification drifted: source=%q artifact=%q gate=%+v", report.SourceSHA, report.ArtifactSHA256, report.Gate)
+	}
+	budget, budgetDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if budgetDigest != wantBudgetDigest || report.Gate.BudgetSHA256 != budgetDigest {
+		t.Fatalf("preserved v0.2 budget identity drifted: loaded=%q report=%q", budgetDigest, report.Gate.BudgetSHA256)
+	}
+	evaluatedGate := EvaluateAgentRecognitionBenchmarkBudget(report, budget, budgetDigest)
+	if !reflect.DeepEqual(evaluatedGate, report.Gate) {
+		t.Fatalf("preserved v0.2 falsification no longer reproduces: evaluated=%+v stored=%+v", evaluatedGate, report.Gate)
+	}
+}
+
 func validAgentRecognitionBenchmarkReport(t *testing.T) AgentRecognitionBenchmarkReport {
 	t.Helper()
 	profiles := []AgentRecognitionBenchmarkProfile{

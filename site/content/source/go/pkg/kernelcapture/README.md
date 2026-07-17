@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "54a69b92f8cb2f2f509710e1c3210e031e61e9828042585bec27fbc105a6fba4"
+source_sha256: "021a1fe06c4481c92fb0d3360a97b68993f2e9256d1e9ec96cdcbf9b33ee16b1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -62,9 +62,10 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
     never computed executable digests, full paths, argv, environment, or file
     content; matches remain heuristic and observe-only.
   - provides a separate real-Linux paired overhead harness with deterministic
-    CI/release profiles, raw AB/BA observations, thread-group CPU, peak RSS,
-    authenticated health, exclusive capture/classification/fingerprint ledgers,
-    artifact digests, and fail-closed reviewed-budget enforcement.
+    CI/release profiles, raw six-order baseline/reference/candidate
+    observations, same-VM daemon CPU ratios, peak RSS, authenticated health,
+    exclusive capture/classification/fingerprint ledgers, artifact digests, and
+    fail-closed reviewed-budget enforcement.
 - Includes a deterministic maintained-corpus evaluation gate:
   - validates versioned samples, reviewed thresholds, sanitized provenance,
     stable IDs, and explicit signal availability;

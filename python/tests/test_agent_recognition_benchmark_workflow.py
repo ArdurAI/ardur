@@ -4,11 +4,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "agent-recognition-benchmark.yml"
 WORKFLOW_MIRROR = REPO_ROOT / "site" / "static" / "repo" / WORKFLOW.relative_to(REPO_ROOT)
+BUDGET = REPO_ROOT / "go" / "pkg" / "kernelcapture" / "testdata" / "agent-recognition-benchmark-budget-v0.3.json"
 
 
 def test_automatic_ci_requires_v3_budget_and_manual_ci_is_explicit_evidence_only() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
+    assert BUDGET.is_file()
     assert "BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.3.json" in workflow
     assert "EVIDENCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'ci' }}" in workflow
     assert "if: github.event_name != 'workflow_dispatch'" in workflow

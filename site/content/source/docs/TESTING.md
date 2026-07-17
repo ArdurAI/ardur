@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "ba9bab840a1e400568f977ab1638b95a34bc66e865e741411b4f7ed9b235316a"
+source_sha256: "52350d10dc444cd29924cf2482b30f6d24e4b1ea91d5401bda060c67039cb537"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -89,7 +89,8 @@ work, schema drift, or digest mismatch. Automatic CI does not retry into a
 pass. It requires the reviewed v0.3 budget before measurement; a missing or
 invalid budget fails instead of silently reverting performance to
 `not_evaluated`. Only an explicit manual `ci` dispatch may collect
-budget-independent bootstrap evidence, and correctness still fails closed. The
+budget-independent replacement evidence, and correctness still fails closed.
+The committed budget is bound to three independent exact-head reports; the
 larger release profile is manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
 

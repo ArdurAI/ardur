@@ -72,7 +72,8 @@ work, schema drift, or digest mismatch. Automatic CI does not retry into a
 pass. It requires the reviewed v0.3 budget before measurement; a missing or
 invalid budget fails instead of silently reverting performance to
 `not_evaluated`. Only an explicit manual `ci` dispatch may collect
-budget-independent bootstrap evidence, and correctness still fails closed. The
+budget-independent replacement evidence, and correctness still fails closed.
+The committed budget is bound to three independent exact-head reports; the
 larger release profile is manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](benchmarks/agent-recognition-overhead.md).
 

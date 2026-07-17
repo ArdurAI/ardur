@@ -1,0 +1,45 @@
+{
+  "schema_version": "ardur.agent_recognition_benchmark_budget.v0.3",
+  "budget_version": "github-ubuntu-24.04-amd64.9c5f16b.v1",
+  "evidence_artifact_sha256s": [
+    "a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4",
+    "b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e",
+    "32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317"
+  ],
+  "minimum_measured_pairs": 20,
+  "profiles": [
+    {
+      "profile_name": "low",
+      "evidence_p50_wall_overhead_percent": 0.05641220123886045,
+      "evidence_p95_wall_overhead_percent": 0.09779611725225638,
+      "wall_overhead_tolerance_percentage_points": 0.1,
+      "evidence_p95_enabled_to_reference_daemon_cpu_ratio": 1.0892296738556329,
+      "enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent": 12,
+      "enabled_to_reference_daemon_cpu_ratio_absolute_tolerance": 0.02,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13452,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "sustained",
+      "evidence_p50_wall_overhead_percent": 0.11618123234414825,
+      "evidence_p95_wall_overhead_percent": 0.2452892702134036,
+      "wall_overhead_tolerance_percentage_points": 0.05,
+      "evidence_p95_enabled_to_reference_daemon_cpu_ratio": 1.0346540798684878,
+      "enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent": 3,
+      "enabled_to_reference_daemon_cpu_ratio_absolute_tolerance": 0.02,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13496,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "storm",
+      "evidence_p50_wall_overhead_percent": 0.6659631270812636,
+      "evidence_p95_wall_overhead_percent": 0.9915785624948255,
+      "wall_overhead_tolerance_percentage_points": 0.15,
+      "evidence_p95_enabled_to_reference_daemon_cpu_ratio": 1.0594118403315005,
+      "enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent": 10,
+      "enabled_to_reference_daemon_cpu_ratio_absolute_tolerance": 0.02,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13632,
+      "peak_rss_tolerance_kib": 4096
+    }
+  ]
+}

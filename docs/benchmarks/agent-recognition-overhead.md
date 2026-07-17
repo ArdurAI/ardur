@@ -77,13 +77,14 @@ branch's merge-base with `dev`. Both source SHAs and both executed binary
 digests are part of the artifact.
 
 Automatic pull-request and `dev` CI must load
-`agent-recognition-benchmark-budget-v0.3.json`. During bootstrap that file is
-deliberately absent, so automatic CI fails at a preflight step before spending
-benchmark time. An explicit `workflow_dispatch` with profile `ci` is the only
-hosted evidence-only path. Reviewers inspect at least three independent
-exact-head artifacts before committing both those reports and a budget bound to
-their artifact digests. Manual `release` runs remain budget-independent
-experiments.
+`agent-recognition-benchmark-budget-v0.3.json`. The committed budget is bound to
+three independently dispatched exact-head reports. A missing budget fails at a
+preflight step before spending benchmark time. An explicit
+`workflow_dispatch` with profile `ci` is the only hosted evidence-only path for
+collecting a replacement evidence set; reviewers must inspect at least three
+independent exact-head artifacts before replacing both those reports and the
+budget bound to their artifact digests. Manual `release` runs remain
+budget-independent experiments.
 
 `not_evaluated` applies only to performance. Even without a budget, any drop,
 malformed or unexplained capture, recognition rejection, fingerprint mismatch,
@@ -111,6 +112,49 @@ convert loss or incorrect fingerprinting into a pass.
 The historical v0.1 and v0.2 reports and budgets remain strictly loadable and
 digest-verifiable. They retain their original absolute or synthetic-calibrated
 CPU rules and are not silently reinterpreted as same-VM reference evidence.
+
+### Reviewed v0.3 same-VM reference evidence
+
+Three independent, first-attempt manual `ci` dispatches compared source
+`9c5f16b2356f77bd63b3db6711c50e16e2407745` with exact `dev` reference
+`5df32e257d2e9c9a6750fa65638f43c8b0707484`. No attempt was rerun. All three
+executed candidate daemon digest
+`46a1d6ecfebe984a1952aeb47652f5ec19e8bbf8906644427686a98a7fe57737`
+and reference daemon digest
+`02352ba197866c120395d75a4ff06bec52c8444691da4e406c94b7a799e3d8af`
+on the same VM for each report.
+
+| Run | Reviewed report | CPU model | Calibration p50 | Artifact digest |
+|---:|---|---|---:|---|
+| [29580498313](https://github.com/ArdurAI/ardur/actions/runs/29580498313) | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json) | AMD EPYC 7763 | 170.023 ms | `a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4` |
+| [29580918057](https://github.com/ArdurAI/ardur/actions/runs/29580918057) | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json) | AMD EPYC 9V74 | 191.558 ms | `b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e` |
+| [29581341003](https://github.com/ArdurAI/ardur/actions/runs/29581341003) | [raw JSON](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json) | AMD EPYC 7763 | 169.963 ms | `32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317` |
+
+Each report delivered, recognized, and fingerprinted all 2,080 candidate and
+all 2,080 reference events. Across the evidence set that is 6,240 exact
+candidate successes plus 6,240 exact reference successes, with zero producer
+drop, malformed record, rejection, mismatch, saturation, unavailable or
+in-flight work, or unexplained outcome.
+
+| Profile | Wall p50 range | Diagnostic wall p95 maximum | Candidate/reference CPU p95 range | Maximum RSS |
+|---|---:|---:|---:|---:|
+| low | 0.0082–0.0564% | 0.0978% | 1.03667–1.08923 | 13,452 KiB |
+| sustained | 0.0931–0.1162% | 0.2453% | 1.02637–1.03465 | 13,496 KiB |
+| storm | 0.6041–0.6660% | 0.9916% | 1.01344–1.05941 | 13,632 KiB |
+
+Budget version `github-ubuntu-24.04-amd64.9c5f16b.v1` records the maximum
+reviewed value for every evidence field. Its wall allowances are tight upward
+roundings of more than twice the cross-run p50 spread: 0.10 percentage points
+for low, 0.05 for sustained, and 0.15 for storm. Its relative CPU allowances
+likewise exceed twice the cross-run relative p95-ratio spread: 12% for low, 3%
+for sustained, and 10% for storm, with a 0.02 absolute floor that does not
+dominate those thresholds. RSS retains the historical 4,096 KiB allowance.
+The committed provenance test strictly reloads all reports, recomputes their
+digests, derives these maxima and spreads, verifies both CPU models and all
+correctness totals, and proves every reviewed report passes the bound budget.
+These limits are regression evidence, not an SLO or a cross-host capacity
+claim. A future failure requires artifact review, never retry voting or blind
+tolerance widening.
 
 ### Retired v0.2 synthetic-calibration evidence
 
@@ -163,7 +207,9 @@ low (`0.086400 > 0.084482`), sustained (`0.373746 > 0.356972`), and storm
 (`1.379734 > 1.280371`). The single-thread SHA calibration did not co-scale
 with the concurrent production daemon path. Widening the v0.2 tolerance or
 retry voting would hide that model failure, so the v0.2 budget is retained only
-as historical, digest-verifiable evidence and is no longer used by CI.
+as historical, digest-verifiable evidence and is no longer used by CI. The
+[failed raw report](../../go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-aaac953-run29577544792.json)
+is committed so the methodology falsification remains reproducible.
 
 ### Historical v0.1 CI evidence
 
