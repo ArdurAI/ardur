@@ -12,7 +12,7 @@ plus the Claude-specific rules below.
 Then read:
 
 1. `.context/ARDUR_CONTEXT.md`
-2. `.context/ardur-graph.md`
+2. Graph artifacts only when its **Generated Graph** status is `available`
 3. `AGENTS.md`
 4. `docs/engineering-standards.md`
 

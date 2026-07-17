@@ -2,7 +2,7 @@
 title: "Conductor Agent Instructions"
 description: "Conductor workspaces are parallel, branch-isolated working areas. Follow the"
 source_path: "docs/agent-instructions/conductor.md"
-source_sha256: "2c6c067edf6b67751c13ac36aaced944b5b626df277fedc2ec0275189f202420"
+source_sha256: "f639a28961925b8beecfca2da7bfd93e88e403f1dfae7de74f41ae90dd3b9849"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -29,7 +29,7 @@ Conductor workspaces are parallel, branch-isolated working areas. Follow the
 Then read:
 
 1. `.context/ARDUR_CONTEXT.md`
-2. `.context/ardur-graph.md`
+2. Graph artifacts only when its **Generated Graph** status is `available`
 3. `AGENTS.md`
 4. `docs/engineering-standards.md`
 
