@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux reference-paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "28c78d0eb7abc2bf8daf9b3c754a54287573854b314f488407616c55b24befd6"
+source_sha256: "aca13aeb1e2457c8c42a6f17986bfb4e06110e550b040bccf6f717a21a654891"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -119,6 +119,16 @@ renamed, schema-mixed, non-finite, overflowing, or invalid budget fails closed
 instead of falling back to `not_evaluated`. The command exits 1 when a budget
 or correctness gate is exceeded and exits 2 for invalid input, unavailable
 measurement, schema drift, digest mismatch, or report-publication failure.
+
+After the capture, recognition, and fingerprint ledgers reach their terminal
+state, each arm also waits for the exact cumulative number of synchronous
+fingerprint-observation records in the daemon's private JSONL log. That record
+is written inside the observer on both the reference and candidate revisions,
+so it is a common publication barrier even when an older reference daemon
+increments its terminal counter first. The runner then re-reads and fully
+validates the ledgers before taking the final CPU sample. A missing, extra,
+malformed, oversized, unreadable, or late observation log fails closed instead
+of producing a partial ratio.
 
 Budget evaluation always fails on a missing profile, too few samples, producer
 drops, malformed records, unexplained capture, rejection, fingerprint queue

@@ -103,6 +103,16 @@ instead of falling back to `not_evaluated`. The command exits 1 when a budget
 or correctness gate is exceeded and exits 2 for invalid input, unavailable
 measurement, schema drift, digest mismatch, or report-publication failure.
 
+After the capture, recognition, and fingerprint ledgers reach their terminal
+state, each arm also waits for the exact cumulative number of synchronous
+fingerprint-observation records in the daemon's private JSONL log. That record
+is written inside the observer on both the reference and candidate revisions,
+so it is a common publication barrier even when an older reference daemon
+increments its terminal counter first. The runner then re-reads and fully
+validates the ledgers before taking the final CPU sample. A missing, extra,
+malformed, oversized, unreadable, or late observation log fails closed instead
+of producing a partial ratio.
+
 Budget evaluation always fails on a missing profile, too few samples, producer
 drops, malformed records, unexplained capture, rejection, fingerprint queue
 mismatch, saturation, unavailable fingerprint work, in-flight work, or

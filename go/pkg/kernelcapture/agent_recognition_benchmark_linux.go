@@ -3,6 +3,7 @@
 package kernelcapture
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,7 +22,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const benchmarkFingerprintRegistryVersion = "ardur.benchmark-agent-fingerprint.2026-07-14.v1"
+const (
+	benchmarkFingerprintRegistryVersion            = "ardur.benchmark-agent-fingerprint.2026-07-14.v1"
+	agentRecognitionBenchmarkFingerprintLogMessage = "AI agent executable fingerprint observed"
+	agentRecognitionBenchmarkMaxDaemonLogBytes     = 16 << 20
+)
 
 type agentRecognitionBenchmarkDaemon struct {
 	command *exec.Cmd
@@ -29,6 +34,7 @@ type agentRecognitionBenchmarkDaemon struct {
 	done    bool
 	waitErr error
 	socket  string
+	logFile *os.File
 }
 
 type agentRecognitionBenchmarkSnapshot struct {
@@ -253,6 +259,7 @@ func runAgentRecognitionBenchmarkArm(ctx context.Context, root string, opts Agen
 	}()
 
 	results := make(map[string]AgentRecognitionBenchmarkArm, len(opts.Profiles))
+	expectedFingerprintObservations := uint64(0)
 	for _, profile := range opts.Profiles {
 		before, err := daemon.snapshot(enabled, registrySHA256)
 		if err != nil {
@@ -274,10 +281,34 @@ func runAgentRecognitionBenchmarkArm(ctx context.Context, root string, opts Agen
 		if err != nil {
 			return nil, err
 		}
+		if enabled {
+			profileObservations := uint64(profile.EventCount)
+			if ^uint64(0)-expectedFingerprintObservations < profileObservations {
+				return nil, fmt.Errorf("%w: cumulative fingerprint observation count overflowed", ErrAgentRecognitionBenchmark)
+			}
+			expectedFingerprintObservations += profileObservations
+		}
+		if err := daemon.waitForFingerprintObservationLogs(ctx, expectedFingerprintObservations, opts.AccountingTimeout); err != nil {
+			return nil, err
+		}
+		after, err = daemon.snapshot(enabled, registrySHA256)
+		if err != nil {
+			return nil, err
+		}
+		settled, err := agentRecognitionBenchmarkAccountingSettled(enabled, before, after, uint64(profile.EventCount))
+		if err != nil {
+			return nil, err
+		}
+		if !settled {
+			return nil, fmt.Errorf("%w: daemon accounting changed after observation publication", ErrAgentRecognitionBenchmark)
+		}
 		settleElapsed := time.Since(settleStarted)
 		cpuAfter, err := readProcessSchedstatNanoseconds(daemon.command.Process.Pid)
-		if err != nil || cpuAfter < cpuBefore {
-			return nil, fmt.Errorf("%w: daemon CPU counter is unavailable or moved backwards", ErrAgentRecognitionBenchmark)
+		if err != nil {
+			return nil, err
+		}
+		if cpuAfter < cpuBefore {
+			return nil, fmt.Errorf("%w: daemon CPU counter moved backwards across the measured arm", ErrAgentRecognitionBenchmark)
 		}
 		peakRSS, err := readProcessPeakRSSKiB(daemon.command.Process.Pid)
 		if err != nil {
@@ -313,7 +344,8 @@ func startAgentRecognitionBenchmarkDaemon(ctx context.Context, root, runtimeRoot
 			"--agent-recognition-fingerprint-registry", registryPath,
 		)
 	}
-	logFile, err := os.OpenFile(filepath.Join(root, "daemon.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	logPath := filepath.Join(root, "daemon.jsonl")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("%w: create private daemon log", ErrAgentRecognitionBenchmark)
 	}
@@ -328,7 +360,7 @@ func startAgentRecognitionBenchmarkDaemon(ctx context.Context, root, runtimeRoot
 		_ = logFile.Close()
 		return nil, fmt.Errorf("%w: daemon failed to start", ErrAgentRecognitionBenchmark)
 	}
-	daemon := &agentRecognitionBenchmarkDaemon{command: command, wait: make(chan error, 1), socket: socket}
+	daemon := &agentRecognitionBenchmarkDaemon{command: command, wait: make(chan error, 1), socket: socket, logFile: logFile}
 	go func() {
 		err := command.Wait()
 		_ = logFile.Close()
@@ -415,32 +447,11 @@ func (d *agentRecognitionBenchmarkDaemon) waitForAccounting(enabled bool, regist
 	for {
 		after, err := d.snapshot(enabled, registrySHA256)
 		if err == nil {
-			capture, captureErr := deltaCaptureHealth(before.capture, after.capture)
-			if captureErr != nil {
-				return agentRecognitionBenchmarkSnapshot{}, captureErr
+			settled, settleErr := agentRecognitionBenchmarkAccountingSettled(enabled, before, after, expected)
+			if settleErr != nil {
+				return agentRecognitionBenchmarkSnapshot{}, settleErr
 			}
-			if !enabled {
-				recognition, recognitionErr := deltaRecognitionCounters(before.recognition.Counters, after.recognition.Counters)
-				if recognitionErr != nil {
-					return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: baseline recognition counter moved backwards", ErrAgentRecognitionBenchmark)
-				}
-				if capture.Delivered == 0 && capture.ProducerDropped == 0 && capture.Malformed == 0 && recognition == (AgentRecognitionCounters{}) {
-					return after, nil
-				}
-				return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: baseline observed recognition-filtered work", ErrAgentRecognitionBenchmark)
-			}
-			candidateDelta, candidateErr := deltaRecognitionCounters(before.recognition.Counters, after.recognition.Counters)
-			fingerprint, fingerprintErr := deltaFingerprintCounters(before.fingerprint.Counters, after.fingerprint.Counters)
-			if candidateErr != nil || fingerprintErr != nil {
-				return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: daemon accounting counter moved backwards", ErrAgentRecognitionBenchmark)
-			}
-			captureTotal := capture.Delivered + capture.ProducerDropped + capture.Malformed
-			terminal := fingerprint.Success + fingerprint.Mismatch + fingerprint.Saturated + fingerprint.Unavailable
-			classified := candidateDelta.Recognized + candidateDelta.Ambiguous
-			if captureTotal > expected || candidateDelta.CandidatesTotal > capture.Delivered || classified > candidateDelta.CandidatesTotal || terminal > candidateDelta.Recognized {
-				return agentRecognitionBenchmarkSnapshot{}, fmt.Errorf("%w: daemon accounting exceeded produced work", ErrAgentRecognitionBenchmark)
-			}
-			if captureTotal == expected && candidateDelta.CandidatesTotal == capture.Delivered && classified == candidateDelta.CandidatesTotal && terminal == candidateDelta.Recognized && after.fingerprint.QueueDepth == 0 {
+			if settled {
 				return after, nil
 			}
 		}
@@ -450,6 +461,35 @@ func (d *agentRecognitionBenchmarkDaemon) waitForAccounting(enabled bool, regist
 		case <-ticker.C:
 		}
 	}
+}
+
+func agentRecognitionBenchmarkAccountingSettled(enabled bool, before, after agentRecognitionBenchmarkSnapshot, expected uint64) (bool, error) {
+	capture, err := deltaCaptureHealth(before.capture, after.capture)
+	if err != nil {
+		return false, err
+	}
+	if !enabled {
+		recognition, recognitionErr := deltaRecognitionCounters(before.recognition.Counters, after.recognition.Counters)
+		if recognitionErr != nil {
+			return false, fmt.Errorf("%w: baseline recognition counter moved backwards", ErrAgentRecognitionBenchmark)
+		}
+		if capture.Delivered == 0 && capture.ProducerDropped == 0 && capture.Malformed == 0 && recognition == (AgentRecognitionCounters{}) {
+			return true, nil
+		}
+		return false, fmt.Errorf("%w: baseline observed recognition-filtered work", ErrAgentRecognitionBenchmark)
+	}
+	candidateDelta, candidateErr := deltaRecognitionCounters(before.recognition.Counters, after.recognition.Counters)
+	fingerprint, fingerprintErr := deltaFingerprintCounters(before.fingerprint.Counters, after.fingerprint.Counters)
+	if candidateErr != nil || fingerprintErr != nil {
+		return false, fmt.Errorf("%w: daemon accounting counter moved backwards", ErrAgentRecognitionBenchmark)
+	}
+	captureTotal := capture.Delivered + capture.ProducerDropped + capture.Malformed
+	terminal := fingerprint.Success + fingerprint.Mismatch + fingerprint.Saturated + fingerprint.Unavailable
+	classified := candidateDelta.Recognized + candidateDelta.Ambiguous
+	if captureTotal > expected || candidateDelta.CandidatesTotal > capture.Delivered || classified > candidateDelta.CandidatesTotal || terminal > candidateDelta.Recognized {
+		return false, fmt.Errorf("%w: daemon accounting exceeded produced work", ErrAgentRecognitionBenchmark)
+	}
+	return captureTotal == expected && candidateDelta.CandidatesTotal == capture.Delivered && classified == candidateDelta.CandidatesTotal && terminal == candidateDelta.Recognized && after.fingerprint.QueueDepth == 0, nil
 }
 
 func buildAgentRecognitionBenchmarkArm(enabled bool, profile AgentRecognitionBenchmarkProfile, completed int, workloadElapsed, settleElapsed time.Duration, daemonCPU, peakRSS uint64, before, after agentRecognitionBenchmarkSnapshot) (AgentRecognitionBenchmarkArm, error) {
@@ -711,6 +751,93 @@ func readProcessSchedstatNanoseconds(pid int) (uint64, error) {
 		return 0, fmt.Errorf("%w: daemon CPU metric is unavailable", ErrAgentRecognitionBenchmark)
 	}
 	return total, nil
+}
+
+func (d *agentRecognitionBenchmarkDaemon) waitForFingerprintObservationLogs(ctx context.Context, expected uint64, timeout time.Duration) error {
+	if d == nil || d.logFile == nil || timeout <= 0 {
+		return fmt.Errorf("%w: daemon observation log barrier is unavailable", ErrAgentRecognitionBenchmark)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: benchmark context ended before observation publication", ErrAgentRecognitionBenchmark)
+	}
+	deadlineAt := time.Now().Add(timeout)
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		observed, complete, err := countAgentRecognitionBenchmarkFingerprintLogs(d.logFile)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: benchmark context ended before observation publication", ErrAgentRecognitionBenchmark)
+		}
+		if !time.Now().Before(deadlineAt) {
+			return fmt.Errorf("%w: daemon fingerprint observations did not settle", ErrAgentRecognitionBenchmark)
+		}
+		if complete && observed > expected {
+			return fmt.Errorf("%w: daemon published more fingerprint observations than produced work", ErrAgentRecognitionBenchmark)
+		}
+		if complete && observed == expected {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: benchmark context ended before observation publication", ErrAgentRecognitionBenchmark)
+		case <-deadline.C:
+			return fmt.Errorf("%w: daemon fingerprint observations did not settle", ErrAgentRecognitionBenchmark)
+		case <-ticker.C:
+		}
+	}
+}
+
+func countAgentRecognitionBenchmarkFingerprintLogs(file *os.File) (uint64, bool, error) {
+	if file == nil {
+		return 0, false, fmt.Errorf("%w: daemon observation log is unavailable", ErrAgentRecognitionBenchmark)
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > agentRecognitionBenchmarkMaxDaemonLogBytes {
+		return 0, false, fmt.Errorf("%w: daemon observation log is unavailable or outside bounds", ErrAgentRecognitionBenchmark)
+	}
+	raw := make([]byte, int(info.Size()))
+	if len(raw) > 0 {
+		n, readErr := file.ReadAt(raw, 0)
+		if readErr != nil || n != len(raw) {
+			return 0, false, fmt.Errorf("%w: daemon observation log is unreadable", ErrAgentRecognitionBenchmark)
+		}
+	}
+	after, err := file.Stat()
+	if err != nil || !after.Mode().IsRegular() || after.Size() < 0 || after.Size() > agentRecognitionBenchmarkMaxDaemonLogBytes {
+		return 0, false, fmt.Errorf("%w: daemon observation log is unavailable or outside bounds", ErrAgentRecognitionBenchmark)
+	}
+	if after.Size() != info.Size() {
+		return 0, false, nil
+	}
+	lines := bytes.Split(raw, []byte{'\n'})
+	var observed uint64
+	for index, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		if index == len(lines)-1 && raw[len(raw)-1] != '\n' {
+			break
+		}
+		var record struct {
+			Message string `json:"msg"`
+		}
+		if err := json.Unmarshal(line, &record); err != nil {
+			return 0, false, fmt.Errorf("%w: daemon observation log contains malformed JSON", ErrAgentRecognitionBenchmark)
+		}
+		if record.Message == agentRecognitionBenchmarkFingerprintLogMessage {
+			observed++
+		}
+	}
+	complete := len(raw) == 0 || raw[len(raw)-1] == '\n'
+	return observed, complete, nil
 }
 
 func parseSchedstatRuntimeNanoseconds(raw []byte) (uint64, error) {
