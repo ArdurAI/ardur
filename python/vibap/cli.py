@@ -5591,7 +5591,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     anchor.add_argument(
         "--receipt-log",
-        type=Path,
+        type=str,
         required=True,
         help="receipt JSONL path whose sibling anchor store should be drained",
     )
@@ -5605,10 +5605,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--keys-dir", type=str, help="receipt signing keys (required by Rekor v1)"
     )
     anchor.add_argument(
-        "--local-log", type=Path, help="self-hosted append-only log JSONL path"
+        "--local-log", type=str, help="self-hosted append-only log JSONL path"
     )
     anchor.add_argument(
-        "--log-private-key", type=Path, help="self-hosted log Ed25519 private key PEM"
+        "--log-private-key", type=str, help="self-hosted log Ed25519 private key PEM"
     )
     anchor.add_argument(
         "--origin", help="C2SP checkpoint origin for the self-hosted log"
