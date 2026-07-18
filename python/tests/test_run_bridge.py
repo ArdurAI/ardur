@@ -2146,42 +2146,43 @@ def test_run_governed_cli_omitted_home_passes_through(
 # ---------------------------------------------------------------------------
 # Centralized next-steps rendering helper
 #
-# ``_format_next_step_line`` builds the deterministic display line for each
-# remediation step. It exists so every governed-run failure path shares one
-# print boundary and so the static developer-guidance values are built into a
-# plain display string (not a dict-field access into a print sink).
+# ``render_next_steps_lines`` builds the deterministic display lines for the
+# remediation steps. It exists so every governed-run failure path shares one
+# formatting boundary and so the static developer-guidance values are built
+# into plain display strings before reaching stderr.
 # ---------------------------------------------------------------------------
 
 
-def test_format_next_step_line_with_detail() -> None:
-    """A step with both command and detail renders as
-    ``<n>. <command>\\n   <detail>``."""
-    line = run_bridge._format_next_step_line(
-        1,
-        {
-            "command": "ardur run --home <ardur-home> -- <command>",
-            "detail": "Pass an existing directory or a nonexistent path.",
-        },
+def test_render_next_steps_lines_with_detail() -> None:
+    """Steps with command+detail produce header, numbered command, and
+    indented detail continuation lines."""
+    lines = run_bridge.render_next_steps_lines(
+        [
+            {
+                "command": "ardur run --home <ardur-home> -- <command>",
+                "detail": "Pass an existing directory or a nonexistent path.",
+            },
+            {"command": "ardur run -- <command>", "detail": ""},
+        ]
     )
-    assert line == (
-        "1. ardur run --home <ardur-home> -- <command>\n"
-        "   Pass an existing directory or a nonexistent path."
+    assert lines == [
+        "Next steps:",
+        "1. ardur run --home <ardur-home> -- <command>",
+        "   Pass an existing directory or a nonexistent path.",
+        "2. ardur run -- <command>",
+    ]
+
+
+def test_render_next_steps_lines_missing_detail_key() -> None:
+    """A step without a ``detail`` key at all renders just the numbered
+    command line."""
+    lines = run_bridge.render_next_steps_lines(
+        [{"command": "ardur doctor"}]
     )
-
-
-def test_format_next_step_line_without_detail() -> None:
-    """A step whose detail is empty renders as ``<n>. <command>`` only."""
-    line = run_bridge._format_next_step_line(
-        2,
-        {"command": "ardur run -- <command>", "detail": ""},
-    )
-    assert line == "2. ardur run -- <command>"
-
-
-def test_format_next_step_line_missing_detail_key() -> None:
-    """A step without a ``detail`` key at all is handled gracefully."""
-    line = run_bridge._format_next_step_line(3, {"command": "ardur doctor"})
-    assert line == "3. ardur doctor"
+    assert lines == [
+        "Next steps:",
+        "1. ardur doctor",
+    ]
 
 
 def test_print_next_steps_renders_all_steps_to_stderr(

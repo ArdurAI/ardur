@@ -1355,35 +1355,35 @@ def run_governed_missing_command_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _format_next_step_line(index: int, step: dict[str, str]) -> str:
-    """Build a single deterministic display line for one remediation step.
+def render_next_steps_lines(steps: list[dict[str, str]]) -> list[str]:
+    """Build deterministic display lines for remediation ``steps``.
 
-    ``command`` and ``detail`` are static developer-guidance strings baked
-    into the ``run_governed_*_next_steps()`` helpers (never user input,
-    credentials, or secrets). They are explicitly constructed into a plain
-    display string here so the value reaching any print/sink is an ordinary
-    formatted message, not a dict-field access that static analysis could
-    mistake for sensitive data flow.
+    Each step becomes a one- or two-line block: ``<n>. <command>`` and, when
+    present, a continuation line with the detail text. ``command`` and
+    ``detail`` are static developer-guidance strings baked into the
+    ``run_governed_*_next_steps()`` helpers (never user input, credentials,
+    or secrets). Returning plain display strings keeps formatting out of the
+    print boundary.
     """
-    command_text = "{}".format(step.get("command", ""))
-    detail_text = "{}".format(step.get("detail", ""))
-    line = "{}. {}".format(index, command_text)
-    if detail_text:
-        line = "{}\n   {}".format(line, detail_text)
-    return line
+    lines: list[str] = ["Next steps:"]
+    for index, step in enumerate(steps, start=1):
+        command_text = "{}".format(step.get("command", ""))
+        detail_text = "{}".format(step.get("detail", ""))
+        lines.append("{}. {}".format(index, command_text))
+        if detail_text:
+            lines.append("   {}".format(detail_text))
+    return lines
 
 
 def _print_next_steps(steps: list[dict[str, str]]) -> None:
     """Render deterministic remediation hints to stderr.
 
     Centralizes the next-steps printing so every governed-run failure path
-    shares one display boundary. Values are static developer guidance
-    strings; each line is built by ``_format_next_step_line`` before it
-    reaches stderr.
+    shares one display boundary. Display lines are produced by
+    ``render_next_steps_lines`` and each is written to stderr directly.
     """
-    print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(steps, start=1):
-        print(_format_next_step_line(index, step), file=sys.stderr)
+    for line in render_next_steps_lines(steps):
+        print(line, file=sys.stderr)
 
 
 def _print_run_governed_missing_command_next_steps() -> None:
