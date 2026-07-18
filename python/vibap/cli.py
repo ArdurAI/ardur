@@ -4481,11 +4481,11 @@ def _protect_claude_code_scope_invalid_response() -> dict[str, object]:
         "agent": "claude-code",
         "error": "protect_scope_invalid",
         "condition": "protect_scope_invalid",
-        "message": "ardur protect claude-code --scope must be a non-empty path after trimming whitespace and must not be an existing regular file.",
+        "message": "ardur protect claude-code --scope must be a non-empty path after trimming whitespace and must not be a dangling symlink or an existing regular file.",
         "detail": (
-            "An empty, whitespace-only, or regular-file --scope was provided. "
-            "Pass an explicit project folder, or use `.` to protect the current "
-            "working directory."
+            "An empty, whitespace-only, dangling-symlink, or regular-file "
+            "--scope was provided.  Pass an explicit project folder, or use "
+            "`.` to protect the current working directory."
         ),
         "next_steps": [
             {
@@ -4874,11 +4874,20 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # signing keys for the wrong directory).
     if isinstance(raw_scope, str) and not raw_scope.strip():
         return _protect_claude_code_scope_invalid_response()
-    # Reject --scope pointing to an existing regular file before any key
-    # generation or directory creation.  A regular file cannot serve as a
-    # project folder and would silently succeed with the old type=Path
-    # behaviour.  Nonexistent paths and directories pass through.
+    # Reject --scope pointing to an existing regular file OR a dangling
+    # symlink before any key generation or directory creation.  A regular
+    # file cannot serve as a project folder and would silently succeed with
+    # the old type=Path behaviour.  A dangling symlink (a symlink whose
+    # target does not exist) looks like it points somewhere but resolves to
+    # a non-existent directory; ``Path.exists()`` returns False for it so
+    # the regular-file branch alone is insufficient.  Without this check
+    # Ardur resolves the scope to the missing target, generates real signing
+    # keys, writes ``active_mission.jwt``, and configures protection against
+    # a directory that does not exist.  Non-symlink nonexistent paths and
+    # real directories pass through.
     scope_path = Path(raw_scope).expanduser()
+    if scope_path.is_symlink() and not scope_path.exists():
+        return _protect_claude_code_scope_invalid_response()
     if scope_path.exists() and scope_path.is_file():
         return _protect_claude_code_scope_invalid_response()
     # Reject empty/whitespace-only --agent-id and explicitly-provided

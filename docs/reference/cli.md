@@ -1052,7 +1052,8 @@ command exits nonzero without configuring Claude Code. JSON output includes
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
 
-If `--scope` is supplied but is empty, whitespace-only, or points to an
+If `--scope` is supplied but is empty, whitespace-only, points to a dangling
+symlink (a symbolic link whose target does not exist), or points to an
 existing regular file, the command exits nonzero without configuring Claude
 Code, generating keys, or writing `active_mission.jwt`. JSON output includes
 `ok: false`, `error: "protect_scope_invalid"`,
@@ -1060,8 +1061,10 @@ Code, generating keys, or writing `active_mission.jwt`. JSON output includes
 as `ardur protect claude-code --scope <your-project>` and
 `ardur protect claude-code --scope .`; human output prints the same recovery
 guidance. An explicit `--scope .` is still accepted and protects the current
-working directory. A nonexistent path is also accepted (the directory will be
-created during protection).
+working directory. A nonexistent path that is not a symlink is also accepted
+(the directory will be created during protection); only dangling symlinks are
+rejected because they appear to point somewhere but resolve to a missing
+target.
 
 If `--agent-id` is supplied but is empty or whitespace-only, the command exits
 nonzero without configuring Claude Code, generating keys, or writing
