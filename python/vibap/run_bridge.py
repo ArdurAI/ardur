@@ -1355,39 +1355,23 @@ def run_governed_missing_command_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def render_next_steps_lines(steps: list[dict[str, str]]) -> list[str]:
-    """Build deterministic display lines for remediation ``steps``.
-
-    Each step becomes a one- or two-line block: ``<n>. <command>`` and, when
-    present, a continuation line with the detail text. ``command`` and
-    ``detail`` are static developer-guidance strings baked into the
-    ``run_governed_*_next_steps()`` helpers (never user input, credentials,
-    or secrets). Returning plain display strings keeps formatting out of the
-    print boundary.
-    """
-    lines: list[str] = ["Next steps:"]
-    for index, step in enumerate(steps, start=1):
-        command_text = "{}".format(step.get("command", ""))
-        detail_text = "{}".format(step.get("detail", ""))
-        lines.append("{}. {}".format(index, command_text))
-        if detail_text:
-            lines.append("   {}".format(detail_text))
-    return lines
-
-
 def _print_next_steps(steps: list[dict[str, str]]) -> None:
     """Render deterministic remediation hints to stderr.
 
-    Centralizes the next-steps printing so every governed-run failure path
-    shares one display boundary. Display lines are produced by
-    ``render_next_steps_lines`` and each is written to stderr directly.
-
-    The ``command``/``detail`` values are static developer-guidance strings
-    baked into the ``run_governed_*_next_steps()`` helpers; they never
-    contain user input, credentials, secrets, tokens, or key material.
+    Mirrors the proven-safe ``_print_report_next_steps`` pattern in
+    ``python/vibap/cli.py``: extract ``command``/``detail`` into local
+    variables per step, then print each. ``command``/``detail`` are static
+    developer-guidance strings baked into the ``run_governed_*_next_steps``
+    helpers; they never contain user input, credentials, secrets, tokens,
+    or key material.
     """
-    rendered = render_next_steps_lines(steps)
-    sys.stderr.write("\n".join(rendered) + "\n")
+    print("Next steps:", file=sys.stderr)
+    for index, step in enumerate(steps, start=1):
+        command = step.get("command", "")
+        detail = step.get("detail", "")
+        print(f"{index}. {command}", file=sys.stderr)
+        if detail:
+            print(f"   {detail}", file=sys.stderr)
 
 
 def _print_run_governed_missing_command_next_steps() -> None:

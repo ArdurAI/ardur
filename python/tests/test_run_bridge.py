@@ -2146,43 +2146,11 @@ def test_run_governed_cli_omitted_home_passes_through(
 # ---------------------------------------------------------------------------
 # Centralized next-steps rendering helper
 #
-# ``render_next_steps_lines`` builds the deterministic display lines for the
-# remediation steps. It exists so every governed-run failure path shares one
-# formatting boundary and so the static developer-guidance values are built
-# into plain display strings before reaching stderr.
+# ``_print_next_steps`` mirrors the proven-safe ``_print_report_next_steps``
+# pattern in ``python/vibap/cli.py``: extract command/detail into locals per
+# step, then print each to stderr. command/detail are static developer-
+# guidance strings baked into the ``run_governed_*_next_steps`` helpers.
 # ---------------------------------------------------------------------------
-
-
-def test_render_next_steps_lines_with_detail() -> None:
-    """Steps with command+detail produce header, numbered command, and
-    indented detail continuation lines."""
-    lines = run_bridge.render_next_steps_lines(
-        [
-            {
-                "command": "ardur run --home <ardur-home> -- <command>",
-                "detail": "Pass an existing directory or a nonexistent path.",
-            },
-            {"command": "ardur run -- <command>", "detail": ""},
-        ]
-    )
-    assert lines == [
-        "Next steps:",
-        "1. ardur run --home <ardur-home> -- <command>",
-        "   Pass an existing directory or a nonexistent path.",
-        "2. ardur run -- <command>",
-    ]
-
-
-def test_render_next_steps_lines_missing_detail_key() -> None:
-    """A step without a ``detail`` key at all renders just the numbered
-    command line."""
-    lines = run_bridge.render_next_steps_lines(
-        [{"command": "ardur doctor"}]
-    )
-    assert lines == [
-        "Next steps:",
-        "1. ardur doctor",
-    ]
 
 
 def test_print_next_steps_renders_all_steps_to_stderr(
@@ -2190,7 +2158,8 @@ def test_print_next_steps_renders_all_steps_to_stderr(
 ) -> None:
     """``_print_next_steps`` writes a ``Next steps:`` header followed by one
     formatted block per step, byte-identical to the pre-centralization
-    per-helper output."""
+    per-helper output and to the sibling ``_print_report_next_steps`` in
+    ``cli.py``."""
     run_bridge._print_next_steps(
         [
             {
@@ -2198,6 +2167,7 @@ def test_print_next_steps_renders_all_steps_to_stderr(
                 "detail": "Pass an existing directory.",
             },
             {"command": "ardur run -- <command>", "detail": ""},
+            {"command": "ardur doctor"},
         ]
     )
     captured = capsys.readouterr()
@@ -2207,4 +2177,5 @@ def test_print_next_steps_renders_all_steps_to_stderr(
         "1. ardur run --home <ardur-home> -- <command>\n"
         "   Pass an existing directory.\n"
         "2. ardur run -- <command>\n"
+        "3. ardur doctor\n"
     )
