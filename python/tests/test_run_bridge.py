@@ -1876,12 +1876,156 @@ def test_run_governed_cli_symlink_to_file_home_is_rejected_before_artifacts(
     assert real_file.read_text() == "sentinel"
 
 
+# ---------------------------------------------------------------------------
+# --home path pre-validation: dangling symlink rejection (silent-success fix)
+#
+# ``Path.exists()`` follows a symlink and returns False for a missing target,
+# which previously defeated the ``exists() and not is_dir()`` guard on the
+# resolved path.  Ardur then resolved --home to a nonexistent target,
+# generated real signing keys, wrote active_mission.jwt and governance_log,
+# and materialized the target directory via ``resolve_keys_dir``.  The fix
+# checks ``is_symlink() and not exists()`` on the UN-resolved path BEFORE
+# ``.resolve()`` follows the link, failing closed before any key generation
+# or artifact write.
+# ---------------------------------------------------------------------------
+
+
+def test_run_governed_home_dangling_symlink_next_steps_are_deterministic() -> None:
+    """The ``next_steps`` list for ``run_home_dangling_symlink`` must be
+    deterministic and contain the expected ``condition`` field."""
+    steps = run_bridge.run_governed_home_dangling_symlink_next_steps()
+    assert len(steps) == 2
+    for step in steps:
+        assert step["condition"] == "run_home_dangling_symlink"
+        assert "command" in step
+        assert "detail" in step
+        assert "action" in step
+
+
+def test_run_governed_cli_dangling_symlink_home_is_rejected_before_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--home <dangling-symlink>`` must be rejected with exit 2, empty
+    stdout, deterministic stderr + Next steps, no traceback, no raw path
+    leak, and NO artifacts created at the symlink's resolved target.
+
+    This is the primary silent-success footgun closed by the fix.  The
+    previous behavior was: ``Path(...).expanduser().resolve()`` followed
+    the link, ``exists() and not is_dir()`` short-circuited to False, and
+    ``resolve_keys_dir`` silently mkdir'd the missing target.
+    """
+    missing_target = tmp_path / "nonexistent-target"
+    dangling = tmp_path / "dangling-home-link"
+    dangling.symlink_to(missing_target)
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        raise AssertionError(
+            "dangling-symlink home must be rejected before governed launch"
+        )
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=str(dangling),
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    # No raw path leak (placeholder-only recovery contract).
+    assert str(dangling) not in captured.err
+    assert str(missing_target) not in captured.err
+    assert "must not point to a dangling symlink" in captured.err
+    assert "Next steps:" in captured.err
+    # The dangling symlink itself must still be a symlink (unchanged), and
+    # its target must NOT have been materialized as a directory.
+    assert dangling.is_symlink()
+    assert not missing_target.exists()
+    # No keys/state/jwt created beside the symlink or under tmp_path.
+    assert not (tmp_path / "keys").exists()
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+
+
+def test_run_governed_cli_symlink_to_existing_dir_home_proceeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--home <symlink-to-existing-dir>`` must proceed normally.
+
+    ``Path.exists()`` follows the symlink and returns True when the target
+    exists, so the dangling-symlink guard correctly does NOT fire here.
+    This guards against an over-broad fix that would reject legitimate
+    symlinks-to-real-directories.
+    """
+    real_target = tmp_path / "real-target-home"
+    real_target.mkdir()
+    link = tmp_path / "home-link"
+    link.symlink_to(real_target)
+
+    from vibap.run_bridge import GovernanceRunResult
+
+    def stub_run_governed(**_kwargs: object) -> GovernanceRunResult:
+        return GovernanceRunResult(
+            exit_code=0,
+            session_id="stub-session",
+            mission_id="stub-mission",
+            agent_id="stub-agent",
+            adapter="stub-adapter",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=str(link),
+            passport_path=str(tmp_path / "passport.jwt"),
+            summary={"ok": True},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="stub-token",
+            attestation_digest="sha-256:stub",
+            receipts_path=str(tmp_path / "receipts.jsonl"),
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+        )
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", stub_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=str(link),
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    assert exit_code == 0
+
+
 @pytest.mark.parametrize(
     "home_value",
     [
         "existing_dir",
         "nonexistent",
-        "dangling_symlink",
     ],
 )
 def test_run_governed_cli_valid_home_paths_pass_through_to_run_governed(
@@ -1889,16 +2033,19 @@ def test_run_governed_cli_valid_home_paths_pass_through_to_run_governed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Existing directories, nonexistent paths, and dangling symlinks must
-    pass through to ``run_governed`` without printing the rejection message."""
+    """Existing directories and nonexistent non-symlink paths must pass
+    through to ``run_governed`` without printing the rejection message.
+
+    Dangling symlinks are NOT valid and are covered by the
+    ``test_run_governed_cli_dangling_symlink_home_is_rejected_*`` tests
+    below; a symlink-to-existing-directory is a valid pass-through and is
+    covered by its own test.
+    """
     if home_value == "existing_dir":
         home = tmp_path / "ardur-home"
         home.mkdir()
     elif home_value == "nonexistent":
         home = tmp_path / "nonexistent-home"
-    elif home_value == "dangling_symlink":
-        home = tmp_path / "dangling-link"
-        home.symlink_to(tmp_path / "nonexistent-target")
     else:
         raise AssertionError(f"unexpected home_value: {home_value}")
 

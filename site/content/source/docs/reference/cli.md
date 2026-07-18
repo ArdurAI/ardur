@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "8dc1c3eca221f12cb3ca612031f056bf704c8e7c11a022ba62ad28bbab5562df"
+source_sha256: "b9407b39ca92645194dc8c1b2538ee678c89012d3e76657ac9215bad209f93a0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -845,6 +845,22 @@ line, and placeholder-only `Next steps:` guidance (condition
 creates an ephemeral home); the remediation text never echoes the raw `--home`
 value or local paths. Omitting `--home` uses an ephemeral Ardur home that is
 created and cleaned up automatically.
+
+If `--home` points to a dangling symlink (a symlink whose target does not
+exist), `ardur run` exits `2` without generating keys, creating a Mission
+Passport, or launching the governed command, and does not materialize the
+symlink's missing target as a directory. Stderr prints a message, a usage line,
+and placeholder-only `Next steps:` guidance (condition
+`run_home_dangling_symlink`) such as
+`ardur run --home <ardur-home> --mission <mission> -- <command>` (pass an
+existing directory or a nonexistent path that Ardur will create) and
+`ardur run -- <command>` (omit `--home` for an ephemeral home); the remediation
+text never echoes the raw `--home` value or local paths. The check runs before
+`Path.resolve()` follows the link, because `exists()` would otherwise return
+`False` for a missing target and let `resolve_keys_dir` silently create the
+directory. A nonexistent path that is not a symlink is still accepted (the
+directory is created during the run); a symlink whose target exists is accepted
+too.
 
 The governance bridge is still local and bounded: the embedded proxy listens on
 loopback only for the launched run, kernel correlation is best effort and may be
