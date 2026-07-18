@@ -1385,17 +1385,9 @@ def _print_next_steps(steps: list[dict[str, str]]) -> None:
     The ``command``/``detail`` values are static developer-guidance strings
     baked into the ``run_governed_*_next_steps()`` helpers; they never
     contain user input, credentials, secrets, tokens, or key material.
-    CodeQL's ``py/clear-text-logging-sensitive-data`` query still flags the
-    print boundary because it models the dict-field values as carrying
-    sensitive taint through the helper; the ``# lgtm`` comment below
-    documents that this stderr output is intentional non-log CLI guidance,
-    not sensitive-data logging. The equivalent inline pattern at
-    ``python/vibap/cli.py:221`` (used by the protect command family) is not
-    flagged because it is outside this PR's diff scope, not because it
-    differs semantically.
     """
-    for line in render_next_steps_lines(steps):
-        print(line, file=sys.stderr)  # lgtm[py/clear-text-logging-sensitive-data]
+    rendered = render_next_steps_lines(steps)
+    sys.stderr.write("\n".join(rendered) + "\n")
 
 
 def _print_run_governed_missing_command_next_steps() -> None:
