@@ -676,6 +676,17 @@ validation state, but does not run a live Claude prompt or call a provider API.
 Use failed `next_steps` entries to recover the setup, then re-run the doctor
 before claiming the local Claude Code path is ready.
 
+If `--home` or `--plugin-dir` is supplied as an empty or whitespace-only string,
+`ardur doctor-claude-code` exits `1` before running any diagnostic check. The
+response is structured JSON with `ok: false`, a stable `condition`
+(`doctor_claude_code_home_empty` or `doctor_claude_code_plugin_dir_empty`), a
+human-readable `message`, an explanatory `detail`, and placeholder-only
+`next_steps` such as `ardur doctor-claude-code --home <home>` or
+`ardur doctor-claude-code --plugin-dir <plugin-directory>`. The remediation
+text never echoes the raw input value or local paths. Omitting either option
+uses the default Ardur home / default Claude Code plugin directory and is not
+rejected; an explicit `--home .` (the current directory) remains valid.
+
 ### `ardur uninstall`
 
 Remove Ardur Personal launch files (the macOS LaunchAgent plist installed by

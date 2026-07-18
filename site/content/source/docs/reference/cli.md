@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "72543e5381c88627e284534cc4ab32e986547f4be6138c5bb40d835d45efcb82"
+source_sha256: "1c0d50376fc62605b1c3f93f938ecc78d9d8a8a883f80454d0a32457fd0529a3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -692,6 +692,17 @@ The command is local-only: it inspects files, PATH, and Claude Code plugin
 validation state, but does not run a live Claude prompt or call a provider API.
 Use failed `next_steps` entries to recover the setup, then re-run the doctor
 before claiming the local Claude Code path is ready.
+
+If `--home` or `--plugin-dir` is supplied as an empty or whitespace-only string,
+`ardur doctor-claude-code` exits `1` before running any diagnostic check. The
+response is structured JSON with `ok: false`, a stable `condition`
+(`doctor_claude_code_home_empty` or `doctor_claude_code_plugin_dir_empty`), a
+human-readable `message`, an explanatory `detail`, and placeholder-only
+`next_steps` such as `ardur doctor-claude-code --home <home>` or
+`ardur doctor-claude-code --plugin-dir <plugin-directory>`. The remediation
+text never echoes the raw input value or local paths. Omitting either option
+uses the default Ardur home / default Claude Code plugin directory and is not
+rejected; an explicit `--home .` (the current directory) remains valid.
 
 ### `ardur uninstall`
 

@@ -5214,6 +5214,32 @@ def cmd_profile_init(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
+    # Reject empty/whitespace-only --home and --plugin-dir before any
+    # diagnostic check. Both args are ``type=str`` so an empty or
+    # whitespace-only value survives here as-is (previously ``type=Path``
+    # normalized ``""`` to ``PosixPath('.')`` which silently resolved to the
+    # CWD and produced misleading diagnostics with corrupted path fragments).
+    # An explicit ``--home .`` (CWD) must remain valid, so only reject when the
+    # trimmed string is empty. Omitting ``--home`` keeps ``args.home=None``;
+    # omitting ``--plugin-dir`` keeps the stringified default plugin dir.
+    path_failure = _coerce_report_path_args(
+        args,
+        command_name="doctor-claude-code",
+        command_title="Claude Code doctor",
+        specs=(
+            ("home", "--home", "home", "doctor_claude_code_home_empty", False),
+            (
+                "plugin_dir",
+                "--plugin-dir",
+                "plugin directory",
+                "doctor_claude_code_plugin_dir_empty",
+                False,
+            ),
+        ),
+    )
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     response = claude_code_doctor(plugin_dir=args.plugin_dir, home=args.home)
     _print_json(response)
     return 0 if response.get("ok") else 1
@@ -5896,12 +5922,12 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor-claude-code", help="check Claude Code plugin and active passport setup"
     )
     doctor_cc.add_argument(
-        "--home", type=Path, help="Ardur home containing active_mission.jwt"
+        "--home", type=str, help="Ardur home containing active_mission.jwt"
     )
     doctor_cc.add_argument(
         "--plugin-dir",
-        type=Path,
-        default=_default_claude_plugin_dir(),
+        type=str,
+        default=str(_default_claude_plugin_dir()),
         help="Claude Code plugin directory",
     )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
