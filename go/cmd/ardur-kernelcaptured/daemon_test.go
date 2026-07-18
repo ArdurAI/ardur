@@ -935,9 +935,29 @@ func TestAgentFingerprintingObservesNativeMatchAndReportsHealth(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for native fingerprint observation")
 	}
-	response := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
-	if !response.OK || response.AgentFingerprint == nil || response.AgentFingerprint.Counters.Success != 1 {
-		t.Fatalf("health response = %+v", response)
+	// Observer publication precedes terminal accounting so an observer panic
+	// cannot be recorded as a success. Wait for the worker to complete that
+	// final accounting step instead of racing it after receiving the callback.
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
+	for {
+		response := d.handleAuthorizedRequest(context.Background(), healthReq(), validHealthHandshake())
+		if !response.OK || response.AgentFingerprint == nil {
+			t.Fatalf("health response = %+v", response)
+		}
+		switch success := response.AgentFingerprint.Counters.Success; {
+		case success == 1:
+			return
+		case success > 1:
+			t.Fatalf("health response = %+v", response)
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for fingerprint success accounting; health response = %+v", response)
+		case <-poll.C:
+		}
 	}
 }
 
