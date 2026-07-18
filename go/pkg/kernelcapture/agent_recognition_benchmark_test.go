@@ -49,6 +49,215 @@ func TestFinalizeAgentRecognitionBenchmarkReportRecomputesRawPairSummariesAndDig
 	}
 }
 
+func TestValidateAgentRecognitionBenchmarkArmRejectsLedgerOverflow(t *testing.T) {
+	t.Parallel()
+	report := validAgentRecognitionBenchmarkReport(t)
+	profile := report.Pairs[0].Profile
+	max := ^uint64(0)
+	tests := []struct {
+		name   string
+		mutate func(*AgentRecognitionBenchmarkArm)
+	}{
+		{
+			name: "capture",
+			mutate: func(arm *AgentRecognitionBenchmarkArm) {
+				arm.Capture.Delivered = max
+				arm.Capture.ProducerDropped = uint64(profile.EventCount) + 1
+			},
+		},
+		{
+			name: "recognition",
+			mutate: func(arm *AgentRecognitionBenchmarkArm) {
+				arm.Recognition.Recognized = max
+				arm.Recognition.Rejected = arm.Recognition.Candidates + 1
+			},
+		},
+		{
+			name: "fingerprint terminal",
+			mutate: func(arm *AgentRecognitionBenchmarkArm) {
+				arm.Fingerprint.Success = max
+				arm.Fingerprint.Mismatch = arm.Fingerprint.Recognized + 1
+			},
+		},
+		{
+			name: "fingerprint unavailable",
+			mutate: func(arm *AgentRecognitionBenchmarkArm) {
+				arm.Fingerprint.Success = 0
+				arm.Fingerprint.Unavailable = arm.Fingerprint.Recognized
+				arm.Fingerprint.ResolutionDenied = max
+				arm.Fingerprint.ProcessExited = arm.Fingerprint.Unavailable + 1
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			arm := report.Pairs[0].Enabled
+			test.mutate(&arm)
+			if err := validateAgentRecognitionBenchmarkArm(arm, profile, true, report.RegistryVersion, report.RegistrySHA256); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("ledger overflow error = %v", err)
+			}
+		})
+	}
+}
+
+func TestNewAgentRecognitionBenchmarkPairRejectsUnrepresentableSignedDeltas(t *testing.T) {
+	t.Parallel()
+	report := validAgentRecognitionBenchmarkReport(t)
+	pair := report.Pairs[0]
+	max := ^uint64(0)
+	tests := []struct {
+		name   string
+		mutate func(*AgentRecognitionBenchmarkArm, *AgentRecognitionBenchmarkArm)
+	}{
+		{name: "baseline elapsed", mutate: func(baseline, _ *AgentRecognitionBenchmarkArm) { baseline.WorkloadElapsedNanoseconds = max }},
+		{name: "enabled elapsed", mutate: func(_, enabled *AgentRecognitionBenchmarkArm) { enabled.WorkloadElapsedNanoseconds = max }},
+		{name: "baseline CPU", mutate: func(baseline, _ *AgentRecognitionBenchmarkArm) { baseline.DaemonCPUNanoseconds = max }},
+		{name: "enabled CPU", mutate: func(_, enabled *AgentRecognitionBenchmarkArm) { enabled.DaemonCPUNanoseconds = max }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			baseline := pair.Baseline
+			enabled := pair.Enabled
+			test.mutate(&baseline, &enabled)
+			if _, err := NewAgentRecognitionBenchmarkPair(pair.PairIndex, pair.Order, pair.Profile, baseline, enabled); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("unrepresentable delta error = %v", err)
+			}
+		})
+	}
+}
+
+func TestNewAgentRecognitionBenchmarkReferencePairRejectsUnrepresentableOperands(t *testing.T) {
+	t.Parallel()
+	report := validAgentRecognitionBenchmarkReport(t)
+	pair := report.Pairs[0]
+	referenceArm := pair.Enabled
+	max := ^uint64(0)
+	tests := []struct {
+		name   string
+		mutate func(*AgentRecognitionBenchmarkArm)
+	}{
+		{name: "reference elapsed", mutate: func(reference *AgentRecognitionBenchmarkArm) { reference.WorkloadElapsedNanoseconds = max }},
+		{name: "reference CPU", mutate: func(reference *AgentRecognitionBenchmarkArm) { reference.DaemonCPUNanoseconds = max }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			reference := referenceArm
+			test.mutate(&reference)
+			if _, err := NewAgentRecognitionBenchmarkReferencePair(pair.PairIndex, pair.Order, pair.Profile, pair.Baseline, reference, pair.Enabled); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) || !strings.Contains(err.Error(), "reference duration or CPU operand") {
+				t.Fatalf("unrepresentable reference operand error = %v", err)
+			}
+		})
+	}
+}
+
+func TestFinalizeAgentRecognitionBenchmarkReportRejectsSummaryOverflow(t *testing.T) {
+	t.Parallel()
+	max := ^uint64(0)
+	tests := []struct {
+		name   string
+		mutate func(*AgentRecognitionBenchmarkPair)
+	}{
+		{name: "capture", mutate: func(pair *AgentRecognitionBenchmarkPair) { pair.Enabled.Capture.Delivered = max }},
+		{name: "recognition", mutate: func(pair *AgentRecognitionBenchmarkPair) { pair.Enabled.Recognition.Candidates = max }},
+		{name: "fingerprint", mutate: func(pair *AgentRecognitionBenchmarkPair) { pair.Enabled.Fingerprint.Success = max }},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			report := validAgentRecognitionBenchmarkReport(t)
+			test.mutate(&report.Pairs[0])
+			if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("summary overflow error = %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadAgentRecognitionBenchmarkReportRejectsWrappedLossCancellation(t *testing.T) {
+	t.Parallel()
+	report := validAgentRecognitionBenchmarkReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	lowPairs := make([]*AgentRecognitionBenchmarkPair, 0, 2)
+	for index := range report.Pairs {
+		if report.Pairs[index].Profile.Name == "low" {
+			lowPairs = append(lowPairs, &report.Pairs[index])
+			if len(lowPairs) == 2 {
+				break
+			}
+		}
+	}
+	if len(lowPairs) != 2 {
+		t.Fatalf("low-profile pairs = %d, want 2", len(lowPairs))
+	}
+	setDelivered := func(arm *AgentRecognitionBenchmarkArm, delivered, dropped uint64) {
+		arm.Capture.Delivered = delivered
+		arm.Capture.ProducerDropped = dropped
+		arm.Recognition.Candidates = delivered
+		arm.Recognition.Recognized = delivered
+		arm.Fingerprint.Recognized = delivered
+		arm.Fingerprint.Success = delivered
+	}
+	setDelivered(&lowPairs[0].Enabled, uint64(lowPairs[0].Profile.EventCount)-1, 1)
+	setDelivered(&lowPairs[1].Enabled, uint64(lowPairs[1].Profile.EventCount)+1, ^uint64(0))
+
+	path := writeAgentRecognitionBenchmarkReportWithDigest(t, &report, "wrapped-loss-report.json")
+	if _, err := LoadAgentRecognitionBenchmarkReport(path); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) || !strings.Contains(err.Error(), "capture ledger counter overflowed") {
+		t.Fatalf("wrapped loss report error = %v", err)
+	}
+}
+
+func TestLoadAgentRecognitionBenchmarkReportRejectsUnrepresentableSignedDeltas(t *testing.T) {
+	t.Parallel()
+	report := validAgentRecognitionBenchmarkReport(t)
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	pair := &report.Pairs[0]
+	pair.Enabled.WorkloadElapsedNanoseconds = ^uint64(0)
+	pair.Enabled.DaemonCPUNanoseconds = ^uint64(0)
+	pair.WallOverhead.NumeratorNanoseconds = int64(pair.Enabled.WorkloadElapsedNanoseconds) - int64(pair.Baseline.WorkloadElapsedNanoseconds)
+	pair.WallOverhead.Percent = (float64(pair.WallOverhead.NumeratorNanoseconds) / float64(pair.WallOverhead.DenominatorNanoseconds)) * 100
+	pair.DaemonCPUDeltaNanoseconds = int64(pair.Enabled.DaemonCPUNanoseconds) - int64(pair.Baseline.DaemonCPUNanoseconds)
+	summaries, err := summarizeAgentRecognitionBenchmark(report.Pairs, report.Calibration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.Summaries = summaries
+	path := writeAgentRecognitionBenchmarkReportWithDigest(t, &report, "wrapped-signed-delta-report.json")
+	if _, err := LoadAgentRecognitionBenchmarkReport(path); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) || !strings.Contains(err.Error(), "health or resource metadata is invalid") {
+		t.Fatalf("unrepresentable signed delta report error = %v", err)
+	}
+}
+
+func writeAgentRecognitionBenchmarkReportWithDigest(t *testing.T, report *AgentRecognitionBenchmarkReport, name string) string {
+	t.Helper()
+	report.ArtifactSHA256 = ""
+	payload, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	report.ArtifactSHA256 = hex.EncodeToString(digest[:])
+	payload, err = json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestAgentRecognitionBenchmarkBudgetFailsClosedOnLossAndDrift(t *testing.T) {
 	report := validAgentRecognitionBenchmarkReport(t)
 	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {

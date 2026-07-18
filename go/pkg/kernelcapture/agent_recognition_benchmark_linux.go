@@ -483,9 +483,12 @@ func agentRecognitionBenchmarkAccountingSettled(enabled bool, before, after agen
 	if candidateErr != nil || fingerprintErr != nil {
 		return false, fmt.Errorf("%w: daemon accounting counter moved backwards", ErrAgentRecognitionBenchmark)
 	}
-	captureTotal := capture.Delivered + capture.ProducerDropped + capture.Malformed
-	terminal := fingerprint.Success + fingerprint.Mismatch + fingerprint.Saturated + fingerprint.Unavailable
-	classified := candidateDelta.Recognized + candidateDelta.Ambiguous
+	captureTotal, captureTotalOK := sumAgentRecognitionBenchmarkCounters(capture.Delivered, capture.ProducerDropped, capture.Malformed)
+	terminal, terminalOK := sumAgentRecognitionBenchmarkCounters(fingerprint.Success, fingerprint.Mismatch, fingerprint.Saturated, fingerprint.Unavailable)
+	classified, classifiedOK := sumAgentRecognitionBenchmarkCounters(candidateDelta.Recognized, candidateDelta.Ambiguous)
+	if !captureTotalOK || !terminalOK || !classifiedOK {
+		return false, fmt.Errorf("%w: daemon accounting counter overflowed", ErrAgentRecognitionBenchmark)
+	}
 	if captureTotal > expected || candidateDelta.CandidatesTotal > capture.Delivered || classified > candidateDelta.CandidatesTotal || terminal > candidateDelta.Recognized {
 		return false, fmt.Errorf("%w: daemon accounting exceeded produced work", ErrAgentRecognitionBenchmark)
 	}
@@ -524,7 +527,10 @@ func buildAgentRecognitionBenchmarkArm(enabled bool, profile AgentRecognitionBen
 			Recognized: recognition.Recognized,
 			Rejected:   recognition.Ambiguous,
 		}
-		classified := arm.Recognition.Recognized + arm.Recognition.Rejected
+		classified, classifiedOK := sumAgentRecognitionBenchmarkCounters(arm.Recognition.Recognized, arm.Recognition.Rejected)
+		if !classifiedOK {
+			return AgentRecognitionBenchmarkArm{}, fmt.Errorf("%w: recognition accounting counter overflowed", ErrAgentRecognitionBenchmark)
+		}
 		if classified <= arm.Recognition.Candidates {
 			arm.Recognition.Unexplained = arm.Recognition.Candidates - classified
 		} else {
@@ -532,7 +538,10 @@ func buildAgentRecognitionBenchmarkArm(enabled bool, profile AgentRecognitionBen
 		}
 		arm.Fingerprint = fingerprint
 		arm.Fingerprint.Recognized = recognition.Recognized
-		terminal := fingerprint.Success + fingerprint.Mismatch + fingerprint.Saturated + fingerprint.Unavailable
+		terminal, terminalOK := sumAgentRecognitionBenchmarkCounters(fingerprint.Success, fingerprint.Mismatch, fingerprint.Saturated, fingerprint.Unavailable)
+		if !terminalOK {
+			return AgentRecognitionBenchmarkArm{}, fmt.Errorf("%w: fingerprint accounting counter overflowed", ErrAgentRecognitionBenchmark)
+		}
 		if terminal <= recognition.Recognized {
 			arm.Fingerprint.InFlight = recognition.Recognized - terminal
 		} else {
@@ -541,7 +550,10 @@ func buildAgentRecognitionBenchmarkArm(enabled bool, profile AgentRecognitionBen
 	}
 	arm.Capture = capture
 	arm.Capture.ExpectedEvents = expected
-	accounted := capture.Delivered + capture.ProducerDropped + capture.Malformed
+	accounted, accountedOK := sumAgentRecognitionBenchmarkCounters(capture.Delivered, capture.ProducerDropped, capture.Malformed)
+	if !accountedOK {
+		return AgentRecognitionBenchmarkArm{}, fmt.Errorf("%w: capture accounting counter overflowed", ErrAgentRecognitionBenchmark)
+	}
 	if accounted <= expected {
 		arm.Capture.Unexplained = expected - accounted
 	} else {
@@ -588,11 +600,15 @@ func deltaFingerprintCounters(before, after AgentFingerprintCounters) (AgentReco
 	sizeExceeded := after.SizeExceeded - before.SizeExceeded
 	deadlineExceeded := after.DeadlineExceeded - before.DeadlineExceeded
 	workerUnavailable := after.WorkerUnavailable - before.WorkerUnavailable
+	unavailable, ok := sumAgentRecognitionBenchmarkCounters(resolutionDenied, processExited, unsupported, sizeExceeded, deadlineExceeded, workerUnavailable)
+	if !ok {
+		return AgentRecognitionBenchmarkFingerprintLedger{}, fmt.Errorf("%w: fingerprint unavailable counter overflowed", ErrAgentRecognitionBenchmark)
+	}
 	return AgentRecognitionBenchmarkFingerprintLedger{
 		Success:           after.Success - before.Success,
 		Mismatch:          after.DigestMismatch - before.DigestMismatch,
 		Saturated:         after.QueueSaturated - before.QueueSaturated,
-		Unavailable:       resolutionDenied + processExited + unsupported + sizeExceeded + deadlineExceeded + workerUnavailable,
+		Unavailable:       unavailable,
 		ResolutionDenied:  resolutionDenied,
 		ProcessExited:     processExited,
 		Unsupported:       unsupported,

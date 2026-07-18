@@ -110,8 +110,11 @@ is written inside the observer on both the reference and candidate revisions,
 so it is a common publication barrier even when an older reference daemon
 increments its terminal counter first. The runner then re-reads and fully
 validates the ledgers before taking the final CPU sample. A missing, extra,
-malformed, oversized, unreadable, or late observation log fails closed instead
-of producing a partial ratio.
+malformed, oversized, unreadable, or late observation log, any wrapping capture,
+recognition, or fingerprint counter aggregate, or any duration or CPU operand
+that cannot be represented by the report's signed delta fields fails closed
+during collection, summary construction, and strict report loading instead of
+producing or accepting a partial ratio.
 
 Budget evaluation always fails on a missing profile, too few samples, producer
 drops, malformed records, unexplained capture, rejection, fingerprint queue

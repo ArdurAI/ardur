@@ -159,6 +159,64 @@ func TestAgentRecognitionBenchmarkAccountingSettled(t *testing.T) {
 	}
 }
 
+func TestAgentRecognitionBenchmarkAccountingSettledRejectsCounterOverflow(t *testing.T) {
+	t.Parallel()
+	before := agentRecognitionBenchmarkSnapshot{
+		capture:     DaemonLifecycleCaptureHealth{ProducerCounterAvailable: true},
+		recognition: AgentRecognitionHealth{Enabled: true},
+		fingerprint: AgentFingerprintHealth{Enabled: true},
+	}
+	max := ^uint64(0)
+	tests := []struct {
+		name   string
+		mutate func(*agentRecognitionBenchmarkSnapshot)
+	}{
+		{
+			name: "capture total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.capture.ProducerRingbufDroppedTotal = 1
+			},
+		},
+		{
+			name: "classified total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: max, Recognized: max, Ambiguous: 1}
+			},
+		},
+		{
+			name: "terminal total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: max, Recognized: max}
+				after.fingerprint.Counters.Success = max
+				after.fingerprint.Counters.DigestMismatch = 1
+			},
+		},
+		{
+			name: "unavailable total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: max, Recognized: max}
+				after.fingerprint.Counters.ResolutionDenied = max
+				after.fingerprint.Counters.ProcessExited = 1
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			after := before
+			test.mutate(&after)
+			if _, err := agentRecognitionBenchmarkAccountingSettled(true, before, after, max); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("overflow accounting error = %v", err)
+			}
+		})
+	}
+}
+
 func TestResetProcessPeakRSSKiB(t *testing.T) {
 	command := exec.Command("/bin/sleep", "5")
 	if err := command.Start(); err != nil {

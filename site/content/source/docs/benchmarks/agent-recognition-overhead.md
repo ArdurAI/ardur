@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux reference-paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "aca13aeb1e2457c8c42a6f17986bfb4e06110e550b040bccf6f717a21a654891"
+source_sha256: "4bf1e5ff9e2db51a3bf3674dec75c3a02c663ad6daed2cc0b26bef182b3c1d64"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -127,8 +127,11 @@ is written inside the observer on both the reference and candidate revisions,
 so it is a common publication barrier even when an older reference daemon
 increments its terminal counter first. The runner then re-reads and fully
 validates the ledgers before taking the final CPU sample. A missing, extra,
-malformed, oversized, unreadable, or late observation log fails closed instead
-of producing a partial ratio.
+malformed, oversized, unreadable, or late observation log, any wrapping capture,
+recognition, or fingerprint counter aggregate, or any duration or CPU operand
+that cannot be represented by the report's signed delta fields fails closed
+during collection, summary construction, and strict report loading instead of
+producing or accepting a partial ratio.
 
 Budget evaluation always fails on a missing profile, too few samples, producer
 drops, malformed records, unexplained capture, rejection, fingerprint queue
