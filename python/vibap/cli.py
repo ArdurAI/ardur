@@ -4564,7 +4564,7 @@ def _protect_claude_code_identity_invalid_response(condition: str) -> dict[str, 
 
 
 def _protect_claude_code_home_invalid_response() -> dict[str, object]:
-    """Structured response for empty/whitespace-only or regular-file ``--home``.
+    """Structured response for empty/whitespace-only, dangling-symlink, or regular-file ``--home``.
 
     Mirrors the ``protect_scope_invalid`` / ``protect_agent_id_invalid`` shape
     so all ``protect claude-code`` fail-closed branches share the same envelope.
@@ -4579,13 +4579,18 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
         "error": "protect_home_invalid",
         "error_code": "protect_home_invalid",
         "condition": "protect_home_invalid",
-        "message": "ardur protect claude-code --home must be a non-empty path after trimming whitespace and must not be an existing regular file.",
+        "message": "ardur protect claude-code --home must be a non-empty path after trimming whitespace and must not be a dangling symlink or an existing regular file.",
         "detail": (
-            "An empty, whitespace-only, or regular-file --home was provided. "
-            "Pass an explicit Ardur home directory, or omit --home to use the "
-            "default home. Empty strings, whitespace-only values, and unquoted "
-            "empty environment variables resolve to the current working "
-            "directory and are rejected."
+            "An empty, whitespace-only, dangling-symlink, or regular-file "
+            "--home was provided. Pass an explicit Ardur home directory, or "
+            "omit --home to use the default home. Empty strings, "
+            "whitespace-only values, and unquoted empty environment "
+            "variables resolve to the current working directory and are "
+            "rejected. A dangling symlink (a symlink whose target does not "
+            "exist) looks like it points somewhere but resolves to a "
+            "non-existent directory; Ardur would generate real signing "
+            "keys and write active_mission.jwt against a directory that "
+            "does not exist."
         ),
         "next_steps": [
             {
@@ -4608,7 +4613,7 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
 
 
 def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
-    """Structured response for empty/whitespace-only or regular-file ``--keys-dir``.
+    """Structured response for empty/whitespace-only, dangling-symlink, or regular-file ``--keys-dir``.
 
     Mirrors the ``protect_home_invalid`` / ``protect_scope_invalid`` shape so all
     ``protect claude-code`` fail-closed branches share the same envelope.
@@ -4623,16 +4628,21 @@ def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
         "error": "protect_keys_dir_invalid",
         "error_code": "protect_keys_dir_invalid",
         "condition": "protect_keys_dir_invalid",
-        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace and must not be an existing regular file.",
+        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace and must not be a dangling symlink or an existing regular file.",
         "detail": (
-            "An empty, whitespace-only, or regular-file --keys-dir was provided. Pass an "
-            "explicit signing keys directory, or omit --keys-dir to use the "
-            "default keys directory under the Ardur home. Empty strings, "
-            "whitespace-only values, and unquoted empty environment variables "
-            "resolve to the current working directory and are rejected, "
-            "because they silently create real signing keys in unintended "
-            "locations. An existing regular file cannot serve as a signing keys "
-            "directory and is rejected before any key generation."
+            "An empty, whitespace-only, dangling-symlink, or regular-file "
+            "--keys-dir was provided. Pass an explicit signing keys "
+            "directory, or omit --keys-dir to use the default keys "
+            "directory under the Ardur home. Empty strings, "
+            "whitespace-only values, and unquoted empty environment "
+            "variables resolve to the current working directory and are "
+            "rejected, because they silently create real signing keys in "
+            "unintended locations. An existing regular file cannot serve "
+            "as a signing keys directory and is rejected before any key "
+            "generation. A dangling symlink (a symlink whose target does "
+            "not exist) looks like it points somewhere but resolves to a "
+            "non-existent directory; Ardur would generate real signing "
+            "keys against a directory that does not exist."
         ),
         "next_steps": [
             {
@@ -4914,12 +4924,21 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # which falls through to ``DEFAULT_HOME`` and is acceptable.
     if isinstance(args.home, str) and not args.home.strip():
         return _protect_claude_code_home_invalid_response()
-    # Reject --home pointing to an existing regular file before any key
-    # generation or directory creation.  A regular file cannot serve as an
-    # Ardur home directory and would traceback with FileExistsError at
-    # home.mkdir().  Nonexistent paths and directories pass through.
+    # Reject --home pointing to an existing regular file OR a dangling
+    # symlink before any key generation or directory creation.  A regular
+    # file cannot serve as an Ardur home directory and would traceback with
+    # FileExistsError at home.mkdir().  A dangling symlink (a symlink whose
+    # target does not exist) looks like it points somewhere but resolves to
+    # a non-existent directory; ``Path.exists()`` returns False for it so
+    # the regular-file branch alone is insufficient.  Without this check
+    # Ardur resolves the home to the missing target, generates real signing
+    # keys, writes ``active_mission.jwt``, and configures protection against
+    # a directory that does not exist.  Non-symlink nonexistent paths and
+    # real directories pass through.
     if args.home:
         home_path = Path(args.home).expanduser()
+        if home_path.is_symlink() and not home_path.exists():
+            return _protect_claude_code_home_invalid_response()
         if home_path.exists() and home_path.is_file():
             return _protect_claude_code_home_invalid_response()
     # Reject empty/whitespace-only --keys-dir before any directory creation or
@@ -4932,12 +4951,20 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # the handler falls back to ``<home>/keys``.
     if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
         return _protect_claude_code_keys_dir_invalid_response()
-    # Reject --keys-dir pointing to an existing regular file before any key
-    # generation.  A regular file cannot serve as a signing keys directory and
-    # would traceback with KeyDirectoryError at generate_keypair().  Nonexistent
-    # paths and directories pass through.
+    # Reject --keys-dir pointing to an existing regular file OR a dangling
+    # symlink before any key generation.  A regular file cannot serve as a
+    # signing keys directory and would traceback with KeyDirectoryError at
+    # generate_keypair().  A dangling symlink (a symlink whose target does
+    # not exist) looks like it points somewhere but resolves to a
+    # non-existent directory; ``Path.exists()`` returns False for it so the
+    # regular-file branch alone is insufficient.  Without this check Ardur
+    # resolves the keys-dir to the missing target and proceeds with key
+    # generation against a directory that does not exist.  Non-symlink
+    # nonexistent paths and real directories pass through.
     if args.keys_dir:
         keys_dir_path = Path(args.keys_dir).expanduser()
+        if keys_dir_path.is_symlink() and not keys_dir_path.exists():
+            return _protect_claude_code_keys_dir_invalid_response()
         if keys_dir_path.exists() and keys_dir_path.is_file():
             return _protect_claude_code_keys_dir_invalid_response()
     # Reject negative --max-tool-calls before any key generation or directory

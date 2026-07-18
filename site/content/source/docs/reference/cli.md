@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "48174ee098583513f21f38dfdc3260e27423a3d99fb08a8607c838c4c32d9298"
+source_sha256: "8dc1c3eca221f12cb3ca612031f056bf704c8e7c11a022ba62ad28bbab5562df"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1104,7 +1104,8 @@ recovery guidance. An empty-string `--mission ""` is falsy and falls through to
 the selected mode's default mission; only whitespace-only strings that would
 leak into the JWT are rejected.
 
-If `--home` is supplied but is empty, whitespace-only, or points to an
+If `--home` is supplied but is empty, whitespace-only, points to a dangling
+symlink (a symbolic link whose target does not exist), or points to an
 existing regular file, the command exits nonzero without configuring Claude
 Code, generating keys, or writing `active_mission.jwt`. JSON output includes
 `ok: false`, `error: "protect_home_invalid"`,
@@ -1117,11 +1118,17 @@ default), and `ardur protect claude-code --home . --scope <your-project>` (use
 recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected.
 A regular file cannot serve as an Ardur home directory and is rejected before
-any key generation or directory creation. Omitting `--home` entirely uses the
-default Ardur home directory and is not rejected. An explicit `--home .` is
-still accepted.
+any key generation or directory creation. A dangling symlink looks like it
+points somewhere but resolves to a missing target; Ardur would otherwise
+generate real signing keys and write `active_mission.jwt` against a directory
+that does not exist, so it is rejected before any key generation or artifact
+write. Omitting `--home` entirely uses the default Ardur home directory and is
+not rejected. A nonexistent path that is not a symlink is also accepted (the
+directory will be created during protection); a symlink whose target exists is
+accepted too. An explicit `--home .` is still accepted.
 
-If `--keys-dir` is supplied but is empty, whitespace-only, or an existing
+If `--keys-dir` is supplied but is empty, whitespace-only, points to a dangling
+symlink (a symbolic link whose target does not exist), or is an existing
 regular file, the command exits nonzero without generating keys, configuring
 Claude Code, or writing `active_mission.jwt`. JSON output includes `ok: false`,
 `error: "protect_keys_dir_invalid"`, `error_code: "protect_keys_dir_invalid"`,
@@ -1135,9 +1142,14 @@ recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected,
 because they silently create real signing keys in unintended locations. An
 existing regular file cannot serve as a signing keys directory and is rejected
-before any key generation. Omitting `--keys-dir` entirely uses the default keys
-directory under the Ardur home and is not rejected. An explicit `--keys-dir .`
-is still accepted.
+before any key generation. A dangling symlink looks like it points somewhere but
+resolves to a missing target; Ardur would otherwise generate real signing keys
+against a directory that does not exist, so it is rejected before any key
+generation or artifact write. Omitting `--keys-dir` entirely uses the default
+keys directory under the Ardur home and is not rejected. A nonexistent path that
+is not a symlink is also accepted (the directory will be created during
+protection); a symlink whose target exists is accepted too. An explicit
+`--keys-dir .` is still accepted.
 
 If `--max-tool-calls` is supplied with a negative value, the command exits
 nonzero without generating keys, configuring Claude Code, or writing
