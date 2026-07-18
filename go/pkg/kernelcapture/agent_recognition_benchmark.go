@@ -91,18 +91,19 @@ type AgentRecognitionBenchmarkCaptureLedger struct {
 }
 
 type AgentRecognitionBenchmarkFingerprintLedger struct {
-	Recognized       uint64 `json:"recognized"`
-	Success          uint64 `json:"success"`
-	Mismatch         uint64 `json:"mismatch"`
-	Saturated        uint64 `json:"saturated"`
-	Unavailable      uint64 `json:"unavailable"`
-	ResolutionDenied uint64 `json:"resolution_denied"`
-	ProcessExited    uint64 `json:"process_exited"`
-	Unsupported      uint64 `json:"unsupported"`
-	SizeExceeded     uint64 `json:"size_exceeded"`
-	DeadlineExceeded uint64 `json:"deadline_exceeded"`
-	InFlight         uint64 `json:"in_flight"`
-	Unexplained      uint64 `json:"unexplained"`
+	Recognized        uint64 `json:"recognized"`
+	Success           uint64 `json:"success"`
+	Mismatch          uint64 `json:"mismatch"`
+	Saturated         uint64 `json:"saturated"`
+	Unavailable       uint64 `json:"unavailable"`
+	ResolutionDenied  uint64 `json:"resolution_denied"`
+	ProcessExited     uint64 `json:"process_exited"`
+	Unsupported       uint64 `json:"unsupported"`
+	SizeExceeded      uint64 `json:"size_exceeded"`
+	DeadlineExceeded  uint64 `json:"deadline_exceeded"`
+	WorkerUnavailable uint64 `json:"worker_unavailable,omitempty"`
+	InFlight          uint64 `json:"in_flight"`
+	Unexplained       uint64 `json:"unexplained"`
 }
 
 type AgentRecognitionBenchmarkRecognitionLedger struct {
@@ -252,7 +253,11 @@ func FinalizeAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkRe
 	if report == nil {
 		return fmt.Errorf("%w: report is required", ErrAgentRecognitionBenchmark)
 	}
-	report.Summaries = summarizeAgentRecognitionBenchmark(report.Pairs, report.Calibration)
+	summaries, err := summarizeAgentRecognitionBenchmark(report.Pairs, report.Calibration)
+	if err != nil {
+		return err
+	}
+	report.Summaries = summaries
 	report.Gate = AgentRecognitionBenchmarkGate{Status: AgentRecognitionBenchmarkGateNotRun, Violations: []string{}}
 	if budget != nil {
 		report.Gate = EvaluateAgentRecognitionBenchmarkBudget(report, budget, budgetSHA256)
@@ -386,7 +391,10 @@ func ValidateAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkRe
 			return fmt.Errorf("%w: profile sample count is incomplete", ErrAgentRecognitionBenchmark)
 		}
 	}
-	wantSummaries := summarizeAgentRecognitionBenchmark(report.Pairs, report.Calibration)
+	wantSummaries, err := summarizeAgentRecognitionBenchmark(report.Pairs, report.Calibration)
+	if err != nil {
+		return err
+	}
 	wantJSON, _ := json.Marshal(wantSummaries)
 	gotJSON, _ := json.Marshal(report.Summaries)
 	if !bytes.Equal(wantJSON, gotJSON) {
@@ -696,8 +704,8 @@ func loadAgentRecognitionBenchmarkJSON(path, label string, target any) ([]byte, 
 }
 
 func NewAgentRecognitionBenchmarkPair(pairIndex int, order string, profile AgentRecognitionBenchmarkProfile, baseline, enabled AgentRecognitionBenchmarkArm) (AgentRecognitionBenchmarkPair, error) {
-	if baseline.WorkloadElapsedNanoseconds == 0 {
-		return AgentRecognitionBenchmarkPair{}, fmt.Errorf("%w: baseline duration must be positive", ErrAgentRecognitionBenchmark)
+	if baseline.WorkloadElapsedNanoseconds == 0 || baseline.WorkloadElapsedNanoseconds > uint64(math.MaxInt64) || enabled.WorkloadElapsedNanoseconds > uint64(math.MaxInt64) || baseline.DaemonCPUNanoseconds > uint64(math.MaxInt64) || enabled.DaemonCPUNanoseconds > uint64(math.MaxInt64) {
+		return AgentRecognitionBenchmarkPair{}, fmt.Errorf("%w: paired duration or CPU delta operand is invalid", ErrAgentRecognitionBenchmark)
 	}
 	numerator := int64(enabled.WorkloadElapsedNanoseconds) - int64(baseline.WorkloadElapsedNanoseconds)
 	return AgentRecognitionBenchmarkPair{
@@ -716,8 +724,8 @@ func NewAgentRecognitionBenchmarkReferencePair(pairIndex int, order string, prof
 	if err != nil {
 		return AgentRecognitionBenchmarkPair{}, err
 	}
-	if referenceEnabled.DaemonCPUNanoseconds == 0 {
-		return AgentRecognitionBenchmarkPair{}, fmt.Errorf("%w: reference daemon CPU must be positive", ErrAgentRecognitionBenchmark)
+	if referenceEnabled.DaemonCPUNanoseconds == 0 || referenceEnabled.DaemonCPUNanoseconds > uint64(math.MaxInt64) || referenceEnabled.WorkloadElapsedNanoseconds > uint64(math.MaxInt64) {
+		return AgentRecognitionBenchmarkPair{}, fmt.Errorf("%w: reference duration or CPU operand is invalid", ErrAgentRecognitionBenchmark)
 	}
 	pair.ReferenceEnabled = &referenceEnabled
 	pair.EnabledToReferenceDaemonCPURatio = float64(enabled.DaemonCPUNanoseconds) / float64(referenceEnabled.DaemonCPUNanoseconds)
@@ -743,7 +751,7 @@ func agentRecognitionBenchmarkReferenceOrder(pairIndex int, seed uint64) string 
 	return orders[index]
 }
 
-func summarizeAgentRecognitionBenchmark(pairs []AgentRecognitionBenchmarkPair, calibration *AgentRecognitionBenchmarkCalibration) []AgentRecognitionBenchmarkProfileSummary {
+func summarizeAgentRecognitionBenchmark(pairs []AgentRecognitionBenchmarkPair, calibration *AgentRecognitionBenchmarkCalibration) ([]AgentRecognitionBenchmarkProfileSummary, error) {
 	type values struct {
 		wall                 []float64
 		cpu                  []float64
@@ -777,16 +785,28 @@ func summarizeAgentRecognitionBenchmark(pairs []AgentRecognitionBenchmarkPair, c
 		if pair.ReferenceEnabled != nil {
 			value.referenceCPU = append(value.referenceCPU, float64(pair.ReferenceEnabled.DaemonCPUNanoseconds))
 			value.referenceRatio = append(value.referenceRatio, pair.EnabledToReferenceDaemonCPURatio)
-			addCaptureLedger(&value.referenceCapture, pair.ReferenceEnabled.Capture)
-			addRecognitionLedger(&value.referenceRecognition, pair.ReferenceEnabled.Recognition)
-			addFingerprintLedger(&value.referenceFingerprint, pair.ReferenceEnabled.Fingerprint)
+			if err := addCaptureLedger(&value.referenceCapture, pair.ReferenceEnabled.Capture); err != nil {
+				return nil, err
+			}
+			if err := addRecognitionLedger(&value.referenceRecognition, pair.ReferenceEnabled.Recognition); err != nil {
+				return nil, err
+			}
+			if err := addFingerprintLedger(&value.referenceFingerprint, pair.ReferenceEnabled.Fingerprint); err != nil {
+				return nil, err
+			}
 		}
 		if pair.Enabled.DaemonPeakRSSKiB > value.rss {
 			value.rss = pair.Enabled.DaemonPeakRSSKiB
 		}
-		addCaptureLedger(&value.capture, pair.Enabled.Capture)
-		addRecognitionLedger(&value.recognition, pair.Enabled.Recognition)
-		addFingerprintLedger(&value.fingerprint, pair.Enabled.Fingerprint)
+		if err := addCaptureLedger(&value.capture, pair.Enabled.Capture); err != nil {
+			return nil, err
+		}
+		if err := addRecognitionLedger(&value.recognition, pair.Enabled.Recognition); err != nil {
+			return nil, err
+		}
+		if err := addFingerprintLedger(&value.fingerprint, pair.Enabled.Fingerprint); err != nil {
+			return nil, err
+		}
 	}
 	names := make([]string, 0, len(grouped))
 	for name := range grouped {
@@ -823,7 +843,7 @@ func summarizeAgentRecognitionBenchmark(pairs []AgentRecognitionBenchmarkPair, c
 		}
 		result = append(result, summary)
 	}
-	return result
+	return result, nil
 }
 
 func benchmarkDistribution(values []float64) AgentRecognitionBenchmarkDistribution {
@@ -905,7 +925,7 @@ func validateAgentRecognitionBenchmarkProfile(profile AgentRecognitionBenchmarkP
 }
 
 func validateAgentRecognitionBenchmarkArm(arm AgentRecognitionBenchmarkArm, profile AgentRecognitionBenchmarkProfile, enabled bool, registryVersion, registrySHA256 string) error {
-	if arm.RecognitionEnabled != enabled || arm.WorkloadCompletions != profile.EventCount || arm.WorkloadElapsedNanoseconds == 0 || arm.AccountingSettleNanoseconds == 0 || arm.DaemonCPUNanoseconds == 0 || arm.DaemonPeakRSSKiB == 0 || !arm.DaemonHealthy {
+	if arm.RecognitionEnabled != enabled || arm.WorkloadCompletions != profile.EventCount || arm.WorkloadElapsedNanoseconds == 0 || arm.WorkloadElapsedNanoseconds > uint64(math.MaxInt64) || arm.AccountingSettleNanoseconds == 0 || arm.DaemonCPUNanoseconds == 0 || arm.DaemonCPUNanoseconds > uint64(math.MaxInt64) || arm.DaemonPeakRSSKiB == 0 || !arm.DaemonHealthy {
 		return fmt.Errorf("%w: benchmark arm health or resource metadata is invalid", ErrAgentRecognitionBenchmark)
 	}
 	wantExpected := uint64(0)
@@ -917,16 +937,32 @@ func validateAgentRecognitionBenchmarkArm(arm AgentRecognitionBenchmarkArm, prof
 	} else if arm.RegistryVersion != "" || arm.RegistrySHA256 != "" {
 		return fmt.Errorf("%w: baseline arm unexpectedly reported recognition metadata", ErrAgentRecognitionBenchmark)
 	}
-	if arm.Capture.ExpectedEvents != wantExpected || arm.Capture.ExpectedEvents != arm.Capture.Delivered+arm.Capture.ProducerDropped+arm.Capture.Malformed+arm.Capture.Unexplained {
+	captureTotal, captureTotalOK := sumAgentRecognitionBenchmarkCounters(arm.Capture.Delivered, arm.Capture.ProducerDropped, arm.Capture.Malformed, arm.Capture.Unexplained)
+	if !captureTotalOK {
+		return fmt.Errorf("%w: capture ledger counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if arm.Capture.ExpectedEvents != wantExpected || arm.Capture.ExpectedEvents != captureTotal {
 		return fmt.Errorf("%w: capture ledger is not exclusive and complete", ErrAgentRecognitionBenchmark)
 	}
-	if arm.Recognition.Candidates != arm.Recognition.Recognized+arm.Recognition.Rejected+arm.Recognition.Unexplained {
+	recognitionTotal, recognitionTotalOK := sumAgentRecognitionBenchmarkCounters(arm.Recognition.Recognized, arm.Recognition.Rejected, arm.Recognition.Unexplained)
+	if !recognitionTotalOK {
+		return fmt.Errorf("%w: recognition ledger counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if arm.Recognition.Candidates != recognitionTotal {
 		return fmt.Errorf("%w: recognition ledger is not exclusive and complete", ErrAgentRecognitionBenchmark)
 	}
-	if arm.Fingerprint.Recognized != arm.Fingerprint.Success+arm.Fingerprint.Mismatch+arm.Fingerprint.Saturated+arm.Fingerprint.Unavailable+arm.Fingerprint.InFlight+arm.Fingerprint.Unexplained {
+	fingerprintTotal, fingerprintTotalOK := sumAgentRecognitionBenchmarkCounters(arm.Fingerprint.Success, arm.Fingerprint.Mismatch, arm.Fingerprint.Saturated, arm.Fingerprint.Unavailable, arm.Fingerprint.InFlight, arm.Fingerprint.Unexplained)
+	if !fingerprintTotalOK {
+		return fmt.Errorf("%w: fingerprint ledger counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if arm.Fingerprint.Recognized != fingerprintTotal {
 		return fmt.Errorf("%w: fingerprint ledger is not exclusive and complete", ErrAgentRecognitionBenchmark)
 	}
-	if arm.Fingerprint.Unavailable != arm.Fingerprint.ResolutionDenied+arm.Fingerprint.ProcessExited+arm.Fingerprint.Unsupported+arm.Fingerprint.SizeExceeded+arm.Fingerprint.DeadlineExceeded {
+	unavailableTotal, unavailableTotalOK := sumAgentRecognitionBenchmarkCounters(arm.Fingerprint.ResolutionDenied, arm.Fingerprint.ProcessExited, arm.Fingerprint.Unsupported, arm.Fingerprint.SizeExceeded, arm.Fingerprint.DeadlineExceeded, arm.Fingerprint.WorkerUnavailable)
+	if !unavailableTotalOK {
+		return fmt.Errorf("%w: fingerprint unavailable counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if arm.Fingerprint.Unavailable != unavailableTotal {
 		return fmt.Errorf("%w: fingerprint unavailable causes are not exclusive and complete", ErrAgentRecognitionBenchmark)
 	}
 	if enabled && (arm.Capture.Delivered != arm.Recognition.Candidates || arm.Recognition.Recognized != arm.Fingerprint.Recognized || arm.Capture.Unexplained != 0 || arm.Recognition.Unexplained != 0 || arm.Fingerprint.InFlight != 0 || arm.Fingerprint.Unexplained != 0) {
@@ -938,34 +974,87 @@ func validateAgentRecognitionBenchmarkArm(arm AgentRecognitionBenchmarkArm, prof
 	return nil
 }
 
-func addCaptureLedger(total *AgentRecognitionBenchmarkCaptureLedger, value AgentRecognitionBenchmarkCaptureLedger) {
-	total.ExpectedEvents += value.ExpectedEvents
-	total.Delivered += value.Delivered
-	total.ProducerDropped += value.ProducerDropped
-	total.Malformed += value.Malformed
-	total.Unexplained += value.Unexplained
+func addCaptureLedger(total *AgentRecognitionBenchmarkCaptureLedger, value AgentRecognitionBenchmarkCaptureLedger) error {
+	next := *total
+	var ok bool
+	if next.ExpectedEvents, ok = sumAgentRecognitionBenchmarkCounters(total.ExpectedEvents, value.ExpectedEvents); !ok {
+		return fmt.Errorf("%w: capture summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.Delivered, ok = sumAgentRecognitionBenchmarkCounters(total.Delivered, value.Delivered); !ok {
+		return fmt.Errorf("%w: capture summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.ProducerDropped, ok = sumAgentRecognitionBenchmarkCounters(total.ProducerDropped, value.ProducerDropped); !ok {
+		return fmt.Errorf("%w: capture summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.Malformed, ok = sumAgentRecognitionBenchmarkCounters(total.Malformed, value.Malformed); !ok {
+		return fmt.Errorf("%w: capture summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.Unexplained, ok = sumAgentRecognitionBenchmarkCounters(total.Unexplained, value.Unexplained); !ok {
+		return fmt.Errorf("%w: capture summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	*total = next
+	return nil
 }
 
-func addRecognitionLedger(total *AgentRecognitionBenchmarkRecognitionLedger, value AgentRecognitionBenchmarkRecognitionLedger) {
-	total.Candidates += value.Candidates
-	total.Recognized += value.Recognized
-	total.Rejected += value.Rejected
-	total.Unexplained += value.Unexplained
+func addRecognitionLedger(total *AgentRecognitionBenchmarkRecognitionLedger, value AgentRecognitionBenchmarkRecognitionLedger) error {
+	next := *total
+	var ok bool
+	if next.Candidates, ok = sumAgentRecognitionBenchmarkCounters(total.Candidates, value.Candidates); !ok {
+		return fmt.Errorf("%w: recognition summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.Recognized, ok = sumAgentRecognitionBenchmarkCounters(total.Recognized, value.Recognized); !ok {
+		return fmt.Errorf("%w: recognition summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.Rejected, ok = sumAgentRecognitionBenchmarkCounters(total.Rejected, value.Rejected); !ok {
+		return fmt.Errorf("%w: recognition summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	if next.Unexplained, ok = sumAgentRecognitionBenchmarkCounters(total.Unexplained, value.Unexplained); !ok {
+		return fmt.Errorf("%w: recognition summary counter overflowed", ErrAgentRecognitionBenchmark)
+	}
+	*total = next
+	return nil
 }
 
-func addFingerprintLedger(total *AgentRecognitionBenchmarkFingerprintLedger, value AgentRecognitionBenchmarkFingerprintLedger) {
-	total.Recognized += value.Recognized
-	total.Success += value.Success
-	total.Mismatch += value.Mismatch
-	total.Saturated += value.Saturated
-	total.Unavailable += value.Unavailable
-	total.ResolutionDenied += value.ResolutionDenied
-	total.ProcessExited += value.ProcessExited
-	total.Unsupported += value.Unsupported
-	total.SizeExceeded += value.SizeExceeded
-	total.DeadlineExceeded += value.DeadlineExceeded
-	total.InFlight += value.InFlight
-	total.Unexplained += value.Unexplained
+func addFingerprintLedger(total *AgentRecognitionBenchmarkFingerprintLedger, value AgentRecognitionBenchmarkFingerprintLedger) error {
+	next := *total
+	fields := []struct {
+		total *uint64
+		value uint64
+	}{
+		{&next.Recognized, value.Recognized},
+		{&next.Success, value.Success},
+		{&next.Mismatch, value.Mismatch},
+		{&next.Saturated, value.Saturated},
+		{&next.Unavailable, value.Unavailable},
+		{&next.ResolutionDenied, value.ResolutionDenied},
+		{&next.ProcessExited, value.ProcessExited},
+		{&next.Unsupported, value.Unsupported},
+		{&next.SizeExceeded, value.SizeExceeded},
+		{&next.DeadlineExceeded, value.DeadlineExceeded},
+		{&next.WorkerUnavailable, value.WorkerUnavailable},
+		{&next.InFlight, value.InFlight},
+		{&next.Unexplained, value.Unexplained},
+	}
+	for _, field := range fields {
+		value, ok := sumAgentRecognitionBenchmarkCounters(*field.total, field.value)
+		if !ok {
+			return fmt.Errorf("%w: fingerprint summary counter overflowed", ErrAgentRecognitionBenchmark)
+		}
+		*field.total = value
+	}
+	*total = next
+	return nil
+}
+
+func sumAgentRecognitionBenchmarkCounters(values ...uint64) (uint64, bool) {
+	var total uint64
+	for _, value := range values {
+		if value > ^uint64(0)-total {
+			return 0, false
+		}
+		total += value
+	}
+	return total, true
 }
 
 func isHexDigest(value string, length int) bool {

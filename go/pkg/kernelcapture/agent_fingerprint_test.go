@@ -604,11 +604,15 @@ func TestAgentFingerprintWorkerContainsResolverPanic(t *testing.T) {
 	digest := sha256.Sum256([]byte("trusted"))
 	registry := mustAgentFingerprintRegistry(t, "codex_cli", digest)
 	resolver := &fakeAgentFingerprintResolver{panicOnResolve: true}
+	observed := make(chan AgentFingerprintObservation, 1)
 	worker, err := newAgentFingerprintWorker(registry, resolver, AgentFingerprintWorkerOptions{
 		QueueCapacity: 2,
 		WorkerCount:   1,
 		Timeout:       time.Second,
 		MaxFileBytes:  1024,
+		Observer: func(_ ProcessEvent, _ AgentRecognitionResult, observation AgentFingerprintObservation) {
+			observed <- observation
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -634,6 +638,9 @@ func TestAgentFingerprintWorkerContainsResolverPanic(t *testing.T) {
 	if got := worker.Submit(ProcessEvent{PID: 2, Type: ProcessEventExec}, candidate); got != nil {
 		t.Fatalf("submit after panic = %+v, want queued", got)
 	}
+	if got := receiveFingerprintObservation(t, observed); got.Outcome != AgentFingerprintOutcomeDigestMismatch {
+		t.Fatalf("post-panic observation = %+v, want digest_mismatch", got)
+	}
 	closeAgentFingerprintWorker(t, worker)
 }
 
@@ -646,18 +653,18 @@ func TestAgentFingerprintWorkerContainsObserverPanic(t *testing.T) {
 	resolver := &fakeAgentFingerprintResolver{digest: agentFingerprintDigest{
 		digest: digest, method: AgentFingerprintMethodSHA256ProcExe, objectState: AgentFingerprintObjectLinked,
 	}}
-	observed := make(chan struct{}, 1)
+	observed := make(chan AgentFingerprintObservation, 1)
+	var calls atomic.Uint32
 	worker, err := newAgentFingerprintWorker(registry, resolver, AgentFingerprintWorkerOptions{
 		QueueCapacity: 2,
 		WorkerCount:   1,
 		Timeout:       time.Second,
 		MaxFileBytes:  1024,
-		Observer: func(_ ProcessEvent, _ AgentRecognitionResult, _ AgentFingerprintObservation) {
-			select {
-			case observed <- struct{}{}:
-			default:
+		Observer: func(_ ProcessEvent, _ AgentRecognitionResult, observation AgentFingerprintObservation) {
+			if calls.Add(1) == 1 {
+				panic("observer blew up")
 			}
-			panic("observer blew up")
+			observed <- observation
 		},
 	})
 	if err != nil {
@@ -666,12 +673,33 @@ func TestAgentFingerprintWorkerContainsObserverPanic(t *testing.T) {
 	if got := worker.Submit(ProcessEvent{PID: 1, Type: ProcessEventExec}, recognizedAgentCandidate("codex_cli")); got != nil {
 		t.Fatalf("submit = %+v, want queued", got)
 	}
-	select {
-	case <-observed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("observer never ran")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if worker.Health().Counters.WorkerUnavailable == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := worker.Health().Counters.WorkerUnavailable; got != 1 {
+		t.Fatalf("worker_unavailable = %d, want 1 after observer panic", got)
+	}
+	if got := worker.Health().Counters.Success; got != 0 {
+		t.Fatalf("success = %d, want 0 after unpublished observer panic", got)
+	}
+	if got := worker.Submit(ProcessEvent{PID: 2, Type: ProcessEventExec}, recognizedAgentCandidate("codex_cli")); got != nil {
+		t.Fatalf("submit after observer panic = %+v, want queued", got)
+	}
+	if got := receiveFingerprintObservation(t, observed); got.Outcome != AgentFingerprintOutcomeSuccess {
+		t.Fatalf("post-observer-panic observation = %+v, want success", got)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("observer calls = %d, want 2", got)
 	}
 	closeAgentFingerprintWorker(t, worker)
+	health := worker.Health().Counters
+	if health.Success != 1 || health.WorkerUnavailable != 1 {
+		t.Fatalf("terminal counters = %+v, want one success and one worker_unavailable", health)
+	}
 }
 
 func TestAgentFingerprintWorkerCountsSubmitAfterClose(t *testing.T) {

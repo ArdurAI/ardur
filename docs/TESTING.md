@@ -55,9 +55,20 @@ cd go
 go test -race -count=1 \
   ./pkg/kernelcapture \
   ./cmd/ardur-kernelcaptured \
+  ./cmd/ardur-agent-recognition-eval \
   ./cmd/ardur-agent-recognition-benchmark \
   ./cmd/ardur-agent-recognition-workload
 ```
+
+The evaluator tests account for all 36 maintained samples while keeping the 28
+name-only cases and eight synthetic content-fingerprint transitions separate.
+They fail on name-only threshold drift, missing native/launcher content
+coverage, any reviewed content-transition mismatch, or any confidence
+promotion after a digest mismatch. Launcher cases bind an independently supplied
+observed interpreter instead of inheriting it from the fixture registry.
+Fingerprint-worker panic tests also require the same one-worker pool to complete
+a second job after recovery and exclusive terminal accounting for an observer
+panic.
 
 The dedicated `agent-recognition-benchmark` workflow builds the exact candidate
 daemon, controller, and native workload plus an exact target-branch reference

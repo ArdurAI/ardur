@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestParseSchedstatRuntimeNanoseconds(t *testing.T) {
@@ -37,6 +38,180 @@ func TestParseSchedstatRuntimeNanoseconds(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("parseSchedstatRuntimeNanoseconds() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCountAgentRecognitionBenchmarkFingerprintLogs(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "daemon.jsonl")
+	raw := []byte("{\"msg\":\"startup\"}\n{\"msg\":\"AI agent executable fingerprint observed\"}\n{\"msg\":\"AI agent executable fingerprint observed\"}\n{\"msg\":")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	observed, complete, err := countAgentRecognitionBenchmarkFingerprintLogs(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed != 2 || complete {
+		t.Fatalf("fingerprint log count = %d, complete = %v; want 2, false", observed, complete)
+	}
+
+	if err := os.WriteFile(path, append(raw, []byte("invalid}\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := countAgentRecognitionBenchmarkFingerprintLogs(file); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("malformed complete log error = %v", err)
+	}
+	if err := file.Truncate(agentRecognitionBenchmarkMaxDaemonLogBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := countAgentRecognitionBenchmarkFingerprintLogs(file); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("oversized log error = %v", err)
+	}
+}
+
+func TestWaitForAgentRecognitionBenchmarkFingerprintLogsFailsClosed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "daemon.jsonl")
+	if err := os.WriteFile(path, []byte("{\"msg\":\"AI agent executable fingerprint observed\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	daemon := &agentRecognitionBenchmarkDaemon{logFile: file}
+	if err := daemon.waitForFingerprintObservationLogs(context.Background(), 0, time.Second); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("extra observation error = %v", err)
+	}
+	if err := daemon.waitForFingerprintObservationLogs(context.Background(), 2, time.Millisecond); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("missing observation timeout error = %v", err)
+	}
+	partial := []byte("{\"msg\":\"AI agent executable fingerprint observed\"}\n{\"msg\":")
+	if err := os.WriteFile(path, partial, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon.waitForFingerprintObservationLogs(context.Background(), 1, time.Millisecond); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("incomplete trailing observation timeout error = %v", err)
+	}
+	complete := []byte("{\"msg\":\"AI agent executable fingerprint observed\"}\n{\"msg\":\"AI agent executable fingerprint observed\"}\n")
+	if err := os.WriteFile(path, complete, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon.waitForFingerprintObservationLogs(context.Background(), 2, time.Second); err != nil {
+		t.Fatalf("complete observation barrier error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := daemon.waitForFingerprintObservationLogs(ctx, 2, time.Second); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("canceled observation barrier error = %v", err)
+	}
+}
+
+func TestAgentRecognitionBenchmarkAccountingSettled(t *testing.T) {
+	t.Parallel()
+	before := agentRecognitionBenchmarkSnapshot{
+		capture:     DaemonLifecycleCaptureHealth{ProducerCounterAvailable: true},
+		recognition: AgentRecognitionHealth{Enabled: true},
+		fingerprint: AgentFingerprintHealth{Enabled: true},
+	}
+	after := before
+	after.capture.DeliveredTotal = 1
+	after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: 1, Recognized: 1}
+	after.fingerprint.Counters.Success = 1
+	settled, err := agentRecognitionBenchmarkAccountingSettled(true, before, after, 1)
+	if err != nil || !settled {
+		t.Fatalf("complete accounting settled = %v, error = %v", settled, err)
+	}
+
+	after.fingerprint.QueueDepth = 1
+	settled, err = agentRecognitionBenchmarkAccountingSettled(true, before, after, 1)
+	if err != nil || settled {
+		t.Fatalf("queued accounting settled = %v, error = %v", settled, err)
+	}
+
+	after.fingerprint.QueueDepth = 0
+	after.fingerprint.Counters.WorkerUnavailable = 1
+	if _, err := agentRecognitionBenchmarkAccountingSettled(true, before, after, 1); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("post-terminal worker failure error = %v", err)
+	}
+
+	baselineBefore := agentRecognitionBenchmarkSnapshot{
+		capture:     DaemonLifecycleCaptureHealth{ProducerCounterAvailable: true},
+		recognition: AgentRecognitionHealth{Enabled: false},
+	}
+	settled, err = agentRecognitionBenchmarkAccountingSettled(false, baselineBefore, baselineBefore, 1)
+	if err != nil || !settled {
+		t.Fatalf("filtered baseline settled = %v, error = %v", settled, err)
+	}
+	baselineAfter := baselineBefore
+	baselineAfter.capture.DeliveredTotal = 1
+	if _, err := agentRecognitionBenchmarkAccountingSettled(false, baselineBefore, baselineAfter, 1); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("baseline leakage error = %v", err)
+	}
+}
+
+func TestAgentRecognitionBenchmarkAccountingSettledRejectsCounterOverflow(t *testing.T) {
+	t.Parallel()
+	before := agentRecognitionBenchmarkSnapshot{
+		capture:     DaemonLifecycleCaptureHealth{ProducerCounterAvailable: true},
+		recognition: AgentRecognitionHealth{Enabled: true},
+		fingerprint: AgentFingerprintHealth{Enabled: true},
+	}
+	max := ^uint64(0)
+	tests := []struct {
+		name   string
+		mutate func(*agentRecognitionBenchmarkSnapshot)
+	}{
+		{
+			name: "capture total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.capture.ProducerRingbufDroppedTotal = 1
+			},
+		},
+		{
+			name: "classified total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: max, Recognized: max, Ambiguous: 1}
+			},
+		},
+		{
+			name: "terminal total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: max, Recognized: max}
+				after.fingerprint.Counters.Success = max
+				after.fingerprint.Counters.DigestMismatch = 1
+			},
+		},
+		{
+			name: "unavailable total",
+			mutate: func(after *agentRecognitionBenchmarkSnapshot) {
+				after.capture.DeliveredTotal = max
+				after.recognition.Counters = AgentRecognitionCounters{CandidatesTotal: max, Recognized: max}
+				after.fingerprint.Counters.ResolutionDenied = max
+				after.fingerprint.Counters.ProcessExited = 1
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			after := before
+			test.mutate(&after)
+			if _, err := agentRecognitionBenchmarkAccountingSettled(true, before, after, max); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("overflow accounting error = %v", err)
 			}
 		})
 	}
@@ -138,5 +313,22 @@ func TestAgentRecognitionBenchmarkRunnerContextParsersAreBounded(t *testing.T) {
 	}
 	if environment.RunnerImageOS != "ubuntu_24" || environment.RunnerImageVersion != "2026_07" {
 		t.Fatalf("runner image context was not sanitized: %+v", environment)
+	}
+}
+
+func TestDeltaFingerprintCountersAccountsForWorkerUnavailable(t *testing.T) {
+	before := AgentFingerprintCounters{Success: 4, WorkerUnavailable: 2}
+	after := AgentFingerprintCounters{Success: 5, WorkerUnavailable: 3}
+	ledger, err := deltaFingerprintCounters(before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Success != 1 || ledger.Unavailable != 1 || ledger.WorkerUnavailable != 1 {
+		t.Fatalf("fingerprint ledger = %+v, want one success and one worker_unavailable", ledger)
+	}
+
+	after.WorkerUnavailable = 1
+	if _, err := deltaFingerprintCounters(before, after); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("backwards worker_unavailable error = %v", err)
 	}
 }

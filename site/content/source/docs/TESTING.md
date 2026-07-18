@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "52350d10dc444cd29924cf2482b30f6d24e4b1ea91d5401bda060c67039cb537"
+source_sha256: "a75bb400567230200e2f57198fba6193a68a0c0d2fed5e7f2f92178ad128e3e0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -72,9 +72,20 @@ cd go
 go test -race -count=1 \
   ./pkg/kernelcapture \
   ./cmd/ardur-kernelcaptured \
+  ./cmd/ardur-agent-recognition-eval \
   ./cmd/ardur-agent-recognition-benchmark \
   ./cmd/ardur-agent-recognition-workload
 ```
+
+The evaluator tests account for all 36 maintained samples while keeping the 28
+name-only cases and eight synthetic content-fingerprint transitions separate.
+They fail on name-only threshold drift, missing native/launcher content
+coverage, any reviewed content-transition mismatch, or any confidence
+promotion after a digest mismatch. Launcher cases bind an independently supplied
+observed interpreter instead of inheriting it from the fixture registry.
+Fingerprint-worker panic tests also require the same one-worker pool to complete
+a second job after recovery and exclusive terminal accounting for an observer
+panic.
 
 The dedicated `agent-recognition-benchmark` workflow builds the exact candidate
 daemon, controller, and native workload plus an exact target-branch reference

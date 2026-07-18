@@ -1,10 +1,12 @@
 # Epic B — Transparent Auto-Detection & Auto-Governance
 
-Status: **planning document with an implementation foundation** (updated
-2026-07-11). The exact-name, observe-only Linux recognition prefilter is now
-implemented; B1/B2 acceptance gates remain open. This plan proposes the
-remaining work, and every enforcement slice inherits the existing security
-gates and the honest
+Status: planning document with a completed bounded Linux classification slice.
+Updated 2026-07-17. Issue #67 now has exact-name prefiltering,
+native and kernel-bound launcher content matching, a two-stratum regression
+gate, and measured overhead evidence. Host-wide feeding, attestation,
+adoption, governance, and non-Linux sources remain separate slices. This plan
+proposes that remaining work, and every enforcement slice inherits the
+existing security gates and the honest
 enforcement boundary in `docs/security-model.md` ("what the reference proxy
 enforces today" is the conservative claim).
 
@@ -54,9 +56,9 @@ The 2026-07-11 implementation pass was reconciled against the current Host
 Agent architecture/roadmap and Linux gap-analysis project notes before code
 changes began.
 
-### 1.1 Implementation checkpoint (2026-07-11)
+### 1.1 Issue #67 completion checkpoint (2026-07-17)
 
-The first #67 foundation lands below the full B1/B2 bar:
+The bounded Linux classification slice now delivers:
 
 - `process_exec.bpf.c` keeps the existing cgroup allowlist and adds separate,
   disabled-by-default exact-`comm` and successful-exec basename hash-map
@@ -70,12 +72,26 @@ The first #67 foundation lands below the full B1/B2 bar:
 - Each registry signal and BPF map has a 64-name capacity. The successful-exec
   path emits only a bounded basename, never its parent path. The canonical
   registry digest is release metadata, not independent provenance.
+- An optional daemon-owned registry privately compares bounded SHA-256 values
+  for native `/proc/<pid>/exe` objects and kernel-bound script-launcher objects.
+  Launcher matches require an allowlisted final-interpreter profile; mutable
+  cmdline is only a locator and cannot establish object identity.
+- A fixed asynchronous worker pool reports explicit fail-low outcomes. Resolver
+  and observer panic tests prove that the same one-worker pool completes a
+  second job after recovery.
+- The v0.2 maintained corpus reports 28 name-only cases separately from eight
+  synthetic native/launcher content transitions. Name-only precision/recall is
+  never inflated by content matches, and a digest mismatch must not promote
+  confidence.
+- The paired real-Linux benchmark measures the exact candidate against the
+  exact target-branch reference on one runner and fails on reviewed latency,
+  CPU, RSS, loss, partial-accounting, or fingerprint-work thresholds.
 
-Still required before #67 closes: binary digest and argv/interpreter signals,
-an independently maintained labeled corpus including installation variants,
-explicit precision/recall thresholds, measured false-negative accounting and
-exec-storm overhead, plus macOS/Windows launch sources. The current exact-name
-fixture is a regression corpus, not a performance or accuracy claim.
+This closes #67's bounded classifier contract, not the whole Epic B pipeline.
+Host-wide observability and gap accounting remain #39/B1; provenance
+attestation and policy are #68/#69; macOS, Windows, and Apple entitlements are
+tracked in #70/#71/#106. The corpus is project-maintained regression evidence,
+not population accuracy, provenance, or identity assurance.
 
 ---
 
@@ -280,7 +296,7 @@ CI-proven, no silent under-enforcement.
 |---|---|---|---|
 | **B0** (gate) | Land security hardening **#108 / #109 / #110** before the daemon acts on unowned processes | — | Per-session peer authz on `apply_policy`/`set_kill_switch`; verified `cgroup_id` ownership; stale-slot + allowlist revocation; per-cgroup apply serialization. Regression tests from each issue's PoC pass. |
 | **B1** | **Linux host-wide exec detection** + observability-gap metric (**#39**). Ungated `sched_process_exec` path capturing binary path/argv/uid; in-kernel basename prefilter; keep the scoped correlator feed intact | — | Every known-agent exec on the host is observed with **near-zero false-negatives** on the corpus; non-agent execs dropped in-kernel; measured exec-latency overhead under the CI budget; observability-gap metric emits (execs dropped vs. surfaced). **No attest, no enforce.** |
-| **B2** | **Classification library (#67).** Static multi-signal fingerprint (basename, binary sha256, argv patterns, interpreter+script detection) → agent-class + confidence; operator allow/deny override | B1 | Precision/recall on the labeled corpus meets target; confidence thresholds documented; hard negatives (`node`/`python`/`git`) not misclassified; override list honored. Ships the corpus as a test fixture. |
+| **B2** | **Classification library (#67, bounded Linux contract implemented).** Exact `comm`/successful-exec basename candidate plus optional native or kernel-bound launcher SHA-256 → agent class + low/medium heuristic confidence; operator allow/deny override | B1 for host-wide feeding; current scoped/opt-in path is independently usable | Separate name-only precision/recall and content-transition gates pass on the maintained corpus; generic-runtime hard negatives are not misclassified; mismatches never promote confidence; native and interpreter-bound launcher methods are covered; override lists are tested. |
 | **B3** | **Auto-attestation (#68).** Daemon issues a **provenance passport** (§3), schema-distinct from mission passports, host-key signed, folded into evidence log + `enforce_receipt_chain`. Observe-only | B0, B2 | An un-wrapped agent gets a verifiable provenance record; the verifier **rejects** using it as a mission grant; auto- vs. operator-declared sessions are distinguishable in evidence (AuditBench-legible); intent resolves to `INSUFFICIENT_EVIDENCE`. |
 | **B4** | **Adopt-and-attach.** Migrate a running process **tree** into an ardur-managed cgroup (bounded ppid/start-time reconciliation sweep), reusing `apply_policy`; fail safe to observe-only if adoption is unsafe | B0, B1 | A running tree is brought under a governable cgroup without losing already-spawned children and without the #110 race; unsafe adoption falls back to observe-only, loudly. |
 | **B5** | **Auto-govern (#69).** classification → **profile registry** → policy plan through tier-1 BPF-LSM + tier-2 seccomp; **default observe-only**, enforce only under an operator binding rule. End-to-end auto-detect→enforce demo (analogue of `enforce-e2e`) | B2, B3, B4, **#104** (tier-2), **#105** (file-op allowlist reconcile) | Unmodified agent launched with no wrapper is detected, attested, and — under a configured binding rule — enforced (a forbidden op → `EPERM` + `enforce_event`); with no rule, observed-only; fail-safe = observe. |
