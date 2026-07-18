@@ -323,13 +323,13 @@ func validateAgentRecognitionThresholds(thresholds AgentRecognitionThresholds) e
 	if !agentRecognitionIdentifier.MatchString(thresholds.ThresholdVersion) {
 		return fmt.Errorf("agent recognition threshold version is invalid")
 	}
-	if thresholds.MinimumSupportedRecall < 0 || thresholds.MinimumSupportedRecall > 1 {
+	if math.IsNaN(thresholds.MinimumSupportedRecall) || thresholds.MinimumSupportedRecall < 0 || thresholds.MinimumSupportedRecall > 1 {
 		return fmt.Errorf("minimum supported recall must be within [0,1]")
 	}
 	if thresholds.MaximumHardNegativeFalsePositives < 0 {
 		return fmt.Errorf("maximum hard-negative false positives must be non-negative")
 	}
-	if thresholds.MinimumContentFingerprintAccuracy < 0 || thresholds.MinimumContentFingerprintAccuracy > 1 {
+	if math.IsNaN(thresholds.MinimumContentFingerprintAccuracy) || thresholds.MinimumContentFingerprintAccuracy < 0 || thresholds.MinimumContentFingerprintAccuracy > 1 {
 		return fmt.Errorf("minimum content-fingerprint accuracy must be within [0,1]")
 	}
 	if thresholds.MaximumContentMismatchPromotions < 0 {
@@ -770,11 +770,13 @@ func validateAgentRecognitionSample(sample AgentRecognitionSample) error {
 	if sample.SignalStratum != AgentRecognitionSignalStratumNameOnly && sample.SignalStratum != AgentRecognitionSignalStratumContentFingerprint {
 		return fmt.Errorf("signal stratum %q is unsupported", sample.SignalStratum)
 	}
-	if !sample.Signals.CommAvailable && sample.Input.Comm != "" {
-		return fmt.Errorf("comm input is present while its signal is unavailable")
+	commInputPresent := sample.Input.Comm != ""
+	if sample.Signals.CommAvailable != commInputPresent {
+		return fmt.Errorf("comm input and availability must agree")
 	}
-	if !sample.Signals.ExecutableBasenameAvailable && sample.Input.ExecutableBasename != "" {
-		return fmt.Errorf("executable basename is present while its signal is unavailable")
+	executableBasenameInputPresent := sample.Input.ExecutableBasename != ""
+	if sample.Signals.ExecutableBasenameAvailable != executableBasenameInputPresent {
+		return fmt.Errorf("executable basename input and availability must agree")
 	}
 	fingerprintInputPresent := sample.ContentFingerprint != nil && sample.ContentFingerprint.FixtureID != ""
 	if sample.Signals.ContentFingerprintAvailable != fingerprintInputPresent {

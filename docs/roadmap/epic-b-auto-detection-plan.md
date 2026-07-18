@@ -90,8 +90,8 @@ The bounded Linux classification slice now delivers:
 This closes #67's bounded classifier contract, not the whole Epic B pipeline.
 Host-wide observability and gap accounting remain #39/B1; provenance
 attestation and policy are #68/#69; macOS, Windows, and Apple entitlements are
-#70/#71/#106. The corpus is project-maintained regression evidence, not
-population accuracy, provenance, or identity assurance.
+tracked in #70/#71/#106. The corpus is project-maintained regression evidence,
+not population accuracy, provenance, or identity assurance.
 
 ---
 

@@ -76,6 +76,24 @@ func TestAgentRecognitionCorpusParserRejectsUnreviewedOrContradictorySamples(t *
 			},
 		},
 		{
+			name: "signal availability without value",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				candidate.Samples[0].Input.Comm = ""
+			},
+		},
+		{
+			name: "executable basename value without availability",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				candidate.Samples[0].Signals.ExecutableBasenameAvailable = false
+			},
+		},
+		{
+			name: "executable basename availability without value",
+			mutate: func(candidate *AgentRecognitionCorpus) {
+				candidate.Samples[0].Input.ExecutableBasename = ""
+			},
+		},
+		{
 			name: "unavailable sample with signal",
 			mutate: func(candidate *AgentRecognitionCorpus) {
 				last := len(candidate.Samples) - 1
@@ -216,6 +234,59 @@ func TestAgentRecognitionThresholdsRequireReviewedIntervalContract(t *testing.T)
 		if _, err := ParseAgentRecognitionThresholds(bytes.NewReader(raw)); err == nil {
 			t.Fatalf("invalid thresholds unexpectedly accepted: %+v", candidate)
 		}
+	}
+}
+
+func TestAgentRecognitionEvaluationRejectsNaNThresholds(t *testing.T) {
+	corpus, digest, err := EmbeddedAgentRecognitionCorpus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thresholds, err := EmbeddedAgentRecognitionThresholds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recognizer, err := NewEmbeddedAgentRecognizer(AgentRecognizerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		mutate      func(*AgentRecognitionThresholds)
+		wantMessage string
+	}{
+		{
+			name: "minimum supported recall",
+			mutate: func(candidate *AgentRecognitionThresholds) {
+				candidate.MinimumSupportedRecall = math.NaN()
+			},
+			wantMessage: "minimum supported recall must be within [0,1]",
+		},
+		{
+			name: "minimum content-fingerprint accuracy",
+			mutate: func(candidate *AgentRecognitionThresholds) {
+				candidate.MinimumContentFingerprintAccuracy = math.NaN()
+			},
+			wantMessage: "minimum content-fingerprint accuracy must be within [0,1]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := *thresholds
+			tt.mutate(&candidate)
+			report, err := EvaluateAgentRecognitionCorpus(recognizer, corpus, digest, &candidate)
+			if err == nil {
+				t.Fatal("NaN threshold unexpectedly accepted")
+			}
+			if report != nil {
+				t.Fatalf("invalid thresholds produced a report containing NaN: %+v", report)
+			}
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
 	}
 }
 

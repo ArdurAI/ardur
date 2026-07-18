@@ -2,7 +2,7 @@
 title: "Epic B — Transparent Auto-Detection & Auto-Governance"
 description: "Status: **planning document with a completed bounded Linux classification"
 source_path: "docs/roadmap/epic-b-auto-detection-plan.md"
-source_sha256: "7d611eb8a970db84e355d04da3b28e5d8ad8837c26f455e304e1dea012d25fe0"
+source_sha256: "be1e18363916d74ea4d523ada1932b01c2ad73e031652cf22b3060e472983a8b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -107,8 +107,8 @@ The bounded Linux classification slice now delivers:
 This closes #67's bounded classifier contract, not the whole Epic B pipeline.
 Host-wide observability and gap accounting remain #39/B1; provenance
 attestation and policy are #68/#69; macOS, Windows, and Apple entitlements are
-#70/#71/#106. The corpus is project-maintained regression evidence, not
-population accuracy, provenance, or identity assurance.
+tracked in #70/#71/#106. The corpus is project-maintained regression evidence,
+not population accuracy, provenance, or identity assurance.
 
 ---
 
