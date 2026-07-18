@@ -1,8 +1,8 @@
 ---
 title: "Epic B — Transparent Auto-Detection & Auto-Governance"
-description: "Status: **planning document with a completed bounded Linux classification"
+description: "Status: planning document with a completed bounded Linux classification slice."
 source_path: "docs/roadmap/epic-b-auto-detection-plan.md"
-source_sha256: "be1e18363916d74ea4d523ada1932b01c2ad73e031652cf22b3060e472983a8b"
+source_sha256: "4ea4c212aa20f642c974374c4438007224da09a0ed27bbe69d95a9c41bc3f273"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -17,8 +17,8 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-Status: **planning document with a completed bounded Linux classification
-slice** (updated 2026-07-17). Issue #67 now has exact-name prefiltering,
+Status: planning document with a completed bounded Linux classification slice.
+Updated 2026-07-17. Issue #67 now has exact-name prefiltering,
 native and kernel-bound launcher content matching, a two-stratum regression
 gate, and measured overhead evidence. Host-wide feeding, attestation,
 adoption, governance, and non-Linux sources remain separate slices. This plan

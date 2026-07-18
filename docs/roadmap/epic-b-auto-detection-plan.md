@@ -1,7 +1,7 @@
 # Epic B — Transparent Auto-Detection & Auto-Governance
 
-Status: **planning document with a completed bounded Linux classification
-slice** (updated 2026-07-17). Issue #67 now has exact-name prefiltering,
+Status: planning document with a completed bounded Linux classification slice.
+Updated 2026-07-17. Issue #67 now has exact-name prefiltering,
 native and kernel-bound launcher content matching, a two-stratum regression
 gate, and measured overhead evidence. Host-wide feeding, attestation,
 adoption, governance, and non-Linux sources remain separate slices. This plan
