@@ -1355,13 +1355,25 @@ def run_governed_missing_command_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _print_run_governed_missing_command_next_steps() -> None:
+def _print_next_steps(steps: list[dict[str, str]]) -> None:
+    """Render deterministic remediation hints to stderr.
+
+    Centralizes the next-steps printing so every governed-run failure path
+    shares one display boundary. ``detail`` values are static developer
+    guidance strings (never user input, credentials, or secrets), so they
+    are coerced to ``str`` here purely to make the display-only intent
+    explicit at the print boundary.
+    """
     print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(run_governed_missing_command_next_steps(), start=1):
+    for index, step in enumerate(steps, start=1):
         print(f"{index}. {step['command']}", file=sys.stderr)
-        detail = step.get("detail", "")
-        if detail:
-            print(f"   {detail}", file=sys.stderr)
+        detail_text = str(step.get("detail", ""))
+        if detail_text:
+            print(f"   {detail_text}", file=sys.stderr)
+
+
+def _print_run_governed_missing_command_next_steps() -> None:
+    _print_next_steps(run_governed_missing_command_next_steps())
 
 
 def run_governed_mission_invalid_next_steps() -> list[dict[str, str]]:
@@ -1390,12 +1402,7 @@ def run_governed_mission_invalid_next_steps() -> list[dict[str, str]]:
 
 
 def _print_run_governed_mission_invalid_next_steps() -> None:
-    print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(run_governed_mission_invalid_next_steps(), start=1):
-        print(f"{index}. {step['command']}", file=sys.stderr)
-        detail = step.get("detail", "")
-        if detail:
-            print(f"   {detail}", file=sys.stderr)
+    _print_next_steps(run_governed_mission_invalid_next_steps())
 
 
 def run_governed_home_not_directory_next_steps() -> list[dict[str, str]]:
@@ -1425,12 +1432,7 @@ def run_governed_home_not_directory_next_steps() -> list[dict[str, str]]:
 
 
 def _print_run_governed_home_not_directory_next_steps() -> None:
-    print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(run_governed_home_not_directory_next_steps(), start=1):
-        print(f"{index}. {step['command']}", file=sys.stderr)
-        detail = step.get("detail", "")
-        if detail:
-            print(f"   {detail}", file=sys.stderr)
+    _print_next_steps(run_governed_home_not_directory_next_steps())
 
 
 def run_governed_home_dangling_symlink_next_steps() -> list[dict[str, str]]:
@@ -1470,14 +1472,7 @@ def run_governed_home_dangling_symlink_next_steps() -> list[dict[str, str]]:
 
 
 def _print_run_governed_home_dangling_symlink_next_steps() -> None:
-    print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(
-        run_governed_home_dangling_symlink_next_steps(), start=1
-    ):
-        print(f"{index}. {step['command']}", file=sys.stderr)
-        detail = step.get("detail", "")
-        if detail:
-            print(f"   {detail}", file=sys.stderr)
+    _print_next_steps(run_governed_home_dangling_symlink_next_steps())
 
 
 def _run_governed_budget_failure(
