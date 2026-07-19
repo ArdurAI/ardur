@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b9407b39ca92645194dc8c1b2538ee678c89012d3e76657ac9215bad209f93a0"
+source_sha256: "b9efce27e8674299cb0dc3aec6d55ccb2db08f5f614a2ff9ec3fc08359a29c05"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -627,6 +627,16 @@ and writes parseable stdout JSON with `ok: false`, stable `condition`/`error`
 values, and `error_code: setup_home_invalid`; stderr stays empty, no traceback
 is emitted, `next_steps` uses placeholders such as `<ardur-home>`, and no
 config, token, LaunchAgent, key, session, log, or state artifacts are created.
+
+If `--extension-path` is empty or whitespace-only, `ardur setup` fails closed
+before writing config, generating or printing a Hub token, installing launch
+files, or creating setup state. The command exits `1` and writes parseable
+stdout JSON with `ok: false`, stable `condition`/`error`/`error_code` values
+of `path_arg_invalid` (distinct from the `setup_home_invalid` condition used
+for an empty `--home`), a message, a detail, and placeholder-only
+`next_steps` such as `ardur setup --extension-path <extension-path>`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths or tokens, and leaves no `browser_extension_path` entry in `config.json`.
 
 Invalid setup bind inputs fail closed before writing config, generating or
 printing a Hub token, installing the LaunchAgent plist, creating setup state, or
@@ -1559,6 +1569,18 @@ such as `config_missing`, `config_malformed`, `config_duplicate_key`, and
 `server_collection_missing` without echoing local paths or file contents. A
 non-string inline schema description fails with
 `tool_schema_description_invalid`.
+
+Empty or whitespace-only path arguments (`--config`, `--output`) fail closed
+before any file inspection or report writing. They exit non-zero and write
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values of `path_arg_invalid`, a message, a detail, and placeholder-only
+`next_steps` such as `ardur <command> --config <config>` and
+`ardur <command> --output <output>`. The failure path keeps stderr empty,
+emits no traceback, does not echo raw local paths or secrets, and writes no
+report or status artifact to the current working directory. Valid non-empty
+paths pass through to the existing `config_missing`/`config_malformed`/
+`config_duplicate_key`/`server_collection_missing` input-failure checks; only
+the empty/whitespace case is rejected before file inspection.
 
 Supported v0.1 shapes are top-level `mcpServers`, VS Code-style `servers`, and
 static `{name, tools}` manifests. A per-server `includeTools` list can seed a
