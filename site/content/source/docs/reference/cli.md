@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b9efce27e8674299cb0dc3aec6d55ccb2db08f5f614a2ff9ec3fc08359a29c05"
+source_sha256: "42315d69474f2b105be38556d1ee1cf53f669bb8ebbd3aeb672d328fde3e6d4e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -352,6 +352,15 @@ are absent from JSON and text reports. `--output` uses atomic owner-only mode
 `0600` and prints a safe digest/count completion object instead of the local
 path.
 
+Out-of-range `--correlation-window-s` fails closed before receipt verification,
+public-key loading, or event parsing. The valid range is `0..3600` seconds;
+values outside that range exit non-zero and write parseable stdout JSON with
+`ok: false`, `valid: false`, an `error` of `correlation_window_invalid`, a
+message, and empty stderr. The guard keeps stderr empty, emits no traceback,
+does not echo raw local paths or secrets, and leaves no artifacts, so no key
+material is required to reproduce. Valid values pass through to the existing
+verification/correlation path unchanged.
+
 See the [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/)
 and [public no-network fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/).
 
@@ -393,6 +402,15 @@ The actor and verifier IDs are signed receipt claims, not independently
 authenticated SPIFFE workloads. Every event and OTLP projection reports that
 the identity strings are signature-covered and that SPIFFE workload identity
 was not verified. A `spiffe://` prefix alone does not upgrade that assurance.
+
+Out-of-range `--timeout-s` fails closed before receipt verification,
+public-key loading, or any network call. The valid range is `1..60` seconds;
+values outside that range exit non-zero and write parseable stdout JSON with
+`ok: false`, an `error` of `otlp_timeout_invalid`, a message, and empty
+stderr. The guard keeps stderr empty, emits no traceback, does not echo raw
+local paths or secrets, and leaves no artifacts, so no key material or
+configured `--otlp-endpoint` is required to reproduce. Valid values pass
+through to the existing export path unchanged.
 
 See [Governance Telemetry v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) and its
 [golden event](/__ardur_internal__/repo/docs/specs/conformance/governance-telemetry-v0.1/events.jsonl).
