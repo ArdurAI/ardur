@@ -1211,13 +1211,16 @@ func TestCommittedAgentRecognitionBenchmarkV3EvidenceMatchesBudget(t *testing.T)
 	}
 }
 
-func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *testing.T) {
+func TestCommittedAgentRecognitionBenchmarkV4EvidenceMatchesBudget(t *testing.T) {
 	evidenceFiles := []string{
 		"agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json",
 		"agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json",
 		"agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json",
 		"agent-recognition-benchmark-evidence-604f618-run29628939552.json",
 		"agent-recognition-benchmark-evidence-86e4807-run29629137197.json",
+		"agent-recognition-benchmark-evidence-3bd8d0d-run29699641719.json",
+		"agent-recognition-benchmark-evidence-3bd8d0d-run29699878928.json",
+		"agent-recognition-benchmark-evidence-3bd8d0d-run29700082923.json",
 	}
 	wantArtifactDigests := []string{
 		"a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4",
@@ -1225,6 +1228,19 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 		"32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317",
 		"fb338e1fa2bc0b2657a603d1d424f3a71691efa22a58aa0f0f288dbe0649a176",
 		"1f8c8d764ec87dd4094e7d249f4c78849116688218013ebf348698eb220d8284",
+		"0e418115253b098345aee755ad916bd6a67df2ab0972e74081967a26abc076d0",
+		"ae744812e4a1e13f119dbabf9ce4bd095721af9e8de540bbfab4d3a7ae6d89f5",
+		"b1e810482693b77a09cb8a049edc4f65c1f8a8cf12484848136f7a1508521c9b",
+	}
+	wantSchemas := []string{
+		AgentRecognitionBenchmarkReportSchemaV3,
+		AgentRecognitionBenchmarkReportSchemaV3,
+		AgentRecognitionBenchmarkReportSchemaV3,
+		AgentRecognitionBenchmarkReportSchemaV3,
+		AgentRecognitionBenchmarkReportSchemaV3,
+		AgentRecognitionBenchmarkReportSchemaV4,
+		AgentRecognitionBenchmarkReportSchemaV4,
+		AgentRecognitionBenchmarkReportSchemaV4,
 	}
 	wantGateStatuses := []string{
 		AgentRecognitionBenchmarkGateNotRun,
@@ -1232,6 +1248,9 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 		AgentRecognitionBenchmarkGateNotRun,
 		AgentRecognitionBenchmarkGatePass,
 		AgentRecognitionBenchmarkGateFail,
+		AgentRecognitionBenchmarkGateNotRun,
+		AgentRecognitionBenchmarkGateNotRun,
+		AgentRecognitionBenchmarkGateNotRun,
 	}
 	type reviewedProfileEvidence struct {
 		maxP50WallOverheadPercent              float64
@@ -1255,10 +1274,13 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 		if err != nil {
 			t.Fatalf("load %s: %v", evidenceFile, err)
 		}
-		if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV3 || report.Environment.OS != "linux" || report.Environment.Architecture != "amd64" || report.Environment.CPUCount != 4 || report.Environment.RunnerImageOS != "ubuntu24" || report.Gate.Status != wantGateStatuses[index] {
-			t.Fatalf("reviewed bootstrap evidence provenance drifted for %s", evidenceFile)
+		if report.SchemaVersion != wantSchemas[index] || report.Environment.OS != "linux" || report.Environment.Architecture != "amd64" || report.Environment.CPUCount != 4 || report.Environment.RunnerImageOS != "ubuntu24" || report.Gate.Status != wantGateStatuses[index] {
+			t.Fatalf("reviewed evidence provenance drifted for %s", evidenceFile)
 		}
-		if index == len(evidenceFiles)-1 && !reflect.DeepEqual(report.Gate.Violations, []string{"budget.storm.p95_enabled_to_reference_daemon_cpu"}) {
+		if index >= 5 && (report.SourceSHA != "3bd8d0d74f84634056d709577ce24bd905b960d3" || report.ReferenceSourceSHA != "7a2167f543671bba4fc20a8d3702f5ae6d6315df") {
+			t.Fatalf("fresh exact-head evidence provenance drifted for %s: source=%q reference=%q", evidenceFile, report.SourceSHA, report.ReferenceSourceSHA)
+		}
+		if index == 4 && !reflect.DeepEqual(report.Gate.Violations, []string{"budget.storm.p95_enabled_to_reference_daemon_cpu"}) {
 			t.Fatalf("preserved Intel failure drifted: %+v", report.Gate)
 		}
 		reports = append(reports, report)
@@ -1266,7 +1288,7 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 		cpuModels[report.Environment.CPUModel] = struct{}{}
 		for _, summary := range report.Summaries {
 			if summary.EnabledToReferenceDaemonCPURatio == nil || summary.ReferenceTotalCapture == nil || summary.ReferenceTotalFingerprint == nil {
-				t.Fatalf("reviewed bootstrap evidence %s profile %q lacks reference evidence", evidenceFile, summary.ProfileName)
+				t.Fatalf("reviewed evidence %s profile %q lacks reference evidence", evidenceFile, summary.ProfileName)
 			}
 			aggregate := aggregates[summary.ProfileName]
 			aggregate.maxP50WallOverheadPercent = math.Max(aggregate.maxP50WallOverheadPercent, summary.PairedWallOverheadPercent.P50)
@@ -1285,20 +1307,20 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 		}
 	}
 	if len(cpuModels) != 4 {
-		t.Fatalf("reviewed bootstrap evidence covers %d CPU models, want 4", len(cpuModels))
+		t.Fatalf("reviewed evidence covers %d CPU models, want 4", len(cpuModels))
 	}
 	if !stringSlicesEqual(artifactDigests, wantArtifactDigests) {
-		t.Fatalf("reviewed bootstrap artifact digests = %v, want %v", artifactDigests, wantArtifactDigests)
+		t.Fatalf("reviewed artifact digests = %v, want %v", artifactDigests, wantArtifactDigests)
 	}
-	if currentExpected != 10400 || currentSuccess != currentExpected || referenceExpected != 10400 || referenceSuccess != referenceExpected {
-		t.Fatalf("reviewed bootstrap correctness totals: current=%d/%d reference=%d/%d", currentSuccess, currentExpected, referenceSuccess, referenceExpected)
+	if currentExpected != 16640 || currentSuccess != currentExpected || referenceExpected != 16640 || referenceSuccess != referenceExpected {
+		t.Fatalf("reviewed correctness totals: current=%d/%d reference=%d/%d", currentSuccess, currentExpected, referenceSuccess, referenceExpected)
 	}
 
 	budget, budgetDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.4.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if budget.BudgetVersion != "github-ubuntu-24.04-amd64.robust-p50.v1" || budgetDigest != "a5b1cbb24da90068a18845520c3d66c25bab2fc7e13ca851ca4f6f46c9574be0" {
+	if budget.BudgetVersion != "github-ubuntu-24.04-amd64.robust-p50.v1" || budgetDigest != "96bfb36207535379bedb1565e94ae3dd35d651b86b8d3e40e20fcd304a9c1d9d" {
 		t.Fatalf("reviewed v0.4 budget identity drifted: version=%q digest=%q", budget.BudgetVersion, budgetDigest)
 	}
 	wantRunnerClasses := []AgentRecognitionBenchmarkRunnerClass{{
@@ -1308,7 +1330,7 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 	if !reflect.DeepEqual(budget.SupportedRunnerClasses, wantRunnerClasses) || !stringSlicesEqual(budget.EvidenceArtifactSHA256s, artifactDigests) {
 		t.Fatalf("reviewed v0.4 runner/evidence provenance drifted: runners=%+v digests=%v", budget.SupportedRunnerClasses, budget.EvidenceArtifactSHA256s)
 	}
-	wantRelativeTolerances := map[string]float64{"low": 3, "sustained": 3, "storm": 6}
+	wantRelativeTolerances := map[string]float64{"low": 4, "sustained": 5, "storm": 6}
 	for _, profile := range budget.Profiles {
 		aggregate, ok := aggregates[profile.ProfileName]
 		if !ok || !nearlyEqual(profile.EvidenceP50WallOverheadPercent, aggregate.maxP50WallOverheadPercent) ||
@@ -1318,7 +1340,7 @@ func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *t
 			profile.EvidenceMaxEnabledDaemonPeakRSSKiB != aggregate.maxEnabledDaemonPeakRSSKiB ||
 			profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != wantRelativeTolerances[profile.ProfileName] ||
 			profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0.02 {
-			t.Fatalf("budget profile %q drifted from reviewed v0.4 bootstrap evidence: %+v", profile.ProfileName, profile)
+			t.Fatalf("budget profile %q drifted from reviewed v0.4 evidence: %+v", profile.ProfileName, profile)
 		}
 		relativeSpreadPercent := ((aggregate.maxP50EnabledToReferenceDaemonCPURatio - aggregate.minP50EnabledToReferenceDaemonCPURatio) / aggregate.minP50EnabledToReferenceDaemonCPURatio) * 100
 		if profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent < 2*relativeSpreadPercent || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent > 2*relativeSpreadPercent+1 {

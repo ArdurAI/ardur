@@ -2,7 +2,7 @@
 title: "Linux Agent-Recognition Overhead And Loss Harness"
 description: "Ardur ships a real-Linux reference-paired benchmark for the opt-in"
 source_path: "docs/benchmarks/agent-recognition-overhead.md"
-source_sha256: "dcf5e0d31189890458630b6b0bfef924a09d8a09ef3df6a390cbcdb71a40018b"
+source_sha256: "2dabc69d1d609755f06ea713951667d9264eba4af038d594a0e84d8903aa0485"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -95,10 +95,11 @@ branch's merge-base with `dev`. Both source SHAs and both executed binary
 digests are part of the artifact.
 
 Automatic pull-request and `dev` CI must load
-`agent-recognition-benchmark-budget-v0.4.json`. Its bootstrap evidence is bound
-to three independently dispatched AMD reports plus the preserved first-attempt
-Intel pass and failure that falsified the v0.3 p95 gate. A missing budget fails
-at a preflight step before spending benchmark time. An explicit
+`agent-recognition-benchmark-budget-v0.4.json`. Its reviewed evidence is bound
+to three original AMD reports, the preserved first-attempt Intel pass and
+failure that falsified the v0.3 p95 gate, and three independent exact-head v0.4
+reports. A missing budget fails at a preflight step before spending benchmark
+time. An explicit
 `workflow_dispatch` with profile `ci` is the only hosted evidence-only path for
 collecting a replacement evidence set; reviewers must inspect at least three
 independent exact-head artifacts before replacing both those reports and the
@@ -151,38 +152,42 @@ loadable and digest-verifiable. They retain their original absolute,
 synthetic-calibrated, or same-VM p95 CPU rules and are not silently
 reinterpreted as the v0.4 median decision.
 
-### Reviewed v0.4 bootstrap evidence
+### Reviewed v0.4 evidence
 
-The v0.4 bootstrap binds five immutable v0.3 reports because their raw pairs
-already contain both p50 and p95 same-VM ratios. The first three are the
-original AMD calibration set. The final two are first-attempt, byte-identical
-PR and merge-tree measurements on distinct Intel processor models. Run
-`29629137197` remains a red v0.3 artifact; it was not rerun or converted into a
-green historical report.
+The v0.4 budget binds eight immutable reports. Five v0.3 reports already contain
+both p50 and p95 same-VM ratios: the original three-run AMD calibration set and
+first-attempt, byte-identical PR and merge-tree measurements on two Intel
+processor models. Run `29629137197` remains a red v0.3 artifact; it was not
+rerun or converted into a green historical report. Three independent v0.4
+manual dispatches then measured exact source `3bd8d0d7` against exact `dev`
+reference `7a2167f5`; all three were retained on their first attempt.
 
-| Run | Reviewed report | CPU model | v0.3 result | Artifact digest |
+| Run | Reviewed report | CPU model | Schema/result | Artifact digest |
 |---:|---|---|---|---|
-| [29580498313](https://github.com/ArdurAI/ardur/actions/runs/29580498313) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json) | AMD EPYC 7763 | evidence only | `a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4` |
-| [29580918057](https://github.com/ArdurAI/ardur/actions/runs/29580918057) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json) | AMD EPYC 9V74 | evidence only | `b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e` |
-| [29581341003](https://github.com/ArdurAI/ardur/actions/runs/29581341003) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json) | AMD EPYC 7763 | evidence only | `32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317` |
-| [29628939552](https://github.com/ArdurAI/ardur/actions/runs/29628939552) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-604f618-run29628939552.json) | Intel Xeon Platinum 8573C | pass | `fb338e1fa2bc0b2657a603d1d424f3a71691efa22a58aa0f0f288dbe0649a176` |
-| [29629137197](https://github.com/ArdurAI/ardur/actions/runs/29629137197) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-86e4807-run29629137197.json) | Intel Xeon 6973P-C | fail: storm p95 only | `1f8c8d764ec87dd4094e7d249f4c78849116688218013ebf348698eb220d8284` |
+| [29580498313](https://github.com/ArdurAI/ardur/actions/runs/29580498313) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json) | AMD EPYC 7763 | v0.3 evidence only | `a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4` |
+| [29580918057](https://github.com/ArdurAI/ardur/actions/runs/29580918057) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json) | AMD EPYC 9V74 | v0.3 evidence only | `b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e` |
+| [29581341003](https://github.com/ArdurAI/ardur/actions/runs/29581341003) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json) | AMD EPYC 7763 | v0.3 evidence only | `32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317` |
+| [29628939552](https://github.com/ArdurAI/ardur/actions/runs/29628939552) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-604f618-run29628939552.json) | Intel Xeon Platinum 8573C | v0.3 pass | `fb338e1fa2bc0b2657a603d1d424f3a71691efa22a58aa0f0f288dbe0649a176` |
+| [29629137197](https://github.com/ArdurAI/ardur/actions/runs/29629137197) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-86e4807-run29629137197.json) | Intel Xeon 6973P-C | v0.3 fail: storm p95 only | `1f8c8d764ec87dd4094e7d249f4c78849116688218013ebf348698eb220d8284` |
+| [29699641719](https://github.com/ArdurAI/ardur/actions/runs/29699641719) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-3bd8d0d-run29699641719.json) | AMD EPYC 7763 | v0.4 evidence only | `0e418115253b098345aee755ad916bd6a67df2ab0972e74081967a26abc076d0` |
+| [29699878928](https://github.com/ArdurAI/ardur/actions/runs/29699878928) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-3bd8d0d-run29699878928.json) | AMD EPYC 9V74 | v0.4 evidence only | `ae744812e4a1e13f119dbabf9ce4bd095721af9e8de540bbfab4d3a7ae6d89f5` |
+| [29700082923](https://github.com/ArdurAI/ardur/actions/runs/29700082923) | [raw JSON](/__ardur_internal__/repo/go/pkg/kernelcapture/testdata/agent-recognition-benchmark-evidence-3bd8d0d-run29700082923.json) | Intel Xeon Platinum 8573C | v0.4 evidence only | `b1e810482693b77a09cb8a049edc4f65c1f8a8cf12484848136f7a1508521c9b` |
 
 Every report strictly reloads and recomputes. Together they delivered,
-recognized, and fingerprinted 10,400 candidate events and 10,400 reference
+recognized, and fingerprinted 16,640 candidate events and 16,640 reference
 events with zero loss, rejection, mismatch, unavailable or unexplained work.
 
 | Profile | Wall p50 range | Diagnostic wall p95 max | CPU p50 range | Diagnostic CPU p95 max | Max RSS |
 |---|---:|---:|---:|---:|---:|
-| low | 0.0052–0.0564% | 0.1159% | 0.99282–1.00462 | 1.16720 | 13,568 KiB |
-| sustained | 0.0271–0.1162% | 0.2453% | 0.99392–1.00840 | 1.04282 | 13,604 KiB |
-| storm | 0.4927–0.6660% | 0.9916% | 0.98969–1.01750 | 1.16693 | 13,684 KiB |
+| low | 0.0052–0.0708% | 0.1586% | 0.99282–1.00847 | 1.16720 | 13,572 KiB |
+| sustained | 0.0271–0.1162% | 0.2453% | 0.98719–1.00840 | 1.04282 | 13,604 KiB |
+| storm | 0.4927–0.6806% | 1.2119% | 0.98969–1.01750 | 1.16693 | 13,684 KiB |
 
 Budget version `github-ubuntu-24.04-amd64.robust-p50.v1` records each maximum
 and retains p95 as diagnostic provenance. Its CPU tolerances are tight upward
-roundings of twice the cross-run relative p50 spread: 3% for low, 3% for
+roundings of twice the cross-run relative p50 spread: 4% for low, 5% for
 sustained, and 6% for storm, with the existing 0.02 absolute floor. The
-resulting ceilings are 1.03476, 1.03865, and 1.07855. Equality passes; the next
+resulting ceilings are 1.04881, 1.05882, and 1.07855. Equality passes; the next
 representable value above a ceiling fails. Two high tail pairs do not fail the
 median gate, while a candidate-only regression in 11 of 20 pairs does.
 
@@ -198,10 +203,10 @@ sampling guidance.
 A controlled larger or self-hosted runner was rejected for this correction.
 It could narrow host variance, but would add runner spend, maintenance,
 capacity, patching, and trust-boundary obligations while leaving a one-sample
-p95 decision fragile. Each CI evidence run currently occupies roughly six
-hosted-runner minutes; the required three-run proof therefore spends roughly
-18 runner minutes before ordinary PR checks. This is a measurement cost, not a
-service SLO or a guaranteed GitHub billing amount.
+p95 decision fragile. The three final first-attempt runs completed in 5m48s,
+5m47s, and 5m48s, consuming about 17.4 hosted-runner minutes before ordinary PR
+checks. This is a measurement cost, not a service SLO or a guaranteed GitHub
+billing amount.
 
 ### Reviewed v0.3 predecessor evidence
 

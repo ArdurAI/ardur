@@ -85,9 +85,10 @@ pass. It requires the reviewed v0.4 budget before measurement; a missing or
 invalid budget fails instead of silently reverting performance to
 `not_evaluated`. Only an explicit manual `ci` dispatch may collect
 budget-independent replacement evidence, and correctness still fails closed.
-The bootstrap budget binds three AMD and two preserved Intel first-attempt
-reports, including the v0.3 falsification; the final replacement requires at
-least three independent fresh exact-head reports. The larger release profile is
+The reviewed budget binds three original AMD reports, two preserved Intel
+first-attempt reports including the v0.3 falsification, and three independent
+fresh exact-head v0.4 reports. Any later replacement likewise requires at least
+three independent fresh exact-head reports. The larger release profile is
 manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](benchmarks/agent-recognition-overhead.md).
 

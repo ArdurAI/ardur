@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "3d7e964cf5e134f310fca4d20ccd5d4c4ce274ac406c8a2844448dfa956394da"
+source_sha256: "6a48ea8063b4ad04277277a62c7681ff7235325574a88a5c79d17533d8a0f444"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -102,9 +102,10 @@ pass. It requires the reviewed v0.4 budget before measurement; a missing or
 invalid budget fails instead of silently reverting performance to
 `not_evaluated`. Only an explicit manual `ci` dispatch may collect
 budget-independent replacement evidence, and correctness still fails closed.
-The bootstrap budget binds three AMD and two preserved Intel first-attempt
-reports, including the v0.3 falsification; the final replacement requires at
-least three independent fresh exact-head reports. The larger release profile is
+The reviewed budget binds three original AMD reports, two preserved Intel
+first-attempt reports including the v0.3 falsification, and three independent
+fresh exact-head v0.4 reports. Any later replacement likewise requires at least
+three independent fresh exact-head reports. The larger release profile is
 manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
 
