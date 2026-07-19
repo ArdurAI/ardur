@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4ed143c3bc5e2c15aa0975af19b5818108f0873137883db6437bc94bb8ce5b41"
+source_sha256: "57f57467042aba072cef2a05218f66abf446555017f112930b105eca32962ae6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,9 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Scope Biscuit authority-baseline queries explicitly to the issuer-signed
+  authority block and reject duplicate required or optional scalar facts
+  instead of selecting a row by dependency-defined ordering
 - Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
   side-effect, budget, time, delegation, lineage-parent, or working-directory
   authority while preserving valid transitive attenuation
