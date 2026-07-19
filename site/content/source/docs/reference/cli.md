@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "b63a9cdccb4652a71849859f89c84d11de892ea3b3747d1c0c73b86dec512dfa"
+source_sha256: "779183516893a53fc23492e48bc946e0087ad2f37f629817d1ce4468bfc37b4c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -688,6 +688,20 @@ copy raw invalid file URLs, local paths, tokens, or provider data into shared
 logs. Healthy Hub responses preserve the existing response shape and omit
 actionable remediation.
 
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur status` exits non-zero and writes parseable stdout JSON with `ok: false`,
+stable `condition`/`error`/`error_code` values of `hub_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur status --hub-token <hub-token>` (supply an explicit token) and
+`ardur status` (omit `--hub-token` so Ardur resolves it from `ARDUR_HUB_TOKEN`
+or Personal Hub config). The failure path keeps stderr empty, emits no
+traceback, and does not echo raw token values or local paths. An unset
+`--hub-token` (omitted) and an empty-string `--hub-token ""` remain valid: in
+both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal Hub config.
+
 ### `ardur doctor`
 
 Health-check the local Ardur Personal setup: config presence, Hub
@@ -705,6 +719,20 @@ checking the loopback Hub, and re-running `ardur doctor`; they use placeholders
 such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw
 local paths, invalid file URLs, or tokens. When the core setup is healthy,
 `next_steps` is an empty array.
+
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur doctor` exits non-zero and writes parseable stdout JSON with `ok: false`,
+stable `condition`/`error`/`error_code` values of `hub_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur doctor --hub-token <hub-token>` (supply an explicit token) and
+`ardur doctor` (omit `--hub-token` so Ardur resolves it from `ARDUR_HUB_TOKEN`
+or Personal Hub config). The failure path keeps stderr empty, emits no
+traceback, and does not echo raw token values or local paths. An unset
+`--hub-token` (omitted) and an empty-string `--hub-token ""` remain valid: in
+both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal Hub config.
 
 ### `ardur doctor-claude-code`
 
@@ -845,6 +873,21 @@ than copying raw temp homes or tokens. Blocked legacy commands still exit `126`
 with a receipt when policy evaluation succeeds; successful commands preserve
 stdout, stderr, and child exit-code streaming without remediation noise.
 
+On the legacy Hub path, a whitespace-only `--hub-token` (for example
+`--hub-token "   "`) is rejected before any network call. The token is trimmed
+internally; a whitespace-only value is truthy before trimming but resolves to an
+empty bearer after, so it is rejected explicitly rather than silently sending a
+whitespace bearer to the Hub. `ardur run` exits non-zero and writes parseable
+stdout JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_token_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur run --hub-token <hub-token> -- <command>` (supply an explicit
+token) and `ardur run -- <command>` (omit `--hub-token` so Ardur resolves it
+from `ARDUR_HUB_TOKEN` or Personal Hub config). The failure path keeps stderr
+empty, emits no traceback, and does not echo raw token values or local paths.
+An unset `--hub-token` (omitted) and an empty-string `--hub-token ""` remain
+valid: in both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal
+Hub config. The zero-setup governance bridge path does not take a `--hub-token`.
+
 If `--mission` is supplied as an empty or whitespace-only string, `ardur run`
 exits `2` without generating keys, creating a Mission Passport, or launching the
 governed command. Stderr prints a message, a usage line, and placeholder-only
@@ -925,6 +968,21 @@ store/native-host installation proof, release readiness, or public metadata
 readiness; successful observations preserve the Hub response shape without
 remediation noise.
 
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur desktop-observe` exits non-zero and writes parseable stdout JSON with
+`ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_token_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur desktop-observe --hub-token <hub-token>` (supply an explicit
+token) and `ardur desktop-observe` (omit `--hub-token` so Ardur resolves it
+from `ARDUR_HUB_TOKEN` or Personal Hub config). The failure path keeps stderr
+empty, emits no traceback, and does not echo raw token values or local paths.
+An unset `--hub-token` (omitted) and an empty-string `--hub-token ""` remain
+valid: in both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal
+Hub config.
+
 ### `ardur personal-native-host`
 
 Run the browser native-messaging host that bridges the browser extension to
@@ -971,6 +1029,23 @@ Hub token, run `ardur doctor`, then re-run `ardur personal-native-host
 store deployment proof, live provider/API behavior, provider-hidden action
 visibility, native-host installation proof, release readiness, or public
 metadata readiness.
+
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur personal-native-host` exits non-zero and writes parseable stdout JSON
+with `ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_token_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur personal-native-host --hub-token <hub-token>` (supply an explicit
+token) and `ardur personal-native-host` (omit `--hub-token` so Ardur resolves it
+from `ARDUR_HUB_TOKEN` or Personal Hub config). The rejection is emitted before
+native-host framing begins, so the JSON is written to stdout regardless of
+whether the command is invoked by a browser or under `--once-json`. The failure
+path keeps stderr empty, emits no traceback, and does not echo raw token values
+or local paths. An unset `--hub-token` (omitted) and an empty-string
+`--hub-token ""` remain valid: in both cases Ardur falls through to
+`ARDUR_HUB_TOKEN` or the Personal Hub config.
 
 ### `ardur personal-native-manifest`
 
