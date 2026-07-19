@@ -1073,6 +1073,9 @@ _PATH_ARG_SPECS = (
     "evidence_output",
     "temp_parent",
     "once_json",
+    "config",
+    "output",
+    "extension_path",
 )
 
 
@@ -3074,6 +3077,11 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
 def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
     """Statically inspect a tool-server configuration without executing it."""
 
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+
     from .runtime_evidence import RuntimeEvidenceError, write_report
 
     try:
@@ -3488,6 +3496,10 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         response = setup_personal(args)
     except HubError as exc:
@@ -5897,7 +5909,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tool_server_preflight.add_argument(
         "--config",
-        type=Path,
+        type=str,
         required=True,
         help="strict JSON MCP client config or static tool manifest",
     )
@@ -5909,7 +5921,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tool_server_preflight.add_argument(
         "--output",
-        type=Path,
+        type=str,
         help="atomically write an owner-only report instead of printing it",
     )
     tool_server_preflight.add_argument(
@@ -5942,8 +5954,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup.add_argument(
         "--extension-path",
-        type=Path,
-        default=Path("examples/ardur-personal-extension"),
+        type=str,
+        default=str(Path("examples/ardur-personal-extension")),
         help="browser extension directory to show in setup output",
     )
     setup.set_defaults(func=cmd_setup)
