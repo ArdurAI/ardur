@@ -5,6 +5,11 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Scope Biscuit authority-baseline queries explicitly to the issuer-signed
+  authority block and reject duplicate required or optional scalar facts
+  instead of selecting a row by dependency-defined ordering; verified by
+  `test_verify_preserves_special_authority_values_with_explicit_scope` and
+  `test_verify_rejects_duplicate_authority_scalar`
 - Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
   side-effect, budget, time, delegation, lineage-parent, or working-directory
   authority while preserving valid transitive attenuation

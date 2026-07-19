@@ -255,13 +255,9 @@ def verify_biscuit_passport(
     # facts (jti / mission / etc.) — the iat-bound failure is the
     # primary security signal for the audit's threat model.
     # FIX-R6-8 (round-6, 2026-04-29): walk EVERY iat fact row in EVERY
-    # block, not just iat_facts[0]. Round-5 audit (LOW-1) noted that
-    # ``_extract_authority_block_facts`` queries the authorizer which
-    # may return iat rows from any block that asserted ``iat(...)``;
-    # if a future biscuit-auth library version reverses the iteration
-    # order, an attacker's far-future authority iat could hide behind
-    # a benign present-time iat at index 0. Iterating every row makes
-    # the bound robust to row-ordering changes upstream.
+    # block, not just iat_facts[0]. Iterating every row keeps the bound robust
+    # if a malformed block contains duplicate iat facts or query row ordering
+    # changes upstream.
     for block_index, block in enumerate(block_facts):
         iat_facts = block.get("iat", [])
         if not iat_facts:
@@ -830,6 +826,16 @@ def _parse_block_source(source: str) -> dict[str, Any]:
 
 
 def _extract_authority_block_facts(authorizer: Any, source: str) -> dict[str, Any]:
+    """Return structured facts that explicitly trust only the authority block.
+
+    ``Biscuit.block_source()`` is a display API, not a lossless serialization:
+    biscuit-python 0.4.0 can print embedded quotes and newlines without escapes,
+    so reparsing block 0 would reject valid credentials. Structured queries keep
+    the original values intact. Every rule carries Biscuit's explicit
+    ``trusting authority`` scope so appended holder blocks cannot contribute
+    facts even if a future binding changes the query method's default scope.
+    """
+
     facts: dict[str, Any] = {"__source__": source}
     for name in (
         "agent_id",
@@ -846,7 +852,7 @@ def _extract_authority_block_facts(authorizer: Any, source: str) -> dict[str, An
         "resource_scope_empty",
         "allowed_side_effect_class",
     ):
-        rows = _query_fact_terms(authorizer, name, 1)
+        rows = _query_authority_fact_terms(authorizer, name, 1)
         if rows:
             facts[name] = rows
 
@@ -857,24 +863,33 @@ def _extract_authority_block_facts(authorizer: Any, source: str) -> dict[str, An
         "max_duration_s",
         "max_delegation_depth",
     ):
-        rows = _query_fact_terms(authorizer, name, 1)
+        rows = _query_authority_fact_terms(authorizer, name, 1)
         if rows:
             facts[name] = rows
 
-    delegation_rows = _query_fact_terms(authorizer, "delegation_allowed", 1)
+    delegation_rows = _query_authority_fact_terms(authorizer, "delegation_allowed", 1)
     if delegation_rows:
         facts["delegation_allowed"] = delegation_rows
 
-    budget_rows = _query_fact_terms(authorizer, "max_tool_calls_per_class", 2)
+    budget_rows = _query_authority_fact_terms(
+        authorizer, "max_tool_calls_per_class", 2
+    )
     if budget_rows:
         facts["max_tool_calls_per_class"] = budget_rows
 
     return facts
 
 
-def _query_fact_terms(authorizer: Any, predicate: str, arity: int) -> list[list[Any]]:
+def _query_authority_fact_terms(
+    authorizer: Any,
+    predicate: str,
+    arity: int,
+) -> list[list[Any]]:
     variables = ", ".join(f"$v{index}" for index in range(arity))
-    rows = authorizer.query(Rule(f"data({variables}) <- {predicate}({variables})"))
+    rule = Rule(
+        f"data({variables}) <- {predicate}({variables}) trusting authority"
+    )
+    rows = authorizer.query(rule)
     return [list(row.terms) for row in rows]
 
 
@@ -925,9 +940,11 @@ def _required_single(block: dict[str, Any], name: str, expected_type: type[Any])
     values = block.get(name)
     if not values:
         raise ValueError(f"missing:{name}")
-    value = values[-1][0] if len(values[-1]) == 1 else None
+    if len(values) != 1:
+        raise ValueError(f"malformed:{name}")
+    value = values[0][0] if len(values[0]) == 1 else None
     if (
-        len(values[-1]) != 1
+        len(values[0]) != 1
         or not isinstance(value, expected_type)
         or (expected_type is int and isinstance(value, bool))
     ):
@@ -941,9 +958,13 @@ def _optional_single(
     values = block.get(name)
     if not values:
         return None
-    if len(values[-1]) != 1 or not isinstance(values[-1][0], expected_type):
+    if (
+        len(values) != 1
+        or len(values[0]) != 1
+        or not isinstance(values[0][0], expected_type)
+    ):
         raise ValueError(f"malformed:{name}")
-    return values[-1][0]
+    return values[0][0]
 
 
 def _fact_values(
