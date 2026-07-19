@@ -1,0 +1,60 @@
+{
+  "schema_version": "ardur.agent_recognition_benchmark_budget.v0.4",
+  "budget_version": "github-ubuntu-24.04-amd64.robust-p50.v1",
+  "evidence_artifact_sha256s": [
+    "a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4",
+    "b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e",
+    "32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317",
+    "fb338e1fa2bc0b2657a603d1d424f3a71691efa22a58aa0f0f288dbe0649a176",
+    "1f8c8d764ec87dd4094e7d249f4c78849116688218013ebf348698eb220d8284"
+  ],
+  "minimum_measured_pairs": 20,
+  "supported_runner_classes": [
+    {
+      "os": "linux",
+      "architecture": "amd64",
+      "cpu_count": 4,
+      "cgroup_cpu_max": "max 100000",
+      "effective_cpu_set": "0-3",
+      "runner_image_os": "ubuntu24"
+    }
+  ],
+  "profiles": [
+    {
+      "profile_name": "low",
+      "evidence_p50_wall_overhead_percent": 0.05641220123886045,
+      "evidence_p95_wall_overhead_percent": 0.11591809969247818,
+      "wall_overhead_tolerance_percentage_points": 0.1,
+      "evidence_p50_enabled_to_reference_daemon_cpu_ratio": 1.0046171385998326,
+      "evidence_p95_enabled_to_reference_daemon_cpu_ratio": 1.1672034942833962,
+      "enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent": 3,
+      "enabled_to_reference_daemon_cpu_ratio_absolute_tolerance": 0.02,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13568,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "sustained",
+      "evidence_p50_wall_overhead_percent": 0.11618123234414825,
+      "evidence_p95_wall_overhead_percent": 0.2452892702134036,
+      "wall_overhead_tolerance_percentage_points": 0.05,
+      "evidence_p50_enabled_to_reference_daemon_cpu_ratio": 1.0083990228499051,
+      "evidence_p95_enabled_to_reference_daemon_cpu_ratio": 1.0428165675854257,
+      "enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent": 3,
+      "enabled_to_reference_daemon_cpu_ratio_absolute_tolerance": 0.02,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13604,
+      "peak_rss_tolerance_kib": 4096
+    },
+    {
+      "profile_name": "storm",
+      "evidence_p50_wall_overhead_percent": 0.6659631270812636,
+      "evidence_p95_wall_overhead_percent": 0.9915785624948255,
+      "wall_overhead_tolerance_percentage_points": 0.15,
+      "evidence_p50_enabled_to_reference_daemon_cpu_ratio": 1.0174957252990484,
+      "evidence_p95_enabled_to_reference_daemon_cpu_ratio": 1.1669299262069304,
+      "enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent": 6,
+      "enabled_to_reference_daemon_cpu_ratio_absolute_tolerance": 0.02,
+      "evidence_max_enabled_daemon_peak_rss_kib": 13684,
+      "peak_rss_tolerance_kib": 4096
+    }
+  ]
+}

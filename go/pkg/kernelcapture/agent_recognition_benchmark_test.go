@@ -423,6 +423,212 @@ func TestAgentRecognitionBenchmarkV3GateUsesSameVMReferenceCPU(t *testing.T) {
 	}
 }
 
+func TestAgentRecognitionBenchmarkV4GateUsesMedianAndKeepsTailDiagnostic(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV4
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromMedianReferenceReport(report)
+	budgetJSON, err := json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetDigest := benchmarkSHA256Hex(budgetJSON)
+
+	profileName := report.Pairs[0].Profile.Name
+	changed := 0
+	for pairIndex := range report.Pairs {
+		pair := &report.Pairs[pairIndex]
+		if pair.Profile.Name != profileName || changed == 2 {
+			continue
+		}
+		pair.Enabled.DaemonCPUNanoseconds *= 4
+		pair.DaemonCPUDeltaNanoseconds = int64(pair.Enabled.DaemonCPUNanoseconds) - int64(pair.Baseline.DaemonCPUNanoseconds)
+		pair.EnabledToReferenceDaemonCPURatio = float64(pair.Enabled.DaemonCPUNanoseconds) / float64(pair.ReferenceEnabled.DaemonCPUNanoseconds)
+		changed++
+	}
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, &budget, budgetDigest); err != nil {
+		t.Fatal(err)
+	}
+	if report.Gate.Status != AgentRecognitionBenchmarkGatePass {
+		t.Fatalf("two-tail-outlier gate = %+v", report.Gate)
+	}
+	var summary AgentRecognitionBenchmarkProfileSummary
+	for _, candidate := range report.Summaries {
+		if candidate.ProfileName == profileName {
+			summary = candidate
+			break
+		}
+	}
+	profileBudget := budget.Profiles[0]
+	p95Ceiling := profileBudget.EvidenceP95EnabledToReferenceDaemonCPURatio + math.Max(
+		profileBudget.EnabledToReferenceDaemonCPURatioAbsoluteTolerance,
+		profileBudget.EvidenceP95EnabledToReferenceDaemonCPURatio*(profileBudget.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent/100),
+	)
+	if summary.EnabledToReferenceDaemonCPURatio == nil || summary.EnabledToReferenceDaemonCPURatio.P95 <= p95Ceiling {
+		t.Fatalf("tail diagnostic did not exceed the old-style p95 ceiling: summary=%+v ceiling=%f", summary.EnabledToReferenceDaemonCPURatio, p95Ceiling)
+	}
+
+	report = validAgentRecognitionBenchmarkReferenceReport(t)
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV4
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget = budgetFromMedianReferenceReport(report)
+	budgetJSON, err = json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetDigest = benchmarkSHA256Hex(budgetJSON)
+	changed = 0
+	for pairIndex := range report.Pairs {
+		pair := &report.Pairs[pairIndex]
+		if pair.Profile.Name != profileName || changed == 11 {
+			continue
+		}
+		pair.Enabled.DaemonCPUNanoseconds *= 2
+		pair.DaemonCPUDeltaNanoseconds = int64(pair.Enabled.DaemonCPUNanoseconds) - int64(pair.Baseline.DaemonCPUNanoseconds)
+		pair.EnabledToReferenceDaemonCPURatio = float64(pair.Enabled.DaemonCPUNanoseconds) / float64(pair.ReferenceEnabled.DaemonCPUNanoseconds)
+		changed++
+	}
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, &budget, budgetDigest); err != nil {
+		t.Fatal(err)
+	}
+	wantViolation := "budget." + profileName + ".p50_enabled_to_reference_daemon_cpu"
+	if report.Gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(report.Gate.Violations, []string{wantViolation}) {
+		t.Fatalf("majority CPU regression gate = %+v, want %q", report.Gate, wantViolation)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV4CPUThresholdBoundary(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV4
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromMedianReferenceReport(report)
+	budgetJSON, err := json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetDigest := benchmarkSHA256Hex(budgetJSON)
+	profile := budget.Profiles[0]
+	ceiling := profile.EvidenceP50EnabledToReferenceDaemonCPURatio + math.Max(
+		profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance,
+		profile.EvidenceP50EnabledToReferenceDaemonCPURatio*(profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent/100),
+	)
+
+	report.Summaries[0].EnabledToReferenceDaemonCPURatio.P50 = ceiling
+	if gate := EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest); gate.Status != AgentRecognitionBenchmarkGatePass {
+		t.Fatalf("exact CPU boundary gate = %+v", gate)
+	}
+	report.Summaries[0].EnabledToReferenceDaemonCPURatio.P50 = math.Nextafter(ceiling, math.Inf(1))
+	wantViolation := "budget." + profile.ProfileName + ".p50_enabled_to_reference_daemon_cpu"
+	if gate := EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest); gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{wantViolation}) {
+		t.Fatalf("above CPU boundary gate = %+v, want %q", gate, wantViolation)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV4FailsClosedOnUnsupportedRunnerClassAndSchemaMix(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV4
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	budget := budgetFromMedianReferenceReport(report)
+	budgetJSON, err := json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetDigest := benchmarkSHA256Hex(budgetJSON)
+
+	report.Environment.CPUCount++
+	gate := EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest)
+	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{"runner.unsupported"}) {
+		t.Fatalf("unsupported runner gate = %+v", gate)
+	}
+	report.Environment.CPUCount--
+	report.Environment.CgroupCPUMax = "100000 100000"
+	gate = EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest)
+	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{"runner.unsupported"}) {
+		t.Fatalf("unsupported cgroup gate = %+v", gate)
+	}
+	report.Environment.CgroupCPUMax = budget.SupportedRunnerClasses[0].CgroupCPUMax
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV3
+	gate = EvaluateAgentRecognitionBenchmarkBudget(&report, &budget, budgetDigest)
+	if gate.Status != AgentRecognitionBenchmarkGateFail || !reflect.DeepEqual(gate.Violations, []string{"budget.invalid"}) {
+		t.Fatalf("mixed schema gate = %+v", gate)
+	}
+}
+
+func TestAgentRecognitionBenchmarkV4BudgetRunnerClassValidation(t *testing.T) {
+	report := validAgentRecognitionBenchmarkReferenceReport(t)
+	report.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV4
+	if err := FinalizeAgentRecognitionBenchmarkReport(&report, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	valid := budgetFromMedianReferenceReport(report)
+	clone := func() AgentRecognitionBenchmarkBudget {
+		copyBudget := valid
+		copyBudget.SupportedRunnerClasses = append([]AgentRecognitionBenchmarkRunnerClass(nil), valid.SupportedRunnerClasses...)
+		copyBudget.Profiles = append([]AgentRecognitionBenchmarkBudgetProfile(nil), valid.Profiles...)
+		return copyBudget
+	}
+
+	for name, mutate := range map[string]func(*AgentRecognitionBenchmarkBudget){
+		"missing": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses = nil
+		},
+		"duplicate": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses = append(budget.SupportedRunnerClasses, budget.SupportedRunnerClasses[0])
+		},
+		"non linux": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].OS = "darwin"
+		},
+		"empty architecture": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].Architecture = ""
+		},
+		"hostile architecture": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].Architecture = "amd64\nspoofed"
+		},
+		"zero cpu": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].CPUCount = 0
+		},
+		"empty cgroup quota": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].CgroupCPUMax = ""
+		},
+		"hostile cpu set": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].EffectiveCPUSet = "0-3|spoofed"
+		},
+		"hostile image label": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.SupportedRunnerClasses[0].RunnerImageOS = "ubuntu24\nspoofed"
+		},
+		"p95 below p50": func(budget *AgentRecognitionBenchmarkBudget) {
+			budget.Profiles[0].EvidenceP95EnabledToReferenceDaemonCPURatio = math.Nextafter(budget.Profiles[0].EvidenceP50EnabledToReferenceDaemonCPURatio, 0)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			budget := clone()
+			mutate(&budget)
+			if err := ValidateAgentRecognitionBenchmarkBudget(&budget); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+				t.Fatalf("invalid v0.4 budget error = %v", err)
+			}
+		})
+	}
+
+	legacy := budgetFromReferenceReport(report)
+	legacy.SupportedRunnerClasses = append([]AgentRecognitionBenchmarkRunnerClass(nil), valid.SupportedRunnerClasses...)
+	if err := ValidateAgentRecognitionBenchmarkBudget(&legacy); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("legacy runner-class injection error = %v", err)
+	}
+	legacy = budgetFromReferenceReport(report)
+	legacy.Profiles[0].EvidenceP50EnabledToReferenceDaemonCPURatio = 1
+	if err := ValidateAgentRecognitionBenchmarkBudget(&legacy); err == nil || !errors.Is(err, ErrAgentRecognitionBenchmark) {
+		t.Fatalf("legacy p50-field injection error = %v", err)
+	}
+}
+
 func TestAgentRecognitionBenchmarkV3ReferenceCorrectnessFailsClosed(t *testing.T) {
 	report := validAgentRecognitionBenchmarkReferenceReport(t)
 	pair := &report.Pairs[0]
@@ -1005,6 +1211,130 @@ func TestCommittedAgentRecognitionBenchmarkV3EvidenceMatchesBudget(t *testing.T)
 	}
 }
 
+func TestCommittedAgentRecognitionBenchmarkV4BootstrapEvidenceMatchesBudget(t *testing.T) {
+	evidenceFiles := []string{
+		"agent-recognition-benchmark-evidence-9c5f16b-run29580498313.json",
+		"agent-recognition-benchmark-evidence-9c5f16b-run29580918057.json",
+		"agent-recognition-benchmark-evidence-9c5f16b-run29581341003.json",
+		"agent-recognition-benchmark-evidence-604f618-run29628939552.json",
+		"agent-recognition-benchmark-evidence-86e4807-run29629137197.json",
+	}
+	wantArtifactDigests := []string{
+		"a656f3ff388e67251bfc3848632cc03714fb455fe5ab5a4cb4a9d60a9cf57ba4",
+		"b3682ba292fa1288300c429ed1c39599acfc125afc9227f855bf82107f97be7e",
+		"32f3cc0c7f5811f4f72297310c1cbd11580130e1773b67e21f9da769c2fa2317",
+		"fb338e1fa2bc0b2657a603d1d424f3a71691efa22a58aa0f0f288dbe0649a176",
+		"1f8c8d764ec87dd4094e7d249f4c78849116688218013ebf348698eb220d8284",
+	}
+	wantGateStatuses := []string{
+		AgentRecognitionBenchmarkGateNotRun,
+		AgentRecognitionBenchmarkGateNotRun,
+		AgentRecognitionBenchmarkGateNotRun,
+		AgentRecognitionBenchmarkGatePass,
+		AgentRecognitionBenchmarkGateFail,
+	}
+	type reviewedProfileEvidence struct {
+		maxP50WallOverheadPercent              float64
+		maxP95WallOverheadPercent              float64
+		minP50EnabledToReferenceDaemonCPURatio float64
+		maxP50EnabledToReferenceDaemonCPURatio float64
+		maxP95EnabledToReferenceDaemonCPURatio float64
+		maxEnabledDaemonPeakRSSKiB             uint64
+	}
+	aggregates := map[string]reviewedProfileEvidence{
+		"low":       {minP50EnabledToReferenceDaemonCPURatio: math.Inf(1)},
+		"sustained": {minP50EnabledToReferenceDaemonCPURatio: math.Inf(1)},
+		"storm":     {minP50EnabledToReferenceDaemonCPURatio: math.Inf(1)},
+	}
+	reports := make([]*AgentRecognitionBenchmarkReport, 0, len(evidenceFiles))
+	artifactDigests := make([]string, 0, len(evidenceFiles))
+	cpuModels := make(map[string]struct{})
+	var currentExpected, currentSuccess, referenceExpected, referenceSuccess uint64
+	for index, evidenceFile := range evidenceFiles {
+		report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", evidenceFile))
+		if err != nil {
+			t.Fatalf("load %s: %v", evidenceFile, err)
+		}
+		if report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV3 || report.Environment.OS != "linux" || report.Environment.Architecture != "amd64" || report.Environment.CPUCount != 4 || report.Environment.RunnerImageOS != "ubuntu24" || report.Gate.Status != wantGateStatuses[index] {
+			t.Fatalf("reviewed bootstrap evidence provenance drifted for %s", evidenceFile)
+		}
+		if index == len(evidenceFiles)-1 && !reflect.DeepEqual(report.Gate.Violations, []string{"budget.storm.p95_enabled_to_reference_daemon_cpu"}) {
+			t.Fatalf("preserved Intel failure drifted: %+v", report.Gate)
+		}
+		reports = append(reports, report)
+		artifactDigests = append(artifactDigests, report.ArtifactSHA256)
+		cpuModels[report.Environment.CPUModel] = struct{}{}
+		for _, summary := range report.Summaries {
+			if summary.EnabledToReferenceDaemonCPURatio == nil || summary.ReferenceTotalCapture == nil || summary.ReferenceTotalFingerprint == nil {
+				t.Fatalf("reviewed bootstrap evidence %s profile %q lacks reference evidence", evidenceFile, summary.ProfileName)
+			}
+			aggregate := aggregates[summary.ProfileName]
+			aggregate.maxP50WallOverheadPercent = math.Max(aggregate.maxP50WallOverheadPercent, summary.PairedWallOverheadPercent.P50)
+			aggregate.maxP95WallOverheadPercent = math.Max(aggregate.maxP95WallOverheadPercent, summary.PairedWallOverheadPercent.P95)
+			aggregate.minP50EnabledToReferenceDaemonCPURatio = math.Min(aggregate.minP50EnabledToReferenceDaemonCPURatio, summary.EnabledToReferenceDaemonCPURatio.P50)
+			aggregate.maxP50EnabledToReferenceDaemonCPURatio = math.Max(aggregate.maxP50EnabledToReferenceDaemonCPURatio, summary.EnabledToReferenceDaemonCPURatio.P50)
+			aggregate.maxP95EnabledToReferenceDaemonCPURatio = math.Max(aggregate.maxP95EnabledToReferenceDaemonCPURatio, summary.EnabledToReferenceDaemonCPURatio.P95)
+			if summary.MaxEnabledDaemonPeakRSSKiB > aggregate.maxEnabledDaemonPeakRSSKiB {
+				aggregate.maxEnabledDaemonPeakRSSKiB = summary.MaxEnabledDaemonPeakRSSKiB
+			}
+			aggregates[summary.ProfileName] = aggregate
+			currentExpected += summary.TotalCapture.ExpectedEvents
+			currentSuccess += summary.TotalFingerprint.Success
+			referenceExpected += summary.ReferenceTotalCapture.ExpectedEvents
+			referenceSuccess += summary.ReferenceTotalFingerprint.Success
+		}
+	}
+	if len(cpuModels) != 4 {
+		t.Fatalf("reviewed bootstrap evidence covers %d CPU models, want 4", len(cpuModels))
+	}
+	if !stringSlicesEqual(artifactDigests, wantArtifactDigests) {
+		t.Fatalf("reviewed bootstrap artifact digests = %v, want %v", artifactDigests, wantArtifactDigests)
+	}
+	if currentExpected != 10400 || currentSuccess != currentExpected || referenceExpected != 10400 || referenceSuccess != referenceExpected {
+		t.Fatalf("reviewed bootstrap correctness totals: current=%d/%d reference=%d/%d", currentSuccess, currentExpected, referenceSuccess, referenceExpected)
+	}
+
+	budget, budgetDigest, err := LoadAgentRecognitionBenchmarkBudget(filepath.Join("testdata", "agent-recognition-benchmark-budget-v0.4.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if budget.BudgetVersion != "github-ubuntu-24.04-amd64.robust-p50.v1" || budgetDigest != "a5b1cbb24da90068a18845520c3d66c25bab2fc7e13ca851ca4f6f46c9574be0" {
+		t.Fatalf("reviewed v0.4 budget identity drifted: version=%q digest=%q", budget.BudgetVersion, budgetDigest)
+	}
+	wantRunnerClasses := []AgentRecognitionBenchmarkRunnerClass{{
+		OS: "linux", Architecture: "amd64", CPUCount: 4,
+		CgroupCPUMax: "max 100000", EffectiveCPUSet: "0-3", RunnerImageOS: "ubuntu24",
+	}}
+	if !reflect.DeepEqual(budget.SupportedRunnerClasses, wantRunnerClasses) || !stringSlicesEqual(budget.EvidenceArtifactSHA256s, artifactDigests) {
+		t.Fatalf("reviewed v0.4 runner/evidence provenance drifted: runners=%+v digests=%v", budget.SupportedRunnerClasses, budget.EvidenceArtifactSHA256s)
+	}
+	wantRelativeTolerances := map[string]float64{"low": 3, "sustained": 3, "storm": 6}
+	for _, profile := range budget.Profiles {
+		aggregate, ok := aggregates[profile.ProfileName]
+		if !ok || !nearlyEqual(profile.EvidenceP50WallOverheadPercent, aggregate.maxP50WallOverheadPercent) ||
+			!nearlyEqual(profile.EvidenceP95WallOverheadPercent, aggregate.maxP95WallOverheadPercent) ||
+			!nearlyEqual(profile.EvidenceP50EnabledToReferenceDaemonCPURatio, aggregate.maxP50EnabledToReferenceDaemonCPURatio) ||
+			!nearlyEqual(profile.EvidenceP95EnabledToReferenceDaemonCPURatio, aggregate.maxP95EnabledToReferenceDaemonCPURatio) ||
+			profile.EvidenceMaxEnabledDaemonPeakRSSKiB != aggregate.maxEnabledDaemonPeakRSSKiB ||
+			profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != wantRelativeTolerances[profile.ProfileName] ||
+			profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0.02 {
+			t.Fatalf("budget profile %q drifted from reviewed v0.4 bootstrap evidence: %+v", profile.ProfileName, profile)
+		}
+		relativeSpreadPercent := ((aggregate.maxP50EnabledToReferenceDaemonCPURatio - aggregate.minP50EnabledToReferenceDaemonCPURatio) / aggregate.minP50EnabledToReferenceDaemonCPURatio) * 100
+		if profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent < 2*relativeSpreadPercent || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent > 2*relativeSpreadPercent+1 {
+			t.Fatalf("profile %q p50 CPU tolerance does not tightly round twice relative spread %f", profile.ProfileName, relativeSpreadPercent)
+		}
+	}
+	for index, report := range reports {
+		v4View := *report
+		v4View.SchemaVersion = AgentRecognitionBenchmarkReportSchemaV4
+		gate := EvaluateAgentRecognitionBenchmarkBudget(&v4View, budget, budgetDigest)
+		if gate.Status != AgentRecognitionBenchmarkGatePass || len(gate.Violations) != 0 {
+			t.Fatalf("reviewed evidence %s does not pass its v0.4 view: %+v", evidenceFiles[index], gate)
+		}
+	}
+}
+
 func TestCommittedAgentRecognitionBenchmarkV2FalsificationRemainsLoadable(t *testing.T) {
 	report, err := LoadAgentRecognitionBenchmarkReport(filepath.Join("testdata", "agent-recognition-benchmark-evidence-aaac953-run29577544792.json"))
 	if err != nil {
@@ -1156,6 +1486,37 @@ func budgetFromReferenceReport(report AgentRecognitionBenchmarkReport) AgentReco
 			EvidenceP50WallOverheadPercent:                           summary.PairedWallOverheadPercent.P50,
 			EvidenceP95WallOverheadPercent:                           summary.PairedWallOverheadPercent.P95,
 			WallOverheadTolerancePercentagePoints:                    0.1,
+			EvidenceP95EnabledToReferenceDaemonCPURatio:              summary.EnabledToReferenceDaemonCPURatio.P95,
+			EnabledToReferenceDaemonCPURatioRelativeTolerancePercent: 10,
+			EnabledToReferenceDaemonCPURatioAbsoluteTolerance:        0.02,
+			EvidenceMaxEnabledDaemonPeakRSSKiB:                       summary.MaxEnabledDaemonPeakRSSKiB,
+			PeakRSSToleranceKiB:                                      4096,
+		})
+	}
+	return budget
+}
+
+func budgetFromMedianReferenceReport(report AgentRecognitionBenchmarkReport) AgentRecognitionBenchmarkBudget {
+	budget := AgentRecognitionBenchmarkBudget{
+		SchemaVersion: AgentRecognitionBenchmarkBudgetSchemaV4,
+		BudgetVersion: "test.v4",
+		EvidenceArtifactSHA256s: []string{
+			strings.Repeat("7", 64), strings.Repeat("8", 64), strings.Repeat("9", 64),
+		},
+		MinimumMeasuredPairs: MinAgentRecognitionBenchmarkPairs,
+		SupportedRunnerClasses: []AgentRecognitionBenchmarkRunnerClass{{
+			OS: report.Environment.OS, Architecture: report.Environment.Architecture,
+			CPUCount: report.Environment.CPUCount, CgroupCPUMax: report.Environment.CgroupCPUMax,
+			EffectiveCPUSet: report.Environment.EffectiveCPUSet, RunnerImageOS: report.Environment.RunnerImageOS,
+		}},
+	}
+	for _, summary := range report.Summaries {
+		budget.Profiles = append(budget.Profiles, AgentRecognitionBenchmarkBudgetProfile{
+			ProfileName:                                              summary.ProfileName,
+			EvidenceP50WallOverheadPercent:                           summary.PairedWallOverheadPercent.P50,
+			EvidenceP95WallOverheadPercent:                           summary.PairedWallOverheadPercent.P95,
+			WallOverheadTolerancePercentagePoints:                    0.1,
+			EvidenceP50EnabledToReferenceDaemonCPURatio:              summary.EnabledToReferenceDaemonCPURatio.P50,
 			EvidenceP95EnabledToReferenceDaemonCPURatio:              summary.EnabledToReferenceDaemonCPURatio.P95,
 			EnabledToReferenceDaemonCPURatioRelativeTolerancePercent: 10,
 			EnabledToReferenceDaemonCPURatioAbsoluteTolerance:        0.02,

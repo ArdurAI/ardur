@@ -19,12 +19,14 @@ const (
 	AgentRecognitionBenchmarkReportSchemaV1 = "ardur.agent_recognition_benchmark_report.v0.1"
 	AgentRecognitionBenchmarkReportSchemaV2 = "ardur.agent_recognition_benchmark_report.v0.2"
 	AgentRecognitionBenchmarkReportSchemaV3 = "ardur.agent_recognition_benchmark_report.v0.3"
+	AgentRecognitionBenchmarkReportSchemaV4 = "ardur.agent_recognition_benchmark_report.v0.4"
 	AgentRecognitionBenchmarkBudgetSchemaV1 = "ardur.agent_recognition_benchmark_budget.v0.1"
 	AgentRecognitionBenchmarkBudgetSchemaV2 = "ardur.agent_recognition_benchmark_budget.v0.2"
 	AgentRecognitionBenchmarkBudgetSchemaV3 = "ardur.agent_recognition_benchmark_budget.v0.3"
+	AgentRecognitionBenchmarkBudgetSchemaV4 = "ardur.agent_recognition_benchmark_budget.v0.4"
 
-	AgentRecognitionBenchmarkReportSchema = AgentRecognitionBenchmarkReportSchemaV3
-	AgentRecognitionBenchmarkBudgetSchema = AgentRecognitionBenchmarkBudgetSchemaV3
+	AgentRecognitionBenchmarkReportSchema = AgentRecognitionBenchmarkReportSchemaV4
+	AgentRecognitionBenchmarkBudgetSchema = AgentRecognitionBenchmarkBudgetSchemaV4
 
 	AgentRecognitionBenchmarkCalibrationAlgorithm   = "sha256_workload_process_cpu.v1"
 	AgentRecognitionBenchmarkGatePass               = "pass"
@@ -233,11 +235,21 @@ type AgentRecognitionBenchmarkBudgetProfile struct {
 	EvidenceP95EnabledDaemonCPUCalibrationRatio              float64 `json:"evidence_p95_enabled_daemon_cpu_calibration_ratio,omitempty"`
 	DaemonCPUCalibrationRatioRelativeTolerancePercent        float64 `json:"daemon_cpu_calibration_ratio_relative_tolerance_percent,omitempty"`
 	DaemonCPUCalibrationRatioAbsoluteTolerance               float64 `json:"daemon_cpu_calibration_ratio_absolute_tolerance,omitempty"`
+	EvidenceP50EnabledToReferenceDaemonCPURatio              float64 `json:"evidence_p50_enabled_to_reference_daemon_cpu_ratio,omitempty"`
 	EvidenceP95EnabledToReferenceDaemonCPURatio              float64 `json:"evidence_p95_enabled_to_reference_daemon_cpu_ratio,omitempty"`
 	EnabledToReferenceDaemonCPURatioRelativeTolerancePercent float64 `json:"enabled_to_reference_daemon_cpu_ratio_relative_tolerance_percent,omitempty"`
 	EnabledToReferenceDaemonCPURatioAbsoluteTolerance        float64 `json:"enabled_to_reference_daemon_cpu_ratio_absolute_tolerance,omitempty"`
 	EvidenceMaxEnabledDaemonPeakRSSKiB                       uint64  `json:"evidence_max_enabled_daemon_peak_rss_kib"`
 	PeakRSSToleranceKiB                                      uint64  `json:"peak_rss_tolerance_kib"`
+}
+
+type AgentRecognitionBenchmarkRunnerClass struct {
+	OS              string `json:"os"`
+	Architecture    string `json:"architecture"`
+	CPUCount        int    `json:"cpu_count"`
+	CgroupCPUMax    string `json:"cgroup_cpu_max"`
+	EffectiveCPUSet string `json:"effective_cpu_set"`
+	RunnerImageOS   string `json:"runner_image_os"`
 }
 
 type AgentRecognitionBenchmarkBudget struct {
@@ -246,6 +258,7 @@ type AgentRecognitionBenchmarkBudget struct {
 	EvidenceArtifactSHA256  string                                   `json:"evidence_artifact_sha256,omitempty"`
 	EvidenceArtifactSHA256s []string                                 `json:"evidence_artifact_sha256s,omitempty"`
 	MinimumMeasuredPairs    int                                      `json:"minimum_measured_pairs"`
+	SupportedRunnerClasses  []AgentRecognitionBenchmarkRunnerClass   `json:"supported_runner_classes,omitempty"`
 	Profiles                []AgentRecognitionBenchmarkBudgetProfile `json:"profiles"`
 }
 
@@ -275,7 +288,7 @@ func FinalizeAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkRe
 }
 
 func ValidateAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkReport) error {
-	if report == nil || (report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV1 && report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV2 && report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV3) {
+	if report == nil || (report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV1 && report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV2 && report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV3 && report.SchemaVersion != AgentRecognitionBenchmarkReportSchemaV4) {
 		return fmt.Errorf("%w: report schema is unsupported", ErrAgentRecognitionBenchmark)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, report.GeneratedAt); err != nil {
@@ -285,13 +298,13 @@ func ValidateAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkRe
 		return fmt.Errorf("%w: report digest metadata is invalid", ErrAgentRecognitionBenchmark)
 	}
 	wantPairOrder := "deterministic_ab_ba_alternation"
-	if report.SchemaVersion == AgentRecognitionBenchmarkReportSchemaV3 {
+	if agentRecognitionBenchmarkUsesReferenceCPU(report.SchemaVersion) {
 		wantPairOrder = "deterministic_six_arm_order_rotation"
 		if !isHexDigest(report.ReferenceSourceSHA, 40) || !isHexDigest(report.DaemonSHA256, 64) || !isHexDigest(report.ReferenceDaemonSHA256, 64) {
-			return fmt.Errorf("%w: v0.3 source or daemon provenance is invalid", ErrAgentRecognitionBenchmark)
+			return fmt.Errorf("%w: reference source or daemon provenance is invalid", ErrAgentRecognitionBenchmark)
 		}
 	} else if report.ReferenceSourceSHA != "" || report.DaemonSHA256 != "" || report.ReferenceDaemonSHA256 != "" {
-		return fmt.Errorf("%w: legacy report contains v0.3 daemon provenance", ErrAgentRecognitionBenchmark)
+		return fmt.Errorf("%w: legacy report contains reference daemon provenance", ErrAgentRecognitionBenchmark)
 	}
 	if report.Seed == 0 || report.WarmupPairs < 1 || report.MeasuredPairs < MinAgentRecognitionBenchmarkPairs || report.MeasuredPairs > 100 || report.PairOrder != wantPairOrder {
 		return fmt.Errorf("%w: report sampling contract is invalid", ErrAgentRecognitionBenchmark)
@@ -325,7 +338,7 @@ func ValidateAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkRe
 	for index := range report.Pairs {
 		pair := &report.Pairs[index]
 		expectedOrder := "baseline_then_enabled"
-		if report.SchemaVersion == AgentRecognitionBenchmarkReportSchemaV3 {
+		if agentRecognitionBenchmarkUsesReferenceCPU(report.SchemaVersion) {
 			expectedOrder = agentRecognitionBenchmarkReferenceOrder(pair.PairIndex, report.Seed)
 		} else if (pair.PairIndex+int(report.Seed&1))%2 != 0 {
 			expectedOrder = "enabled_then_baseline"
@@ -354,19 +367,19 @@ func ValidateAgentRecognitionBenchmarkReport(report *AgentRecognitionBenchmarkRe
 		if err := validateAgentRecognitionBenchmarkArm(pair.Enabled, pair.Profile, true, report.RegistryVersion, report.RegistrySHA256); err != nil {
 			return err
 		}
-		if report.SchemaVersion == AgentRecognitionBenchmarkReportSchemaV3 {
+		if agentRecognitionBenchmarkUsesReferenceCPU(report.SchemaVersion) {
 			if pair.ReferenceEnabled == nil {
-				return fmt.Errorf("%w: v0.3 reference arm is missing", ErrAgentRecognitionBenchmark)
+				return fmt.Errorf("%w: reference arm is missing", ErrAgentRecognitionBenchmark)
 			}
 			if err := validateAgentRecognitionBenchmarkArm(*pair.ReferenceEnabled, pair.Profile, true, report.RegistryVersion, report.RegistrySHA256); err != nil {
 				return err
 			}
 			if pair.ReferenceEnabled.DaemonCPUNanoseconds == 0 {
-				return fmt.Errorf("%w: v0.3 reference daemon CPU is unavailable", ErrAgentRecognitionBenchmark)
+				return fmt.Errorf("%w: reference daemon CPU is unavailable", ErrAgentRecognitionBenchmark)
 			}
 			wantRatio := float64(pair.Enabled.DaemonCPUNanoseconds) / float64(pair.ReferenceEnabled.DaemonCPUNanoseconds)
 			if !finite(pair.EnabledToReferenceDaemonCPURatio) || pair.EnabledToReferenceDaemonCPURatio <= 0 || !nearlyEqual(pair.EnabledToReferenceDaemonCPURatio, wantRatio) {
-				return fmt.Errorf("%w: v0.3 same-VM CPU ratio drifted", ErrAgentRecognitionBenchmark)
+				return fmt.Errorf("%w: same-VM CPU ratio drifted", ErrAgentRecognitionBenchmark)
 			}
 		} else if pair.ReferenceEnabled != nil || pair.EnabledToReferenceDaemonCPURatio != 0 {
 			return fmt.Errorf("%w: legacy pair contains reference measurements", ErrAgentRecognitionBenchmark)
@@ -455,6 +468,9 @@ func EvaluateAgentRecognitionBenchmarkBudget(report *AgentRecognitionBenchmarkRe
 	if report.MeasuredPairs < budget.MinimumMeasuredPairs {
 		gate.Violations = append(gate.Violations, "samples.below_budget_floor")
 	}
+	if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV4 && !agentRecognitionBenchmarkRunnerClassSupported(report.Environment, budget.SupportedRunnerClasses) {
+		gate.Violations = append(gate.Violations, "runner.unsupported")
+	}
 	summaries := make(map[string]AgentRecognitionBenchmarkProfileSummary, len(report.Summaries))
 	for _, summary := range report.Summaries {
 		summaries[summary.ProfileName] = summary
@@ -485,6 +501,11 @@ func EvaluateAgentRecognitionBenchmarkBudget(report *AgentRecognitionBenchmarkRe
 			}
 		} else if summary.EnabledToReferenceDaemonCPURatio == nil {
 			gate.Violations = append(gate.Violations, "budget."+profile.ProfileName+".reference_cpu_missing")
+		} else if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV4 {
+			cpuTolerance := math.Max(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance, profile.EvidenceP50EnabledToReferenceDaemonCPURatio*(profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent/100))
+			if summary.EnabledToReferenceDaemonCPURatio.P50 > profile.EvidenceP50EnabledToReferenceDaemonCPURatio+cpuTolerance {
+				gate.Violations = append(gate.Violations, "budget."+profile.ProfileName+".p50_enabled_to_reference_daemon_cpu")
+			}
 		} else {
 			cpuTolerance := math.Max(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance, profile.EvidenceP95EnabledToReferenceDaemonCPURatio*(profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent/100))
 			if summary.EnabledToReferenceDaemonCPURatio.P95 > profile.EvidenceP95EnabledToReferenceDaemonCPURatio+cpuTolerance {
@@ -573,7 +594,7 @@ func sortedUniqueStrings(values []string) bool {
 }
 
 func ValidateAgentRecognitionBenchmarkBudget(budget *AgentRecognitionBenchmarkBudget) error {
-	if budget == nil || (budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV1 && budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV2 && budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV3) || strings.TrimSpace(budget.BudgetVersion) == "" || budget.MinimumMeasuredPairs < MinAgentRecognitionBenchmarkPairs || budget.MinimumMeasuredPairs > 100 || len(budget.Profiles) != 3 {
+	if budget == nil || (budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV1 && budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV2 && budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV3 && budget.SchemaVersion != AgentRecognitionBenchmarkBudgetSchemaV4) || strings.TrimSpace(budget.BudgetVersion) == "" || budget.MinimumMeasuredPairs < MinAgentRecognitionBenchmarkPairs || budget.MinimumMeasuredPairs > 100 || len(budget.Profiles) != 3 {
 		return fmt.Errorf("%w: benchmark budget metadata is invalid", ErrAgentRecognitionBenchmark)
 	}
 	if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV1 {
@@ -595,6 +616,23 @@ func ValidateAgentRecognitionBenchmarkBudget(budget *AgentRecognitionBenchmarkBu
 			seenEvidence[digest] = struct{}{}
 		}
 	}
+	if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV4 {
+		if len(budget.SupportedRunnerClasses) == 0 || len(budget.SupportedRunnerClasses) > 16 {
+			return fmt.Errorf("%w: v0.4 supported runner classes are invalid", ErrAgentRecognitionBenchmark)
+		}
+		seenRunnerClasses := make(map[AgentRecognitionBenchmarkRunnerClass]struct{}, len(budget.SupportedRunnerClasses))
+		for _, runnerClass := range budget.SupportedRunnerClasses {
+			if runnerClass.OS != "linux" || !validAgentRecognitionBenchmarkHostText(runnerClass.Architecture) || runnerClass.CPUCount < 1 || runnerClass.CPUCount > 1024 || !validAgentRecognitionBenchmarkHostText(runnerClass.CgroupCPUMax) || !validAgentRecognitionBenchmarkHostText(runnerClass.EffectiveCPUSet) || !validAgentRecognitionBenchmarkHostText(runnerClass.RunnerImageOS) {
+				return fmt.Errorf("%w: v0.4 supported runner class is invalid", ErrAgentRecognitionBenchmark)
+			}
+			if _, duplicated := seenRunnerClasses[runnerClass]; duplicated {
+				return fmt.Errorf("%w: v0.4 supported runner class is duplicated", ErrAgentRecognitionBenchmark)
+			}
+			seenRunnerClasses[runnerClass] = struct{}{}
+		}
+	} else if len(budget.SupportedRunnerClasses) != 0 {
+		return fmt.Errorf("%w: legacy budget contains v0.4 runner classes", ErrAgentRecognitionBenchmark)
+	}
 	requiredProfiles := map[string]struct{}{"low": {}, "sustained": {}, "storm": {}}
 	seen := make(map[string]struct{}, len(budget.Profiles))
 	for _, profile := range budget.Profiles {
@@ -607,20 +645,26 @@ func ValidateAgentRecognitionBenchmarkBudget(budget *AgentRecognitionBenchmarkBu
 		if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV1 {
 			relativeTolerance := profile.EvidenceP95EnabledDaemonCPUNanoseconds * (profile.DaemonCPURelativeTolerancePercent / 100)
 			cpuTolerance := math.Max(float64(profile.DaemonCPUAbsoluteToleranceNanoseconds), relativeTolerance)
-			if !finiteNonnegative(profile.EvidenceP95EnabledDaemonCPUNanoseconds) || !finiteNonnegative(profile.DaemonCPURelativeTolerancePercent) || !finite(relativeTolerance) || !finite(profile.EvidenceP95EnabledDaemonCPUNanoseconds+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio != 0 || profile.DaemonCPUCalibrationRatioRelativeTolerancePercent != 0 || profile.DaemonCPUCalibrationRatioAbsoluteTolerance != 0 || profile.EvidenceP95EnabledToReferenceDaemonCPURatio != 0 || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != 0 || profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0 {
+			if !finiteNonnegative(profile.EvidenceP95EnabledDaemonCPUNanoseconds) || !finiteNonnegative(profile.DaemonCPURelativeTolerancePercent) || !finite(relativeTolerance) || !finite(profile.EvidenceP95EnabledDaemonCPUNanoseconds+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio != 0 || profile.DaemonCPUCalibrationRatioRelativeTolerancePercent != 0 || profile.DaemonCPUCalibrationRatioAbsoluteTolerance != 0 || profile.EvidenceP50EnabledToReferenceDaemonCPURatio != 0 || profile.EvidenceP95EnabledToReferenceDaemonCPURatio != 0 || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != 0 || profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0 {
 				return fmt.Errorf("%w: v0.1 benchmark CPU budget profile is invalid", ErrAgentRecognitionBenchmark)
 			}
 		} else if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV2 {
 			relativeTolerance := profile.EvidenceP95EnabledDaemonCPUCalibrationRatio * (profile.DaemonCPUCalibrationRatioRelativeTolerancePercent / 100)
 			cpuTolerance := math.Max(profile.DaemonCPUCalibrationRatioAbsoluteTolerance, relativeTolerance)
-			if !finite(profile.EvidenceP95EnabledDaemonCPUCalibrationRatio) || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio <= 0 || !finiteNonnegative(profile.DaemonCPUCalibrationRatioRelativeTolerancePercent) || !finiteNonnegative(profile.DaemonCPUCalibrationRatioAbsoluteTolerance) || !finite(relativeTolerance) || !finite(profile.EvidenceP95EnabledDaemonCPUCalibrationRatio+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUNanoseconds != 0 || profile.DaemonCPURelativeTolerancePercent != 0 || profile.DaemonCPUAbsoluteToleranceNanoseconds != 0 || profile.EvidenceP95EnabledToReferenceDaemonCPURatio != 0 || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != 0 || profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0 {
+			if !finite(profile.EvidenceP95EnabledDaemonCPUCalibrationRatio) || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio <= 0 || !finiteNonnegative(profile.DaemonCPUCalibrationRatioRelativeTolerancePercent) || !finiteNonnegative(profile.DaemonCPUCalibrationRatioAbsoluteTolerance) || !finite(relativeTolerance) || !finite(profile.EvidenceP95EnabledDaemonCPUCalibrationRatio+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUNanoseconds != 0 || profile.DaemonCPURelativeTolerancePercent != 0 || profile.DaemonCPUAbsoluteToleranceNanoseconds != 0 || profile.EvidenceP50EnabledToReferenceDaemonCPURatio != 0 || profile.EvidenceP95EnabledToReferenceDaemonCPURatio != 0 || profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent != 0 || profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance != 0 {
 				return fmt.Errorf("%w: v0.2 normalized CPU budget profile is invalid", ErrAgentRecognitionBenchmark)
 			}
-		} else {
+		} else if budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV3 {
 			relativeTolerance := profile.EvidenceP95EnabledToReferenceDaemonCPURatio * (profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent / 100)
 			cpuTolerance := math.Max(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance, relativeTolerance)
-			if !finite(profile.EvidenceP95EnabledToReferenceDaemonCPURatio) || profile.EvidenceP95EnabledToReferenceDaemonCPURatio <= 0 || !finiteNonnegative(profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent) || !finiteNonnegative(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance) || !finite(relativeTolerance) || !finite(profile.EvidenceP95EnabledToReferenceDaemonCPURatio+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUNanoseconds != 0 || profile.DaemonCPURelativeTolerancePercent != 0 || profile.DaemonCPUAbsoluteToleranceNanoseconds != 0 || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio != 0 || profile.DaemonCPUCalibrationRatioRelativeTolerancePercent != 0 || profile.DaemonCPUCalibrationRatioAbsoluteTolerance != 0 {
+			if !finite(profile.EvidenceP95EnabledToReferenceDaemonCPURatio) || profile.EvidenceP95EnabledToReferenceDaemonCPURatio <= 0 || !finiteNonnegative(profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent) || !finiteNonnegative(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance) || !finite(relativeTolerance) || !finite(profile.EvidenceP95EnabledToReferenceDaemonCPURatio+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUNanoseconds != 0 || profile.DaemonCPURelativeTolerancePercent != 0 || profile.DaemonCPUAbsoluteToleranceNanoseconds != 0 || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio != 0 || profile.DaemonCPUCalibrationRatioRelativeTolerancePercent != 0 || profile.DaemonCPUCalibrationRatioAbsoluteTolerance != 0 || profile.EvidenceP50EnabledToReferenceDaemonCPURatio != 0 {
 				return fmt.Errorf("%w: v0.3 same-VM CPU budget profile is invalid", ErrAgentRecognitionBenchmark)
+			}
+		} else {
+			relativeTolerance := profile.EvidenceP50EnabledToReferenceDaemonCPURatio * (profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent / 100)
+			cpuTolerance := math.Max(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance, relativeTolerance)
+			if !finite(profile.EvidenceP50EnabledToReferenceDaemonCPURatio) || profile.EvidenceP50EnabledToReferenceDaemonCPURatio <= 0 || !finite(profile.EvidenceP95EnabledToReferenceDaemonCPURatio) || profile.EvidenceP95EnabledToReferenceDaemonCPURatio < profile.EvidenceP50EnabledToReferenceDaemonCPURatio || !finiteNonnegative(profile.EnabledToReferenceDaemonCPURatioRelativeTolerancePercent) || !finiteNonnegative(profile.EnabledToReferenceDaemonCPURatioAbsoluteTolerance) || !finite(relativeTolerance) || !finite(profile.EvidenceP50EnabledToReferenceDaemonCPURatio+cpuTolerance) || profile.EvidenceP95EnabledDaemonCPUNanoseconds != 0 || profile.DaemonCPURelativeTolerancePercent != 0 || profile.DaemonCPUAbsoluteToleranceNanoseconds != 0 || profile.EvidenceP95EnabledDaemonCPUCalibrationRatio != 0 || profile.DaemonCPUCalibrationRatioRelativeTolerancePercent != 0 || profile.DaemonCPUCalibrationRatioAbsoluteTolerance != 0 {
+				return fmt.Errorf("%w: v0.4 same-VM CPU budget profile is invalid", ErrAgentRecognitionBenchmark)
 			}
 		}
 		if _, exists := seen[profile.ProfileName]; exists {
@@ -640,7 +684,21 @@ func agentRecognitionBenchmarkSchemasMatch(reportSchema string, budget *AgentRec
 	}
 	return (reportSchema == AgentRecognitionBenchmarkReportSchemaV1 && budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV1) ||
 		(reportSchema == AgentRecognitionBenchmarkReportSchemaV2 && budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV2) ||
-		(reportSchema == AgentRecognitionBenchmarkReportSchemaV3 && budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV3)
+		(reportSchema == AgentRecognitionBenchmarkReportSchemaV3 && budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV3) ||
+		(reportSchema == AgentRecognitionBenchmarkReportSchemaV4 && budget.SchemaVersion == AgentRecognitionBenchmarkBudgetSchemaV4)
+}
+
+func agentRecognitionBenchmarkUsesReferenceCPU(reportSchema string) bool {
+	return reportSchema == AgentRecognitionBenchmarkReportSchemaV3 || reportSchema == AgentRecognitionBenchmarkReportSchemaV4
+}
+
+func agentRecognitionBenchmarkRunnerClassSupported(environment AgentRecognitionBenchmarkEnvironment, supported []AgentRecognitionBenchmarkRunnerClass) bool {
+	for _, runnerClass := range supported {
+		if environment.OS == runnerClass.OS && environment.Architecture == runnerClass.Architecture && environment.CPUCount == runnerClass.CPUCount && environment.CgroupCPUMax == runnerClass.CgroupCPUMax && environment.EffectiveCPUSet == runnerClass.EffectiveCPUSet && environment.RunnerImageOS == runnerClass.RunnerImageOS {
+			return true
+		}
+	}
+	return false
 }
 
 func LoadAgentRecognitionBenchmarkBudget(path string) (*AgentRecognitionBenchmarkBudget, string, error) {

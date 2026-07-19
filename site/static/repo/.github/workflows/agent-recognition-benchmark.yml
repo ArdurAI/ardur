@@ -46,7 +46,7 @@ jobs:
     env:
       BENCHMARK_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }}
       SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.3.json
+      BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.4.json
       EVIDENCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'ci' }}
       GOWORK: "off"
     steps:
@@ -192,7 +192,7 @@ jobs:
           if [ "$BENCHMARK_PROFILE" = "ci" ] && [ "$EVIDENCE_ONLY" != "true" ]; then
             args+=(--budget "$BUDGET_FILE")
           elif [ "$BENCHMARK_PROFILE" = "ci" ]; then
-            echo "::notice::manual CI dispatch is collecting budget-independent v0.3 evidence"
+            echo "::notice::manual CI dispatch is collecting budget-independent v0.4 evidence"
           else
             echo "::notice::manual release profile is a budget-independent experiment and never substitutes for required CI"
           fi
