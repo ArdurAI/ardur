@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After"
 source_path: "docs/reference/cli.md"
-source_sha256: "42315d69474f2b105be38556d1ee1cf53f669bb8ebbd3aeb672d328fde3e6d4e"
+source_sha256: "b63a9cdccb4652a71849859f89c84d11de892ea3b3747d1c0c73b86dec512dfa"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1137,16 +1137,17 @@ and placeholder-only `next_steps` such as
 recovery guidance. Omitting `--agent-id` uses the default subject and is not
 rejected.
 
-If `--mission` is supplied as a non-empty but whitespace-only string, the
-command exits nonzero without configuring Claude Code, generating keys, or
-writing `active_mission.jwt`. JSON output includes `ok: false`,
+If `--mission` is supplied as an empty string (`""`) or a whitespace-only
+string, the command exits nonzero without configuring Claude Code, generating
+keys, or writing `active_mission.jwt`. JSON output includes `ok: false`,
 `error: "protect_mission_invalid"`, `condition: "protect_mission_invalid"`,
 and placeholder-only `next_steps` such as
 `ardur protect claude-code --scope <your-project> --mission <mission>` and
 `ardur protect claude-code --scope <your-project>`; human output prints the same
-recovery guidance. An empty-string `--mission ""` is falsy and falls through to
-the selected mode's default mission; only whitespace-only strings that would
-leak into the JWT are rejected.
+recovery guidance. An empty-string `--mission ""` is also rejected with the
+same `protect_mission_invalid` structured JSON before key generation, matching
+the pattern for `--agent-id`, `--max-tool-calls`, `--max-duration-s`, and
+`--ttl-s`.
 
 If `--home` is supplied but is empty, whitespace-only, points to a dangling
 symlink (a symbolic link whose target does not exist), or points to an

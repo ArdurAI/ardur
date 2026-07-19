@@ -1120,16 +1120,17 @@ and placeholder-only `next_steps` such as
 recovery guidance. Omitting `--agent-id` uses the default subject and is not
 rejected.
 
-If `--mission` is supplied as a non-empty but whitespace-only string, the
-command exits nonzero without configuring Claude Code, generating keys, or
-writing `active_mission.jwt`. JSON output includes `ok: false`,
+If `--mission` is supplied as an empty string (`""`) or a whitespace-only
+string, the command exits nonzero without configuring Claude Code, generating
+keys, or writing `active_mission.jwt`. JSON output includes `ok: false`,
 `error: "protect_mission_invalid"`, `condition: "protect_mission_invalid"`,
 and placeholder-only `next_steps` such as
 `ardur protect claude-code --scope <your-project> --mission <mission>` and
 `ardur protect claude-code --scope <your-project>`; human output prints the same
-recovery guidance. An empty-string `--mission ""` is falsy and falls through to
-the selected mode's default mission; only whitespace-only strings that would
-leak into the JWT are rejected.
+recovery guidance. An empty-string `--mission ""` is also rejected with the
+same `protect_mission_invalid` structured JSON before key generation, matching
+the pattern for `--agent-id`, `--max-tool-calls`, `--max-duration-s`, and
+`--ttl-s`.
 
 If `--home` is supplied but is empty, whitespace-only, points to a dangling
 symlink (a symbolic link whose target does not exist), or points to an
