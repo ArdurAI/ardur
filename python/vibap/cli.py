@@ -1071,6 +1071,8 @@ _PATH_ARG_SPECS = (
     "log_private_key",
     "evidence_events",
     "evidence_output",
+    "temp_parent",
+    "once_json",
 )
 
 
@@ -3632,6 +3634,10 @@ def _load_personal_native_host_once_json(path: Path) -> dict:
 
 
 def cmd_personal_native_host(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     if args.once_json:
         try:
             message = _load_personal_native_host_once_json(args.once_json)
@@ -3676,6 +3682,10 @@ def cmd_personal_native_manifest(args: argparse.Namespace) -> int:
 
 
 def cmd_personal_firewall_demo(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         result = run_personal_firewall_demo(
             timeout_s=args.timeout_s,
@@ -6124,7 +6134,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     personal_native_host.add_argument(
         "--once-json",
-        type=Path,
+        type=str,
         help="development mode: process one JSON message file",
     )
     personal_native_host.set_defaults(func=cmd_personal_native_host)
@@ -6162,7 +6172,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     personal_firewall_demo.add_argument(
         "--temp-parent",
-        type=Path,
+        type=str,
         help="existing directory that receives temporary demo state",
     )
     personal_firewall_demo.add_argument("--json", action="store_true")
