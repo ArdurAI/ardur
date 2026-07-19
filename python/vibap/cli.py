@@ -1914,6 +1914,19 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
     if path_failure is not None:
         _print_json(path_failure)
         return 1
+    if args.correlation_window_s < 0 or args.correlation_window_s > 3600:
+        _print_json(
+            {
+                "ok": False,
+                "valid": False,
+                "error": "correlation_window_invalid",
+                "message": (
+                    "--correlation-window-s must be an integer "
+                    "between 0 and 3600 seconds."
+                ),
+            }
+        )
+        return 1
     try:
         receipt_public_key = (
             _load_p256_public_key(args.receipt_public_key, label="receipt public key")
@@ -2089,6 +2102,16 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
         verified_governance_events,
         write_export,
     )
+
+    if args.timeout_s < 1 or args.timeout_s > 60:
+        _print_json(
+            {
+                "ok": False,
+                "error": "otlp_timeout_invalid",
+                "message": "--timeout-s must be an integer from 1 to 60 seconds.",
+            }
+        )
+        return 1
 
     try:
         receipt_public_key = (

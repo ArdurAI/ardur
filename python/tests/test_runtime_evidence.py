@@ -806,6 +806,45 @@ def test_invalid_correlation_window_is_rejected(tmp_path: Path, window: Any) -> 
     assert exc_info.value.code == "correlation_window_invalid"
 
 
+@pytest.mark.parametrize("window", ["-1", "3601"])
+def test_cli_correlation_window_prevalidated(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], window: str
+) -> None:
+    """CLI rejects out-of-range --correlation-window-s before receipt verification.
+
+    Mirrors the cmd_verify numeric pre-validation pattern: the guard fires
+    before receipt key loading, so no trusted key material is required to
+    reproduce the rejection.
+    """
+    journal = tmp_path / "receipts.jsonl"
+    journal.write_text("{}\n", encoding="utf-8")
+    events = tmp_path / "events.jsonl"
+    events.write_text("{}\n", encoding="utf-8")
+    missing_key = tmp_path / "missing-receipt.pem"
+
+    assert (
+        cli_main(
+            [
+                "evidence",
+                "correlate",
+                str(journal),
+                str(events),
+                "--source-format",
+                "normalized",
+                "--receipt-public-key",
+                str(missing_key),
+                "--correlation-window-s",
+                window,
+            ]
+        )
+        == 1
+    )
+    failure = json.loads(capsys.readouterr().out)
+    assert failure["error"] == "correlation_window_invalid"
+    assert failure["ok"] is False
+    assert failure["valid"] is False
+
+
 def test_unverified_receipt_report_is_rejected_before_correlation(
     tmp_path: Path,
 ) -> None:
