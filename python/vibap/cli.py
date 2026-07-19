@@ -1051,6 +1051,68 @@ def _start_api_token_invalid_failure(
     return None
 
 
+def _hub_token_invalid_response() -> dict[str, object]:
+    """Failure response for a whitespace-only ``--hub-token`` on Hub-client commands.
+
+    ``resolve_hub_token`` strips the env-var path (``os.environ...strip()``) but
+    returns the CLI-explicit path verbatim (``if explicit: return explicit``),
+    so a whitespace-only ``--hub-token '   '`` is truthy before stripping and
+    resolves to a whitespace bearer token inside ``hub_request``. That reaches
+    ``urlrequest.urlopen`` and surfaces as a confusing ``hub_unavailable`` after
+    a 5-second network timeout rather than a clear input-validation error.
+
+    An unset ``--hub-token`` (None) and an empty string ``""`` (falsy, falls
+    through to the env-var/config lookup) remain valid: only whitespace-only
+    strings are rejected. This mirrors the ``_start_api_token_invalid_response``
+    helper and the silent-empty-token bug class already closed for ``--api-token``
+    and ``--proxy-url``.
+    """
+    return {
+        "ok": False,
+        "error": "hub_token_invalid",
+        "error_code": "hub_token_invalid",
+        "condition": "hub_token_invalid",
+        "message": "ardur --hub-token must be a non-empty token after trimming whitespace.",
+        "detail": (
+            "A whitespace-only --hub-token was provided. Provide an explicit "
+            "Hub bearer token, or omit --hub-token so ardur resolves the token "
+            "from ARDUR_HUB_TOKEN or the local Personal Hub config. An empty "
+            "string --hub-token \"\" is intentionally valid and means fall "
+            "through to env/config."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_explicit_hub_token",
+                "command": "ardur <command> --hub-token <hub-token>",
+                "detail": "Provide an explicit --hub-token Hub bearer token.",
+            },
+            {
+                "action": "omit_hub_token_to_use_env_or_config",
+                "command": "ardur <command>",
+                "detail": (
+                    "Omit --hub-token so ardur resolves the token from "
+                    "ARDUR_HUB_TOKEN or the Personal Hub config. An empty "
+                    "--hub-token \"\" has the same fall-through semantics."
+                ),
+            },
+        ],
+    }
+
+
+def _hub_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
+    """Return the hub-token-invalid response when ``--hub-token`` is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to env/config), or a real token.
+    """
+    value = getattr(args, "hub_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _hub_token_invalid_response()
+    return None
+
+
 _PATH_ARG_SPECS = (
     "keys_dir",
     "state_dir",
@@ -3532,6 +3594,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     response = hub_request(
         "GET",
         "/v1/status",
@@ -3545,6 +3611,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     try:
         response = doctor_personal(args)
     except HubError as exc:
@@ -3592,10 +3662,21 @@ def _run_has_governance_intent(args: argparse.Namespace) -> bool:
 def cmd_run(args: argparse.Namespace) -> int:
     if _run_has_governance_intent(args):
         return run_governed_cli(args)
+    # Legacy Hub-streaming path: reject whitespace-only --hub-token before the
+    # network call. (The governance path ignores --hub-token entirely, so the
+    # guard only applies here.)
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     return run_under_hub(args)
 
 
 def cmd_desktop_observe(args: argparse.Namespace) -> int:
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     try:
         response = desktop_observe(args)
     except HubError as exc:
@@ -3672,6 +3753,10 @@ def cmd_personal_native_host(args: argparse.Namespace) -> int:
     path_failure = _path_arg_invalid_failure(args)
     if path_failure is not None:
         _print_json(path_failure)
+        return 1
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
         return 1
     if args.once_json:
         try:

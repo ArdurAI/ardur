@@ -2861,3 +2861,247 @@ def test_start_api_token_empty_string_is_not_rejected_like_whitespace():
     failure = cli._start_api_token_invalid_failure(ns_ws)
     assert failure is not None
     assert failure["condition"] == "start_api_token_invalid"
+
+
+# ---------------------------------------------------------------------------
+# Hub-client --hub-token whitespace guard.
+#
+# ``resolve_hub_token`` strips the env-var path but returns the CLI-explicit
+# path verbatim, so a whitespace-only ``--hub-token '   '`` is truthy and
+# resolves to a whitespace bearer token inside ``hub_request``. That reaches
+# ``urlrequest.urlopen`` and surfaces as a confusing ``hub_unavailable`` after
+# a 5-second network timeout instead of a clear input-validation error. The
+# guard in each Hub-client command handler rejects whitespace-only tokens
+# before the network call. An empty string ``""`` is falsy and intentionally
+# falls through to env/config; only whitespace-only strings are rejected.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_hub_token_whitespace_invalid_failure_helper(token_value):
+    """The _hub_token_invalid_failure helper rejects whitespace-only and accepts None/empty/real."""
+    ns_unset = argparse.Namespace(hub_token=None)
+    assert cli._hub_token_invalid_failure(ns_unset) is None
+
+    ns_empty = argparse.Namespace(hub_token="")
+    assert cli._hub_token_invalid_failure(ns_empty) is None
+
+    ns_valid = argparse.Namespace(hub_token="real-hub-token-value")
+    assert cli._hub_token_invalid_failure(ns_valid) is None
+
+    ns_ws = argparse.Namespace(hub_token=token_value)
+    failure = cli._hub_token_invalid_failure(ns_ws)
+    assert failure is not None
+    assert failure["ok"] is False
+    assert failure["condition"] == "hub_token_invalid"
+    assert failure["error"] == "hub_token_invalid"
+    assert failure["error_code"] == "hub_token_invalid"
+    assert "hub-token" in failure["message"].lower()
+    assert "whitespace" in failure["message"].lower()
+    assert failure["next_steps"]
+    rendered = json.dumps(failure)
+    # Placeholder-only next-step commands; no raw local paths.
+    for step in failure["next_steps"]:
+        assert "<hub-token>" in step["command"] or step["command"] == "ardur <command>", step
+    assert "Traceback" not in rendered
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_status_hub_token_whitespace_returns_hub_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --hub-token on status returns hub_token_invalid before hub_request."""
+    from argparse import Namespace
+
+    rc = cli.cmd_status(
+        Namespace(
+            home=str(tmp_path),
+            hub_url="http://127.0.0.1:8765",
+            hub_token=token_value,
+        )
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert result["ok"] is False
+    assert result["condition"] == "hub_token_invalid"
+    assert result["error_code"] == "hub_token_invalid"
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_doctor_hub_token_whitespace_returns_hub_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --hub-token on doctor returns hub_token_invalid before hub_request."""
+    from argparse import Namespace
+
+    rc = cli.cmd_doctor(
+        Namespace(
+            home=str(tmp_path),
+            hub_url="http://127.0.0.1:8765",
+            hub_token=token_value,
+        )
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert result["ok"] is False
+    assert result["condition"] == "hub_token_invalid"
+    assert result["error_code"] == "hub_token_invalid"
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_run_hub_token_whitespace_returns_hub_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --hub-token on legacy `ardur run` returns hub_token_invalid.
+
+    Governance flags are all unset so _run_has_governance_intent returns False
+    and the legacy Hub-streaming path is selected. The whitespace guard fires
+    before run_under_hub is reached.
+    """
+    from argparse import Namespace
+
+    rc = cli.cmd_run(
+        Namespace(
+            hub_url="http://127.0.0.1:8765",
+            hub_token=token_value,
+            home=str(tmp_path),
+            mission=None,
+            allowed_tools=None,
+            forbidden_tools=None,
+            via=None,
+            govern=None,
+            enforce=None,
+            no_kernel_correlation=None,
+            resource_scope=None,
+            no_resource_scope=None,
+            max_tool_calls=None,
+            max_duration_s=None,
+            command=["echo", "hello"],
+        )
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert result["ok"] is False
+    assert result["condition"] == "hub_token_invalid"
+    assert result["error_code"] == "hub_token_invalid"
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_desktop_observe_hub_token_whitespace_returns_hub_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --hub-token on desktop-observe returns hub_token_invalid before hub_request."""
+    from argparse import Namespace
+
+    rc = cli.cmd_desktop_observe(
+        Namespace(
+            home=str(tmp_path),
+            hub_url="http://127.0.0.1:8765",
+            hub_token=token_value,
+            session_id=None,
+            app=None,
+            title=None,
+            text=None,
+        )
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert result["ok"] is False
+    assert result["condition"] == "hub_token_invalid"
+    assert result["error_code"] == "hub_token_invalid"
+
+
+@pytest.mark.parametrize("token_value", ["   ", "\t", "\n", " \t\n "])
+def test_personal_native_host_hub_token_whitespace_returns_hub_token_invalid(
+    tmp_path, capsys, token_value
+):
+    """Whitespace-only --hub-token on personal-native-host returns hub_token_invalid before hub_request."""
+    from argparse import Namespace
+
+    rc = cli.cmd_personal_native_host(
+        Namespace(
+            home=str(tmp_path),
+            hub_url="http://127.0.0.1:8765",
+            hub_token=token_value,
+            once_json=None,
+        )
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_token_invalid"
+    assert result["error_code"] == "hub_token_invalid"
+
+
+def test_status_hub_token_empty_and_omitted_still_reach_hub_request(monkeypatch, tmp_path, capsys):
+    """Empty-string and omitted --hub-token fall through to hub_request (regression).
+
+    The guard must not reject these cases: they mean "resolve from env/config",
+    matching resolve_hub_token's explicit-empty semantics and the --api-token
+    precedent. We monkeypatch hub_request so no real network call is made and
+    assert it is actually invoked.
+    """
+    from argparse import Namespace
+
+    calls: list[dict] = []
+
+    def fake_hub_request(method, path, *args, **kwargs):
+        calls.append({"method": method, "path": path, "kwargs": kwargs})
+        return {"ok": False, "error": "hub_unavailable", "error_code": "hub_unavailable"}
+
+    monkeypatch.setattr(cli, "hub_request", fake_hub_request)
+
+    for token_value in (None, ""):
+        calls.clear()
+        rc = cli.cmd_status(
+            Namespace(
+                home=str(tmp_path),
+                hub_url="http://127.0.0.1:8765",
+                hub_token=token_value,
+            )
+        )
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        # hub_request was actually reached (not short-circuited by the guard).
+        assert len(calls) == 1, f"hub_request not reached for token={token_value!r}"
+        assert calls[0]["kwargs"].get("hub_token") == token_value
+        # Result is the hub response, NOT hub_token_invalid.
+        assert result.get("error_code") != "hub_token_invalid"
+        # rc reflects the (failing) hub response, not the guard.
+        _ = rc
+
+
+def test_status_hub_token_valid_reaches_hub_request(monkeypatch, tmp_path, capsys):
+    """A valid non-whitespace --hub-token reaches hub_request (regression)."""
+    from argparse import Namespace
+
+    calls: list[dict] = []
+
+    def fake_hub_request(method, path, *args, **kwargs):
+        calls.append({"method": method, "path": path, "kwargs": kwargs})
+        return {"ok": False, "error": "hub_unavailable", "error_code": "hub_unavailable"}
+
+    monkeypatch.setattr(cli, "hub_request", fake_hub_request)
+
+    rc = cli.cmd_status(
+        Namespace(
+            home=str(tmp_path),
+            hub_url="http://127.0.0.1:8765",
+            hub_token="abc",
+        )
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert len(calls) == 1
+    assert calls[0]["kwargs"].get("hub_token") == "abc"
+    assert result.get("error_code") == "hub_unavailable"
+    assert result.get("error_code") != "hub_token_invalid"
+    _ = rc
