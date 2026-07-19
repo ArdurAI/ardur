@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "a75bb400567230200e2f57198fba6193a68a0c0d2fed5e7f2f92178ad128e3e0"
+source_sha256: "6a48ea8063b4ad04277277a62c7681ff7235325574a88a5c79d17533d8a0f444"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -94,15 +94,19 @@ daemon. It runs one warm-up plus 20 three-arm groups on one fresh privileged
 orders. The report binds both source SHAs and both copied daemon digests,
 records bounded CPU/scheduling identity, retains three diagnostic process-CPU
 calibration samples, and uploads privacy-bounded raw JSON. CI fails on median
-wall drift, same-VM candidate/reference daemon-CPU p95 drift, RSS drift, loss or
+wall drift, same-VM candidate/reference daemon-CPU p50 drift, an unsupported
+runner class, RSS drift, loss or
 partial accounting in either enabled arm, rejection, unavailable fingerprint
 work, schema drift, or digest mismatch. Automatic CI does not retry into a
-pass. It requires the reviewed v0.3 budget before measurement; a missing or
+pass. It requires the reviewed v0.4 budget before measurement; a missing or
 invalid budget fails instead of silently reverting performance to
 `not_evaluated`. Only an explicit manual `ci` dispatch may collect
 budget-independent replacement evidence, and correctness still fails closed.
-The committed budget is bound to three independent exact-head reports; the
-larger release profile is manual and never substitutes for required CI. See the
+The reviewed budget binds three original AMD reports, two preserved Intel
+first-attempt reports including the v0.3 falsification, and three independent
+fresh exact-head v0.4 reports. Any later replacement likewise requires at least
+three independent fresh exact-head reports. The larger release profile is
+manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
 
 When changing the AuditBench evaluation-protocol artifact pipeline, run:

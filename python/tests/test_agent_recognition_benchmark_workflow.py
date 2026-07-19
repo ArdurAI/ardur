@@ -4,20 +4,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "agent-recognition-benchmark.yml"
 WORKFLOW_MIRROR = REPO_ROOT / "site" / "static" / "repo" / WORKFLOW.relative_to(REPO_ROOT)
-BUDGET = REPO_ROOT / "go" / "pkg" / "kernelcapture" / "testdata" / "agent-recognition-benchmark-budget-v0.3.json"
+BUDGET = REPO_ROOT / "go" / "pkg" / "kernelcapture" / "testdata" / "agent-recognition-benchmark-budget-v0.4.json"
 
 
-def test_automatic_ci_requires_v3_budget_and_manual_profiles_are_explicit() -> None:
+def test_automatic_ci_requires_v4_budget_and_manual_profiles_are_explicit() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert BUDGET.is_file()
-    assert "BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.3.json" in workflow
+    assert "BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.4.json" in workflow
     assert "EVIDENCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'ci' }}" in workflow
     assert "if: github.event_name != 'workflow_dispatch'" in workflow
     assert 'test -f "$BUDGET_FILE"' in workflow
     assert 'if [ "$BENCHMARK_PROFILE" = "ci" ] && [ "$EVIDENCE_ONLY" != "true" ]; then' in workflow
     assert 'args+=(--budget "$BUDGET_FILE")' in workflow
-    assert "manual CI dispatch is collecting budget-independent v0.3 evidence" in workflow
+    assert "manual CI dispatch is collecting budget-independent v0.4 evidence" in workflow
     assert "manual release profile is a budget-independent experiment and never substitutes for required CI" in workflow
 
 
