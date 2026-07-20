@@ -5,6 +5,16 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+
+### Added
+
+### Changed
+
+### Fixed
+
+## [0.2.0] — 2026-07-19
+
+### Security
 - Scope Biscuit authority-baseline queries explicitly to the issuer-signed
   authority block and reject duplicate required or optional scalar facts
   instead of selecting a row by dependency-defined ordering; verified by

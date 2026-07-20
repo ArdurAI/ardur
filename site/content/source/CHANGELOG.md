@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "096ad506c8fa785042bc35dc5243238148df09149794671d8d3e0ce33d264ba5"
+source_sha256: "95e7efe9b6fb1864da1a279c4c8e5da4ad0ec250e8071fd90e45ad9fa708e4b5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -20,6 +20,16 @@ This page is generated from the public repository source file. Edit the source f
 All notable changes to Ardur will be documented in this file.
 
 ## [Unreleased]
+
+### Security
+
+### Added
+
+### Changed
+
+### Fixed
+
+## [0.2.0] — 2026-07-19
 
 ### Security
 - Scope Biscuit authority-baseline queries explicitly to the issuer-signed
