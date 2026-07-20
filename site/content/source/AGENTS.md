@@ -2,7 +2,7 @@
 title: "Ardur Agent Instructions"
 description: "The canonical entry point for coding agents working in this repository. These"
 source_path: "AGENTS.md"
-source_sha256: "daf6e20bf755e281dce56a3906f9deff491e0a4f6a908439e5eb2e6d97dd6357"
+source_sha256: "58dc104d3f677c47289b5c24c73811902b8e5ac5ecc01ef3ccbac208074d0e29"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -282,10 +282,17 @@ The shortest real loop — local, no API key, reaching a `PERMIT`, a `DENY`, and
 locally verified signed attestation:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 python scripts/run-no-key-mvp-demo.py
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. Use it
+rather than a hand-rolled `python3 -m venv` + `pip install -e python/`: macOS
+system Python 3.9 and its bundled pip are too old (`python/pyproject.toml`
+requires ≥3.10, and PEP 660 editable installs need a newer pip). For a manual
+install, upgrade pip first — `python -m pip install --upgrade pip`, then
+`python -m pip install -e python/`.
 
 That demo disables TLS and bearer auth **for the child process only**. It is not
 a production launch command.
@@ -293,7 +300,7 @@ a production launch command.
 Issuing and verifying a Mission Passport directly:
 
 ```bash
-cd python && pip install -e .
+cd python && pip install -e .   # Python ≥3.10; see the setup note above
 ardur issue \
   --agent-id alice \
   --mission "summarize sales from sales/q1.csv into reports/" \
