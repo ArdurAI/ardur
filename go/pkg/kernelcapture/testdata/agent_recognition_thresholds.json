@@ -1,8 +1,10 @@
 {
-  "schema_version": "ardur.agent_recognition_thresholds.v0.1",
-  "threshold_version": "ardur.maintained-agent-recognition-thresholds.2026-07-14.v1",
+  "schema_version": "ardur.agent_recognition_thresholds.v0.2",
+  "threshold_version": "ardur.maintained-agent-recognition-thresholds.2026-07-17.v2",
   "minimum_supported_recall": 0.90,
   "maximum_hard_negative_false_positives": 0,
+  "minimum_content_fingerprint_accuracy": 1.0,
+  "maximum_content_mismatch_promotions": 0,
   "confidence_level": 0.95,
   "confidence_interval_method": "wilson_score"
 }

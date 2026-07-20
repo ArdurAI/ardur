@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 
 import vibap.linux_benchmark as benchmark
 from vibap._specs import linux_governance_benchmark_report_v01_schema
@@ -114,6 +115,28 @@ def test_distribution_schema_separates_latency_and_percent_domains() -> None:
     )
 
 
+def test_report_schema_gives_heap_bytes_a_dedicated_integer_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(benchmark, "validate_report", lambda _report: None)
+    report = benchmark.run_benchmark(_tiny_config(), allow_non_linux=True)
+    report["sustained_governance"]["python_heap_peak_bytes"] = 1_955_064
+    validator = Draft202012Validator(linux_governance_benchmark_report_v01_schema())
+
+    assert list(validator.iter_errors(report)) == []
+
+    report["sustained_governance"]["python_heap_peak_bytes"] = 1_000_000_000_000_000
+    assert list(validator.iter_errors(report)) == []
+
+    report["sustained_governance"]["python_heap_peak_bytes"] = 1_000_000_000_000_001
+    errors = list(validator.iter_errors(report))
+    assert [error.validator for error in errors] == ["maximum"]
+
+    report["sustained_governance"]["python_heap_peak_bytes"] = True
+    errors = list(validator.iter_errors(report))
+    assert [error.validator for error in errors] == ["type"]
+
+
 def test_report_schema_rejects_cross_field_claim_mismatches() -> None:
     report = benchmark.run_benchmark(_tiny_config(), allow_non_linux=True)
     validator = Draft202012Validator(linux_governance_benchmark_report_v01_schema())
@@ -149,6 +172,106 @@ def test_tiny_report_is_schema_valid_and_does_not_leak_private_paths(
     assert report["imported_evidence_processing"][0]["notes"][-1] == (
         "This does not measure live kernel sensor capture."
     )
+
+
+def test_report_schema_failure_names_path_and_rule_without_echoing_value(
+    tmp_path: Path,
+) -> None:
+    report = benchmark.run_benchmark(_tiny_config(), allow_non_linux=True)
+    private_marker = str(tmp_path / "private-report-value")
+    report["environment"]["cpu_count"] = private_marker
+    report[private_marker] = "unknown private field"
+
+    with pytest.raises(benchmark.BenchmarkError) as error:
+        benchmark.validate_report(report)
+
+    assert error.value.code == "report_schema_invalid"
+    assert "$ [additionalProperties]" in error.value.detail
+    assert "$.environment.cpu_count [type]" in error.value.detail
+    assert private_marker not in error.value.detail
+    assert "unknown private field" not in error.value.detail
+    assert "\n" not in error.value.detail
+
+
+def test_report_schema_failure_details_are_deterministic_and_bounded() -> None:
+    report = benchmark.run_benchmark(_tiny_config(), allow_non_linux=True)
+    report["config"]["evidence_event_count"] = 0
+    report["config"]["sample_count"] = 0
+    report["environment"]["architecture"] = ""
+    report["environment"]["cpu_count"] = 0
+    report["environment"]["kernel_release"] = ""
+    report["mode"] = "invalid"
+
+    details = []
+    for _ in range(2):
+        with pytest.raises(benchmark.BenchmarkError) as error:
+            benchmark.validate_report(report)
+        details.append(error.value.detail)
+
+    assert (
+        details
+        == [
+            "generated report violated its JSON Schema: "
+            "$.config.evidence_event_count [minimum]; "
+            "$.config.sample_count [minimum]; "
+            "$.environment.architecture [minLength]; "
+            "$.environment.cpu_count [minimum]; "
+            "$.environment.kernel_release [minLength]; +1 more"
+        ]
+        * 2
+    )
+    assert len(details[0]) < 512
+
+
+def test_schema_failure_detail_counts_only_omitted_unique_diagnostics() -> None:
+    duplicate = ValidationError("private value", validator="type", path=("alpha",))
+    other = ValidationError("other private value", validator="minimum", path=("beta",))
+
+    detail = benchmark._schema_failure_detail([duplicate, duplicate, other])
+
+    assert detail == (
+        "generated report violated its JSON Schema: $.alpha [type]; $.beta [minimum]"
+    )
+
+
+def test_schema_failure_detail_enforces_total_text_cap() -> None:
+    errors = [
+        ValidationError(
+            "private value",
+            validator="type",
+            path=(
+                f"section_{index}_" + "a" * 64,
+                "nested_" + "b" * 64,
+                "leaf_" + "c" * 64,
+            ),
+        )
+        for index in range(3)
+    ]
+
+    details = [benchmark._schema_failure_detail(errors) for _ in range(2)]
+
+    assert details[0] == details[1]
+    assert len(details[0]) == benchmark.MAX_SCHEMA_ERROR_TEXT_CHARS
+    assert details[0].endswith("...")
+    assert "private value" not in details[0]
+
+    omitted_errors = [
+        ValidationError(
+            "other private value",
+            validator="type",
+            path=(
+                f"omitted_section_{index}_" + "d" * 64,
+                "nested_" + "e" * 64,
+                "leaf_" + "f" * 64,
+            ),
+        )
+        for index in range(6)
+    ]
+    omitted_detail = benchmark._schema_failure_detail(omitted_errors)
+
+    assert len(omitted_detail) == benchmark.MAX_SCHEMA_ERROR_TEXT_CHARS
+    assert omitted_detail.endswith("...; +1 more")
+    assert "other private value" not in omitted_detail
 
 
 def test_write_outputs_are_owner_only_and_stdout_is_path_free(

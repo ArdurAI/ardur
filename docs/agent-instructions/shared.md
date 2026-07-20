@@ -7,9 +7,12 @@ future automation.
 
 1. Run `./scripts/conductor-bootstrap.sh`.
 2. Read `.context/ARDUR_CONTEXT.md`.
-3. Read `.context/ardur-graph.md`.
-4. Use `.context/ardur-graph.json` as the structural map, then verify exact
-   behavior with source files and tests.
+3. Check its **Generated Graph** section.
+4. When the graph status is `available`, read `.context/ardur-graph.md` and use
+   `.context/ardur-graph.json` as the structural map, then verify exact behavior
+   with source files and tests.
+5. When the graph status is `unavailable`, use the listed live source and
+   workflow files directly. Missing graph artifacts are optional in this path.
 
 If bootstrap fails, stop and fix or report the bootstrap problem before making
 task-specific edits.

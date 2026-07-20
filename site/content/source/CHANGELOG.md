@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "306db70632afa2a8bd71360570a433201a52a4945e4f197b561b16a5bca0600f"
+source_sha256: "95e7efe9b6fb1864da1a279c4c8e5da4ad0ec250e8071fd90e45ad9fa708e4b5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,21 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+
+### Added
+
+### Changed
+
+### Fixed
+
+## [0.2.0] — 2026-07-19
+
+### Security
+- Scope Biscuit authority-baseline queries explicitly to the issuer-signed
+  authority block and reject duplicate required or optional scalar facts
+  instead of selecting a row by dependency-defined ordering; verified by
+  `test_verify_preserves_special_authority_values_with_explicit_scope` and
+  `test_verify_rejects_duplicate_authority_scalar`
 - Reject holder-authored Biscuit blocks that widen tool, deny-list, resource,
   side-effect, budget, time, delegation, lineage-parent, or working-directory
   authority while preserving valid transitive attenuation
@@ -90,6 +105,10 @@ All notable changes to Ardur will be documented in this file.
 - Posture detector for agent behavioral profiling
 
 ### Changed
+- Complete the bounded Linux agent-recognition evidence contract with separate
+  name-only and synthetic content-fingerprint corpus strata, fail-closed
+  match/mismatch transition gates, independently supplied launcher-interpreter
+  inputs, and exclusive same-worker post-panic terminal-accounting proofs
 - Claude Code hook rewired to stdlib hashlib/datetime
 - Gemini CLI hook generalized beyond hardcoded version contracts
 - Proxy kernel capture integration removed

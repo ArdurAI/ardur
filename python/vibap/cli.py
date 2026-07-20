@@ -1051,6 +1051,68 @@ def _start_api_token_invalid_failure(
     return None
 
 
+def _hub_token_invalid_response() -> dict[str, object]:
+    """Failure response for a whitespace-only ``--hub-token`` on Hub-client commands.
+
+    ``resolve_hub_token`` strips the env-var path (``os.environ...strip()``) but
+    returns the CLI-explicit path verbatim (``if explicit: return explicit``),
+    so a whitespace-only ``--hub-token '   '`` is truthy before stripping and
+    resolves to a whitespace bearer token inside ``hub_request``. That reaches
+    ``urlrequest.urlopen`` and surfaces as a confusing ``hub_unavailable`` after
+    a 5-second network timeout rather than a clear input-validation error.
+
+    An unset ``--hub-token`` (None) and an empty string ``""`` (falsy, falls
+    through to the env-var/config lookup) remain valid: only whitespace-only
+    strings are rejected. This mirrors the ``_start_api_token_invalid_response``
+    helper and the silent-empty-token bug class already closed for ``--api-token``
+    and ``--proxy-url``.
+    """
+    return {
+        "ok": False,
+        "error": "hub_token_invalid",
+        "error_code": "hub_token_invalid",
+        "condition": "hub_token_invalid",
+        "message": "ardur --hub-token must be a non-empty token after trimming whitespace.",
+        "detail": (
+            "A whitespace-only --hub-token was provided. Provide an explicit "
+            "Hub bearer token, or omit --hub-token so ardur resolves the token "
+            "from ARDUR_HUB_TOKEN or the local Personal Hub config. An empty "
+            "string --hub-token \"\" is intentionally valid and means fall "
+            "through to env/config."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_explicit_hub_token",
+                "command": "ardur <command> --hub-token <hub-token>",
+                "detail": "Provide an explicit --hub-token Hub bearer token.",
+            },
+            {
+                "action": "omit_hub_token_to_use_env_or_config",
+                "command": "ardur <command>",
+                "detail": (
+                    "Omit --hub-token so ardur resolves the token from "
+                    "ARDUR_HUB_TOKEN or the Personal Hub config. An empty "
+                    "--hub-token \"\" has the same fall-through semantics."
+                ),
+            },
+        ],
+    }
+
+
+def _hub_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
+    """Return the hub-token-invalid response when ``--hub-token`` is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to env/config), or a real token.
+    """
+    value = getattr(args, "hub_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _hub_token_invalid_response()
+    return None
+
+
 _PATH_ARG_SPECS = (
     "keys_dir",
     "state_dir",
@@ -1071,6 +1133,11 @@ _PATH_ARG_SPECS = (
     "log_private_key",
     "evidence_events",
     "evidence_output",
+    "temp_parent",
+    "once_json",
+    "config",
+    "output",
+    "extension_path",
 )
 
 
@@ -1909,6 +1976,19 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
     if path_failure is not None:
         _print_json(path_failure)
         return 1
+    if args.correlation_window_s < 0 or args.correlation_window_s > 3600:
+        _print_json(
+            {
+                "ok": False,
+                "valid": False,
+                "error": "correlation_window_invalid",
+                "message": (
+                    "--correlation-window-s must be an integer "
+                    "between 0 and 3600 seconds."
+                ),
+            }
+        )
+        return 1
     try:
         receipt_public_key = (
             _load_p256_public_key(args.receipt_public_key, label="receipt public key")
@@ -2084,6 +2164,16 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
         verified_governance_events,
         write_export,
     )
+
+    if args.timeout_s < 1 or args.timeout_s > 60:
+        _print_json(
+            {
+                "ok": False,
+                "error": "otlp_timeout_invalid",
+                "message": "--timeout-s must be an integer from 1 to 60 seconds.",
+            }
+        )
+        return 1
 
     try:
         receipt_public_key = (
@@ -3072,6 +3162,11 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
 def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
     """Statically inspect a tool-server configuration without executing it."""
 
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+
     from .runtime_evidence import RuntimeEvidenceError, write_report
 
     try:
@@ -3486,6 +3581,10 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         response = setup_personal(args)
     except HubError as exc:
@@ -3495,6 +3594,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     response = hub_request(
         "GET",
         "/v1/status",
@@ -3508,6 +3611,10 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     try:
         response = doctor_personal(args)
     except HubError as exc:
@@ -3555,10 +3662,21 @@ def _run_has_governance_intent(args: argparse.Namespace) -> bool:
 def cmd_run(args: argparse.Namespace) -> int:
     if _run_has_governance_intent(args):
         return run_governed_cli(args)
+    # Legacy Hub-streaming path: reject whitespace-only --hub-token before the
+    # network call. (The governance path ignores --hub-token entirely, so the
+    # guard only applies here.)
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     return run_under_hub(args)
 
 
 def cmd_desktop_observe(args: argparse.Namespace) -> int:
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     try:
         response = desktop_observe(args)
     except HubError as exc:
@@ -3632,6 +3750,14 @@ def _load_personal_native_host_once_json(path: Path) -> dict:
 
 
 def cmd_personal_native_host(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
+    hub_token_failure = _hub_token_invalid_failure(args)
+    if hub_token_failure is not None:
+        _print_json(hub_token_failure)
+        return 1
     if args.once_json:
         try:
             message = _load_personal_native_host_once_json(args.once_json)
@@ -3676,6 +3802,10 @@ def cmd_personal_native_manifest(args: argparse.Namespace) -> int:
 
 
 def cmd_personal_firewall_demo(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         result = run_personal_firewall_demo(
             timeout_s=args.timeout_s,
@@ -4284,7 +4414,8 @@ def claude_code_doctor(
     plugin_dir: Path | None = None, home: Path | None = None
 ) -> dict[str, object]:
     plugin = (plugin_dir or _default_claude_plugin_dir()).expanduser().resolve()
-    checks = _claude_code_plugin_checks(plugin)
+    plugin_checks = _claude_code_plugin_checks(plugin)
+    checks = list(plugin_checks)
     claude_binary = shutil.which("claude")
     checks.append(
         {
@@ -4305,7 +4436,7 @@ def claude_code_doctor(
             "detail": f"expected file at {_ARDUR_HOME_PLACEHOLDER}/active_mission.jwt",
         }
     )
-    if claude_binary and all(check["ok"] for check in checks[:5]):
+    if claude_binary and all(check["ok"] for check in plugin_checks):
         result = subprocess.run(
             [claude_binary, "plugin", "validate", str(plugin)],
             capture_output=True,
@@ -4480,11 +4611,11 @@ def _protect_claude_code_scope_invalid_response() -> dict[str, object]:
         "agent": "claude-code",
         "error": "protect_scope_invalid",
         "condition": "protect_scope_invalid",
-        "message": "ardur protect claude-code --scope must be a non-empty path after trimming whitespace and must not be an existing regular file.",
+        "message": "ardur protect claude-code --scope must be a non-empty path after trimming whitespace and must not be a dangling symlink or an existing regular file.",
         "detail": (
-            "An empty, whitespace-only, or regular-file --scope was provided. "
-            "Pass an explicit project folder, or use `.` to protect the current "
-            "working directory."
+            "An empty, whitespace-only, dangling-symlink, or regular-file "
+            "--scope was provided.  Pass an explicit project folder, or use "
+            "`.` to protect the current working directory."
         ),
         "next_steps": [
             {
@@ -4563,7 +4694,7 @@ def _protect_claude_code_identity_invalid_response(condition: str) -> dict[str, 
 
 
 def _protect_claude_code_home_invalid_response() -> dict[str, object]:
-    """Structured response for empty/whitespace-only or regular-file ``--home``.
+    """Structured response for empty/whitespace-only, dangling-symlink, or regular-file ``--home``.
 
     Mirrors the ``protect_scope_invalid`` / ``protect_agent_id_invalid`` shape
     so all ``protect claude-code`` fail-closed branches share the same envelope.
@@ -4578,13 +4709,18 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
         "error": "protect_home_invalid",
         "error_code": "protect_home_invalid",
         "condition": "protect_home_invalid",
-        "message": "ardur protect claude-code --home must be a non-empty path after trimming whitespace and must not be an existing regular file.",
+        "message": "ardur protect claude-code --home must be a non-empty path after trimming whitespace and must not be a dangling symlink or an existing regular file.",
         "detail": (
-            "An empty, whitespace-only, or regular-file --home was provided. "
-            "Pass an explicit Ardur home directory, or omit --home to use the "
-            "default home. Empty strings, whitespace-only values, and unquoted "
-            "empty environment variables resolve to the current working "
-            "directory and are rejected."
+            "An empty, whitespace-only, dangling-symlink, or regular-file "
+            "--home was provided. Pass an explicit Ardur home directory, or "
+            "omit --home to use the default home. Empty strings, "
+            "whitespace-only values, and unquoted empty environment "
+            "variables resolve to the current working directory and are "
+            "rejected. A dangling symlink (a symlink whose target does not "
+            "exist) looks like it points somewhere but resolves to a "
+            "non-existent directory; Ardur would generate real signing "
+            "keys and write active_mission.jwt against a directory that "
+            "does not exist."
         ),
         "next_steps": [
             {
@@ -4607,7 +4743,7 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
 
 
 def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
-    """Structured response for empty/whitespace-only or regular-file ``--keys-dir``.
+    """Structured response for empty/whitespace-only, dangling-symlink, or regular-file ``--keys-dir``.
 
     Mirrors the ``protect_home_invalid`` / ``protect_scope_invalid`` shape so all
     ``protect claude-code`` fail-closed branches share the same envelope.
@@ -4622,16 +4758,21 @@ def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
         "error": "protect_keys_dir_invalid",
         "error_code": "protect_keys_dir_invalid",
         "condition": "protect_keys_dir_invalid",
-        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace and must not be an existing regular file.",
+        "message": "ardur protect claude-code --keys-dir must be a non-empty path after trimming whitespace and must not be a dangling symlink or an existing regular file.",
         "detail": (
-            "An empty, whitespace-only, or regular-file --keys-dir was provided. Pass an "
-            "explicit signing keys directory, or omit --keys-dir to use the "
-            "default keys directory under the Ardur home. Empty strings, "
-            "whitespace-only values, and unquoted empty environment variables "
-            "resolve to the current working directory and are rejected, "
-            "because they silently create real signing keys in unintended "
-            "locations. An existing regular file cannot serve as a signing keys "
-            "directory and is rejected before any key generation."
+            "An empty, whitespace-only, dangling-symlink, or regular-file "
+            "--keys-dir was provided. Pass an explicit signing keys "
+            "directory, or omit --keys-dir to use the default keys "
+            "directory under the Ardur home. Empty strings, "
+            "whitespace-only values, and unquoted empty environment "
+            "variables resolve to the current working directory and are "
+            "rejected, because they silently create real signing keys in "
+            "unintended locations. An existing regular file cannot serve "
+            "as a signing keys directory and is rejected before any key "
+            "generation. A dangling symlink (a symlink whose target does "
+            "not exist) looks like it points somewhere but resolves to a "
+            "non-existent directory; Ardur would generate real signing "
+            "keys against a directory that does not exist."
         ),
         "next_steps": [
             {
@@ -4873,11 +5014,20 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # signing keys for the wrong directory).
     if isinstance(raw_scope, str) and not raw_scope.strip():
         return _protect_claude_code_scope_invalid_response()
-    # Reject --scope pointing to an existing regular file before any key
-    # generation or directory creation.  A regular file cannot serve as a
-    # project folder and would silently succeed with the old type=Path
-    # behaviour.  Nonexistent paths and directories pass through.
+    # Reject --scope pointing to an existing regular file OR a dangling
+    # symlink before any key generation or directory creation.  A regular
+    # file cannot serve as a project folder and would silently succeed with
+    # the old type=Path behaviour.  A dangling symlink (a symlink whose
+    # target does not exist) looks like it points somewhere but resolves to
+    # a non-existent directory; ``Path.exists()`` returns False for it so
+    # the regular-file branch alone is insufficient.  Without this check
+    # Ardur resolves the scope to the missing target, generates real signing
+    # keys, writes ``active_mission.jwt``, and configures protection against
+    # a directory that does not exist.  Non-symlink nonexistent paths and
+    # real directories pass through.
     scope_path = Path(raw_scope).expanduser()
+    if scope_path.is_symlink() and not scope_path.exists():
+        return _protect_claude_code_scope_invalid_response()
     if scope_path.exists() and scope_path.is_file():
         return _protect_claude_code_scope_invalid_response()
     # Reject empty/whitespace-only --agent-id and explicitly-provided
@@ -4904,12 +5054,21 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # which falls through to ``DEFAULT_HOME`` and is acceptable.
     if isinstance(args.home, str) and not args.home.strip():
         return _protect_claude_code_home_invalid_response()
-    # Reject --home pointing to an existing regular file before any key
-    # generation or directory creation.  A regular file cannot serve as an
-    # Ardur home directory and would traceback with FileExistsError at
-    # home.mkdir().  Nonexistent paths and directories pass through.
+    # Reject --home pointing to an existing regular file OR a dangling
+    # symlink before any key generation or directory creation.  A regular
+    # file cannot serve as an Ardur home directory and would traceback with
+    # FileExistsError at home.mkdir().  A dangling symlink (a symlink whose
+    # target does not exist) looks like it points somewhere but resolves to
+    # a non-existent directory; ``Path.exists()`` returns False for it so
+    # the regular-file branch alone is insufficient.  Without this check
+    # Ardur resolves the home to the missing target, generates real signing
+    # keys, writes ``active_mission.jwt``, and configures protection against
+    # a directory that does not exist.  Non-symlink nonexistent paths and
+    # real directories pass through.
     if args.home:
         home_path = Path(args.home).expanduser()
+        if home_path.is_symlink() and not home_path.exists():
+            return _protect_claude_code_home_invalid_response()
         if home_path.exists() and home_path.is_file():
             return _protect_claude_code_home_invalid_response()
     # Reject empty/whitespace-only --keys-dir before any directory creation or
@@ -4922,12 +5081,20 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # the handler falls back to ``<home>/keys``.
     if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
         return _protect_claude_code_keys_dir_invalid_response()
-    # Reject --keys-dir pointing to an existing regular file before any key
-    # generation.  A regular file cannot serve as a signing keys directory and
-    # would traceback with KeyDirectoryError at generate_keypair().  Nonexistent
-    # paths and directories pass through.
+    # Reject --keys-dir pointing to an existing regular file OR a dangling
+    # symlink before any key generation.  A regular file cannot serve as a
+    # signing keys directory and would traceback with KeyDirectoryError at
+    # generate_keypair().  A dangling symlink (a symlink whose target does
+    # not exist) looks like it points somewhere but resolves to a
+    # non-existent directory; ``Path.exists()`` returns False for it so the
+    # regular-file branch alone is insufficient.  Without this check Ardur
+    # resolves the keys-dir to the missing target and proceeds with key
+    # generation against a directory that does not exist.  Non-symlink
+    # nonexistent paths and real directories pass through.
     if args.keys_dir:
         keys_dir_path = Path(args.keys_dir).expanduser()
+        if keys_dir_path.is_symlink() and not keys_dir_path.exists():
+            return _protect_claude_code_keys_dir_invalid_response()
         if keys_dir_path.exists() and keys_dir_path.is_file():
             return _protect_claude_code_keys_dir_invalid_response()
     # Reject negative --max-tool-calls before any key generation or directory
@@ -5213,6 +5380,32 @@ def cmd_profile_init(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
+    # Reject empty/whitespace-only --home and --plugin-dir before any
+    # diagnostic check. Both args are ``type=str`` so an empty or
+    # whitespace-only value survives here as-is (previously ``type=Path``
+    # normalized ``""`` to ``PosixPath('.')`` which silently resolved to the
+    # CWD and produced misleading diagnostics with corrupted path fragments).
+    # An explicit ``--home .`` (CWD) must remain valid, so only reject when the
+    # trimmed string is empty. Omitting ``--home`` keeps ``args.home=None``;
+    # omitting ``--plugin-dir`` keeps the stringified default plugin dir.
+    path_failure = _coerce_report_path_args(
+        args,
+        command_name="doctor-claude-code",
+        command_title="Claude Code doctor",
+        specs=(
+            ("home", "--home", "home", "doctor_claude_code_home_empty", False),
+            (
+                "plugin_dir",
+                "--plugin-dir",
+                "plugin directory",
+                "doctor_claude_code_plugin_dir_empty",
+                False,
+            ),
+        ),
+    )
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     response = claude_code_doctor(plugin_dir=args.plugin_dir, home=args.home)
     _print_json(response)
     return 0 if response.get("ok") else 1
@@ -5528,7 +5721,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     anchor.add_argument(
         "--receipt-log",
-        type=Path,
+        type=str,
         required=True,
         help="receipt JSONL path whose sibling anchor store should be drained",
     )
@@ -5542,10 +5735,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--keys-dir", type=str, help="receipt signing keys (required by Rekor v1)"
     )
     anchor.add_argument(
-        "--local-log", type=Path, help="self-hosted append-only log JSONL path"
+        "--local-log", type=str, help="self-hosted append-only log JSONL path"
     )
     anchor.add_argument(
-        "--log-private-key", type=Path, help="self-hosted log Ed25519 private key PEM"
+        "--log-private-key", type=str, help="self-hosted log Ed25519 private key PEM"
     )
     anchor.add_argument(
         "--origin", help="C2SP checkpoint origin for the self-hosted log"
@@ -5824,7 +6017,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tool_server_preflight.add_argument(
         "--config",
-        type=Path,
+        type=str,
         required=True,
         help="strict JSON MCP client config or static tool manifest",
     )
@@ -5836,7 +6029,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tool_server_preflight.add_argument(
         "--output",
-        type=Path,
+        type=str,
         help="atomically write an owner-only report instead of printing it",
     )
     tool_server_preflight.add_argument(
@@ -5869,8 +6062,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup.add_argument(
         "--extension-path",
-        type=Path,
-        default=Path("examples/ardur-personal-extension"),
+        type=str,
+        default=str(Path("examples/ardur-personal-extension")),
         help="browser extension directory to show in setup output",
     )
     setup.set_defaults(func=cmd_setup)
@@ -5895,12 +6088,12 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor-claude-code", help="check Claude Code plugin and active passport setup"
     )
     doctor_cc.add_argument(
-        "--home", type=Path, help="Ardur home containing active_mission.jwt"
+        "--home", type=str, help="Ardur home containing active_mission.jwt"
     )
     doctor_cc.add_argument(
         "--plugin-dir",
-        type=Path,
-        default=_default_claude_plugin_dir(),
+        type=str,
+        default=str(_default_claude_plugin_dir()),
         help="Claude Code plugin directory",
     )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
@@ -6061,7 +6254,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     personal_native_host.add_argument(
         "--once-json",
-        type=Path,
+        type=str,
         help="development mode: process one JSON message file",
     )
     personal_native_host.set_defaults(func=cmd_personal_native_host)
@@ -6099,7 +6292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     personal_firewall_demo.add_argument(
         "--temp-parent",
-        type=Path,
+        type=str,
         help="existing directory that receives temporary demo state",
     )
     personal_firewall_demo.add_argument("--json", action="store_true")

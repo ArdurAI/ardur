@@ -44,10 +44,14 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - exposes only bounded outcome counters and canonical registry metadata,
     never computed executable digests, full paths, argv, environment, or file
     content; matches remain heuristic and observe-only.
-  - provides a separate real-Linux paired overhead harness with deterministic
-    CI/release profiles, raw AB/BA observations, thread-group CPU, peak RSS,
-    authenticated health, exclusive capture/classification/fingerprint ledgers,
-    artifact digests, and fail-closed reviewed-budget enforcement.
+  - provides a separate [real-Linux paired overhead
+    harness](../../../docs/benchmarks/agent-recognition-overhead.md) with
+    deterministic CI/release profiles, raw six-order
+    baseline/reference/candidate observations, same-VM daemon CPU ratios, peak
+    RSS, authenticated health, exclusive capture/classification/fingerprint
+    ledgers, artifact digests, and fail-closed reviewed-budget enforcement; the
+    [strict report tests](agent_recognition_benchmark_test.go) bind those claims
+    to the committed evidence and budgets.
 - Includes a deterministic maintained-corpus evaluation gate:
   - validates versioned samples, reviewed thresholds, sanitized provenance,
     stable IDs, and explicit signal availability;

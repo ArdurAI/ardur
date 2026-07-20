@@ -1355,13 +1355,27 @@ def run_governed_missing_command_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _print_run_governed_missing_command_next_steps() -> None:
+def _print_next_steps(steps: list[dict[str, str]]) -> None:
+    """Render deterministic remediation hints to stderr.
+
+    Mirrors the proven-safe ``_print_report_next_steps`` pattern in
+    ``python/vibap/cli.py``: extract ``command``/``detail`` into local
+    variables per step, then print each. ``command``/``detail`` are static
+    developer-guidance strings baked into the ``run_governed_*_next_steps``
+    helpers; they never contain user input, credentials, secrets, tokens,
+    or key material.
+    """
     print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(run_governed_missing_command_next_steps(), start=1):
-        print(f"{index}. {step['command']}", file=sys.stderr)
+    for index, step in enumerate(steps, start=1):
+        command = step.get("command", "")
         detail = step.get("detail", "")
+        print(f"{index}. {command}", file=sys.stderr)
         if detail:
             print(f"   {detail}", file=sys.stderr)
+
+
+def _print_run_governed_missing_command_next_steps() -> None:
+    _print_next_steps(run_governed_missing_command_next_steps())
 
 
 def run_governed_mission_invalid_next_steps() -> list[dict[str, str]]:
@@ -1390,12 +1404,7 @@ def run_governed_mission_invalid_next_steps() -> list[dict[str, str]]:
 
 
 def _print_run_governed_mission_invalid_next_steps() -> None:
-    print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(run_governed_mission_invalid_next_steps(), start=1):
-        print(f"{index}. {step['command']}", file=sys.stderr)
-        detail = step.get("detail", "")
-        if detail:
-            print(f"   {detail}", file=sys.stderr)
+    _print_next_steps(run_governed_mission_invalid_next_steps())
 
 
 def run_governed_home_not_directory_next_steps() -> list[dict[str, str]]:
@@ -1425,12 +1434,47 @@ def run_governed_home_not_directory_next_steps() -> list[dict[str, str]]:
 
 
 def _print_run_governed_home_not_directory_next_steps() -> None:
-    print("Next steps:", file=sys.stderr)
-    for index, step in enumerate(run_governed_home_not_directory_next_steps(), start=1):
-        print(f"{index}. {step['command']}", file=sys.stderr)
-        detail = step.get("detail", "")
-        if detail:
-            print(f"   {detail}", file=sys.stderr)
+    _print_next_steps(run_governed_home_not_directory_next_steps())
+
+
+def run_governed_home_dangling_symlink_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    that is a dangling symlink (symlink whose target does not exist).
+
+    ``Path.exists()`` follows a symlink and returns False when the target is
+    missing, which previously defeated the ``exists() and not is_dir()``
+    guard on the resolved path.  The fix checks ``is_symlink() and not
+    exists()`` on the UN-resolved path before ``.resolve()`` follows the
+    link, rejecting dangling ``--home`` before any key generation or
+    artifact write.
+    """
+    return [
+        {
+            "condition": "run_home_dangling_symlink",
+            "action": "pass_an_existing_or_nonexistent_path",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "Pass a path that is either an existing directory or a "
+                "nonexistent path (it will be created). The path you "
+                "provided is a dangling symlink: it points at a target that "
+                "does not exist, so it looks like it resolves somewhere "
+                "but does not."
+            ),
+        },
+        {
+            "condition": "run_home_dangling_symlink",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_dangling_symlink_next_steps() -> None:
+    _print_next_steps(run_governed_home_dangling_symlink_next_steps())
 
 
 def _run_governed_budget_failure(
@@ -1496,12 +1540,32 @@ def run_governed_cli(args: Any) -> int:
         _print_run_governed_mission_invalid_next_steps()
         return 2
 
-    # Validate --home before budget checks so an existing non-directory is
-    # rejected without creating key material or issuing a passport.
+    # Validate --home before budget checks so a broken or non-directory path
+    # is rejected without creating key material or issuing a passport.
+    #
+    # The dangling-symlink check MUST run against the UN-resolved path and
+    # BEFORE ``.resolve()``: ``Path.exists()`` follows the symlink and returns
+    # False for a missing target, which previously defeated the
+    # ``exists() and not is_dir()`` guard on the resolved path and let
+    # ``resolve_keys_dir`` silently mkdir the broken target.  See
+    # ``run_governed_home_dangling_symlink_next_steps`` for the recovery
+    # contract.  Only dangling symlinks are rejected here: a plain
+    # nonexistent non-symlink path is legitimate (Ardur creates it later),
+    # and a symlink-to-existing-directory proceeds normally.
     home_arg = getattr(args, "home", None)
     if home_arg is not None:
         try:
-            resolved_home = Path(home_arg).expanduser().resolve()
+            expanded_home = Path(home_arg).expanduser()
+        except (OSError, ValueError) as exc:
+            print(f"ardur run: {exc}", file=sys.stderr)
+            return 2
+        if expanded_home.is_symlink() and not expanded_home.exists():
+            print("ardur run --home must not point to a dangling symlink.", file=sys.stderr)
+            print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+            _print_run_governed_home_dangling_symlink_next_steps()
+            return 2
+        try:
+            resolved_home = expanded_home.resolve()
         except (OSError, ValueError) as exc:
             print(f"ardur run: {exc}", file=sys.stderr)
             return 2

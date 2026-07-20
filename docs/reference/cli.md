@@ -63,6 +63,13 @@ certificate and private-key PEM files, and `--no-tls` disables TLS only for
 plain-HTTP loopback development. This is not a production TLS, release, or
 hosted-website visibility claim.
 
+Newly generated material uses a DNS SAN for a DNS bind name and an IP SAN for
+a concrete IPv4 or IPv6 bind address. Because an unspecified wildcard bind
+such as `0.0.0.0` or `::` is not a client-verifiable identity, newly generated
+local material uses `localhost` in that case. Supply an explicit certificate
+and key whose SAN matches the client-facing identity for any non-loopback
+deployment.
+
 Invalid explicit TLS material fails closed before keys, state files, audit logs,
 sessions, or the proxy startup path are created. If either `--tls-cert` or
 `--tls-key` is provided, both values must point to existing files unless TLS is
@@ -328,6 +335,15 @@ are absent from JSON and text reports. `--output` uses atomic owner-only mode
 `0600` and prints a safe digest/count completion object instead of the local
 path.
 
+Out-of-range `--correlation-window-s` fails closed before receipt verification,
+public-key loading, or event parsing. The valid range is `0..3600` seconds;
+values outside that range exit non-zero and write parseable stdout JSON with
+`ok: false`, `valid: false`, an `error` of `correlation_window_invalid`, a
+message, and empty stderr. The guard keeps stderr empty, emits no traceback,
+does not echo raw local paths or secrets, and leaves no artifacts, so no key
+material is required to reproduce. Valid values pass through to the existing
+verification/correlation path unchanged.
+
 See the [Runtime Evidence Correlation Profile v0.1](../specs/runtime-evidence-correlation-v0.1.md)
 and [public no-network fixtures](../specs/conformance/runtime-evidence-v0.1/README.md).
 
@@ -369,6 +385,15 @@ The actor and verifier IDs are signed receipt claims, not independently
 authenticated SPIFFE workloads. Every event and OTLP projection reports that
 the identity strings are signature-covered and that SPIFFE workload identity
 was not verified. A `spiffe://` prefix alone does not upgrade that assurance.
+
+Out-of-range `--timeout-s` fails closed before receipt verification,
+public-key loading, or any network call. The valid range is `1..60` seconds;
+values outside that range exit non-zero and write parseable stdout JSON with
+`ok: false`, an `error` of `otlp_timeout_invalid`, a message, and empty
+stderr. The guard keeps stderr empty, emits no traceback, does not echo raw
+local paths or secrets, and leaves no artifacts, so no key material or
+configured `--otlp-endpoint` is required to reproduce. Valid values pass
+through to the existing export path unchanged.
 
 See [Governance Telemetry v0.1](../specs/governance-telemetry-v0.1.md) and its
 [golden event](../specs/conformance/governance-telemetry-v0.1/events.jsonl).
@@ -556,6 +581,12 @@ before the Hub binds a listening socket; the command exits `1` with
 stderr, and no raw path, file-name, certificate, or private-key disclosure.
 Port, host, and Personal home validation retain their existing precedence.
 
+Newly generated managed local material uses a DNS SAN for a DNS bind name and
+an IP SAN for a concrete IPv4 or IPv6 bind address. An unspecified wildcard
+bind uses `localhost` as the generated certificate identity; operators
+exposing the Hub beyond loopback must provide a certificate whose SAN matches
+the identity used by clients.
+
 `--no-tls` is the only intentional plaintext Hub mode and is intended for
 explicit local development. Environment configuration such as
 `ARDUR_NO_TLS=1` does not silently downgrade `ardur hub`; without `--no-tls`,
@@ -598,6 +629,16 @@ values, and `error_code: setup_home_invalid`; stderr stays empty, no traceback
 is emitted, `next_steps` uses placeholders such as `<ardur-home>`, and no
 config, token, LaunchAgent, key, session, log, or state artifacts are created.
 
+If `--extension-path` is empty or whitespace-only, `ardur setup` fails closed
+before writing config, generating or printing a Hub token, installing launch
+files, or creating setup state. The command exits `1` and writes parseable
+stdout JSON with `ok: false`, stable `condition`/`error`/`error_code` values
+of `path_arg_invalid` (distinct from the `setup_home_invalid` condition used
+for an empty `--home`), a message, a detail, and placeholder-only
+`next_steps` such as `ardur setup --extension-path <extension-path>`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths or tokens, and leaves no `browser_extension_path` entry in `config.json`.
+
 Invalid setup bind inputs fail closed before writing config, generating or
 printing a Hub token, installing the LaunchAgent plist, creating setup state, or
 starting a service. `--port` must be an integer stable TCP port from `1` through
@@ -630,6 +671,20 @@ copy raw invalid file URLs, local paths, tokens, or provider data into shared
 logs. Healthy Hub responses preserve the existing response shape and omit
 actionable remediation.
 
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur status` exits non-zero and writes parseable stdout JSON with `ok: false`,
+stable `condition`/`error`/`error_code` values of `hub_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur status --hub-token <hub-token>` (supply an explicit token) and
+`ardur status` (omit `--hub-token` so Ardur resolves it from `ARDUR_HUB_TOKEN`
+or Personal Hub config). The failure path keeps stderr empty, emits no
+traceback, and does not echo raw token values or local paths. An unset
+`--hub-token` (omitted) and an empty-string `--hub-token ""` remain valid: in
+both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal Hub config.
+
 ### `ardur doctor`
 
 Health-check the local Ardur Personal setup: config presence, Hub
@@ -648,6 +703,20 @@ such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw
 local paths, invalid file URLs, or tokens. When the core setup is healthy,
 `next_steps` is an empty array.
 
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur doctor` exits non-zero and writes parseable stdout JSON with `ok: false`,
+stable `condition`/`error`/`error_code` values of `hub_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur doctor --hub-token <hub-token>` (supply an explicit token) and
+`ardur doctor` (omit `--hub-token` so Ardur resolves it from `ARDUR_HUB_TOKEN`
+or Personal Hub config). The failure path keeps stderr empty, emits no
+traceback, and does not echo raw token values or local paths. An unset
+`--hub-token` (omitted) and an empty-string `--hub-token ""` remain valid: in
+both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal Hub config.
+
 ### `ardur doctor-claude-code`
 
 Verify the Claude Code plugin and active passport setup. Reports missing
@@ -662,6 +731,17 @@ The command is local-only: it inspects files, PATH, and Claude Code plugin
 validation state, but does not run a live Claude prompt or call a provider API.
 Use failed `next_steps` entries to recover the setup, then re-run the doctor
 before claiming the local Claude Code path is ready.
+
+If `--home` or `--plugin-dir` is supplied as an empty or whitespace-only string,
+`ardur doctor-claude-code` exits `1` before running any diagnostic check. The
+response is structured JSON with `ok: false`, a stable `condition`
+(`doctor_claude_code_home_empty` or `doctor_claude_code_plugin_dir_empty`), a
+human-readable `message`, an explanatory `detail`, and placeholder-only
+`next_steps` such as `ardur doctor-claude-code --home <home>` or
+`ardur doctor-claude-code --plugin-dir <plugin-directory>`. The remediation
+text never echoes the raw input value or local paths. Omitting either option
+uses the default Ardur home / default Claude Code plugin directory and is not
+rejected; an explicit `--home .` (the current directory) remains valid.
 
 ### `ardur uninstall`
 
@@ -776,6 +856,21 @@ than copying raw temp homes or tokens. Blocked legacy commands still exit `126`
 with a receipt when policy evaluation succeeds; successful commands preserve
 stdout, stderr, and child exit-code streaming without remediation noise.
 
+On the legacy Hub path, a whitespace-only `--hub-token` (for example
+`--hub-token "   "`) is rejected before any network call. The token is trimmed
+internally; a whitespace-only value is truthy before trimming but resolves to an
+empty bearer after, so it is rejected explicitly rather than silently sending a
+whitespace bearer to the Hub. `ardur run` exits non-zero and writes parseable
+stdout JSON with `ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_token_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur run --hub-token <hub-token> -- <command>` (supply an explicit
+token) and `ardur run -- <command>` (omit `--hub-token` so Ardur resolves it
+from `ARDUR_HUB_TOKEN` or Personal Hub config). The failure path keeps stderr
+empty, emits no traceback, and does not echo raw token values or local paths.
+An unset `--hub-token` (omitted) and an empty-string `--hub-token ""` remain
+valid: in both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal
+Hub config. The zero-setup governance bridge path does not take a `--hub-token`.
+
 If `--mission` is supplied as an empty or whitespace-only string, `ardur run`
 exits `2` without generating keys, creating a Mission Passport, or launching the
 governed command. Stderr prints a message, a usage line, and placeholder-only
@@ -804,6 +899,22 @@ line, and placeholder-only `Next steps:` guidance (condition
 creates an ephemeral home); the remediation text never echoes the raw `--home`
 value or local paths. Omitting `--home` uses an ephemeral Ardur home that is
 created and cleaned up automatically.
+
+If `--home` points to a dangling symlink (a symlink whose target does not
+exist), `ardur run` exits `2` without generating keys, creating a Mission
+Passport, or launching the governed command, and does not materialize the
+symlink's missing target as a directory. Stderr prints a message, a usage line,
+and placeholder-only `Next steps:` guidance (condition
+`run_home_dangling_symlink`) such as
+`ardur run --home <ardur-home> --mission <mission> -- <command>` (pass an
+existing directory or a nonexistent path that Ardur will create) and
+`ardur run -- <command>` (omit `--home` for an ephemeral home); the remediation
+text never echoes the raw `--home` value or local paths. The check runs before
+`Path.resolve()` follows the link, because `exists()` would otherwise return
+`False` for a missing target and let `resolve_keys_dir` silently create the
+directory. A nonexistent path that is not a symlink is still accepted (the
+directory is created during the run); a symlink whose target exists is accepted
+too.
 
 The governance bridge is still local and bounded: the embedded proxy listens on
 loopback only for the launched run, kernel correlation is best effort and may be
@@ -839,6 +950,21 @@ claim live provider/API behavior, provider-hidden action visibility, browser
 store/native-host installation proof, release readiness, or public metadata
 readiness; successful observations preserve the Hub response shape without
 remediation noise.
+
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur desktop-observe` exits non-zero and writes parseable stdout JSON with
+`ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_token_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur desktop-observe --hub-token <hub-token>` (supply an explicit
+token) and `ardur desktop-observe` (omit `--hub-token` so Ardur resolves it
+from `ARDUR_HUB_TOKEN` or Personal Hub config). The failure path keeps stderr
+empty, emits no traceback, and does not echo raw token values or local paths.
+An unset `--hub-token` (omitted) and an empty-string `--hub-token ""` remain
+valid: in both cases Ardur falls through to `ARDUR_HUB_TOKEN` or the Personal
+Hub config.
 
 ### `ardur personal-native-host`
 
@@ -886,6 +1012,23 @@ Hub token, run `ardur doctor`, then re-run `ardur personal-native-host
 store deployment proof, live provider/API behavior, provider-hidden action
 visibility, native-host installation proof, release readiness, or public
 metadata readiness.
+
+A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
+before any network call. The token is trimmed internally; a whitespace-only
+value is truthy before trimming but resolves to an empty bearer after, so it is
+rejected explicitly rather than silently sending a whitespace bearer to the Hub.
+`ardur personal-native-host` exits non-zero and writes parseable stdout JSON
+with `ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_token_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur personal-native-host --hub-token <hub-token>` (supply an explicit
+token) and `ardur personal-native-host` (omit `--hub-token` so Ardur resolves it
+from `ARDUR_HUB_TOKEN` or Personal Hub config). The rejection is emitted before
+native-host framing begins, so the JSON is written to stdout regardless of
+whether the command is invoked by a browser or under `--once-json`. The failure
+path keeps stderr empty, emits no traceback, and does not echo raw token values
+or local paths. An unset `--hub-token` (omitted) and an empty-string
+`--hub-token ""` remain valid: in both cases Ardur falls through to
+`ARDUR_HUB_TOKEN` or the Personal Hub config.
 
 ### `ardur personal-native-manifest`
 
@@ -1028,7 +1171,8 @@ command exits nonzero without configuring Claude Code. JSON output includes
 local `next_steps`; human output prints the same recovery guidance under a
 "Next steps" section with placeholders such as `<your-project>`.
 
-If `--scope` is supplied but is empty, whitespace-only, or points to an
+If `--scope` is supplied but is empty, whitespace-only, points to a dangling
+symlink (a symbolic link whose target does not exist), or points to an
 existing regular file, the command exits nonzero without configuring Claude
 Code, generating keys, or writing `active_mission.jwt`. JSON output includes
 `ok: false`, `error: "protect_scope_invalid"`,
@@ -1036,8 +1180,10 @@ Code, generating keys, or writing `active_mission.jwt`. JSON output includes
 as `ardur protect claude-code --scope <your-project>` and
 `ardur protect claude-code --scope .`; human output prints the same recovery
 guidance. An explicit `--scope .` is still accepted and protects the current
-working directory. A nonexistent path is also accepted (the directory will be
-created during protection).
+working directory. A nonexistent path that is not a symlink is also accepted
+(the directory will be created during protection); only dangling symlinks are
+rejected because they appear to point somewhere but resolve to a missing
+target.
 
 If `--agent-id` is supplied but is empty or whitespace-only, the command exits
 nonzero without configuring Claude Code, generating keys, or writing
@@ -1049,18 +1195,20 @@ and placeholder-only `next_steps` such as
 recovery guidance. Omitting `--agent-id` uses the default subject and is not
 rejected.
 
-If `--mission` is supplied as a non-empty but whitespace-only string, the
-command exits nonzero without configuring Claude Code, generating keys, or
-writing `active_mission.jwt`. JSON output includes `ok: false`,
+If `--mission` is supplied as an empty string (`""`) or a whitespace-only
+string, the command exits nonzero without configuring Claude Code, generating
+keys, or writing `active_mission.jwt`. JSON output includes `ok: false`,
 `error: "protect_mission_invalid"`, `condition: "protect_mission_invalid"`,
 and placeholder-only `next_steps` such as
 `ardur protect claude-code --scope <your-project> --mission <mission>` and
 `ardur protect claude-code --scope <your-project>`; human output prints the same
-recovery guidance. An empty-string `--mission ""` is falsy and falls through to
-the selected mode's default mission; only whitespace-only strings that would
-leak into the JWT are rejected.
+recovery guidance. An empty-string `--mission ""` is also rejected with the
+same `protect_mission_invalid` structured JSON before key generation, matching
+the pattern for `--agent-id`, `--max-tool-calls`, `--max-duration-s`, and
+`--ttl-s`.
 
-If `--home` is supplied but is empty, whitespace-only, or points to an
+If `--home` is supplied but is empty, whitespace-only, points to a dangling
+symlink (a symbolic link whose target does not exist), or points to an
 existing regular file, the command exits nonzero without configuring Claude
 Code, generating keys, or writing `active_mission.jwt`. JSON output includes
 `ok: false`, `error: "protect_home_invalid"`,
@@ -1073,11 +1221,17 @@ default), and `ardur protect claude-code --home . --scope <your-project>` (use
 recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected.
 A regular file cannot serve as an Ardur home directory and is rejected before
-any key generation or directory creation. Omitting `--home` entirely uses the
-default Ardur home directory and is not rejected. An explicit `--home .` is
-still accepted.
+any key generation or directory creation. A dangling symlink looks like it
+points somewhere but resolves to a missing target; Ardur would otherwise
+generate real signing keys and write `active_mission.jwt` against a directory
+that does not exist, so it is rejected before any key generation or artifact
+write. Omitting `--home` entirely uses the default Ardur home directory and is
+not rejected. A nonexistent path that is not a symlink is also accepted (the
+directory will be created during protection); a symlink whose target exists is
+accepted too. An explicit `--home .` is still accepted.
 
-If `--keys-dir` is supplied but is empty, whitespace-only, or an existing
+If `--keys-dir` is supplied but is empty, whitespace-only, points to a dangling
+symlink (a symbolic link whose target does not exist), or is an existing
 regular file, the command exits nonzero without generating keys, configuring
 Claude Code, or writing `active_mission.jwt`. JSON output includes `ok: false`,
 `error: "protect_keys_dir_invalid"`, `error_code: "protect_keys_dir_invalid"`,
@@ -1091,9 +1245,14 @@ recovery guidance. Empty strings, whitespace-only values, and unquoted empty
 environment variables resolve to the current working directory and are rejected,
 because they silently create real signing keys in unintended locations. An
 existing regular file cannot serve as a signing keys directory and is rejected
-before any key generation. Omitting `--keys-dir` entirely uses the default keys
-directory under the Ardur home and is not rejected. An explicit `--keys-dir .`
-is still accepted.
+before any key generation. A dangling symlink looks like it points somewhere but
+resolves to a missing target; Ardur would otherwise generate real signing keys
+against a directory that does not exist, so it is rejected before any key
+generation or artifact write. Omitting `--keys-dir` entirely uses the default
+keys directory under the Ardur home and is not rejected. A nonexistent path that
+is not a symlink is also accepted (the directory will be created during
+protection); a symlink whose target exists is accepted too. An explicit
+`--keys-dir .` is still accepted.
 
 If `--max-tool-calls` is supplied with a negative value, the command exits
 nonzero without generating keys, configuring Claude Code, or writing
@@ -1487,6 +1646,18 @@ such as `config_missing`, `config_malformed`, `config_duplicate_key`, and
 `server_collection_missing` without echoing local paths or file contents. A
 non-string inline schema description fails with
 `tool_schema_description_invalid`.
+
+Empty or whitespace-only path arguments (`--config`, `--output`) fail closed
+before any file inspection or report writing. They exit non-zero and write
+parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
+values of `path_arg_invalid`, a message, a detail, and placeholder-only
+`next_steps` such as `ardur <command> --config <config>` and
+`ardur <command> --output <output>`. The failure path keeps stderr empty,
+emits no traceback, does not echo raw local paths or secrets, and writes no
+report or status artifact to the current working directory. Valid non-empty
+paths pass through to the existing `config_missing`/`config_malformed`/
+`config_duplicate_key`/`server_collection_missing` input-failure checks; only
+the empty/whitespace case is rejected before file inspection.
 
 Supported v0.1 shapes are top-level `mcpServers`, VS Code-style `servers`, and
 static `{name, tools}` manifests. A per-server `includeTools` list can seed a

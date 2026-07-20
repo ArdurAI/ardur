@@ -75,10 +75,14 @@ process, and neither an exact name nor an ordinary SHA-256 match proves agent
 identity or provenance. A [maintained sanitized corpus and deterministic
 gate](docs/reference/agent-recognition-evaluation.md) publishes exact corpus and
 registry digests, sample-counted precision/recall, Wilson intervals, and stable
-false-positive/false-negative IDs. The gate is regression evidence for the
-maintained corpus—not population accuracy—and stronger fingerprints remain
-tracked separately under issue #67. Attestation and governance remain separate
-follow-up work.
+false-positive/false-negative IDs. Its v0.2 report keeps 28 exact-name samples
+separate from eight synthetic native/launcher content transitions, requires
+zero mismatch confidence promotions, grades launcher fixtures against an
+independent observed-interpreter input, and never blends content matches into
+name-only accuracy. The gate is regression evidence for the maintained
+corpus—not population accuracy, provenance, or identity assurance. Attestation,
+adoption, governance, and non-Linux launch sources remain separate follow-up
+work.
 
 For performance engineering, the
 [Linux governance overhead harness](docs/benchmarks/linux-governance-overhead.md)
@@ -90,11 +94,14 @@ claim.
 
 The separate
 [agent-recognition overhead harness](docs/benchmarks/agent-recognition-overhead.md)
-runs a real-Linux exact-exec corpus with recognition off and on in paired AB/BA
-order. Its machine report keeps lifecycle delivery/loss, classifier rejection,
-fingerprint terminal outcomes, daemon CPU, peak RSS, and workload wall time
-separate. It is host-specific observer-effect evidence, not identity,
-accuracy, attestation, or governance proof.
+runs a real-Linux exact-exec corpus with recognition disabled for the candidate
+baseline, enabled for the exact target-branch reference daemon, and enabled for
+the candidate daemon on the same VM; arm order rotates through all six
+permutations. Its machine report keeps
+lifecycle delivery/loss, classifier rejection, fingerprint terminal outcomes,
+daemon CPU, peak RSS, and workload wall time separate. It is host-specific
+observer-effect evidence, not identity, accuracy, attestation, or governance
+proof.
 
 The [AuditBench evaluation protocol](docs/specs/auditbench-evaluation-protocol-v0.1.md)
 adds strict raw-capture replay, blind two-view annotations, a local
@@ -139,9 +146,8 @@ key; the local demo additionally avoids manual bearer-token and Docker setup.
 
 ```bash
 git clone https://github.com/ArdurAI/ardur.git && cd ardur
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 python scripts/run-no-key-mvp-demo.py
 ```
 
@@ -149,6 +155,12 @@ This temporary loopback-only demo reaches a `PERMIT`, a `DENY`, and a locally
 verified signed attestation. It disables TLS and bearer auth only for the child
 process; do not use it as a production launch command. See the
 [no-key MVP guide](docs/guides/no-key-mvp-demo.md) for the boundary and timing.
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 ### Fresh-user evidence bundle
 

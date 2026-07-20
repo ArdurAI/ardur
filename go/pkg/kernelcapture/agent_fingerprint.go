@@ -697,13 +697,13 @@ func (w *AgentFingerprintWorker) process(job agentFingerprintJob) {
 			outcome = AgentFingerprintOutcomeSuccess
 		}
 		observation := w.observation(job.candidate, outcome, digest.method, digest.objectState, matched)
-		w.recordOutcome(outcome)
 		w.publish(job, observation)
+		w.recordOutcome(outcome)
 		return
 	}
 	observation := w.observation(job.candidate, outcome, digest.method, digest.objectState, nil)
-	w.recordOutcome(outcome)
 	w.publish(job, observation)
+	w.recordOutcome(outcome)
 }
 
 func (w *AgentFingerprintWorker) publish(job agentFingerprintJob, observation AgentFingerprintObservation) {
@@ -713,6 +713,10 @@ func (w *AgentFingerprintWorker) publish(job agentFingerprintJob, observation Ag
 }
 
 func (w *AgentFingerprintWorker) observation(candidate AgentRecognitionResult, outcome, method, objectState string, matched []string) AgentFingerprintObservation {
+	return agentFingerprintObservation(w.registry, candidate, outcome, method, objectState, matched)
+}
+
+func agentFingerprintObservation(registry *AgentFingerprintRegistry, candidate AgentRecognitionResult, outcome, method, objectState string, matched []string) AgentFingerprintObservation {
 	confidence := candidate.Confidence
 	assurance := candidate.IdentityAssurance
 	if outcome == AgentFingerprintOutcomeSuccess {
@@ -732,8 +736,8 @@ func (w *AgentFingerprintWorker) observation(candidate AgentRecognitionResult, o
 		IdentityAssurance:          assurance,
 		GovernanceAction:           "observe_only",
 		MatchedRuleIDs:             append([]string(nil), matched...),
-		FingerprintRegistryVersion: w.registry.version,
-		FingerprintRegistrySHA256:  w.registry.digest,
+		FingerprintRegistryVersion: registry.version,
+		FingerprintRegistrySHA256:  registry.digest,
 	}
 }
 

@@ -55,17 +55,41 @@ cd go
 go test -race -count=1 \
   ./pkg/kernelcapture \
   ./cmd/ardur-kernelcaptured \
+  ./cmd/ardur-agent-recognition-eval \
   ./cmd/ardur-agent-recognition-benchmark \
   ./cmd/ardur-agent-recognition-workload
 ```
 
-The dedicated `agent-recognition-benchmark` workflow builds the exact PR-head
-daemon, controller, and native workload, then runs one warm-up plus 20 paired
-recognition-off/on samples on a fresh privileged `ubuntu-24.04` runner. It
-uploads the privacy-bounded raw JSON report and enforces the committed reviewed
-budget. CI fails on metric drift, loss, rejection, unavailable fingerprint
-work, missing counters, schema drift, or digest mismatch. The larger release
-profile is manual and never substitutes for the required CI profile. See the
+The evaluator tests account for all 36 maintained samples while keeping the 28
+name-only cases and eight synthetic content-fingerprint transitions separate.
+They fail on name-only threshold drift, missing native/launcher content
+coverage, any reviewed content-transition mismatch, or any confidence
+promotion after a digest mismatch. Launcher cases bind an independently supplied
+observed interpreter instead of inheriting it from the fixture registry.
+Fingerprint-worker panic tests also require the same one-worker pool to complete
+a second job after recovery and exclusive terminal accounting for an observer
+panic.
+
+The dedicated `agent-recognition-benchmark` workflow builds the exact candidate
+daemon, controller, and native workload plus an exact target-branch reference
+daemon. It runs one warm-up plus 20 three-arm groups on one fresh privileged
+`ubuntu-24.04` runner, rotating through all six baseline/reference/candidate
+orders. The report binds both source SHAs and both copied daemon digests,
+records bounded CPU/scheduling identity, retains three diagnostic process-CPU
+calibration samples, and uploads privacy-bounded raw JSON. CI fails on median
+wall drift, same-VM candidate/reference daemon-CPU p50 drift, an unsupported
+runner class, RSS drift, loss or
+partial accounting in either enabled arm, rejection, unavailable fingerprint
+work, schema drift, or digest mismatch. Automatic CI does not retry into a
+pass. It requires the reviewed v0.4 budget before measurement; a missing or
+invalid budget fails instead of silently reverting performance to
+`not_evaluated`. Only an explicit manual `ci` dispatch may collect
+budget-independent replacement evidence, and correctness still fails closed.
+The reviewed budget binds three original AMD reports, two preserved Intel
+first-attempt reports including the v0.3 falsification, and three independent
+fresh exact-head v0.4 reports. Any later replacement likewise requires at least
+three independent fresh exact-head reports. The larger release profile is
+manual and never substitutes for required CI. See the
 [agent-recognition benchmark guide](benchmarks/agent-recognition-overhead.md).
 
 When changing the AuditBench evaluation-protocol artifact pipeline, run:
@@ -98,15 +122,17 @@ while Linux benchmark stress is manual.
 - Manual dispatch defaults to stress and uploads the JSON/Markdown report for seven days.
 - No scheduled performance run exists; shared-runner variance and CI cost would make those numbers misleading.
 
-### `agent-recognition-benchmark` — paired real-Linux loss and budget gate
+### `agent-recognition-benchmark` — reference-paired real-Linux loss and budget gate
 
 [`/.github/workflows/agent-recognition-benchmark.yml`](../.github/workflows/agent-recognition-benchmark.yml)
 
 - Relevant pull requests and pushes to `dev` run the bounded CI profile with
-  one warm-up and 20 deterministic AB/BA pairs.
+  one warm-up and 20 deterministic three-arm groups.
 - The required job uses authenticated daemon health to enforce exclusive
   lifecycle, classification, and fingerprint accounting; any unreported or
-  unavailable work fails the reviewed budget gate.
+  unavailable work in either enabled arm fails the reviewed budget gate. The
+  hard CPU signal is the candidate/exact-reference ratio on one VM; synthetic
+  process-CPU calibration remains diagnostic without weakening those ledgers.
 - Manual dispatch defaults to the longer release profile. There is no schedule,
   because privileged performance work consumes runner CPU and shared-runner
   variation is not longitudinal evidence.
@@ -122,8 +148,12 @@ while Linux benchmark stress is manual.
 
 [`/.github/workflows/link-check.yml`](../.github/workflows/link-check.yml)
 
-- Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.9.0` (commit-pinned).
+- Runs on every pull request and weekly via cron, scanning `**/*.md`. Uses `lycheeverse/lychee-action@v2.9.0` (commit-pinned).
 - Currently excludes five URL patterns/domains. One (`security/advisories/new`) requires being signed in to GitHub, so an unauthenticated checker gets a 404. Four bot-blocking domains (`developers.redhat.com`, `medium.com`, `answers.uillinois.edu`, `theregister.com`) return 403 to automated requests; these are legitimate research citations excluded rather than removed. The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
+- Timeouts remain failures. Prefer an immutable upstream primary reference over
+  excluding a slow mirror or enabling `--accept-timeouts`; exclusions are for
+  sources that are legitimate but structurally unavailable to automation, not
+  a substitute for maintaining citations.
 
 ### `validate-formats` — JSON and YAML parsers
 
@@ -156,6 +186,11 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
   directories unless a test explicitly directs output elsewhere. Coverage data
   and the uploaded XML report are written to the GitHub runner temp directory.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
+- **Windows portability compile**: the Go job also cross-compiles
+  `pkg/kernelcapture`, `ardur-kernelcaptured`, and the agent-recognition
+  benchmark command for `windows/amd64` without executing them. This guards
+  portable import boundaries; it does not claim Windows kernel capture or
+  enforcement support.
 - **Demo stack smoke**: starts the exact `make demo` target from fresh Compose
   volumes in detached/wait mode, then runs `scripts/verify-mvp.sh`. The job
   requires healthy public endpoints, authenticated issue/start, one `PERMIT`,

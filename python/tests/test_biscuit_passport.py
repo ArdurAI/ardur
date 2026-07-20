@@ -6,6 +6,7 @@ from dataclasses import fields
 import pytest
 from biscuit_auth import (
     Biscuit,
+    BiscuitBuilder,
     BiscuitValidationError,
     BlockBuilder,
     Fact,
@@ -213,6 +214,65 @@ def test_verify_accepts_valid_biscuit() -> None:
     assert context.agent_id == "agent-001"
     assert context.spiffe_id == "spiffe://example.org/agent/root"
     assert context.issuer_spiffe_id == "spiffe://example.org/issuer/root"
+
+
+def test_verify_preserves_special_authority_values_with_explicit_scope() -> None:
+    keypair = _keypair()
+    mission = 'line 1\nline 2; a "quoted" value'
+    token = issue_biscuit_passport(
+        _mission(mission=mission),
+        keypair.private_key,
+        "spiffe://example.org/issuer/root",
+        now=100,
+    )
+
+    context = verify_biscuit_passport(token, keypair.public_key, now=101)
+
+    assert context.mission == mission
+
+
+@pytest.mark.parametrize(
+    ("duplicate_sources", "error"),
+    [
+        (
+            ("max_tool_calls(1)", "max_tool_calls(999)"),
+            "malformed:max_tool_calls",
+        ),
+        (
+            (
+                "max_tool_calls(1)",
+                'mission_id("mission:first")',
+                'mission_id("mission:second")',
+            ),
+            "malformed:mission_id",
+        ),
+    ],
+)
+def test_verify_rejects_duplicate_authority_scalar(
+    duplicate_sources: tuple[str, ...],
+    error: str,
+) -> None:
+    keypair = _keypair()
+    builder = BiscuitBuilder()
+    authority_sources = (
+        'agent_id("agent-001")',
+        'spiffe_id("spiffe://example.org/agent/root")',
+        'issuer_spiffe_id("spiffe://example.org/issuer/root")',
+        'mission("duplicate scalar regression")',
+        'jti("root-jti")',
+        "iat(100)",
+        "exp(700)",
+        "max_duration_s(300)",
+        "delegation_allowed(false)",
+        "max_delegation_depth(0)",
+        "resource_scope_empty(true)",
+    )
+    for source in (*authority_sources, *duplicate_sources):
+        builder.add_fact(Fact(source))
+    token = bytes(builder.build(keypair.private_key).to_bytes())
+
+    with pytest.raises(BiscuitVerifyError, match=error):
+        verify_biscuit_passport(token, keypair.public_key, now=101)
 
 
 def test_verify_rejects_wrong_root_public_key() -> None:

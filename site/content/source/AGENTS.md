@@ -2,7 +2,7 @@
 title: "Ardur Agent Instructions"
 description: "The canonical entry point for coding agents working in this repository. These"
 source_path: "AGENTS.md"
-source_sha256: "d0ee1142c3f783bd09eacef617a954a1e61e534f7d69d639496d8b8a23b3f6ba"
+source_sha256: "daf6e20bf755e281dce56a3906f9deff491e0a4f6a908439e5eb2e6d97dd6357"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -32,8 +32,14 @@ Run the Conductor bootstrap before doing task-specific work:
 ./scripts/conductor-bootstrap.sh
 ```
 
-Then read `.context/ARDUR_CONTEXT.md` and `.context/ardur-graph.md`. The JSON
-graph at `.context/ardur-graph.json` is the machine-readable map of the repo.
+Then read `.context/ARDUR_CONTEXT.md`. Its **Generated Graph** section is the
+authority for graph availability:
+
+- When the status is `available`, read `.context/ardur-graph.md` and use
+  `.context/ardur-graph.json` as the machine-readable map of the repo.
+- When the status is `unavailable`, continue with the live source and workflow
+  files listed in the context. Missing graph artifacts are optional in this
+  path and are not a bootstrap failure.
 
 If the bootstrap fails, stop and inspect the failure before editing files. A
 failed bootstrap usually means the local toolchain, branch state, or generated

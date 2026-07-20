@@ -637,9 +637,9 @@ Web (accessed 2026-07-03):
 - Santa MONITOR/LOCKDOWN semantics: <https://santa.dev/concepts/mode.html>,
   <https://github.com/northpolesec/santa>
 - SELinux targeted/unconfined; AppArmor complain mode + `aa-logprof`:
-  <https://documentation.suse.com/sles/12-SP5/html/SLES-all/cha-apparmor-concept.html>,
-  <https://wiki.archlinux.org/title/AppArmor>,
-  <https://tuxcare.com/blog/selinux-vs-apparmor/>
+  <https://fedoraproject.org/wiki/SELinux/Policies>,
+  <https://documentation.ubuntu.com/server/how-to/security/apparmor/>,
+  <https://apparmor.net/man/4.0/aa-logprof/>
 - NAC/802.1X quarantine & guest VLAN, posture assessment:
   <https://www.forescout.com/glossary/802-1x-network-access-control/>,
   <https://infohub.delltechnologies.com/static/media/60658f87-85c9-4493-a78a-7871a3e7acbb.pdf>

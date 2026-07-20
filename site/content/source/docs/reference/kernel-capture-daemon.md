@@ -2,7 +2,7 @@
 title: "Kernel Capture Daemon Operations"
 description: "`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket"
 source_path: "docs/reference/kernel-capture-daemon.md"
-source_sha256: "11c97a2d9f46f5e27a911ccf3c9df0ff86e7b6564d6edb17049e376d3beb7b65"
+source_sha256: "cc19620b1b088b8c4e55e9f85203b822df74388579c9d573e670710c1e94a048"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -351,8 +351,10 @@ fingerprinting and ordinary lifecycle capture continue; launcher submissions
 return `unsupported_kernel`. Other bounded outcomes include process exit,
 missing kernel identity, unsupported filesystem, missing locator, locator
 mismatch, resolution denial, interpreter denial, argument/size/deadline limit,
-digest mismatch, queue saturation, and success. The lifecycle ringbuf consumer
-never performs file I/O or waits for queue capacity.
+digest mismatch, queue saturation, worker unavailability, and success. An
+observer callback must return before an attempt is counted as successfully
+published, so every attempt occupies one terminal bucket. The lifecycle
+ringbuf consumer never performs file I/O or waits for queue capacity.
 
 A configured match produces `confidence=medium` and
 `identity_assurance=heuristic_executable_content` for native objects or
@@ -404,10 +406,12 @@ adopts a process, selects policy, or enforces an action. Any
 process can reuse one of these names, and unlisted launch shapes remain false
 negatives. The [agent-recognition evaluation
 reference](agent-recognition-evaluation.md) documents the versioned sanitized
-corpus, deterministic report, maintained-corpus threshold, Wilson intervals,
-and known renamed-binary false negatives. Issue #67 remains open for stronger
-fingerprints and additional signal strata, and the attestation and governance
-slices remain separate.
+corpus, separately reported name-only and synthetic content-fingerprint
+strata, deterministic report, maintained-corpus thresholds, Wilson intervals,
+known renamed-binary false negatives, and zero mismatch-promotion gate. This
+completes the bounded Linux classification evidence contract in #67.
+Attestation, adoption, governance, and macOS/Windows launch sources remain
+separate slices under #68, #69, #70, #71, and #106.
 
 Kernel contract references: Linux [`fs/exec.c`](https://github.com/torvalds/linux/blob/v6.10/fs/exec.c),
 [`fs/binfmt_script.c`](https://github.com/torvalds/linux/blob/v6.10/fs/binfmt_script.c),

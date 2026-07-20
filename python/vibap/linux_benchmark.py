@@ -24,6 +24,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import ValidationError
 
 from ._specs import linux_governance_benchmark_report_v01_schema
 from .backends.native import NativeBackend
@@ -47,6 +48,9 @@ MAX_SENSOR_CONFIG_BYTES = 64 * 1024
 MAX_ARGV_ITEMS = 64
 MAX_ARG_BYTES = 4096
 MAX_ARGV_BYTES = 32 * 1024
+MAX_SCHEMA_ERROR_DETAILS = 5
+MAX_SCHEMA_ERROR_PATH_CHARS = 192
+MAX_SCHEMA_ERROR_TEXT_CHARS = 512
 
 LIMITATIONS = (
     "Smoke mode verifies report shape and execution only; it is not performance evidence.",
@@ -940,18 +944,74 @@ def _validate_source_ref(source_ref: str) -> str:
     )
 
 
+def _schema_error_token(value: object, *, fallback: str) -> str:
+    if not isinstance(value, str):
+        return fallback
+    token = "".join(
+        character
+        if character.isascii() and (character.isalnum() or character in "_-")
+        else "?"
+        for character in value[:64]
+    )
+    return token or fallback
+
+
+def _schema_error_path(error: ValidationError) -> str:
+    parts = ["$"]
+    for component in error.absolute_path:
+        if isinstance(component, bool):
+            parts.append("[?]")
+        elif isinstance(component, int):
+            parts.append(f"[{component}]")
+        elif isinstance(component, str):
+            parts.append(f".{_schema_error_token(component, fallback='?')}")
+        else:
+            parts.append(".?")
+    path = "".join(parts)
+    if len(path) > MAX_SCHEMA_ERROR_PATH_CHARS:
+        return path[: MAX_SCHEMA_ERROR_PATH_CHARS - 3] + "..."
+    return path
+
+
+def _schema_error_sort_key(error: ValidationError) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        _schema_error_path(error),
+        _schema_error_token(error.validator, fallback="unknown"),
+        tuple(str(component) for component in error.absolute_schema_path),
+    )
+
+
+def _schema_failure_detail(errors: Sequence[ValidationError]) -> str:
+    seen_details: set[str] = set()
+    details: list[str] = []
+    for error in errors:
+        rule = _schema_error_token(error.validator, fallback="unknown")
+        detail = f"{_schema_error_path(error)} [{rule}]"
+        if detail in seen_details:
+            continue
+        seen_details.add(detail)
+        if len(details) < MAX_SCHEMA_ERROR_DETAILS:
+            details.append(detail)
+
+    omitted = len(seen_details) - len(details)
+    summary = "generated report violated its JSON Schema: " + "; ".join(details)
+    suffix = ""
+    if omitted > 0:
+        suffix = f"; +{omitted} more"
+    if len(summary) + len(suffix) <= MAX_SCHEMA_ERROR_TEXT_CHARS:
+        return summary + suffix
+    body_limit = MAX_SCHEMA_ERROR_TEXT_CHARS - len(suffix)
+    return summary[: body_limit - 3] + "..." + suffix
+
+
 def validate_report(report: Mapping[str, Any]) -> None:
     validator = Draft202012Validator(
         linux_governance_benchmark_report_v01_schema(),
         format_checker=FormatChecker(),
     )
-    errors = sorted(
-        validator.iter_errors(report), key=lambda item: list(item.absolute_path)
-    )
+    errors = sorted(validator.iter_errors(report), key=_schema_error_sort_key)
     if errors:
-        raise BenchmarkError(
-            "report_schema_invalid", "generated report violated its JSON Schema"
-        )
+        raise BenchmarkError("report_schema_invalid", _schema_failure_detail(errors))
 
 
 def run_benchmark(

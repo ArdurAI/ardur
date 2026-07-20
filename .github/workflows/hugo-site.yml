@@ -33,6 +33,11 @@ jobs:
           set -euo pipefail
           python3 site/scripts/validate_claims.py
 
+      - name: Test llms.txt validation contract
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s site/tests -p 'test_*.py' -v
+
       - name: Install Hugo
         run: |
           set -euo pipefail
@@ -52,6 +57,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 site/scripts/validate_rendered_docs_links.py site/public
+
+      - name: Verify generated llms.txt
+        run: |
+          set -euo pipefail
+          python3 site/scripts/validate_llms_output.py site/public
 
       - name: Verify rendered source provenance
         run: |

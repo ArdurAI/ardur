@@ -2,7 +2,7 @@
 title: "Phase 1 Demo Packet"
 description: "Use this packet after the [Claude Code MVP quickstart](claude-code-mvp-quickstart.md)"
 source_path: "docs/guides/phase1-demo-packet.md"
-source_sha256: "76575f9f2187a71eba1330617a697b9c57b0ba39cffc35b1ae59d82a6e46202c"
+source_sha256: "8453ff65b527cbd698a9e4a27329015ee5d82dd9cb0114cc122a2752b8b9d9c0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -41,10 +41,8 @@ Say this before showing artifacts:
 From a clean checkout of the current `dev` branch:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 python3 scripts/run-claude-deny-demo.py
 

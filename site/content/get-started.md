@@ -21,20 +21,22 @@ the setup that matches your host.
 ```bash
 # 1. Clone the repo
 git clone https://github.com/ArdurAI/ardur.git
-cd ardur/python
+cd ardur
 
-# 2. Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+# 2. Create the dev virtualenv and install the package
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
-# 3. Install the local package
-pip install -e .
-
-# 4. Verify it works
-PYTHONPATH=. python -c "from vibap.passport import generate_keypair; generate_keypair()"
+# 3. Verify it works
+PYTHONPATH=python python -c "from vibap.passport import generate_keypair; generate_keypair()"
 ```
 
 **Done.** You can now issue mission passports and run the governance proxy.
+
+For a manual install instead, use Python 3.10 or newer (`python/pyproject.toml`
+enforces this), run `python -m pip install --upgrade pip`, then
+`pip install -e python/`. macOS system Python 3.9 and its bundled pip are too
+old for the PEP 660 editable install.
 
 ---
 
@@ -43,12 +45,12 @@ PYTHONPATH=. python -c "from vibap.passport import generate_keypair; generate_ke
 ```bash
 # 1. Clone and set up Python
 git clone https://github.com/ArdurAI/ardur.git
-cd ardur/python
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+cd ardur
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 # 2. Optional: build the Go AAT engine
-cd ../go && go build ./...
+cd go && go build ./...
 ```
 
 ---
@@ -135,9 +137,8 @@ temporary state:
 ```bash
 git clone https://github.com/ArdurAI/ardur.git
 cd ardur
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 python scripts/run-no-key-mvp-demo.py
 ```
 

@@ -143,6 +143,11 @@
       "minimum": 0,
       "maximum": 1000000
     },
+    "byteCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000000000
+    },
     "finiteNonnegative": {
       "type": "number",
       "minimum": 0,
@@ -419,7 +424,7 @@
           "$ref": "#/$defs/finiteNonnegative"
         },
         "python_heap_peak_bytes": {
-          "$ref": "#/$defs/count"
+          "$ref": "#/$defs/byteCount"
         },
         "linux_rss_start_kib": {
           "oneOf": [

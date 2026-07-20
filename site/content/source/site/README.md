@@ -2,7 +2,7 @@
 title: "Ardur Public Evidence Site"
 description: "This Hugo project renders Ardur's public evidence and documentation surface."
 source_path: "site/README.md"
-source_sha256: "cfbb9a9a37992119d8c1363ae4fc45b6bfa56fb3e03b5f22c41a2a87f63bc5e6"
+source_sha256: "dc495a11378eaf9f5bca0cf396ff3dc1102ab722b08043dac73a82a5a688c919"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -45,11 +45,23 @@ Extended.
 ```sh
 python3 site/scripts/sync_source_docs.py --check
 python3 site/scripts/validate_claims.py
+python3 -m unittest discover -s site/tests -p 'test_*.py' -v
 hugo --source site --gc --minify
+python3 site/scripts/validate_rendered_docs_links.py site/public
+python3 site/scripts/validate_llms_output.py site/public
 ```
 
 `validate_claims.py` fails when a claim card is missing required evidence
 metadata or points at a repo path that does not exist.
+
+The build also generates `site/public/llms.txt` from Hugo's regular-page
+collection. It lists current public pages first, generated source-backed
+repository documentation second, and already-public pages without the
+`public-now` maturity label under the standard `Optional` section. Entries are
+ordered by their rendered routes; drafts and files outside Hugo's public
+content tree are not eligible. `validate_llms_output.py` checks the required
+plain-text structure, canonical HTTPS routes, duplicate URLs, rendered targets,
+path traversal, and source-provenance placeholders.
 
 `sync_source_docs.py` generates the `site/content/source/` mirrors from all
 public Markdown files in the repo, including root docs, articles, package

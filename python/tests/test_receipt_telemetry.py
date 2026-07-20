@@ -531,3 +531,36 @@ def test_cli_writes_otlp_inspection_bundle_owner_only(
     assert summary["raw_content_exported"] is False
     assert set(json.loads(output.read_bytes())) == {"logs", "traces"}
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("timeout", ["0", "61"])
+def test_cli_timeout_prevalidated(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], timeout: str
+) -> None:
+    """CLI rejects out-of-range --timeout-s before receipt verification.
+
+    Mirrors the cmd_verify numeric pre-validation pattern: the guard fires
+    before receipt key loading, so no trusted key material is required to
+    reproduce the rejection and no network call is attempted.
+    """
+    journal = tmp_path / "receipts.jsonl"
+    journal.write_text("{}\n", encoding="utf-8")
+    missing_key = tmp_path / "missing-receipt.pem"
+
+    assert (
+        cli_main(
+            [
+                "telemetry",
+                "export",
+                str(journal),
+                "--receipt-public-key",
+                str(missing_key),
+                "--timeout-s",
+                timeout,
+            ]
+        )
+        == 1
+    )
+    failure = json.loads(capsys.readouterr().out)
+    assert failure["error"] == "otlp_timeout_invalid"
+    assert failure["ok"] is False

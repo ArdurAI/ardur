@@ -1,0 +1,5684 @@
+{
+  "schema_version": "ardur.agent_recognition_benchmark_report.v0.2",
+  "generated_at": "2026-07-17T11:07:02.693475854Z",
+  "source_sha": "a0bdcd981107631a45476ac27f84ed17da2d221d",
+  "seed": 302,
+  "warmup_pairs": 1,
+  "measured_pairs": 20,
+  "pair_order": "deterministic_ab_ba_alternation",
+  "environment": {
+    "os": "linux",
+    "architecture": "amd64",
+    "kernel_release": "6.17.0-1020-azure",
+    "go_version": "go1.26.5",
+    "cpu_count": 4,
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "cgroup_cpu_max": "max 100000",
+    "effective_cpu_set": "0-3",
+    "runner_image_os": "ubuntu24",
+    "runner_image_version": "20260714.240.1"
+  },
+  "workload_sha256": "7af4093ee859bb65f8e2ead41d3efc5f2a6cb4f7e2fe33131268d21f2db9e25d",
+  "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+  "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+  "calibration": {
+    "algorithm": "sha256_workload_process_cpu.v1",
+    "workload_bytes": 2148089,
+    "iterations_per_sample": 125,
+    "bytes_per_sample": 268511125,
+    "process_cpu_samples_nanoseconds": [
+      191872768,
+      192027212,
+      191500020
+    ],
+    "process_cpu_nanoseconds": {
+      "sample_count": 3,
+      "p50": 191872768,
+      "p95": 192027212,
+      "min": 191500020,
+      "max": 192027212,
+      "mean": 191800000
+    }
+  },
+  "pairs": [
+    {
+      "pair_index": 0,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209009251,
+        "accounting_settle_nanoseconds": 442881,
+        "daemon_cpu_nanoseconds": 1055004,
+        "daemon_peak_rss_kib": 11288,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209711974,
+        "accounting_settle_nanoseconds": 482399,
+        "daemon_cpu_nanoseconds": 11550453,
+        "daemon_peak_rss_kib": 13436,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 702723,
+        "denominator_nanoseconds": 1209009251,
+        "percent": 0.0581238728668752
+      },
+      "daemon_cpu_delta_nanoseconds": 10495449
+    },
+    {
+      "pair_index": 0,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1519514486,
+        "accounting_settle_nanoseconds": 396301,
+        "daemon_cpu_nanoseconds": 2284443,
+        "daemon_peak_rss_kib": 11296,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1520105893,
+        "accounting_settle_nanoseconds": 433893,
+        "daemon_cpu_nanoseconds": 47032224,
+        "daemon_peak_rss_kib": 13468,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 591407,
+        "denominator_nanoseconds": 1519514486,
+        "percent": 0.03892078722834894
+      },
+      "daemon_cpu_delta_nanoseconds": 44747781
+    },
+    {
+      "pair_index": 0,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524483297,
+        "accounting_settle_nanoseconds": 442970,
+        "daemon_cpu_nanoseconds": 1669438,
+        "daemon_peak_rss_kib": 11308,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1533474284,
+        "accounting_settle_nanoseconds": 461709,
+        "daemon_cpu_nanoseconds": 165859182,
+        "daemon_peak_rss_kib": 13492,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 8990987,
+        "denominator_nanoseconds": 1524483297,
+        "percent": 0.5897727458013599
+      },
+      "daemon_cpu_delta_nanoseconds": 164189744
+    },
+    {
+      "pair_index": 1,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1208947712,
+        "accounting_settle_nanoseconds": 424213,
+        "daemon_cpu_nanoseconds": 1018323,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209813360,
+        "accounting_settle_nanoseconds": 443637,
+        "daemon_cpu_nanoseconds": 11169505,
+        "daemon_peak_rss_kib": 13396,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 865648,
+        "denominator_nanoseconds": 1208947712,
+        "percent": 0.07160342762615693
+      },
+      "daemon_cpu_delta_nanoseconds": 10151182
+    },
+    {
+      "pair_index": 1,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515720937,
+        "accounting_settle_nanoseconds": 390884,
+        "daemon_cpu_nanoseconds": 1491014,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517325828,
+        "accounting_settle_nanoseconds": 466291,
+        "daemon_cpu_nanoseconds": 46734143,
+        "daemon_peak_rss_kib": 13432,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1604891,
+        "denominator_nanoseconds": 1515720937,
+        "percent": 0.10588301321326934
+      },
+      "daemon_cpu_delta_nanoseconds": 45243129
+    },
+    {
+      "pair_index": 1,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1523045256,
+        "accounting_settle_nanoseconds": 415796,
+        "daemon_cpu_nanoseconds": 2360786,
+        "daemon_peak_rss_kib": 11276,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1540494394,
+        "accounting_settle_nanoseconds": 435525,
+        "daemon_cpu_nanoseconds": 167634921,
+        "daemon_peak_rss_kib": 13492,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 17449138,
+        "denominator_nanoseconds": 1523045256,
+        "percent": 1.145674295051939
+      },
+      "daemon_cpu_delta_nanoseconds": 165274135
+    },
+    {
+      "pair_index": 2,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209054647,
+        "accounting_settle_nanoseconds": 448625,
+        "daemon_cpu_nanoseconds": 1056472,
+        "daemon_peak_rss_kib": 13316,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1210008650,
+        "accounting_settle_nanoseconds": 500677,
+        "daemon_cpu_nanoseconds": 11836800,
+        "daemon_peak_rss_kib": 11344,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 954003,
+        "denominator_nanoseconds": 1209054647,
+        "percent": 0.07890487021137929
+      },
+      "daemon_cpu_delta_nanoseconds": 10780328
+    },
+    {
+      "pair_index": 2,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516466882,
+        "accounting_settle_nanoseconds": 429154,
+        "daemon_cpu_nanoseconds": 1173205,
+        "daemon_peak_rss_kib": 13316,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516893951,
+        "accounting_settle_nanoseconds": 452860,
+        "daemon_cpu_nanoseconds": 47036376,
+        "daemon_peak_rss_kib": 11368,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 427069,
+        "denominator_nanoseconds": 1516466882,
+        "percent": 0.028162105290209696
+      },
+      "daemon_cpu_delta_nanoseconds": 45863171
+    },
+    {
+      "pair_index": 2,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1523970867,
+        "accounting_settle_nanoseconds": 461032,
+        "daemon_cpu_nanoseconds": 2063188,
+        "daemon_peak_rss_kib": 13328,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1537601452,
+        "accounting_settle_nanoseconds": 422456,
+        "daemon_cpu_nanoseconds": 164218442,
+        "daemon_peak_rss_kib": 11420,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 13630585,
+        "denominator_nanoseconds": 1523970867,
+        "percent": 0.8944124389222987
+      },
+      "daemon_cpu_delta_nanoseconds": 162155254
+    },
+    {
+      "pair_index": 3,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209212686,
+        "accounting_settle_nanoseconds": 474007,
+        "daemon_cpu_nanoseconds": 1018374,
+        "daemon_peak_rss_kib": 13348,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209738107,
+        "accounting_settle_nanoseconds": 459306,
+        "daemon_cpu_nanoseconds": 11040754,
+        "daemon_peak_rss_kib": 11352,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 525421,
+        "denominator_nanoseconds": 1209212686,
+        "percent": 0.04345149584380063
+      },
+      "daemon_cpu_delta_nanoseconds": 10022380
+    },
+    {
+      "pair_index": 3,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515542592,
+        "accounting_settle_nanoseconds": 401004,
+        "daemon_cpu_nanoseconds": 1060906,
+        "daemon_peak_rss_kib": 13348,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515798851,
+        "accounting_settle_nanoseconds": 441840,
+        "daemon_cpu_nanoseconds": 45469542,
+        "daemon_peak_rss_kib": 11384,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 256259,
+        "denominator_nanoseconds": 1515542592,
+        "percent": 0.016908729675609142
+      },
+      "daemon_cpu_delta_nanoseconds": 44408636
+    },
+    {
+      "pair_index": 3,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524028297,
+        "accounting_settle_nanoseconds": 378241,
+        "daemon_cpu_nanoseconds": 1176457,
+        "daemon_peak_rss_kib": 13348,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1535831021,
+        "accounting_settle_nanoseconds": 454543,
+        "daemon_cpu_nanoseconds": 165734936,
+        "daemon_peak_rss_kib": 13484,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 11802724,
+        "denominator_nanoseconds": 1524028297,
+        "percent": 0.774442575851989
+      },
+      "daemon_cpu_delta_nanoseconds": 164558479
+    },
+    {
+      "pair_index": 4,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209226433,
+        "accounting_settle_nanoseconds": 806399,
+        "daemon_cpu_nanoseconds": 1464640,
+        "daemon_peak_rss_kib": 13340,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209829754,
+        "accounting_settle_nanoseconds": 483286,
+        "daemon_cpu_nanoseconds": 11209278,
+        "daemon_peak_rss_kib": 11364,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 603321,
+        "denominator_nanoseconds": 1209226433,
+        "percent": 0.049893136929136245
+      },
+      "daemon_cpu_delta_nanoseconds": 9744638
+    },
+    {
+      "pair_index": 4,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516425930,
+        "accounting_settle_nanoseconds": 388315,
+        "daemon_cpu_nanoseconds": 1596378,
+        "daemon_peak_rss_kib": 13340,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516303440,
+        "accounting_settle_nanoseconds": 437828,
+        "daemon_cpu_nanoseconds": 47325034,
+        "daemon_peak_rss_kib": 11384,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": -122490,
+        "denominator_nanoseconds": 1516425930,
+        "percent": -0.008077545864703066
+      },
+      "daemon_cpu_delta_nanoseconds": 45728656
+    },
+    {
+      "pair_index": 4,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1522805487,
+        "accounting_settle_nanoseconds": 374765,
+        "daemon_cpu_nanoseconds": 3221664,
+        "daemon_peak_rss_kib": 13340,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1531634826,
+        "accounting_settle_nanoseconds": 446206,
+        "daemon_cpu_nanoseconds": 163132310,
+        "daemon_peak_rss_kib": 13532,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 8829339,
+        "denominator_nanoseconds": 1522805487,
+        "percent": 0.5798074064859211
+      },
+      "daemon_cpu_delta_nanoseconds": 159910646
+    },
+    {
+      "pair_index": 5,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209369702,
+        "accounting_settle_nanoseconds": 434939,
+        "daemon_cpu_nanoseconds": 1074180,
+        "daemon_peak_rss_kib": 11280,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209910134,
+        "accounting_settle_nanoseconds": 486110,
+        "daemon_cpu_nanoseconds": 11288932,
+        "daemon_peak_rss_kib": 13412,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 540432,
+        "denominator_nanoseconds": 1209369702,
+        "percent": 0.044687079484979526
+      },
+      "daemon_cpu_delta_nanoseconds": 10214752
+    },
+    {
+      "pair_index": 5,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515399037,
+        "accounting_settle_nanoseconds": 391555,
+        "daemon_cpu_nanoseconds": 1666187,
+        "daemon_peak_rss_kib": 11284,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517924855,
+        "accounting_settle_nanoseconds": 823164,
+        "daemon_cpu_nanoseconds": 47641200,
+        "daemon_peak_rss_kib": 13444,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 2525818,
+        "denominator_nanoseconds": 1515399037,
+        "percent": 0.16667675894794698
+      },
+      "daemon_cpu_delta_nanoseconds": 45975013
+    },
+    {
+      "pair_index": 5,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1526182951,
+        "accounting_settle_nanoseconds": 480656,
+        "daemon_cpu_nanoseconds": 1338224,
+        "daemon_peak_rss_kib": 11296,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1534031997,
+        "accounting_settle_nanoseconds": 440141,
+        "daemon_cpu_nanoseconds": 164729051,
+        "daemon_peak_rss_kib": 13476,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 7849046,
+        "denominator_nanoseconds": 1526182951,
+        "percent": 0.5142926013461934
+      },
+      "daemon_cpu_delta_nanoseconds": 163390827
+    },
+    {
+      "pair_index": 6,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209044416,
+        "accounting_settle_nanoseconds": 406993,
+        "daemon_cpu_nanoseconds": 1052146,
+        "daemon_peak_rss_kib": 11300,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209456000,
+        "accounting_settle_nanoseconds": 442961,
+        "daemon_cpu_nanoseconds": 11229696,
+        "daemon_peak_rss_kib": 13396,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 411584,
+        "denominator_nanoseconds": 1209044416,
+        "percent": 0.03404209097310781
+      },
+      "daemon_cpu_delta_nanoseconds": 10177550
+    },
+    {
+      "pair_index": 6,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516601078,
+        "accounting_settle_nanoseconds": 400308,
+        "daemon_cpu_nanoseconds": 1122968,
+        "daemon_peak_rss_kib": 11300,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517527834,
+        "accounting_settle_nanoseconds": 425620,
+        "daemon_cpu_nanoseconds": 46271161,
+        "daemon_peak_rss_kib": 13432,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 926756,
+        "denominator_nanoseconds": 1516601078,
+        "percent": 0.06110743381655436
+      },
+      "daemon_cpu_delta_nanoseconds": 45148193
+    },
+    {
+      "pair_index": 6,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1525169409,
+        "accounting_settle_nanoseconds": 394965,
+        "daemon_cpu_nanoseconds": 1207051,
+        "daemon_peak_rss_kib": 11300,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1531618010,
+        "accounting_settle_nanoseconds": 463781,
+        "daemon_cpu_nanoseconds": 163862106,
+        "daemon_peak_rss_kib": 13468,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 6448601,
+        "denominator_nanoseconds": 1525169409,
+        "percent": 0.4228121126706915
+      },
+      "daemon_cpu_delta_nanoseconds": 162655055
+    },
+    {
+      "pair_index": 7,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209269400,
+        "accounting_settle_nanoseconds": 438915,
+        "daemon_cpu_nanoseconds": 1059563,
+        "daemon_peak_rss_kib": 11260,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209292068,
+        "accounting_settle_nanoseconds": 462680,
+        "daemon_cpu_nanoseconds": 11784408,
+        "daemon_peak_rss_kib": 13396,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 22668,
+        "denominator_nanoseconds": 1209269400,
+        "percent": 0.001874520268188379
+      },
+      "daemon_cpu_delta_nanoseconds": 10724845
+    },
+    {
+      "pair_index": 7,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516462365,
+        "accounting_settle_nanoseconds": 415055,
+        "daemon_cpu_nanoseconds": 3338574,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516734236,
+        "accounting_settle_nanoseconds": 467502,
+        "daemon_cpu_nanoseconds": 46322677,
+        "daemon_peak_rss_kib": 13440,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 271871,
+        "denominator_nanoseconds": 1516462365,
+        "percent": 0.01792797541665335
+      },
+      "daemon_cpu_delta_nanoseconds": 42984103
+    },
+    {
+      "pair_index": 7,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1523951467,
+        "accounting_settle_nanoseconds": 469550,
+        "daemon_cpu_nanoseconds": 3206181,
+        "daemon_peak_rss_kib": 11276,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1540346808,
+        "accounting_settle_nanoseconds": 444618,
+        "daemon_cpu_nanoseconds": 162618123,
+        "daemon_peak_rss_kib": 13472,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 16395341,
+        "denominator_nanoseconds": 1523951467,
+        "percent": 1.0758440380175176
+      },
+      "daemon_cpu_delta_nanoseconds": 159411942
+    },
+    {
+      "pair_index": 8,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209389345,
+        "accounting_settle_nanoseconds": 436947,
+        "daemon_cpu_nanoseconds": 1649502,
+        "daemon_peak_rss_kib": 13324,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209874025,
+        "accounting_settle_nanoseconds": 476058,
+        "daemon_cpu_nanoseconds": 11296925,
+        "daemon_peak_rss_kib": 11376,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 484680,
+        "denominator_nanoseconds": 1209389345,
+        "percent": 0.040076423858356386
+      },
+      "daemon_cpu_delta_nanoseconds": 9647423
+    },
+    {
+      "pair_index": 8,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1514911585,
+        "accounting_settle_nanoseconds": 400444,
+        "daemon_cpu_nanoseconds": 1144607,
+        "daemon_peak_rss_kib": 13324,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516526735,
+        "accounting_settle_nanoseconds": 471187,
+        "daemon_cpu_nanoseconds": 47528110,
+        "daemon_peak_rss_kib": 11404,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1615150,
+        "denominator_nanoseconds": 1514911585,
+        "percent": 0.10661678318342255
+      },
+      "daemon_cpu_delta_nanoseconds": 46383503
+    },
+    {
+      "pair_index": 8,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1523299458,
+        "accounting_settle_nanoseconds": 486063,
+        "daemon_cpu_nanoseconds": 1241291,
+        "daemon_peak_rss_kib": 13336,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1538075204,
+        "accounting_settle_nanoseconds": 471488,
+        "daemon_cpu_nanoseconds": 162549585,
+        "daemon_peak_rss_kib": 13480,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 14775746,
+        "denominator_nanoseconds": 1523299458,
+        "percent": 0.9699830143312503
+      },
+      "daemon_cpu_delta_nanoseconds": 161308294
+    },
+    {
+      "pair_index": 9,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1208998271,
+        "accounting_settle_nanoseconds": 455695,
+        "daemon_cpu_nanoseconds": 1699732,
+        "daemon_peak_rss_kib": 13316,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209686937,
+        "accounting_settle_nanoseconds": 437719,
+        "daemon_cpu_nanoseconds": 11078874,
+        "daemon_peak_rss_kib": 13428,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 688666,
+        "denominator_nanoseconds": 1208998271,
+        "percent": 0.05696170263588408
+      },
+      "daemon_cpu_delta_nanoseconds": 9379142
+    },
+    {
+      "pair_index": 9,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515560159,
+        "accounting_settle_nanoseconds": 416767,
+        "daemon_cpu_nanoseconds": 3897695,
+        "daemon_peak_rss_kib": 13316,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516712295,
+        "accounting_settle_nanoseconds": 424803,
+        "daemon_cpu_nanoseconds": 45317109,
+        "daemon_peak_rss_kib": 13460,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1152136,
+        "denominator_nanoseconds": 1515560159,
+        "percent": 0.07602047290291696
+      },
+      "daemon_cpu_delta_nanoseconds": 41419414
+    },
+    {
+      "pair_index": 9,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524022868,
+        "accounting_settle_nanoseconds": 397844,
+        "daemon_cpu_nanoseconds": 2869427,
+        "daemon_peak_rss_kib": 13316,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1534929188,
+        "accounting_settle_nanoseconds": 424614,
+        "daemon_cpu_nanoseconds": 166212532,
+        "daemon_peak_rss_kib": 13500,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 10906320,
+        "denominator_nanoseconds": 1524022868,
+        "percent": 0.7156270571131613
+      },
+      "daemon_cpu_delta_nanoseconds": 163343105
+    },
+    {
+      "pair_index": 10,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209157966,
+        "accounting_settle_nanoseconds": 454183,
+        "daemon_cpu_nanoseconds": 1682908,
+        "daemon_peak_rss_kib": 13352,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1210366434,
+        "accounting_settle_nanoseconds": 502153,
+        "daemon_cpu_nanoseconds": 11992019,
+        "daemon_peak_rss_kib": 13408,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1208468,
+        "denominator_nanoseconds": 1209157966,
+        "percent": 0.09994293830753292
+      },
+      "daemon_cpu_delta_nanoseconds": 10309111
+    },
+    {
+      "pair_index": 10,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517123154,
+        "accounting_settle_nanoseconds": 390520,
+        "daemon_cpu_nanoseconds": 2189673,
+        "daemon_peak_rss_kib": 13352,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517885104,
+        "accounting_settle_nanoseconds": 496204,
+        "daemon_cpu_nanoseconds": 46520022,
+        "daemon_peak_rss_kib": 13424,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 761950,
+        "denominator_nanoseconds": 1517123154,
+        "percent": 0.050223345282884004
+      },
+      "daemon_cpu_delta_nanoseconds": 44330349
+    },
+    {
+      "pair_index": 10,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1522784788,
+        "accounting_settle_nanoseconds": 370197,
+        "daemon_cpu_nanoseconds": 1732299,
+        "daemon_peak_rss_kib": 13352,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1540525531,
+        "accounting_settle_nanoseconds": 420472,
+        "daemon_cpu_nanoseconds": 164797517,
+        "daemon_peak_rss_kib": 13528,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 17740743,
+        "denominator_nanoseconds": 1522784788,
+        "percent": 1.1650197151824975
+      },
+      "daemon_cpu_delta_nanoseconds": 163065218
+    },
+    {
+      "pair_index": 11,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209627812,
+        "accounting_settle_nanoseconds": 490349,
+        "daemon_cpu_nanoseconds": 1682087,
+        "daemon_peak_rss_kib": 13336,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209637649,
+        "accounting_settle_nanoseconds": 450191,
+        "daemon_cpu_nanoseconds": 11359260,
+        "daemon_peak_rss_kib": 13412,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 9837,
+        "denominator_nanoseconds": 1209627812,
+        "percent": 0.0008132253493523345
+      },
+      "daemon_cpu_delta_nanoseconds": 9677173
+    },
+    {
+      "pair_index": 11,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516470587,
+        "accounting_settle_nanoseconds": 392621,
+        "daemon_cpu_nanoseconds": 1113525,
+        "daemon_peak_rss_kib": 13336,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515683613,
+        "accounting_settle_nanoseconds": 413561,
+        "daemon_cpu_nanoseconds": 45181849,
+        "daemon_peak_rss_kib": 13444,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": -786974,
+        "denominator_nanoseconds": 1516470587,
+        "percent": -0.051895104774623634
+      },
+      "daemon_cpu_delta_nanoseconds": 44068324
+    },
+    {
+      "pair_index": 11,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524614944,
+        "accounting_settle_nanoseconds": 447887,
+        "daemon_cpu_nanoseconds": 2309392,
+        "daemon_peak_rss_kib": 13336,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1530946322,
+        "accounting_settle_nanoseconds": 426501,
+        "daemon_cpu_nanoseconds": 162468457,
+        "daemon_peak_rss_kib": 13488,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 6331378,
+        "denominator_nanoseconds": 1524614944,
+        "percent": 0.4152771835876744
+      },
+      "daemon_cpu_delta_nanoseconds": 160159065
+    },
+    {
+      "pair_index": 12,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209692419,
+        "accounting_settle_nanoseconds": 466616,
+        "daemon_cpu_nanoseconds": 1685693,
+        "daemon_peak_rss_kib": 11264,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209613402,
+        "accounting_settle_nanoseconds": 419390,
+        "daemon_cpu_nanoseconds": 11858633,
+        "daemon_peak_rss_kib": 13400,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": -79017,
+        "denominator_nanoseconds": 1209692419,
+        "percent": -0.006531991005227587
+      },
+      "daemon_cpu_delta_nanoseconds": 10172940
+    },
+    {
+      "pair_index": 12,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515628614,
+        "accounting_settle_nanoseconds": 396933,
+        "daemon_cpu_nanoseconds": 1178514,
+        "daemon_peak_rss_kib": 11264,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516278640,
+        "accounting_settle_nanoseconds": 440031,
+        "daemon_cpu_nanoseconds": 46039854,
+        "daemon_peak_rss_kib": 13428,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 650026,
+        "denominator_nanoseconds": 1515628614,
+        "percent": 0.042888211135343475
+      },
+      "daemon_cpu_delta_nanoseconds": 44861340
+    },
+    {
+      "pair_index": 12,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1526140229,
+        "accounting_settle_nanoseconds": 454327,
+        "daemon_cpu_nanoseconds": 2223394,
+        "daemon_peak_rss_kib": 11264,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1532408662,
+        "accounting_settle_nanoseconds": 422780,
+        "daemon_cpu_nanoseconds": 164176135,
+        "daemon_peak_rss_kib": 13460,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 6268433,
+        "denominator_nanoseconds": 1526140229,
+        "percent": 0.4107376819564855
+      },
+      "daemon_cpu_delta_nanoseconds": 161952741
+    },
+    {
+      "pair_index": 13,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209431226,
+        "accounting_settle_nanoseconds": 419801,
+        "daemon_cpu_nanoseconds": 1585660,
+        "daemon_peak_rss_kib": 11292,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209683284,
+        "accounting_settle_nanoseconds": 473921,
+        "daemon_cpu_nanoseconds": 11852227,
+        "daemon_peak_rss_kib": 13384,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 252058,
+        "denominator_nanoseconds": 1209431226,
+        "percent": 0.020841036231025838
+      },
+      "daemon_cpu_delta_nanoseconds": 10266567
+    },
+    {
+      "pair_index": 13,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515615429,
+        "accounting_settle_nanoseconds": 434357,
+        "daemon_cpu_nanoseconds": 1718761,
+        "daemon_peak_rss_kib": 11292,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516862137,
+        "accounting_settle_nanoseconds": 448769,
+        "daemon_cpu_nanoseconds": 46823694,
+        "daemon_peak_rss_kib": 13408,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1246708,
+        "denominator_nanoseconds": 1515615429,
+        "percent": 0.08225754212746274
+      },
+      "daemon_cpu_delta_nanoseconds": 45104933
+    },
+    {
+      "pair_index": 13,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1523692358,
+        "accounting_settle_nanoseconds": 404618,
+        "daemon_cpu_nanoseconds": 1687421,
+        "daemon_peak_rss_kib": 11292,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1532335113,
+        "accounting_settle_nanoseconds": 521407,
+        "daemon_cpu_nanoseconds": 164361592,
+        "daemon_peak_rss_kib": 13452,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 8642755,
+        "denominator_nanoseconds": 1523692358,
+        "percent": 0.5672244107953975
+      },
+      "daemon_cpu_delta_nanoseconds": 162674171
+    },
+    {
+      "pair_index": 14,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209420621,
+        "accounting_settle_nanoseconds": 442400,
+        "daemon_cpu_nanoseconds": 1548627,
+        "daemon_peak_rss_kib": 11264,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209356527,
+        "accounting_settle_nanoseconds": 463651,
+        "daemon_cpu_nanoseconds": 11746373,
+        "daemon_peak_rss_kib": 13400,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": -64094,
+        "denominator_nanoseconds": 1209420621,
+        "percent": -0.005299562359620128
+      },
+      "daemon_cpu_delta_nanoseconds": 10197746
+    },
+    {
+      "pair_index": 14,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515426195,
+        "accounting_settle_nanoseconds": 409521,
+        "daemon_cpu_nanoseconds": 1748672,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516624105,
+        "accounting_settle_nanoseconds": 454272,
+        "daemon_cpu_nanoseconds": 46502615,
+        "daemon_peak_rss_kib": 13428,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1197910,
+        "denominator_nanoseconds": 1515426195,
+        "percent": 0.07904772953987377
+      },
+      "daemon_cpu_delta_nanoseconds": 44753943
+    },
+    {
+      "pair_index": 14,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1525023710,
+        "accounting_settle_nanoseconds": 423531,
+        "daemon_cpu_nanoseconds": 4037351,
+        "daemon_peak_rss_kib": 11276,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1532913055,
+        "accounting_settle_nanoseconds": 405965,
+        "daemon_cpu_nanoseconds": 162525932,
+        "daemon_peak_rss_kib": 13464,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 7889345,
+        "denominator_nanoseconds": 1525023710,
+        "percent": 0.5173260552126104
+      },
+      "daemon_cpu_delta_nanoseconds": 158488581
+    },
+    {
+      "pair_index": 15,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209096970,
+        "accounting_settle_nanoseconds": 404719,
+        "daemon_cpu_nanoseconds": 1022398,
+        "daemon_peak_rss_kib": 11272,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209376298,
+        "accounting_settle_nanoseconds": 483630,
+        "daemon_cpu_nanoseconds": 12313188,
+        "daemon_peak_rss_kib": 13404,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 279328,
+        "denominator_nanoseconds": 1209096970,
+        "percent": 0.02310219998318249
+      },
+      "daemon_cpu_delta_nanoseconds": 11290790
+    },
+    {
+      "pair_index": 15,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515416224,
+        "accounting_settle_nanoseconds": 403787,
+        "daemon_cpu_nanoseconds": 1097505,
+        "daemon_peak_rss_kib": 11272,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517347024,
+        "accounting_settle_nanoseconds": 456004,
+        "daemon_cpu_nanoseconds": 45783276,
+        "daemon_peak_rss_kib": 13432,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1930800,
+        "denominator_nanoseconds": 1515416224,
+        "percent": 0.127410540379697
+      },
+      "daemon_cpu_delta_nanoseconds": 44685771
+    },
+    {
+      "pair_index": 15,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1523606871,
+        "accounting_settle_nanoseconds": 435529,
+        "daemon_cpu_nanoseconds": 1695847,
+        "daemon_peak_rss_kib": 11280,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1532192618,
+        "accounting_settle_nanoseconds": 414047,
+        "daemon_cpu_nanoseconds": 162651419,
+        "daemon_peak_rss_kib": 13484,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 8585747,
+        "denominator_nanoseconds": 1523606871,
+        "percent": 0.5635145891909016
+      },
+      "daemon_cpu_delta_nanoseconds": 160955572
+    },
+    {
+      "pair_index": 16,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209353922,
+        "accounting_settle_nanoseconds": 432415,
+        "daemon_cpu_nanoseconds": 988608,
+        "daemon_peak_rss_kib": 13328,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209471458,
+        "accounting_settle_nanoseconds": 469419,
+        "daemon_cpu_nanoseconds": 11235049,
+        "daemon_peak_rss_kib": 11360,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 117536,
+        "denominator_nanoseconds": 1209353922,
+        "percent": 0.00971890840736034
+      },
+      "daemon_cpu_delta_nanoseconds": 10246441
+    },
+    {
+      "pair_index": 16,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516137176,
+        "accounting_settle_nanoseconds": 387092,
+        "daemon_cpu_nanoseconds": 2132113,
+        "daemon_peak_rss_kib": 13328,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516515983,
+        "accounting_settle_nanoseconds": 449414,
+        "daemon_cpu_nanoseconds": 45712922,
+        "daemon_peak_rss_kib": 11456,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 378807,
+        "denominator_nanoseconds": 1516137176,
+        "percent": 0.02498500834861133
+      },
+      "daemon_cpu_delta_nanoseconds": 43580809
+    },
+    {
+      "pair_index": 16,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524012043,
+        "accounting_settle_nanoseconds": 442540,
+        "daemon_cpu_nanoseconds": 1799938,
+        "daemon_peak_rss_kib": 13336,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1530875310,
+        "accounting_settle_nanoseconds": 440868,
+        "daemon_cpu_nanoseconds": 163693669,
+        "daemon_peak_rss_kib": 13548,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 6863267,
+        "denominator_nanoseconds": 1524012043,
+        "percent": 0.4503420449676853
+      },
+      "daemon_cpu_delta_nanoseconds": 161893731
+    },
+    {
+      "pair_index": 17,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209214961,
+        "accounting_settle_nanoseconds": 452690,
+        "daemon_cpu_nanoseconds": 1054620,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209612782,
+        "accounting_settle_nanoseconds": 509329,
+        "daemon_cpu_nanoseconds": 11226481,
+        "daemon_peak_rss_kib": 13392,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 397821,
+        "denominator_nanoseconds": 1209214961,
+        "percent": 0.032899113295043
+      },
+      "daemon_cpu_delta_nanoseconds": 10171861
+    },
+    {
+      "pair_index": 17,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515617942,
+        "accounting_settle_nanoseconds": 395996,
+        "daemon_cpu_nanoseconds": 1630332,
+        "daemon_peak_rss_kib": 11272,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517209715,
+        "accounting_settle_nanoseconds": 618464,
+        "daemon_cpu_nanoseconds": 45686457,
+        "daemon_peak_rss_kib": 13416,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1591773,
+        "denominator_nanoseconds": 1515617942,
+        "percent": 0.10502468701970538
+      },
+      "daemon_cpu_delta_nanoseconds": 44056125
+    },
+    {
+      "pair_index": 17,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1525233054,
+        "accounting_settle_nanoseconds": 413402,
+        "daemon_cpu_nanoseconds": 5229347,
+        "daemon_peak_rss_kib": 11284,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1535842617,
+        "accounting_settle_nanoseconds": 446971,
+        "daemon_cpu_nanoseconds": 164719699,
+        "daemon_peak_rss_kib": 13456,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 10609563,
+        "denominator_nanoseconds": 1525233054,
+        "percent": 0.6956027455722842
+      },
+      "daemon_cpu_delta_nanoseconds": 159490352
+    },
+    {
+      "pair_index": 18,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209644377,
+        "accounting_settle_nanoseconds": 425834,
+        "daemon_cpu_nanoseconds": 1563832,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209744910,
+        "accounting_settle_nanoseconds": 464182,
+        "daemon_cpu_nanoseconds": 11854712,
+        "daemon_peak_rss_kib": 13400,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 100533,
+        "denominator_nanoseconds": 1209644377,
+        "percent": 0.008310955013847016
+      },
+      "daemon_cpu_delta_nanoseconds": 10290880
+    },
+    {
+      "pair_index": 18,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516254587,
+        "accounting_settle_nanoseconds": 397573,
+        "daemon_cpu_nanoseconds": 1072294,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1517062971,
+        "accounting_settle_nanoseconds": 433260,
+        "daemon_cpu_nanoseconds": 46093432,
+        "daemon_peak_rss_kib": 13500,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 808384,
+        "denominator_nanoseconds": 1516254587,
+        "percent": 0.05331452956059548
+      },
+      "daemon_cpu_delta_nanoseconds": 45021138
+    },
+    {
+      "pair_index": 18,
+      "order": "baseline_then_enabled",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524579118,
+        "accounting_settle_nanoseconds": 468929,
+        "daemon_cpu_nanoseconds": 2486408,
+        "daemon_peak_rss_kib": 11276,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1533192326,
+        "accounting_settle_nanoseconds": 412394,
+        "daemon_cpu_nanoseconds": 164506032,
+        "daemon_peak_rss_kib": 13540,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 8613208,
+        "denominator_nanoseconds": 1524579118,
+        "percent": 0.5649564459008942
+      },
+      "daemon_cpu_delta_nanoseconds": 162019624
+    },
+    {
+      "pair_index": 19,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "low",
+        "event_count": 4,
+        "concurrency": 1,
+        "inter_arrival_microseconds": 5000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1213712797,
+        "accounting_settle_nanoseconds": 442604,
+        "daemon_cpu_nanoseconds": 2145423,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 4,
+        "workload_elapsed_nanoseconds": 1209520480,
+        "accounting_settle_nanoseconds": 501031,
+        "daemon_cpu_nanoseconds": 11283104,
+        "daemon_peak_rss_kib": 13408,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 4,
+          "delivered": 4,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 4,
+          "recognized": 4,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 4,
+          "success": 4,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": -4192317,
+        "denominator_nanoseconds": 1213712797,
+        "percent": -0.3454126058786212
+      },
+      "daemon_cpu_delta_nanoseconds": 9137681
+    },
+    {
+      "pair_index": 19,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "sustained",
+        "event_count": 20,
+        "concurrency": 4,
+        "inter_arrival_microseconds": 1000,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1515459248,
+        "accounting_settle_nanoseconds": 408038,
+        "daemon_cpu_nanoseconds": 2487966,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 20,
+        "workload_elapsed_nanoseconds": 1516499649,
+        "accounting_settle_nanoseconds": 444811,
+        "daemon_cpu_nanoseconds": 45618762,
+        "daemon_peak_rss_kib": 13436,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 20,
+          "delivered": 20,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 20,
+          "recognized": 20,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 20,
+          "success": 20,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 1040401,
+        "denominator_nanoseconds": 1515459248,
+        "percent": 0.0686525224200552
+      },
+      "daemon_cpu_delta_nanoseconds": 43130796
+    },
+    {
+      "pair_index": 19,
+      "order": "enabled_then_baseline",
+      "profile": {
+        "name": "storm",
+        "event_count": 80,
+        "concurrency": 16,
+        "inter_arrival_microseconds": 0,
+        "hold_milliseconds": 300
+      },
+      "baseline": {
+        "recognition_enabled": false,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1524052392,
+        "accounting_settle_nanoseconds": 394513,
+        "daemon_cpu_nanoseconds": 2359883,
+        "daemon_peak_rss_kib": 11268,
+        "daemon_healthy": true,
+        "capture": {
+          "expected_events": 0,
+          "delivered": 0,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 0,
+          "recognized": 0,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 0,
+          "success": 0,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "enabled": {
+        "recognition_enabled": true,
+        "workload_completions": 80,
+        "workload_elapsed_nanoseconds": 1534892512,
+        "accounting_settle_nanoseconds": 470954,
+        "daemon_cpu_nanoseconds": 163064603,
+        "daemon_peak_rss_kib": 15532,
+        "daemon_healthy": true,
+        "registry_version": "ardur.benchmark-agent-fingerprint.2026-07-14.v1",
+        "registry_sha256": "c9fc1728ef2ad71155f2d29c9fe23e4f46b4677d68472a2e15db2d21a4838923",
+        "capture": {
+          "expected_events": 80,
+          "delivered": 80,
+          "producer_dropped": 0,
+          "malformed": 0,
+          "unexplained": 0
+        },
+        "recognition": {
+          "candidates": 80,
+          "recognized": 80,
+          "rejected": 0,
+          "unexplained": 0
+        },
+        "fingerprint": {
+          "recognized": 80,
+          "success": 80,
+          "mismatch": 0,
+          "saturated": 0,
+          "unavailable": 0,
+          "resolution_denied": 0,
+          "process_exited": 0,
+          "unsupported": 0,
+          "size_exceeded": 0,
+          "deadline_exceeded": 0,
+          "in_flight": 0,
+          "unexplained": 0
+        }
+      },
+      "wall_overhead": {
+        "numerator_nanoseconds": 10840120,
+        "denominator_nanoseconds": 1524052392,
+        "percent": 0.7112695112649382
+      },
+      "daemon_cpu_delta_nanoseconds": 160704720
+    }
+  ],
+  "summaries": [
+    {
+      "profile_name": "low",
+      "paired_wall_overhead_percent": {
+        "sample_count": 20,
+        "p50": 0.032899113295043,
+        "p95": 0.07890487021137929,
+        "min": -0.3454126058786212,
+        "max": 0.09994293830753292,
+        "mean": 0.015900141902086974
+      },
+      "enabled_daemon_cpu_nanoseconds": {
+        "sample_count": 20,
+        "p50": 11296925,
+        "p95": 11992019,
+        "min": 11040754,
+        "max": 12313188,
+        "mean": 11510333.55
+      },
+      "enabled_daemon_cpu_calibration_ratio": {
+        "sample_count": 20,
+        "p50": 0.058877166977650525,
+        "p95": 0.062499848858176686,
+        "min": 0.05754205828729171,
+        "max": 0.06417371328066732,
+        "mean": 0.05998940688654682
+      },
+      "max_enabled_daemon_peak_rss_kib": 13436,
+      "total_capture": {
+        "expected_events": 80,
+        "delivered": 80,
+        "producer_dropped": 0,
+        "malformed": 0,
+        "unexplained": 0
+      },
+      "total_recognition": {
+        "candidates": 80,
+        "recognized": 80,
+        "rejected": 0,
+        "unexplained": 0
+      },
+      "total_fingerprint": {
+        "recognized": 80,
+        "success": 80,
+        "mismatch": 0,
+        "saturated": 0,
+        "unavailable": 0,
+        "resolution_denied": 0,
+        "process_exited": 0,
+        "unsupported": 0,
+        "size_exceeded": 0,
+        "deadline_exceeded": 0,
+        "in_flight": 0,
+        "unexplained": 0
+      }
+    },
+    {
+      "profile_name": "storm",
+      "paired_wall_overhead_percent": {
+        "sample_count": 20,
+        "p50": 0.5798074064859211,
+        "p95": 1.145674295051939,
+        "min": 0.4107376819564855,
+        "max": 1.1650197151824975,
+        "mean": 0.6871969334611845
+      },
+      "enabled_daemon_cpu_nanoseconds": {
+        "sample_count": 20,
+        "p50": 164176135,
+        "p95": 166212532,
+        "min": 162468457,
+        "max": 167634921,
+        "mean": 164175812.15
+      },
+      "enabled_daemon_cpu_calibration_ratio": {
+        "sample_count": 20,
+        "p50": 0.8556510478860658,
+        "p95": 0.8662643153196184,
+        "min": 0.8467509938669359,
+        "max": 0.8736775038342075,
+        "mean": 0.8556493652606294
+      },
+      "max_enabled_daemon_peak_rss_kib": 15532,
+      "total_capture": {
+        "expected_events": 1600,
+        "delivered": 1600,
+        "producer_dropped": 0,
+        "malformed": 0,
+        "unexplained": 0
+      },
+      "total_recognition": {
+        "candidates": 1600,
+        "recognized": 1600,
+        "rejected": 0,
+        "unexplained": 0
+      },
+      "total_fingerprint": {
+        "recognized": 1600,
+        "success": 1600,
+        "mismatch": 0,
+        "saturated": 0,
+        "unavailable": 0,
+        "resolution_denied": 0,
+        "process_exited": 0,
+        "unsupported": 0,
+        "size_exceeded": 0,
+        "deadline_exceeded": 0,
+        "in_flight": 0,
+        "unexplained": 0
+      }
+    },
+    {
+      "profile_name": "sustained",
+      "paired_wall_overhead_percent": {
+        "sample_count": 20,
+        "p50": 0.05331452956059548,
+        "p95": 0.127410540379697,
+        "min": -0.051895104774623634,
+        "max": 0.16667675894794698,
+        "mean": 0.05960277624249165
+      },
+      "enabled_daemon_cpu_nanoseconds": {
+        "sample_count": 20,
+        "p50": 46271161,
+        "p95": 47528110,
+        "min": 45181849,
+        "max": 47641200,
+        "mean": 46332022.95
+      },
+      "enabled_daemon_cpu_calibration_ratio": {
+        "sample_count": 20,
+        "p50": 0.2411554358771746,
+        "p95": 0.24770638634868705,
+        "min": 0.23547817374480157,
+        "max": 0.24829578734174512,
+        "mean": 0.2414726353976402
+      },
+      "max_enabled_daemon_peak_rss_kib": 13500,
+      "total_capture": {
+        "expected_events": 400,
+        "delivered": 400,
+        "producer_dropped": 0,
+        "malformed": 0,
+        "unexplained": 0
+      },
+      "total_recognition": {
+        "candidates": 400,
+        "recognized": 400,
+        "rejected": 0,
+        "unexplained": 0
+      },
+      "total_fingerprint": {
+        "recognized": 400,
+        "success": 400,
+        "mismatch": 0,
+        "saturated": 0,
+        "unavailable": 0,
+        "resolution_denied": 0,
+        "process_exited": 0,
+        "unsupported": 0,
+        "size_exceeded": 0,
+        "deadline_exceeded": 0,
+        "in_flight": 0,
+        "unexplained": 0
+      }
+    }
+  ],
+  "gate": {
+    "status": "not_evaluated",
+    "violations": []
+  },
+  "artifact_sha256": "02b15844718be0ec716397b8b1d17b4efcfe9e6ecb19a40c8e424e1a7f658b06",
+  "limitations": [
+    "Paired host evidence does not establish a universal recognition-overhead percentage.",
+    "Shared-runner scheduling and CPU-frequency variation remain outside the daemon's control.",
+    "The workload uses one deterministic native executable shape and does not estimate population accuracy.",
+    "Recognition and fingerprinting remain observe-only and do not attest identity or authorize governance.",
+    "The benchmark requires an isolated disposable host because the daemon uses a host-global bpffs pin namespace."
+  ]
+}

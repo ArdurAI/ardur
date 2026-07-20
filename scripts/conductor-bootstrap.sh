@@ -8,6 +8,9 @@ BASE_REF="${ARDUR_BASE_REF:-origin/dev}"
 RELEASE_REF="${ARDUR_RELEASE_REF:-origin/main}"
 CONTEXT_DIR="${ARDUR_CONTEXT_DIR:-.context}"
 CONTEXT_FILE="$CONTEXT_DIR/ARDUR_CONTEXT.md"
+GRAPH_JSON="$CONTEXT_DIR/ardur-graph.json"
+GRAPH_MARKDOWN="$CONTEXT_DIR/ardur-graph.md"
+GRAPH_MERMAID="$CONTEXT_DIR/ardur-graph.mmd"
 PYTHON_BIN="${PYTHON_BIN:-}"
 
 if [ -z "$PYTHON_BIN" ]; then
@@ -97,10 +100,20 @@ else
   worktree_diff_names="$(printf '%s\n%s\n' "$worktree_diff_names" "$untracked_names" | sed '/^$/d')"
 fi
 
+rm -f -- "$CONTEXT_FILE" "$GRAPH_JSON" "$GRAPH_MARKDOWN" "$GRAPH_MERMAID"
+
+graph_required_reading=""
 if [ -f scripts/build-knowledge-graph.py ]; then
   "$PYTHON_BIN" scripts/build-knowledge-graph.py --output-dir "$CONTEXT_DIR"
 
-  graph_summary="$("$PYTHON_BIN" - "$CONTEXT_DIR/ardur-graph.json" <<'PY'
+  for graph_file in "$GRAPH_JSON" "$GRAPH_MARKDOWN" "$GRAPH_MERMAID"; do
+    if [ ! -f "$graph_file" ] || [ ! -s "$graph_file" ]; then
+      printf 'error: graph builder did not produce required artifact: %s\n' "$graph_file" >&2
+      exit 1
+    fi
+  done
+
+  graph_counts="$("$PYTHON_BIN" - "$GRAPH_JSON" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -117,10 +130,47 @@ for kind, count in counts["nodes_by_type"].items():
         print(f"- {kind}: `{count}`")
 PY
 )"
+  graph_summary="- Status: available
+$graph_counts"
+  graph_required_reading="- \`$GRAPH_MARKDOWN\`
+- \`$GRAPH_JSON\`"
+  generated_files="- \`$CONTEXT_FILE\`
+- \`$GRAPH_JSON\`
+- \`$GRAPH_MARKDOWN\`
+- \`$GRAPH_MERMAID\`
+- \`$CONTEXT_DIR/skills/README.md\`"
+  graph_rule="The generated graph is available. Use its Markdown view to choose a
+neighborhood and its JSON form as the machine-readable map, then verify exact
+behavior with \`rg\`, tests, and source files."
 else
-  graph_summary="- Graph build skipped: scripts/build-knowledge-graph.py is not tracked in this checkout. Use live source files and workflow files directly."
+  graph_summary="- Status: unavailable
+- Reason: \`scripts/build-knowledge-graph.py\` is not tracked in this checkout.
+- Fallback: use live source files and workflow files directly."
+  generated_files="- \`$CONTEXT_FILE\`
+- \`$CONTEXT_DIR/skills/README.md\`"
+  graph_rule="Graph artifacts are optional and unavailable in this checkout. Use \`rg\`,
+tests, live source files, and workflow files directly; do not treat an absent
+graph as a bootstrap failure."
 fi
 
+required_reading="- \`AGENTS.md\`"
+if [ -n "$graph_required_reading" ]; then
+  required_reading="$required_reading
+$graph_required_reading"
+fi
+required_reading="$required_reading
+- \`README.md\`
+- \`STATUS.md\`
+- \`docs/agent-instructions/README.md\`
+- \`docs/agent-instructions/shared.md\`
+- \`docs/engineering-standards.md\`
+- \`docs/conductor-bootstrap.md\`
+- \`docs/public-import-plan.md\`
+- \`docs/TESTING.md\`
+- \`.github/workflows/tests.yml\`"
+
+# sed uses an EOL anchor and literal Markdown backticks.
+# shellcheck disable=SC2016
 workflow_list="$(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml' | sed 's/^/- `/; s/$/`/')"
 if [ -z "$workflow_list" ]; then
   workflow_list="- no workflows tracked"
@@ -188,17 +238,7 @@ of truth and update stale docs when touching that area.
 
 ## Required Reading Order
 
-1. \`AGENTS.md\`
-2. \`.context/ardur-graph.md\`
-3. \`README.md\`
-4. \`STATUS.md\`
-5. \`docs/agent-instructions/README.md\`
-6. \`docs/agent-instructions/shared.md\`
-7. \`docs/engineering-standards.md\`
-8. \`docs/conductor-bootstrap.md\`
-9. \`docs/public-import-plan.md\`
-10. \`docs/TESTING.md\`
-11. \`.github/workflows/tests.yml\`
+$required_reading
 
 ## Branch Flow
 
@@ -211,12 +251,9 @@ of truth and update stale docs when touching that area.
 
 $graph_summary
 
-Files:
+## Generated Files
 
-- \`.context/ardur-graph.json\`
-- \`.context/ardur-graph.md\`
-- \`.context/ardur-graph.mmd\`
-- \`.context/skills/README.md\`
+$generated_files
 
 ## Local-Only Skill Guardrail
 
@@ -229,9 +266,10 @@ become tracked.
 
 ## Bootstrap Rule For Agents
 
-Use the graph to pick a neighborhood, then use \`rg\`, tests, and source files
-to verify exact behavior. Do not infer current state from memory or articles
-when the repo can answer the question directly.
+$graph_rule
+
+Do not infer current state from memory or articles when the repo can
+answer the question directly.
 EOF
 
 printf 'wrote %s\n' "$CONTEXT_FILE"

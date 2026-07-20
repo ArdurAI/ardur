@@ -179,6 +179,17 @@ jobs:
         working-directory: go
         run: go vet ./...
 
+      - name: Cross-compile Windows portability targets
+        working-directory: go
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go test -c -o "${{ runner.temp }}/kernelcapture-windows.test.exe" ./pkg/kernelcapture
+          go test -c -o "${{ runner.temp }}/kernelcaptured-windows.test.exe" ./cmd/ardur-kernelcaptured
+          go test -c -o "${{ runner.temp }}/recognition-benchmark-windows.test.exe" ./cmd/ardur-agent-recognition-benchmark
+
       - name: Upload agent-recognition corpus report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
