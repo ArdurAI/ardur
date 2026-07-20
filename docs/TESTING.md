@@ -211,20 +211,25 @@ Explicit list, so the gap is visible:
 ## Local Development Setup
 
 ```bash
-# First-run setup — Python 3.13 required
-cd /path/to/ardur/python
-python3.13 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+# First-run setup — defaults to python3.13, upgrades pip, installs .[dev]
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 # Run the curated test suite
-.venv/bin/pytest tests/ -q
+(cd python && python -m pytest tests/ -q)
 
 # Run a specific module
-.venv/bin/pytest tests/test_passport.py -v
+(cd python && python -m pytest tests/test_passport.py -v)
 
 # End-to-end reproduce (Z3 proofs, signed proof bundle, corpus consistency)
 make reproduce
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 ## Module-Specific Gotchas
 

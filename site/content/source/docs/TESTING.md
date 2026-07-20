@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "6a48ea8063b4ad04277277a62c7681ff7235325574a88a5c79d17533d8a0f444"
+source_sha256: "efc37106dd7285a3a82e4ff1d5e8ef2c8a187f9ab84b3e4684404bb8f6f91607"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -228,20 +228,25 @@ Explicit list, so the gap is visible:
 ## Local Development Setup
 
 ```bash
-# First-run setup — Python 3.13 required
-cd /path/to/ardur/python
-python3.13 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+# First-run setup — defaults to python3.13, upgrades pip, installs .[dev]
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 # Run the curated test suite
-.venv/bin/pytest tests/ -q
+(cd python && python -m pytest tests/ -q)
 
 # Run a specific module
-.venv/bin/pytest tests/test_passport.py -v
+(cd python && python -m pytest tests/test_passport.py -v)
 
 # End-to-end reproduce (Z3 proofs, signed proof bundle, corpus consistency)
 make reproduce
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 ## Module-Specific Gotchas
 
