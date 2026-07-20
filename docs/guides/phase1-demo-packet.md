@@ -24,10 +24,8 @@ Say this before showing artifacts:
 From a clean checkout of the current `dev` branch:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 python3 scripts/run-claude-deny-demo.py
 

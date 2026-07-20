@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "dac4b17d5eadfb1a7b6ba429a1140720879650cabf45c7bc94ab379df737a833"
+source_sha256: "2d31a901e2384072ce88ca40b379f88793e76b800f5213e53b877f101c3980f8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -163,9 +163,8 @@ key; the local demo additionally avoids manual bearer-token and Docker setup.
 
 ```bash
 git clone https://github.com/ArdurAI/ardur.git && cd ardur
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 python scripts/run-no-key-mvp-demo.py
 ```
 
@@ -173,6 +172,12 @@ This temporary loopback-only demo reaches a `PERMIT`, a `DENY`, and a locally
 verified signed attestation. It disables TLS and bearer auth only for the child
 process; do not use it as a production launch command. See the
 [no-key MVP guide](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/) for the boundary and timing.
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 ### Fresh-user evidence bundle
 
