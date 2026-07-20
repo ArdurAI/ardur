@@ -1,8 +1,8 @@
 ---
 title: "ardur` CLI Reference"
-description: "The `ardur` console entry point ships with the Python package. After"
+description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "779183516893a53fc23492e48bc946e0087ad2f37f629817d1ce4468bfc37b4c"
+source_sha256: "6f40abb429f4204ccc4432f96652e6fb5dbf7a67054663d08a5e1ec439cecd07"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -17,8 +17,9 @@ evidence_levels: ["code-and-doc"]
 This page is generated from the public repository source file. Edit the source file, then run `python3 site/scripts/sync_source_docs.py` to refresh the Hugo mirror.
 {{< /proof-status >}}
 
-The `ardur` console entry point ships with the Python package. After
-`pip install -e python/`, run `ardur --help` to see this list at runtime.
+The `ardur` console entry point ships with the Python package. After installing
+from a source checkout (`./scripts/setup-dev.sh --skip-go`), run `ardur --help`
+to see this list at runtime.
 
 The CLI splits into two groups:
 

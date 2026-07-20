@@ -2,7 +2,7 @@
 title: "Ardur Claude Code Plugin"
 description: "This plugin protects Claude Code at the local tool boundary. `PreToolUse` runs"
 source_path: "plugins/claude-code/README.md"
-source_sha256: "6b2409fc4a2922a12845c00cb61695025f712585d0be751327fa59a4de77e484"
+source_sha256: "6d09e1ed146c14bacba39cb42f8d29af3a375fc4dbb36301787e9c8296999446"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -40,9 +40,16 @@ guardrail file:
 
 ```bash
 cd <ardur-repo>
-pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur profile init --template read-only --path ARDUR.md
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 To see the conservative personal flow before configuring Claude Code, run:
 

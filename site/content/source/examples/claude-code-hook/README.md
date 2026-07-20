@@ -2,7 +2,7 @@
 title: "Claude Code + Ardur"
 description: "The runnable Claude Code integration now lives in"
 source_path: "examples/claude-code-hook/README.md"
-source_sha256: "b5153d3b6c40a60fabbe466a0ca44492dda4b7b233762cd45231777e7d3f53b4"
+source_sha256: "19140c9252ed0b2c02f34c9a5874b3c69b59181119ed7aba00484f10b978bbb5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -27,12 +27,19 @@ implementation and it does not contain mock hook code.
 
 ```bash
 cd ../..
-pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur profile init --template read-only --path ARDUR.md
 ardur protect claude-code --profile ARDUR.md
 ardur doctor-claude-code
 # Run the exact VIBAP_HOME=... claude --plugin-dir ... command printed above.
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 The plugin uses Claude Code `PreToolUse` and `PostToolUse` hooks, signs real
 Ardur Execution Receipts, and can block disallowed local tool calls. The

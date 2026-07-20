@@ -1,7 +1,8 @@
 # `ardur` CLI Reference
 
-The `ardur` console entry point ships with the Python package. After
-`pip install -e python/`, run `ardur --help` to see this list at runtime.
+The `ardur` console entry point ships with the Python package. After installing
+from a source checkout (`./scripts/setup-dev.sh --skip-go`), run `ardur --help`
+to see this list at runtime.
 
 The CLI splits into two groups:
 
