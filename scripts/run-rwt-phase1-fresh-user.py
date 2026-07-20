@@ -672,15 +672,102 @@ def validate_repo_preflight(ctx: HarnessContext) -> tuple[dict[str, Any], str | 
     return repo_info, None
 
 
-def _find_symlinks(root: Path) -> list[Path]:
+def _path_is_gitignored(repo_root: Path, candidate: Path) -> bool:
+    """Return True if ``candidate`` is ignored by ``repo_root/.gitignore``.
+
+    Honors the canonical gitignore semantics by shelling out to
+    ``git check-ignore`` from the repo root. This is the correct way to decide
+    that a path (such as the dev-install ``python/.venv/`` created by
+    ``scripts/setup-dev.sh``) is not part of tracked/dirty source even though it
+    lives under the repo worktree.
+
+    Falls back to ``False`` (treat as tracked) when git is unavailable, the path
+    is outside the repo, or ``git check-ignore`` errors. This preserves the
+    fail-closed symlink guard for any path whose ignored status cannot be
+    positively confirmed.
+    """
+    try:
+        resolved_candidate = candidate.resolve()
+        resolved_repo = repo_root.resolve()
+        # Path.is_relative_to was added in 3.9; guard for older interpreters.
+        try:
+            if not resolved_candidate.is_relative_to(resolved_repo):
+                return False
+        except AttributeError:
+            if resolved_repo not in resolved_candidate.parents and resolved_candidate != resolved_repo:
+                return False
+        result = subprocess.run(
+            ["git", "check-ignore", "--quiet", str(candidate)],
+            cwd=str(repo_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # git check-ignore exits 0 when the path is ignored, 1 when not ignored,
+    # and >1 on error. Only exit 0 counts as "ignored".
+    return result.returncode == 0
+
+
+def _make_python_source_ignore(repo_root: Path):
+    """Build a ``shutil.copytree`` ignore callable for the python source copy.
+
+    Combines the existing hard-coded packaging-side-effect exclusions (``build``,
+    ``*.egg-info``, ``__pycache__``, ``.pytest_cache``) with a gitignore-aware
+    filter that drops any path positively confirmed as ignored by
+    ``repo_root/.gitignore`` (notably the dev-install ``python/.venv/``
+    directory created by ``scripts/setup-dev.sh``). The gitignored check uses
+    the same primitive as the symlink guard so the two cannot drift apart.
+    """
+    static_ignore = shutil.ignore_patterns("build", "*.egg-info", "__pycache__", ".pytest_cache")
+
+    def _ignore(directory: str, names: list[str]) -> list[str]:
+        ignored: list[str] = list(static_ignore(directory, names))
+        base = Path(directory)
+        for name in names:
+            candidate = base / name
+            if _path_is_gitignored(repo_root, candidate):
+                ignored.append(name)
+        return ignored
+
+    return _ignore
+
+
+def _find_symlinks(root: Path, repo_root: Path | None = None) -> list[Path]:
+    """Collect symlinks under ``root``.
+
+    Paths positively confirmed as gitignored (e.g. the dev-install
+    ``python/.venv/`` directory created by ``scripts/setup-dev.sh``) are skipped
+    so the canonical fresh-user dev-install path is not mistaken for a tracked
+    or dirty symlink. When ``repo_root`` is None or git is unavailable, only the
+    literal ``.venv`` directory name is skipped as a defensive minimum.
+    """
     links: list[Path] = []
     if root.is_symlink():
+        if repo_root and _path_is_gitignored(repo_root, root):
+            return links
+        if repo_root is None and root.name == ".venv":
+            return links
         links.append(root)
         return links
+    skipped_dirs: set[str] = {".venv"} if repo_root is None else set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         base = Path(dirpath)
+        # Prune gitignored directories in-place so os.walk does not descend.
+        if repo_root:
+            kept: list[str] = []
+            for name in dirnames:
+                candidate = base / name
+                if not _path_is_gitignored(repo_root, candidate):
+                    kept.append(name)
+            dirnames[:] = kept
+        else:
+            dirnames[:] = [name for name in dirnames if name not in skipped_dirs]
         for name in [*dirnames, *filenames]:
             candidate = base / name
+            if repo_root and _path_is_gitignored(repo_root, candidate):
+                continue
             if candidate.is_symlink():
                 links.append(candidate)
     return sorted(links)
@@ -696,9 +783,13 @@ def copy_python_source_for_wheel(ctx: HarnessContext) -> Path:
 
     The source copy fails closed when symlinks are present so future tracked or
     dirty symlink paths cannot be silently dereferenced into the wheel context.
+    Gitignored paths (notably the dev-install ``python/.venv/`` created by
+    ``scripts/setup-dev.sh``) are skipped because they are not part of tracked
+    or dirty source; the fail-closed behavior is preserved for any other
+    unexpected symlink.
     """
     source = ctx.repo / "python"
-    symlinks = _find_symlinks(source)
+    symlinks = _find_symlinks(source, repo_root=ctx.repo)
     if symlinks:
         rel_links = [relpath(path, source) for path in symlinks]
         raise RuntimeError(f"refusing to copy python source containing symlinks: {rel_links}")
@@ -706,7 +797,7 @@ def copy_python_source_for_wheel(ctx: HarnessContext) -> Path:
     shutil.copytree(
         source,
         destination,
-        ignore=shutil.ignore_patterns("build", "*.egg-info", "__pycache__", ".pytest_cache"),
+        ignore=_make_python_source_ignore(ctx.repo),
     )
     return destination
 
@@ -1122,7 +1213,6 @@ def version_info(ctx: HarnessContext) -> dict[str, str]:
     versions: dict[str, str] = {}
     for key, argv, cwd in [
         ("python", [ctx.python_bin, "--version"], ctx.repo),
-        ("ardur", [str(ctx.ardur_bin), "--version"], ctx.repo),
         ("git", ["git", "--version"], ctx.repo),
     ]:
         try:
@@ -1131,6 +1221,30 @@ def version_info(ctx: HarnessContext) -> dict[str, str]:
             versions[key] = "missing"
             continue
         versions[key] = redact_text((result.stdout or result.stderr).strip() or f"exit_{result.returncode}")
+    # ``versions.ardur`` is resolved from the harness venv that just ran
+    # ``install_ardur`` (ctx.venv), not from the ambient interpreter. The venv
+    # python is the authoritative location of the freshly-installed ardur
+    # package; probing the ambient python3 would always report "missing" on a
+    # clean host. We probe ``import vibap; __version__`` rather than the
+    # ``ardur`` console-script because the import path is robust to console-
+    # script shebang/PATH quirks. ``"missing"`` is kept only as the
+    # ImportError / exit-nonzero fallback.
+    venv_python = ctx.venv / "bin" / "python"
+    if not venv_python.exists():
+        versions["ardur"] = "missing"
+    else:
+        result = subprocess.run(
+            [str(venv_python), "-c", "import vibap; print(vibap.__version__)"],
+            cwd=str(ctx.repo),
+            env=ctx.env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0 and (result.stdout or "").strip():
+            versions["ardur"] = redact_text(result.stdout.strip())
+        else:
+            versions["ardur"] = "missing"
     claude = shutil.which("claude", path=ctx.env.get("PATH"))
     if not claude:
         versions["claude"] = "missing"
