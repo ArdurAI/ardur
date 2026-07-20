@@ -47,6 +47,25 @@ HOOK_INPUT_MAX_CHARS = 1024 * 1024
 HOOK_STATE_MAX_BYTES = 16 * 1024 * 1024
 HOOK_STATE_MAX_RECEIPTS = 8192
 HOOK_SESSION_CACHE_MAX_ENTRIES = 128
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    """Return ``value`` as a dict, tolerating non-mapping JSON values.
+
+    Claude Code hook payloads are externally controlled and may carry any JSON
+    type for fields that are nominally objects (``tool_input``,
+    ``tool_response``, nested ``measurements``/``lifecycle`` blocks). A bare
+    ``dict(value or {})`` raises ``ValueError``/``TypeError`` for strings,
+    ints, lists, or bools, which would crash the hook handler and emit a raw
+    traceback on stderr instead of a structured decision. Coerce non-mappings
+    to an empty dict so the handler fails safe with a normal deny/continue
+    response.
+    """
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 _SAFE_TRACE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 
 
@@ -944,7 +963,7 @@ def handle_pre_tool_use(
         return _pre_tool_use_deny_output(f"ardur: {exc}")
 
     tool_name = str(hook_input.get("tool_name", ""))
-    tool_input_dict = dict(hook_input.get("tool_input", {}) or {})
+    tool_input_dict = _coerce_mapping(hook_input.get("tool_input"))
     arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
 
     trace_id = _trace_id_from_claims(claims)
@@ -1088,8 +1107,8 @@ def handle_post_tool_use(
         return {"continue": True}
 
     tool_name = str(hook_input.get("tool_name", ""))
-    tool_input_dict = dict(hook_input.get("tool_input", {}) or {})
-    tool_response = dict(hook_input.get("tool_response", {}) or {})
+    tool_input_dict = _coerce_mapping(hook_input.get("tool_input"))
+    tool_response = _coerce_mapping(hook_input.get("tool_response"))
     arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
 
     trace_id = _trace_id_from_claims(claims)
@@ -1264,7 +1283,7 @@ def _summarize_child_receipts_unverified(
             if str(claims.get("tool", "")) in {"SubagentStart", "SubagentStop"}:
                 continue
             meta = (
-                dict(claims.get("measurements", {}) or {})
+                _coerce_mapping(claims.get("measurements"))
                 .get("claude_code", {})
             )
             if not isinstance(meta, dict):
@@ -1291,7 +1310,7 @@ def _subagent_registry_record(
     lifecycle: str,
     observed_at: str,
 ) -> dict[str, Any]:
-    lifecycle_meta = dict(metadata.get("lifecycle", {}) or {})
+    lifecycle_meta = _coerce_mapping(metadata.get("lifecycle"))
     return _without_empty_values(
         {
             "schema_version": "ardur.claude_code.subagents.v0.1",

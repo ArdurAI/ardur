@@ -293,6 +293,86 @@ def test_direct_hook_fails_closed_for_malformed_additional_policies_claim(
     assert "unknown policy backend: invalid_additional_policies" in _deny_reason(output)
 
 
+@pytest.mark.parametrize(
+    "bad_tool_input",
+    [
+        "not_a_dict_string",
+        12345,
+        ["a", "list"],
+        True,
+    ],
+)
+def test_pre_tool_use_tolerates_non_dict_tool_input(
+    tmp_path, monkeypatch, bad_tool_input
+):
+    """A non-dict ``tool_input`` must not crash the hook handler.
+
+    Claude Code may emit any JSON value for ``tool_input`` under malformed or
+    adversarial conditions. The hook must coerce it to an empty dict (fail
+    safe) rather than raising ``ValueError`` from ``dict(non_dict)``. A crash
+    here propagates as exit code 1 with a raw traceback on stderr, violating
+    the project's empty-stderr / structured-output contract. Regression test
+    for the bare ``dict(x or {})`` coercion replaced by an isinstance guard.
+    """
+    from vibap.claude_code_hook import handle_pre_tool_use
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chains"))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "non-dict-tool-input")
+
+    output = handle_pre_tool_use(
+        {
+            "session_id": "non-dict-tool-input",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_use_id": "tool-non-dict-input",
+            "tool_input": bad_tool_input,
+        },
+        keys_dir=tmp_path,
+    )
+
+    # Must return a valid hook-protocol dict, not raise. With a wildcard
+    # passport allowing Read, an empty (coerced) tool_input is permitted,
+    # so the expected shape is {"continue": True, ...}. The regression is
+    # the absence of a ValueError crash, not the specific decision.
+    assert isinstance(output, dict)
+    if "hookSpecificOutput" in output:
+        hook_specific = output["hookSpecificOutput"]
+        assert hook_specific.get("hookEventName") == "PreToolUse"
+        assert hook_specific.get("permissionDecision") == "deny"
+    else:
+        assert output.get("continue") is True
+
+
+def test_post_tool_use_tolerates_non_dict_tool_input_and_response(
+    tmp_path, monkeypatch
+):
+    """PostToolUse must tolerate non-dict ``tool_input`` / ``tool_response``."""
+    from vibap.claude_code_hook import handle_post_tool_use
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chains"))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "non-dict-post")
+
+    output = handle_post_tool_use(
+        {
+            "session_id": "non-dict-post",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Read",
+            "tool_use_id": "tool-non-dict-post",
+            "tool_input": "not_a_dict",
+            "tool_response": 42,
+        },
+        keys_dir=tmp_path,
+    )
+
+    # PostToolUse returns {"continue": True} on non-blocking paths; it must
+    # not raise regardless of tool_input / tool_response shape.
+    assert isinstance(output, dict)
+
+
 def test_direct_hook_fails_closed_for_oversized_budget_chain(tmp_path, monkeypatch):
     from vibap import claude_code_hook as hook
 
