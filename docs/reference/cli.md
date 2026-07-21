@@ -1405,6 +1405,16 @@ They do not call Claude, contact a provider, claim visibility into
 provider-hidden actions, or require copying sensitive values or local private paths
 into shared logs.
 
+If `--keys-dir` is empty or whitespace-only, the command fails closed with exit
+code `1` and prints a JSON response with `ok: false`, matching
+`error`/`error_code`/`condition` values of `path_arg_invalid`, a concise
+`message`, a `detail`, and placeholder-only `next_steps` such as
+`ardur claude-code-hook pre --keys-dir <keys-dir>`. The failure path keeps
+stderr empty, emits no traceback, does not echo raw local paths or secrets, and
+writes no receipt or chain artifact. Omit `--keys-dir` to use the default local
+Ardur signing-keys location; pass `.` explicitly when the current working
+directory is intended.
+
 ### `ardur claude-code-report`
 
 Read a Claude Code receipt chain and emit a human or JSON summary of allow,
@@ -1522,6 +1532,16 @@ for wrappers that fail closed. Unknown results are used for unmapped Gemini tool
 schemas or other coverage gaps instead of silently treating insufficient
 evidence as safe success.
 
+If `--keys-dir` is empty or whitespace-only, the command fails closed with exit
+code `1` and prints a JSON response with `ok: false`, matching
+`error`/`error_code`/`condition` values of `path_arg_invalid`, a concise
+`message`, a `detail`, and placeholder-only `next_steps` such as
+`ardur gemini-cli-hook pre --keys-dir <keys-dir>`. The failure path keeps
+stderr empty, emits no traceback, does not echo raw local paths or secrets, and
+writes no receipt or chain artifact. Omit `--keys-dir` to use the default local
+Ardur signing-keys location; pass `.` explicitly when the current working
+directory is intended.
+
 ### `ardur gemini-cli-report`
 
 Verify Gemini CLI hook receipt chains and emit a redacted local observability
@@ -1614,6 +1634,16 @@ permission flow authoritative. `status=deny` and `status=unknown` return a
 blocking result for wrappers that fail closed. Unknown results are used for
 unmapped Codex host-event schemas or other coverage gaps instead of treating
 insufficient evidence as safe success.
+
+If `--keys-dir` is empty or whitespace-only, the command fails closed with exit
+code `1` and prints a JSON response with `ok: false`, matching
+`error`/`error_code`/`condition` values of `path_arg_invalid`, a concise
+`message`, a `detail`, and placeholder-only `next_steps` such as
+`ardur codex-app-server-event --keys-dir <keys-dir>`. The failure path keeps
+stderr empty, emits no traceback, does not echo raw local paths or secrets, and
+writes no receipt or chain artifact. Omit `--keys-dir` to use the default local
+Ardur signing-keys location; pass `.` explicitly when the current working
+directory is intended.
 
 ### `ardur codex-app-server-report`
 
