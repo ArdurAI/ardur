@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "6f40abb429f4204ccc4432f96652e6fb5dbf7a67054663d08a5e1ec439cecd07"
+source_sha256: "8a74d8c29efa93803f75c9a4f7de35ea509c1bcd556e13c95b64a94b11634207"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -318,6 +318,23 @@ values of `path_arg_invalid`, a message, a detail, and placeholder-only
 traceback, does not echo raw local paths or secrets, and leaves no artifacts.
 An explicit `--keys-dir .` is still accepted.
 
+The same `path_arg_invalid` guard also rejects empty or whitespace-only values
+for the remaining verify path arguments — the positional `journal` and the
+`--anchor-bundle`, `--receiver-envelope`, `--receipt-public-key`,
+`--transparency-log-key`, `--receiver-public-key`, `--mcp-request`,
+`--mcp-response`, and `--html-report` options — before any receipt, key,
+transparency-log, envelope, MCP-digest, or HTML-report work begins. They exit
+non-zero and write parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `path_arg_invalid`, a message, a
+detail, and placeholder-only `next_steps` (for example
+`ardur verify --anchor-bundle <anchor-bundle>` and
+`ardur verify --receipt-public-key <receipt-public-key>`). The failure path
+keeps stderr empty, emits no traceback, does not echo raw local paths or
+secrets, and leaves no key, receipt, transparency-log, envelope, or
+HTML-report artifacts behind. The guard fires before any key material or
+configured endpoint is required, and valid values pass through to the existing
+mode-specific verification path unchanged.
+
 ### `ardur evidence correlate`
 
 Verify a signed receipt journal, import one explicit runtime-sensor JSONL
@@ -361,6 +378,19 @@ message, and empty stderr. The guard keeps stderr empty, emits no traceback,
 does not echo raw local paths or secrets, and leaves no artifacts, so no key
 material is required to reproduce. Valid values pass through to the existing
 verification/correlation path unchanged.
+
+Empty or whitespace-only path arguments — the positional `journal`, the
+positional `evidence_events` (EVENTS), `--receipt-public-key`, and `--output`
+— fail closed before receipt verification, event parsing, public-key loading,
+or atomic report writing. They exit non-zero and write parseable stdout JSON
+with `ok: false`, stable `condition`/`error`/`error_code` values of
+`path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+(for example `ardur evidence correlate <journal> <events>` and
+`ardur evidence correlate ... --output <output>`). The failure path keeps
+stderr empty, emits no traceback, does not echo raw local paths or secrets,
+and leaves no key, receipt, event, or report artifacts behind. The guard
+fires before any key material or sensor-file loading is required, and valid
+values pass through to the existing verification/correlation path unchanged.
 
 See the [Runtime Evidence Correlation Profile v0.1](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/)
 and [public no-network fixtures](/__ardur_internal__/source/docs/specs/conformance/runtime-evidence-v0.1/readme/).
@@ -412,6 +442,19 @@ stderr. The guard keeps stderr empty, emits no traceback, does not echo raw
 local paths or secrets, and leaves no artifacts, so no key material or
 configured `--otlp-endpoint` is required to reproduce. Valid values pass
 through to the existing export path unchanged.
+
+Empty or whitespace-only path arguments — the positional `journal`,
+`--receipt-public-key`, and `--output` — fail closed before receipt
+verification, public-key loading, or telemetry export (local write or OTLP
+post). They exit non-zero and write parseable stdout JSON with `ok: false`,
+stable `condition`/`error`/`error_code` values of `path_arg_invalid`, a
+message, a detail, and placeholder-only `next_steps` (for example
+`ardur telemetry export <journal>` and
+`ardur telemetry export ... --output <output>`). The failure path keeps
+stderr empty, emits no traceback, does not echo raw local paths or secrets,
+and leaves no key, receipt, or telemetry artifacts behind. The guard fires
+before any key material or configured `--otlp-endpoint` is required, and
+valid values pass through to the existing export path unchanged.
 
 See [Governance Telemetry v0.1](/__ardur_internal__/source/docs/specs/governance-telemetry-v0.1/) and its
 [golden event](/__ardur_internal__/repo/docs/specs/conformance/governance-telemetry-v0.1/events.jsonl).
