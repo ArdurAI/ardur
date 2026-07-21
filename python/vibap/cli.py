@@ -1139,6 +1139,8 @@ _PATH_ARG_SPECS = (
     "config",
     "output",
     "extension_path",
+    "path",
+    "plugin_dir",
 )
 
 
@@ -2492,6 +2494,10 @@ def cmd_attest(args: argparse.Namespace) -> int:
 
 
 def cmd_claude_code_hook(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     argv = [args.phase]
     if args.keys_dir:
         argv.extend(["--keys-dir", str(args.keys_dir)])
@@ -2822,6 +2828,10 @@ def cmd_offline_verification_fixture(args: argparse.Namespace) -> int:
 
 
 def cmd_gemini_cli_hook(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     phase = args.phase or args.phase_pos or "pre"
     argv = ["--phase", phase]
     if args.keys_dir:
@@ -3046,6 +3056,10 @@ def _load_codex_app_server_event_stdin(raw: str) -> dict:
 
 
 def cmd_codex_app_server_event(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     raw = sys.stdin.read()
     try:
         payload = _load_codex_app_server_event_stdin(raw)
@@ -3309,6 +3323,10 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
 
 
 def cmd_hub(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     port_failure = _hub_port_failure_exit_code(args.port)
     if port_failure is not None:
         return port_failure
@@ -5235,6 +5253,10 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
 
 
 def cmd_protect_claude_code(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     result = protect_claude_code(args)
     ok = bool(result.get("ok"))
     if args.json:
@@ -5337,6 +5359,10 @@ def _profile_init_path_failure_response(exc: OSError) -> dict[str, object]:
 
 
 def cmd_profile_init(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     try:
         path = write_profile_template(
             args.path, template=args.template, force=args.force
@@ -5823,7 +5849,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cc_hook.add_argument(
         "--keys-dir",
-        type=Path,
+        type=str,
         help="signing keys directory",
     )
     cc_hook.set_defaults(func=cmd_claude_code_hook)
@@ -5857,7 +5883,7 @@ def build_parser() -> argparse.ArgumentParser:
         "phase_pos", nargs="?", choices=["pre"], help="hook lifecycle phase"
     )
     gemini_hook.add_argument("--phase", choices=["pre"], help="hook lifecycle phase")
-    gemini_hook.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    gemini_hook.add_argument("--keys-dir", type=str, help="signing keys directory")
     gemini_hook.set_defaults(func=cmd_gemini_cli_hook)
 
     gemini_fixture = subparsers.add_parser(
@@ -5905,7 +5931,7 @@ def build_parser() -> argparse.ArgumentParser:
         "codex-app-server-event",
         help="ingest a local Codex app-server/host-event JSON payload and emit an Ardur receipt",
     )
-    codex_event.add_argument("--keys-dir", type=Path, help="signing keys directory")
+    codex_event.add_argument("--keys-dir", type=str, help="signing keys directory")
     codex_event.set_defaults(func=cmd_codex_app_server_event)
 
     codex_fixture = subparsers.add_parser(
@@ -6050,8 +6076,8 @@ def build_parser() -> argparse.ArgumentParser:
     hub.add_argument("--host", default=DEFAULT_HUB_HOST, help="bind address")
     hub.add_argument("--port", type=int, default=DEFAULT_HUB_PORT, help="listen port")
     hub.add_argument("--home", type=str, help="Ardur Personal home directory")
-    hub.add_argument("--tls-cert", type=Path, help="TLS certificate PEM file")
-    hub.add_argument("--tls-key", type=Path, help="TLS private key PEM file")
+    hub.add_argument("--tls-cert", type=str, help="TLS certificate PEM file")
+    hub.add_argument("--tls-key", type=str, help="TLS private key PEM file")
     hub.add_argument(
         "--no-tls", action="store_true", help="disable TLS (plain HTTP only)"
     )
@@ -6320,7 +6346,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="starter profile to write",
     )
     profile_init.add_argument(
-        "--path", type=Path, default=Path("ARDUR.md"), help="profile file to create"
+        "--path", type=str, default="ARDUR.md", help="profile file to create"
     )
     profile_init.add_argument(
         "--force", action="store_true", help="replace an existing profile"
@@ -6367,8 +6393,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     protect_cc.add_argument(
         "--plugin-dir",
-        type=Path,
-        default=_default_claude_plugin_dir(),
+        type=str,
+        default=str(_default_claude_plugin_dir()),
         help="Claude Code plugin directory",
     )
     # ``--keys-dir`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-

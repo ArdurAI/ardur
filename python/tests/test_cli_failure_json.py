@@ -2350,9 +2350,9 @@ def test_protect_claude_code_empty_keys_dir_returns_invalid(tmp_path, capsys, ke
     rendered = json.dumps(payload, sort_keys=True)
     assert rc == 1
     assert payload["ok"] is False
-    assert payload["condition"] == "protect_keys_dir_invalid"
-    assert payload["error"] == "protect_keys_dir_invalid"
-    assert payload["error_code"] == "protect_keys_dir_invalid"
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
     assert payload["message"]
     assert payload["detail"]
     assert payload["next_steps"]
