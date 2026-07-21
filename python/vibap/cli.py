@@ -1133,6 +1133,7 @@ _PATH_ARG_SPECS = (
     "log_private_key",
     "evidence_events",
     "evidence_output",
+    "telemetry_output",
     "temp_parent",
     "once_json",
     "config",
@@ -2154,6 +2155,11 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
 
 def cmd_telemetry_export(args: argparse.Namespace) -> int:
     """Verify a receipt journal and export conservative governance telemetry."""
+
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
 
     from .receipt_telemetry import (
         TelemetryExportError,
@@ -5497,19 +5503,19 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument(
         "journal",
         nargs="?",
-        type=Path,
+        type=str,
         help="offline full-evidence bundle, or receipt JSONL with --chain-only",
     )
     verify_input = verify.add_mutually_exclusive_group(required=False)
     verify_input.add_argument("--token", help="passport token to verify")
     verify_input.add_argument(
         "--anchor-bundle",
-        type=Path,
+        type=str,
         help="portable receipt transparency-anchor JSON bundle",
     )
     verify_input.add_argument(
         "--receiver-envelope",
-        type=Path,
+        type=str,
         help="portable receiver-attestation receipt envelope",
     )
     verify.add_argument(
@@ -5517,27 +5523,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify.add_argument(
         "--receipt-public-key",
-        type=Path,
+        type=str,
         help="trusted receipt-issuer ES256 public key PEM for offline journal verification",
     )
     verify.add_argument(
         "--transparency-log-key",
-        type=Path,
+        type=str,
         help="trusted transparency-log public key PEM for offline anchor verification",
     )
     verify.add_argument(
         "--receiver-public-key",
-        type=Path,
+        type=str,
         help="trusted receiver ES256 public key PEM for offline co-signature verification",
     )
     verify.add_argument(
         "--mcp-request",
-        type=Path,
+        type=str,
         help="optional exact MCP tools/call request JSON for digest comparison",
     )
     verify.add_argument(
         "--mcp-response",
-        type=Path,
+        type=str,
         help="optional exact MCP tools/call response JSON for digest comparison",
     )
     verify.add_argument(
@@ -5583,7 +5589,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify.add_argument(
         "--html-report",
-        type=Path,
+        type=str,
         help="write a private static HTML explorer report",
     )
     verify.add_argument(
@@ -5606,13 +5612,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evidence_correlate.add_argument(
         "journal",
-        type=Path,
+        type=str,
         help="signed receipt JSONL journal to verify before correlation",
     )
     evidence_correlate.add_argument(
         "evidence_events",
         metavar="EVENTS",
-        type=Path,
+        type=str,
         help="normalized, Tetragon, or Falco JSONL evidence input",
     )
     evidence_correlate.add_argument(
@@ -5629,7 +5635,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evidence_key_source.add_argument(
         "--receipt-public-key",
-        type=Path,
+        type=str,
         help="trusted receipt-issuer ES256 P-256 public key PEM",
     )
     evidence_correlate.add_argument(
@@ -5653,7 +5659,7 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_correlate.add_argument(
         "--output",
         dest="evidence_output",
-        type=Path,
+        type=str,
         help="atomically write an owner-only report instead of printing it",
     )
     evidence_correlate.set_defaults(func=cmd_evidence_correlate)
@@ -5671,7 +5677,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     telemetry_export.add_argument(
         "journal",
-        type=Path,
+        type=str,
         help="signed receipt JSONL journal to verify before export",
     )
     telemetry_key_source = telemetry_export.add_mutually_exclusive_group(required=True)
@@ -5682,7 +5688,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     telemetry_key_source.add_argument(
         "--receipt-public-key",
-        type=Path,
+        type=str,
         help="trusted receipt-issuer ES256 P-256 public key PEM",
     )
     telemetry_export.add_argument(
@@ -5695,7 +5701,7 @@ def build_parser() -> argparse.ArgumentParser:
     telemetry_export.add_argument(
         "--output",
         dest="telemetry_output",
-        type=Path,
+        type=str,
         help="atomically write an owner-only local artifact instead of stdout",
     )
     telemetry_export.add_argument(

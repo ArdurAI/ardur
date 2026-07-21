@@ -3105,3 +3105,243 @@ def test_status_hub_token_valid_reaches_hub_request(monkeypatch, tmp_path, capsy
     assert result.get("error_code") == "hub_unavailable"
     assert result.get("error_code") != "hub_token_invalid"
     _ = rc
+
+
+# ---------------------------------------------------------------------------
+# Path-arg validation across verify / evidence correlate / telemetry export:
+# ``type=Path`` argparse args silently normalize ``""`` to ``Path(".")`` (CWD,
+# truthy) before the handler runs, so the generic ``_path_arg_is_empty`` str
+# guard never fires and empty paths fall through to confusing downstream
+# errors. These args are now ``type=str`` so the empty value survives to the
+# ``_path_arg_invalid_failure`` guard at the top of each handler. See
+# continuous-dev-path-arg-specs-false-safety-type-mismatch-2026-07-11.md.
+# ---------------------------------------------------------------------------
+
+
+def test_verify_anchor_bundle_empty_rejected(tmp_path, capsys):
+    """Empty --anchor-bundle on verify must be rejected before key resolution."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    before = _relative_tree_entries(cwd)
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--anchor-bundle", "", "--transparency-log-key", "/tmp/nonexist.pem"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "anchor-bundle" in payload["message"]
+    assert payload["detail"]
+    assert payload["next_steps"]
+    assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
+    assert payload.get("error") != "anchor_verification_failed"
+    assert _relative_tree_entries(cwd) == before
+
+
+def test_verify_anchor_bundle_whitespace_rejected(tmp_path, capsys):
+    """Whitespace-only --anchor-bundle on verify must be rejected after trimming."""
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--anchor-bundle", "   ", "--transparency-log-key", "/tmp/nonexist.pem"],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "anchor-bundle" in payload["message"]
+    assert payload.get("error") != "anchor_verification_failed"
+
+
+def test_verify_receipt_public_key_empty_rejected(tmp_path, capsys):
+    """Empty --receipt-public-key on verify must be rejected before key load."""
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "journal.jsonl", "--receipt-public-key", ""],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "receipt-public-key" in payload["message"]
+
+
+def test_verify_transparency_log_key_empty_rejected(tmp_path, capsys):
+    """Empty --transparency-log-key on verify (with anchor-bundle set) must be rejected."""
+    rc, payload = _run_cli_and_read_json(
+        [
+            "verify",
+            "--anchor-bundle",
+            str(tmp_path / "bundle.json"),
+            "--transparency-log-key",
+            "",
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "transparency-log-key" in payload["message"]
+
+
+def test_verify_receiver_envelope_empty_rejected(tmp_path, capsys):
+    """Empty --receiver-envelope on verify must be rejected before envelope parsing."""
+    rc, payload = _run_cli_and_read_json(
+        ["verify", "--receiver-envelope", ""],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "receiver-envelope" in payload["message"]
+
+
+def test_verify_html_report_empty_rejected(tmp_path, capsys):
+    """Empty --html-report on verify (with a valid journal input) must be rejected."""
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text("\n", encoding="utf-8")
+
+    rc, payload = _run_cli_and_read_json(
+        ["verify", str(journal), "--chain-only", "--html-report", ""],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "html-report" in payload["message"]
+
+
+def test_evidence_correlate_empty_journal_rejected(tmp_path, capsys):
+    """Empty journal positional on evidence correlate must be rejected before verification."""
+    rc, payload = _run_cli_and_read_json(
+        [
+            "evidence",
+            "correlate",
+            "",
+            "EVENTS",
+            "--source-format",
+            "normalized",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "journal" in payload["message"]
+
+
+def test_evidence_correlate_empty_events_rejected(tmp_path, capsys):
+    """Empty evidence_events positional on evidence correlate must be rejected before adapter load."""
+    rc, payload = _run_cli_and_read_json(
+        [
+            "evidence",
+            "correlate",
+            "JOURNAL",
+            "",
+            "--source-format",
+            "normalized",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "evidence-events" in payload["message"]
+
+
+def test_evidence_correlate_empty_output_rejected(tmp_path, capsys):
+    """Empty --output on evidence correlate must be rejected before atomic write."""
+    rc, payload = _run_cli_and_read_json(
+        [
+            "evidence",
+            "correlate",
+            "JOURNAL",
+            "EVENTS",
+            "--source-format",
+            "normalized",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+            "--output",
+            "",
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "evidence-output" in payload["message"]
+
+
+def test_telemetry_export_empty_journal_rejected(tmp_path, capsys):
+    """Empty journal positional on telemetry export must be rejected before verification."""
+    rc, payload = _run_cli_and_read_json(
+        [
+            "telemetry",
+            "export",
+            "",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "journal" in payload["message"]
+    # Must be rejected before the timeout check (the prior failure mode).
+    assert payload.get("error") != "otlp_timeout_invalid"
+
+
+def test_telemetry_export_empty_output_rejected(tmp_path, capsys):
+    """Empty --output on telemetry export must be rejected before atomic write."""
+    rc, payload = _run_cli_and_read_json(
+        [
+            "telemetry",
+            "export",
+            "/tmp/journal.jsonl",
+            "--keys-dir",
+            str(tmp_path / "keys"),
+            "--output",
+            "",
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "path_arg_invalid"
+    assert payload["error"] == "path_arg_invalid"
+    assert payload["error_code"] == "path_arg_invalid"
+    assert "telemetry-output" in payload["message"]
