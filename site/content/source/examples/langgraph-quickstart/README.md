@@ -2,7 +2,7 @@
 title: "LangGraph + Ardur quickstart"
 description: "A LangGraph agent making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a small set of tools (read, write, summarize), "
 source_path: "examples/langgraph-quickstart/README.md"
-source_sha256: "23bfccc4851348e363cbfba09159d27ffe6f67d384d21e8be6541ad9b5d65998"
+source_sha256: "d3e64efd9a4054ab0e2da8068eca4ce819406ce176b897327a6384015630086f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -40,7 +40,7 @@ langgraph-quickstart/
 
 - Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install with the LangGraph integration extra
-  (`pip install -e '../../python[dev,langgraph]'`)
+  (via `./scripts/setup-dev.sh --skip-go` then `pip install -e '.[langgraph]'`)
 - `langgraph >=1.2.9,<2` and `langchain >=1.3.13,<2`, matching the typed
   runtime-context and `ToolRuntime` APIs used by the reference
 - LLM access: local Ollama, an OpenAI-compatible gateway, or an Anthropic API key
@@ -49,12 +49,25 @@ langgraph-quickstart/
 ## Running locally
 
 ```bash
-cd ../../python && pip install -e '.[dev,langgraph]'
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
+pip install -e '.[langgraph]'
+
+# 2. Pick a provider + model id
 export ARDUR_PROVIDER=ollama
 export OLLAMA_MODEL='<your local model tag>'
-cd ../examples/langgraph-quickstart
+
+# 3. Run the demo from this directory
+cd examples/langgraph-quickstart
 PYTHONPATH=../_shared python demo.py
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e 'python/.[dev,langgraph]'`; macOS system Python 3.9 and
+its bundled pip are too old for the PEP 660 editable install.
 
 `ARDUR_PROVIDER` plus the matching `*_MODEL` env var are required. No model identifiers are hard-coded — see [CONTRIBUTING.md](/__ardur_internal__/source/contributing/).
 
