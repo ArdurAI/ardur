@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "8ebd3852521a58ef4c10933ff2327196e3153b6923261d36abbfcacf20e6e6a4"
+source_sha256: "4665640fc48cdf2c0c9a7377934fae4b908bfd270594403b76988713057d08b8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1482,14 +1482,16 @@ Write a local-only Gemini CLI settings/context fixture and print a redacted
 shareable context document with digests for the generated files.
 
 ```text
-ardur gemini-cli-fixture [--home DIR] [--project-dir DIR]
+ardur gemini-cli-fixture [--home DIR] --project-dir DIR
                          [--chain-dir DIR] [--keys-dir DIR]
 ```
 
 The fixture writes `settings.json`, `extensions/ardur-local/gemini-extension.json`,
 and `GEMINI.md` under the selected local directories. It is a proof harness for
 visible Gemini CLI hook/tool-boundary events; it is not a live-provider or
-server-side enforcement claim.
+server-side enforcement claim. `--project-dir` is required because `GEMINI.md`
+is project-specific and has no sensible isolated default; `--home`, `--chain-dir`,
+and `--keys-dir` default to isolated Ardur local state when omitted.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target
@@ -1594,7 +1596,7 @@ Write a local-only Codex app-server config/schema/context fixture and print a
 redacted shareable context document with digests for the generated files.
 
 ```text
-ardur codex-app-server-fixture [--home DIR] [--project-dir DIR]
+ardur codex-app-server-fixture [--home DIR] --project-dir DIR
                                [--chain-dir DIR] [--keys-dir DIR]
 ```
 
@@ -1602,6 +1604,9 @@ By default the fixture writes under isolated Ardur local state, not the caller's
 real `~/.codex`. It writes `config.json`, `ardur-host-event.schema.json`, and
 `CODEX.md` under the selected local directories. This is an adoption/proof
 harness for visible local Codex app-server or host-event-style fields only.
+`--project-dir` is required because `CODEX.md` is project-specific and has no
+sensible isolated default; `--home`, `--chain-dir`, and `--keys-dir` default to
+isolated Ardur local state when omitted.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target

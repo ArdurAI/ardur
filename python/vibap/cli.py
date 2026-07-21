@@ -5896,7 +5896,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit Gemini home/settings directory to populate; defaults to isolated Ardur local fixture state",
     )
     gemini_fixture.add_argument(
-        "--project-dir", type=str, help="project directory that receives GEMINI.md"
+        "--project-dir",
+        type=str,
+        required=True,
+        help="project directory that receives GEMINI.md (required)",
     )
     gemini_fixture.add_argument(
         "--chain-dir", type=str, help="Ardur Gemini receipt chain directory"
@@ -5944,7 +5947,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit Codex home/config directory to populate; defaults to isolated Ardur local fixture state",
     )
     codex_fixture.add_argument(
-        "--project-dir", type=str, help="project directory that receives CODEX.md"
+        "--project-dir",
+        type=str,
+        required=True,
+        help="project directory that receives CODEX.md (required)",
     )
     codex_fixture.add_argument(
         "--chain-dir", type=str, help="Ardur Codex receipt chain directory"

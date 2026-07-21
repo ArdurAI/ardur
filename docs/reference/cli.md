@@ -1465,14 +1465,16 @@ Write a local-only Gemini CLI settings/context fixture and print a redacted
 shareable context document with digests for the generated files.
 
 ```text
-ardur gemini-cli-fixture [--home DIR] [--project-dir DIR]
+ardur gemini-cli-fixture [--home DIR] --project-dir DIR
                          [--chain-dir DIR] [--keys-dir DIR]
 ```
 
 The fixture writes `settings.json`, `extensions/ardur-local/gemini-extension.json`,
 and `GEMINI.md` under the selected local directories. It is a proof harness for
 visible Gemini CLI hook/tool-boundary events; it is not a live-provider or
-server-side enforcement claim.
+server-side enforcement claim. `--project-dir` is required because `GEMINI.md`
+is project-specific and has no sensible isolated default; `--home`, `--chain-dir`,
+and `--keys-dir` default to isolated Ardur local state when omitted.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target
@@ -1577,7 +1579,7 @@ Write a local-only Codex app-server config/schema/context fixture and print a
 redacted shareable context document with digests for the generated files.
 
 ```text
-ardur codex-app-server-fixture [--home DIR] [--project-dir DIR]
+ardur codex-app-server-fixture [--home DIR] --project-dir DIR
                                [--chain-dir DIR] [--keys-dir DIR]
 ```
 
@@ -1585,6 +1587,9 @@ By default the fixture writes under isolated Ardur local state, not the caller's
 real `~/.codex`. It writes `config.json`, `ardur-host-event.schema.json`, and
 `CODEX.md` under the selected local directories. This is an adoption/proof
 harness for visible local Codex app-server or host-event-style fields only.
+`--project-dir` is required because `CODEX.md` is project-specific and has no
+sensible isolated default; `--home`, `--chain-dir`, and `--keys-dir` default to
+isolated Ardur local state when omitted.
 
 If `--home`, `--chain-dir`, `--keys-dir`, or `--project-dir` points at an
 existing regular file (or `--project-dir` is a dangling symlink whose target

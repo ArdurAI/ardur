@@ -581,3 +581,46 @@ def test_codex_fixture_rejects_keys_dir_whitespace(tmp_path: Path) -> None:
     assert str(tmp_path) not in output_text
     assert not fixture_home.exists()
     assert not chain_dir.exists()
+
+
+def test_codex_fixture_rejects_project_dir_omitted(tmp_path: Path) -> None:
+    """Omitting --project-dir must fail at argparse level (rc=2) before any handler runs.
+
+    This is distinct from passing an empty string, which reaches the handler
+    and returns the structured <cmd>_fixture_project_dir_empty JSON (rc=1).
+    Making --project-dir required=True at argparse surfaces the missing-required-arg
+    case as a clean usage error instead of an input-validation-looking JSON failure.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    caller_home.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+
+    completed = _run_fixture(
+        "--home", str(fixture_home),
+        # --project-dir deliberately omitted
+        "--chain-dir", str(chain_dir),
+        "--keys-dir", str(keys_dir),
+        env=env,
+        repo_root=repo_root,
+    )
+
+    # argparse rejects a missing required option with rc=2, a stderr usage line,
+    # and empty stdout. No handler runs, so no JSON body is emitted.
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert "--project-dir" in completed.stderr
+    assert "required" in completed.stderr.lower()
+    # No CWD pollution: argparse exits before any fixture artifact is created.
+    assert not fixture_home.exists()
+    assert not chain_dir.exists()
+    assert not keys_dir.exists()
