@@ -1502,10 +1502,35 @@ def _load_hook_input(stream: Any) -> dict[str, Any]:
     return parsed
 
 
+def _fail_safe_output(phase: str) -> dict[str, Any]:
+    """Return the protocol-valid response when the hook cannot process input.
+
+    For PreToolUse this is a fail-closed ``deny`` so that malformed or crashing
+    input cannot silently bypass governance — Claude Code treats exit code 1 as
+    a non-blocking error, which means the tool call would proceed without a
+    policy decision.  Returning a deny with exit code 0 ensures the host honours
+    the block.
+
+    For non-blocking phases (post / subagent) we emit ``{"continue": True}``
+    because those phases cannot block the host; at least the output is
+    protocol-valid so the host does not interpret a crash as an actionable
+    error.
+    """
+    if phase == "pre":
+        return _pre_tool_use_deny_output(
+            "ardur: blocked - hook input could not be processed safely"
+        )
+    return {"continue": True}
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Reads hook input JSON from stdin, writes hook
-    output JSON to stdout. Exit code is 0 on success (handler returned
-    a dict), 1 on JSON-parse failure or unhandled exception."""
+    output JSON to stdout.
+
+    Exit code is always 0 when any response — success or fail-safe — can be
+    formulated.  For PreToolUse every error path emits a fail-closed deny so
+    that unparseable or crashing input cannot silently bypass governance.
+    """
     import argparse
     import sys
 
@@ -1523,17 +1548,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    fail_safe = _fail_safe_output(args.phase)
+
     try:
         hook_input = _load_hook_input(sys.stdin)
-    except json.JSONDecodeError as exc:
-        print(json.dumps(_claude_code_hook_input_failure_response(exc, phase=args.phase), sort_keys=True))
-        return 1
-    except HookInputNotObjectError as exc:
-        print(json.dumps(_claude_code_hook_input_failure_response(exc, phase=args.phase), sort_keys=True))
-        return 1
+    except (json.JSONDecodeError, HookInputNotObjectError) as exc:
+        # Diagnostic detail goes to stderr so operators can troubleshoot;
+        # stdout carries the protocol-valid fail-safe response.
+        sys.stderr.write(
+            json.dumps(
+                _claude_code_hook_input_failure_response(exc, phase=args.phase),
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        print(json.dumps(fail_safe))
+        return 0
     except ValueError as exc:
         sys.stderr.write(f"ardur: invalid hook input: {exc}\n")
-        return 1
+        print(json.dumps(fail_safe))
+        return 0
 
     handlers = {
         "pre": _handle_pre_tool_use_daemon_first,
@@ -1546,8 +1580,14 @@ def main(argv: list[str] | None = None) -> int:
         output = handler(hook_input, keys_dir=args.keys_dir)
     except Exception as exc:  # pylint: disable=broad-except
         sys.stderr.write(f"ardur: hook handler crashed: {exc}\n")
-        return 1
-    print(json.dumps(output))
+        print(json.dumps(fail_safe))
+        return 0
+    try:
+        print(json.dumps(output))
+    except (TypeError, ValueError):
+        # Output dict contained a non-serializable value — fall back to the
+        # protocol-valid fail-safe instead of crashing with a traceback.
+        print(json.dumps(fail_safe))
     return 0
 
 

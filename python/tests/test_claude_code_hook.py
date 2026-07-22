@@ -1534,18 +1534,22 @@ def test_claude_code_hook_cli_returns_structured_input_error_next_steps(
         timeout=20,
     )
 
-    assert completed.returncode == 1
-    assert completed.stderr == ""
+    # Fail-safe: PreToolUse now returns exit 0 with a protocol-valid deny on
+    # stdout so the host honours the block, and the diagnostic detail on stderr
+    # so operators can still troubleshoot.
+    assert completed.returncode == 0
     output = json.loads(completed.stdout)
-    output_text = json.dumps(output, sort_keys=True)
-    assert output["ok"] is False
-    assert output["error"] == condition
-    assert output["condition"] == condition
-    assert expected_detail in output["detail"]
-    assert [step["action"] for step in output["next_steps"]] == [
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    stderr_output = json.loads(completed.stderr.strip())
+    assert stderr_output["ok"] is False
+    assert stderr_output["error"] == condition
+    assert stderr_output["condition"] == condition
+    assert expected_detail in stderr_output["detail"]
+    assert [step["action"] for step in stderr_output["next_steps"]] == [
         "configure_claude_code_protection",
         "rerun_with_hook_event_json_file",
     ]
+    output_text = json.dumps(stderr_output, sort_keys=True)
     assert (
         "ardur protect claude-code --scope <your-project> --home <ardur-home>"
         in output_text
@@ -1570,8 +1574,95 @@ def test_main_rejects_oversize_stdin(monkeypatch, capsys):
     rc = hook_module.main(["pre"])
 
     captured = capsys.readouterr()
-    assert rc == 1
+    # Fail-safe: exit 0 with a protocol-valid deny so the host honours the block.
+    assert rc == 0
     assert "hook input exceeds" in captured.err
+    stdout_output = json.loads(captured.out)
+    assert stdout_output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_main_pre_crash_emits_fail_safe_deny(monkeypatch, capsys):
+    """A handler crash must emit a protocol-valid deny with exit 0.
+
+    If the host treats exit 1 as a non-blocking error, returning exit 1 on a
+    crash would silently bypass governance.  The fail-safe path must deny.
+    """
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    def _crashing_handler(_hook_input, *, keys_dir=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        hook_module, "_handle_pre_tool_use_daemon_first", _crashing_handler
+    )
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO('{"tool_name": "Read", "tool_input": {}}')
+    )
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "hook handler crashed" in captured.err
+    output = json.loads(captured.out)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "could not be processed safely" in output["hookSpecificOutput"][
+        "permissionDecisionReason"
+    ]
+
+
+def test_main_post_crash_emits_fail_safe_continue(monkeypatch, capsys):
+    """PostToolUse crashes should not produce a traceback on stderr."""
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    def _crashing_handler(_hook_input, *, keys_dir=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(hook_module, "handle_post_tool_use", _crashing_handler)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO('{"tool_name": "Read", "tool_input": {}}')
+    )
+
+    rc = hook_module.main(["post"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "hook handler crashed" in captured.err
+    output = json.loads(captured.out)
+    assert output == {"continue": True}
+
+
+def test_main_pre_non_serializable_output_emits_fail_safe_deny(
+    monkeypatch, capsys
+):
+    """If json.dumps fails on the handler output, fall back to deny."""
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    class _NotSerializable:
+        pass
+
+    def _bad_output_handler(_hook_input, *, keys_dir=None):
+        return {"bad": _NotSerializable()}
+
+    monkeypatch.setattr(
+        hook_module, "_handle_pre_tool_use_daemon_first", _bad_output_handler
+    )
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO('{"tool_name": "Read", "tool_input": {}}')
+    )
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    output = json.loads(captured.out)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
