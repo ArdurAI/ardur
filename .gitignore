@@ -41,6 +41,13 @@ _internal/
 # Go build artifacts when binaries land in the repo root rather than $GOBIN.
 go/operator
 go/webhook
+go/ardur-agent-recognition-benchmark
+go/ardur-agent-recognition-eval
+go/ardur-agent-recognition-workload
+go/ardur-exec-shim
+go/ardur-kernelcaptured
+go/auditbench-label
+go/auditbench-oracle
 
 # `make bench` output (go/cmd/benchcheck writes here; see the `bench` target).
 go/bench-results/

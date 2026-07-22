@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
@@ -46,7 +47,7 @@ func run(args []string, stdout io.Writer) int {
 	warmupPairs := flags.Int("warmup-pairs", 1, "excluded warm-up pair count")
 	measuredPairs := flags.Int("measured-pairs", kernelcapture.MinAgentRecognitionBenchmarkPairs, "measured pair count")
 	overallTimeout := flags.Duration("timeout", 15*time.Minute, "overall benchmark timeout")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *daemonPath == "" || *referenceDaemonPath == "" || *workloadPath == "" || *sourceSHA == "" || *referenceSourceSHA == "" || *outputDirectory == "" || (*profileSet != "ci" && *profileSet != "release") {
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || strings.TrimSpace(*daemonPath) == "" || strings.TrimSpace(*referenceDaemonPath) == "" || strings.TrimSpace(*workloadPath) == "" || strings.TrimSpace(*sourceSHA) == "" || strings.TrimSpace(*referenceSourceSHA) == "" || strings.TrimSpace(*outputDirectory) == "" || (*profileSet != "ci" && *profileSet != "release") {
 		writeSummary(stdout, commandSummary{Condition: "agent_recognition_benchmark_failed", ErrorCode: "arguments_invalid"})
 		return 2
 	}
