@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ArdurAI/ardur/go/benchmark/independent"
 )
@@ -62,7 +63,7 @@ func addStudyFlags(fs *flag.FlagSet) (*studyPaths, *string) {
 }
 
 func (paths studyPaths) validate() error {
-	if paths.root == "" || paths.corpus == "" || paths.protocol == "" || paths.prereg == "" || paths.gold == "" || paths.annotations == "" || paths.adjudications == "" || paths.splits == "" {
+	if strings.TrimSpace(paths.root) == "" || strings.TrimSpace(paths.corpus) == "" || strings.TrimSpace(paths.protocol) == "" || strings.TrimSpace(paths.prereg) == "" || strings.TrimSpace(paths.gold) == "" || strings.TrimSpace(paths.annotations) == "" || strings.TrimSpace(paths.adjudications) == "" || strings.TrimSpace(paths.splits) == "" {
 		return fmt.Errorf("root, corpus, protocol, prereg, gold, annotations, adjudications, and splits are required")
 	}
 	return nil
@@ -78,7 +79,7 @@ func runSeal(args []string) error {
 	if err := paths.validate(); err != nil {
 		return err
 	}
-	if *sealPath == "" || *sealedAt == "" || fs.NArg() != 0 {
+	if strings.TrimSpace(*sealPath) == "" || strings.TrimSpace(*sealedAt) == "" || fs.NArg() != 0 {
 		return fmt.Errorf("seal output and sealed-at are required")
 	}
 	seal, err := independent.BuildSeal(paths.root, paths.corpus, paths.protocol, paths.prereg, paths.gold, paths.annotations, paths.adjudications, paths.splits, *sealedAt)
@@ -105,7 +106,7 @@ func runVerify(args []string) error {
 	if err := paths.validate(); err != nil {
 		return err
 	}
-	if *sealPath == "" || fs.NArg() != 0 {
+	if strings.TrimSpace(*sealPath) == "" || fs.NArg() != 0 {
 		return fmt.Errorf("seal is required")
 	}
 	var seal independent.Seal
@@ -131,7 +132,7 @@ func runScore(args []string) error {
 	if err := paths.validate(); err != nil {
 		return err
 	}
-	if *sealPath == "" || *resultPath == "" || *output == "" || fs.NArg() != 0 {
+	if strings.TrimSpace(*sealPath) == "" || strings.TrimSpace(*resultPath) == "" || strings.TrimSpace(*output) == "" || fs.NArg() != 0 {
 		return fmt.Errorf("seal, result, and out are required")
 	}
 	var prereg independent.Preregistration
