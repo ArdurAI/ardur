@@ -51,6 +51,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -80,7 +81,7 @@ func main() {
 		return
 	}
 
-	if *daemonBin == "" || *shimBin == "" {
+	if !validateRequiredPaths(*daemonBin, *shimBin) {
 		fmt.Fprintln(os.Stderr, "usage: ardur-seccomp-smoke --daemon-bin PATH --shim-bin PATH")
 		os.Exit(2)
 	}
@@ -93,6 +94,14 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("PASS: seccomp tier enforced connect policy and listener cancellation did not corrupt concurrent control connections")
+}
+
+// validateRequiredPaths enforces the required --daemon-bin and --shim-bin
+// flags without depending on process-wide side effects, so the whitespace
+// guard can be unit tested independently of the socket/process setup in
+// run(). A whitespace-only path is treated as missing.
+func validateRequiredPaths(daemonBin, shimBin string) bool {
+	return strings.TrimSpace(daemonBin) != "" && strings.TrimSpace(shimBin) != ""
 }
 
 // runProbe is this binary's own re-exec mode: attempt one TCP connect and

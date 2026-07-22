@@ -50,7 +50,7 @@ func main() {
 	flag.Parse()
 
 	packDir := flag.Arg(0)
-	if packDir == "" {
+	if shouldUseDefaultPackDir(packDir) {
 		packDir = defaultPackDir()
 	}
 
@@ -75,6 +75,14 @@ func main() {
 	}
 
 	fmt.Printf("Results written to %s\n", *outDir)
+}
+
+// shouldUseDefaultPackDir reports whether the positional pack-dir argument
+// is absent or whitespace-only, in which case main() falls back to the
+// detected default. Extracted so the whitespace guard is unit-testable
+// without invoking flag parsing or the filesystem.
+func shouldUseDefaultPackDir(arg string) bool {
+	return strings.TrimSpace(arg) == ""
 }
 
 func defaultPackDir() string {
