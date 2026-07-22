@@ -120,7 +120,6 @@ def test_anchor_valid_paths_get_past_path_validation(
     captured = capsys.readouterr()
     assert rc == 1  # downstream failure is expected (missing private key)
     payload = json.loads(captured.out)
-    rendered = json.dumps(payload, sort_keys=True)
     # Must NOT be path_arg_invalid — that would mean we over-rejected valid input.
     assert payload["error"] != "path_arg_invalid"
     assert payload.get("condition") != "path_arg_invalid"

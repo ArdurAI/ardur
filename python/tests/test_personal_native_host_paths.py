@@ -73,7 +73,7 @@ def test_personal_native_host_valid_once_json_gets_past_path_validation(
     payload_file = tmp_path / "native-message.json"
     payload_file.write_text('{"example": "native-message"}', encoding="utf-8")
 
-    rc = main([*_BASE, "--once-json", str(payload_file)])
+    main([*_BASE, "--once-json", str(payload_file)])
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)

@@ -136,7 +136,7 @@ def test_preflight_tool_server_valid_config_gets_past_path_validation(
 
     cfg = _write_valid_config(tmp_path)
 
-    rc = main(["preflight", "tool-server", "--config", str(cfg)])
+    main(["preflight", "tool-server", "--config", str(cfg)])
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)

@@ -72,11 +72,10 @@ def test_personal_firewall_demo_valid_temp_parent_gets_past_path_validation(
     path-validation guard.
     """
 
-    rc = main([*_BASE, "--temp-parent", str(tmp_path)])
+    main([*_BASE, "--temp-parent", str(tmp_path)])
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    rendered = json.dumps(payload, sort_keys=True)
     # Must NOT be path_arg_invalid — that would mean we over-rejected valid input.
     assert payload.get("error") != "path_arg_invalid"
     assert payload.get("condition") != "path_arg_invalid"
