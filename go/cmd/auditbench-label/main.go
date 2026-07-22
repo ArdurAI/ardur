@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ArdurAI/ardur/go/benchmark/independent"
 )
@@ -43,7 +44,7 @@ func runBundle(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *studyID == "" || *view == "" || *source == "" || *output == "" || fs.NArg() != 0 {
+	if strings.TrimSpace(*studyID) == "" || strings.TrimSpace(*view) == "" || strings.TrimSpace(*source) == "" || strings.TrimSpace(*output) == "" || fs.NArg() != 0 {
 		return fmt.Errorf("usage: auditbench-label bundle -study-id ID -view oracle|evidence -source FILE -out FILE")
 	}
 	bundle, err := independent.BuildLabelBundle(*studyID, *view, *source)
@@ -71,7 +72,7 @@ func runAdjudicate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *studyID == "" || *annotationsPath == "" || *output == "" || fs.NArg() != 0 {
+	if strings.TrimSpace(*studyID) == "" || strings.TrimSpace(*annotationsPath) == "" || strings.TrimSpace(*output) == "" || fs.NArg() != 0 {
 		return fmt.Errorf("usage: auditbench-label adjudicate -study-id ID -annotations FILE [-decisions FILE] -out FILE")
 	}
 	var annotations []independent.Annotation
