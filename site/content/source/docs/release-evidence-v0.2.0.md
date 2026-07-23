@@ -2,7 +2,7 @@
 title: "v0.2.0 Version-Sensitive Release Evidence"
 description: "This record supports the external dependency claims added to the v0.2.0"
 source_path: "docs/release-evidence-v0.2.0.md"
-source_sha256: "d98d0e15967805e8d9063fc3e7313a487fe59d0dbb1ecca8383f55087d855933"
+source_sha256: "ac0a7fe212e87a2bb58017c0adc0335f33e7682d7d517e463c42365765deee36"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -74,8 +74,10 @@ def yank_states(version: str) -> list[bool]:
     return states
 
 
-assert not any(yank_states("1.5.0"))
-assert all(yank_states("1.5.1"))
+if any(yank_states("1.5.0")):
+    raise SystemExit("build 1.5.0 unexpectedly has a yanked distribution file")
+if not all(yank_states("1.5.1")):
+    raise SystemExit("build 1.5.1 unexpectedly has a non-yanked distribution file")
 print("build 1.5.0 non-yanked; build 1.5.1 yanked")
 PY
 ```

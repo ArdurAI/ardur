@@ -57,8 +57,10 @@ def yank_states(version: str) -> list[bool]:
     return states
 
 
-assert not any(yank_states("1.5.0"))
-assert all(yank_states("1.5.1"))
+if any(yank_states("1.5.0")):
+    raise SystemExit("build 1.5.0 unexpectedly has a yanked distribution file")
+if not all(yank_states("1.5.1")):
+    raise SystemExit("build 1.5.1 unexpectedly has a non-yanked distribution file")
 print("build 1.5.0 non-yanked; build 1.5.1 yanked")
 PY
 ```
