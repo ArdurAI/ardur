@@ -20,6 +20,17 @@ GENERATED_ARTIFACTS = (
     "lineage_hashes.json",
 )
 
+# Runtime artifacts that ``ardur protect`` writes to the project root.
+# These carry signed mission tokens and private key material — never commit.
+ROOT_RUNTIME_ARTIFACTS = (
+    "active_mission.jwt",
+    "keys/passport_private.pem",
+    "keys/passport_public.pem",
+    "claude-code-hook-python",
+    "claude-code-pre_tool_use",
+    "claude-code-pre_tool_use.sha256",
+)
+
 VISIBLE_FILES = (
     "ordinary.txt",
     "runtime/replay_cache.json",
@@ -66,6 +77,28 @@ def test_recursive_staging_skips_generated_artifacts_but_keeps_public_fixtures(
 
     assert set(GENERATED_ARTIFACTS).isdisjoint(staged)
     assert {".gitignore", *VISIBLE_FILES} == staged
+
+
+def test_root_runtime_artifacts_are_ignored(tmp_path: Path) -> None:
+    """Root-level ``ardur protect`` outputs must never be accidentally staged."""
+
+    shutil.copy2(REPO_ROOT / ".gitignore", tmp_path / ".gitignore")
+    _git("init", "--quiet", cwd=tmp_path)
+
+    for relative in ROOT_RUNTIME_ARTIFACTS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("fixture\n", encoding="utf-8")
+
+    _git("add", "--all", cwd=tmp_path)
+    staged = set(
+        _git("diff", "--cached", "--name-only", "-z", cwd=tmp_path)
+        .stdout.rstrip("\0")
+        .split("\0")
+    )
+
+    assert set(ROOT_RUNTIME_ARTIFACTS).isdisjoint(staged)
+    assert {".gitignore"} == staged
 
 
 def test_tracked_pem_files_stay_in_reviewed_public_fixture_trees() -> None:

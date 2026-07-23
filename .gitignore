@@ -6,6 +6,14 @@
 __pycache__/
 *.pyc
 
+# Runtime artifacts that ardur protect writes to the project root or CWD.
+# These carry signed mission tokens and private key material — never commit.
+active_mission.jwt
+keys/
+claude-code-hook-python
+claude-code-pre_tool_use
+claude-code-pre_tool_use.sha256
+
 # AI-agent / LLM working context - handoff prompts, work logs, checkpoints,
 # local skills, graph indexes, and other artifacts produced by Claude / Codex /
 # Gemini / Cursor / Conductor / etc. while collaborating on this repo. NEVER
