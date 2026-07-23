@@ -145,7 +145,11 @@ class EnvProxyAdapter(AgentAdapter):
         env[ENV_HOME] = str(ctx.home)
         env[ENV_MISSION_PASSPORT] = str(ctx.passport_path)
         env[ENV_TRACE_ID] = ctx.trace_id
-        return env, list(command), [f"governance routed via env → {ctx.proxy_url}/evaluate"]
+        return (
+            env,
+            list(command),
+            [f"governance routed via env → {ctx.proxy_url}/evaluate"],
+        )
 
 
 class ClaudeCodeAdapter(EnvProxyAdapter):
@@ -187,7 +191,12 @@ class ClaudeCodeAdapter(EnvProxyAdapter):
             and ctx.plugin_dir is not None
             and "--plugin-dir" not in command
         ):
-            new_command = [command[0], "--plugin-dir", str(ctx.plugin_dir), *command[1:]]
+            new_command = [
+                command[0],
+                "--plugin-dir",
+                str(ctx.plugin_dir),
+                *command[1:],
+            ]
             notes.append(
                 f"Claude Code hook scoped to this run via --plugin-dir {ctx.plugin_dir} "
                 "and VIBAP_HOME (no settings.json edit)"
@@ -333,7 +342,7 @@ def _build_embedded_server(
             prefix = "Bearer "
             if not header.startswith(prefix):
                 return False
-            supplied = header[len(prefix):].strip().encode("utf-8")
+            supplied = header[len(prefix) :].strip().encode("utf-8")
             return hmac.compare_digest(supplied, token_material)
 
         def _read_json(self) -> dict[str, Any]:
@@ -373,9 +382,14 @@ def _build_embedded_server(
                         sid,
                         str(tool_name),
                         dict(arguments),
-                        receipt_callback=receipt_registrar.register if receipt_registrar is not None else None,
+                        receipt_callback=receipt_registrar.register
+                        if receipt_registrar is not None
+                        else None,
                     )
-                    response: dict[str, Any] = {"decision": decision.value, "session_id": sid}
+                    response: dict[str, Any] = {
+                        "decision": decision.value,
+                        "session_id": sid,
+                    }
                     if decision != Decision.PERMIT:
                         response["reason"] = reason
                     self._send(200, response)
@@ -394,7 +408,9 @@ def _build_embedded_server(
                     self._send(200, {"attestation_token": token, "summary": summary})
                     return
                 if path == "/attest":
-                    token, claims = proxy.issue_attestation_for_session(sid, private_key)
+                    token, claims = proxy.issue_attestation_for_session(
+                        sid, private_key
+                    )
                     self._send(200, {"token": token, "claims": claims})
                     return
             except (ValueError, KeyError, PermissionError) as exc:
@@ -482,7 +498,9 @@ def _correlate_launch(
     """
     socket_path = kc.daemon_socket_path()
     if not enabled:
-        return kc.CorrelationResult(available=False, reason="kernel correlation disabled by caller")
+        return kc.CorrelationResult(
+            available=False, reason="kernel correlation disabled by caller"
+        )
     if cgroup_handle is None:
         return kc.CorrelationResult(
             available=False,
@@ -601,17 +619,27 @@ def _plan_seccomp_shim(*, enabled: bool) -> SeccompShimPlan:
     whether that is a permissive degrade or an ``--enforce`` abort.
     """
     if not enabled:
-        return SeccompShimPlan(tier=None, wrapped=False, reason="kernel correlation disabled by caller")
+        return SeccompShimPlan(
+            tier=None, wrapped=False, reason="kernel correlation disabled by caller"
+        )
     socket_path = kc.daemon_socket_path()
     if not kc.daemon_available(socket_path):
-        return SeccompShimPlan(tier=None, wrapped=False, reason="kernelcapture daemon socket not present")
+        return SeccompShimPlan(
+            tier=None, wrapped=False, reason="kernelcapture daemon socket not present"
+        )
     try:
         response = kc.KernelCaptureClient(socket_path).health()
     except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError) as exc:
-        return SeccompShimPlan(tier=None, wrapped=False, reason=f"daemon health check failed: {exc}")
+        return SeccompShimPlan(
+            tier=None, wrapped=False, reason=f"daemon health check failed: {exc}"
+        )
     tier = response.get("enforcement_tier") or None
     if tier != kc.ENFORCEMENT_TIER_SECCOMP:
-        return SeccompShimPlan(tier=tier, wrapped=False, reason=f"active enforcement tier is {tier!r}, no shim needed")
+        return SeccompShimPlan(
+            tier=tier,
+            wrapped=False,
+            reason=f"active enforcement tier is {tier!r}, no shim needed",
+        )
     shim_path = kc.exec_shim_path()
     if shim_path is None:
         return SeccompShimPlan(
@@ -710,7 +738,11 @@ def _verify_seccomp_listener_attached(
     any daemon-communication failure.
     """
     timeout_s = SECCOMP_LISTENER_VERIFY_TIMEOUT_S if timeout_s is None else timeout_s
-    poll_interval_s = SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S if poll_interval_s is None else poll_interval_s
+    poll_interval_s = (
+        SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S
+        if poll_interval_s is None
+        else poll_interval_s
+    )
     deadline = time.time() + timeout_s
     client = kc.KernelCaptureClient(kc.daemon_socket_path())
     while True:
@@ -728,7 +760,7 @@ def _verify_seccomp_listener_attached(
 def _apply_kernel_policy(
     *,
     session_id: str,
-    passport: "MissionPassport",
+    passport: MissionPassport,
     kernel_resource_scope: list[str],
     correlation: kc.CorrelationResult,
     enforce: bool,
@@ -772,7 +804,12 @@ def _apply_kernel_policy(
         return {"applied": False, "reason": reason, "tier2_ops": []}
 
     from .bpf_lower import OpPolicyEntry, lower_to_bpf_policy_plan
-    from .bpf_types import ACT_DENY, ENFORCE_MODE_ENFORCE, ENFORCE_MODE_PERMISSIVE, OP_NET_CONNECT
+    from .bpf_types import (
+        ACT_DENY,
+        ENFORCE_MODE_ENFORCE,
+        ENFORCE_MODE_PERMISSIVE,
+        OP_NET_CONNECT,
+    )
 
     plan = lower_to_bpf_policy_plan(
         allowed_side_effect_classes=passport.allowed_side_effect_classes,
@@ -788,7 +825,9 @@ def _apply_kernel_policy(
     # endpoint exceptions without it), while the dedicated root-PID/port BPF
     # map makes only this tuple reachable. Every unrelated connect remains
     # denied in strict mode.
-    if control_plane_endpoint is not None and not any(entry.op == OP_NET_CONNECT for entry in plan.op_policies):
+    if control_plane_endpoint is not None and not any(
+        entry.op == OP_NET_CONNECT for entry in plan.op_policies
+    ):
         plan = replace(
             plan,
             op_policies=plan.op_policies
@@ -803,7 +842,10 @@ def _apply_kernel_policy(
         }
 
     generation = 1  # first (and only) apply for this fresh session/cgroup pair.
-    if seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP and control_plane_endpoint is None:
+    if (
+        seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP
+        and control_plane_endpoint is None
+    ):
         reason = "seccomp tier requires an exact governance control-plane endpoint"
         if enforce:
             raise KernelPolicyEnforcementError(reason)
@@ -878,7 +920,9 @@ def _resolve_run_resource_scope(
         if not isinstance(raw_root, str) or not raw_root.strip():
             raise ValueError("resource_scope entries must be non-empty path roots")
         if any(char in raw_root for char in "*?[]"):
-            raise ValueError("resource_scope entries must be path roots, not glob patterns")
+            raise ValueError(
+                "resource_scope entries must be path roots, not glob patterns"
+            )
         candidate = Path(raw_root).expanduser()
         if not candidate.is_absolute():
             candidate = work_dir / candidate
@@ -887,7 +931,9 @@ def _resolve_run_resource_scope(
         except (OSError, ValueError) as exc:
             raise ValueError(f"invalid resource_scope path root: {exc}") from exc
         if root != work_dir and not root.is_relative_to(work_dir):
-            raise ValueError("resource_scope path roots must stay inside the governed cwd")
+            raise ValueError(
+                "resource_scope path roots must stay inside the governed cwd"
+            )
         if root not in roots:
             roots.append(root)
 
@@ -956,7 +1002,9 @@ def run_governed(
     if not command:
         raise ValueError("ardur run requires a command to govern")
     if via not in VALID_VIA_MODES:
-        raise ValueError(f"unknown --via mode: {via!r} (choose from {', '.join(VALID_VIA_MODES)})")
+        raise ValueError(
+            f"unknown --via mode: {via!r} (choose from {', '.join(VALID_VIA_MODES)})"
+        )
 
     work_dir = Path(cwd).expanduser().resolve() if cwd else Path.cwd()
     scope_patterns = _resolve_run_resource_scope(
@@ -1020,7 +1068,9 @@ def run_governed(
     proxy_host = str(server.server_address[0])
     port = server.server_address[1]
     proxy_url = f"http://{proxy_host}:{port}"
-    server_thread = threading.Thread(target=server.serve_forever, name="ardur-run-proxy", daemon=True)
+    server_thread = threading.Thread(
+        target=server.serve_forever, name="ardur-run-proxy", daemon=True
+    )
     server_thread.start()
 
     cgroup_handle: kc.CgroupHandle | None = None
@@ -1034,7 +1084,9 @@ def run_governed(
         )
     # Pre-initialized so the finally block has a safe value even if an
     # exception is raised before kernel correlation is attempted below.
-    correlation = kc.CorrelationResult(available=False, reason="run did not reach kernel correlation")
+    correlation = kc.CorrelationResult(
+        available=False, reason="run did not reach kernel correlation"
+    )
     seccomp_ready_file: Path | None = None
     launch_gate_read_fd: int | None = None
     launch_gate_write_fd: int | None = None
@@ -1069,9 +1121,14 @@ def run_governed(
         seccomp_ready_file = home / f"seccomp-ready-{session_id}"
         if seccomp_plan.wrapped and seccomp_plan.shim_path is not None:
             run_command = _wrap_command_with_seccomp_shim(
-                run_command, session_id=session_id, shim_path=seccomp_plan.shim_path, ready_file=seccomp_ready_file
+                run_command,
+                session_id=session_id,
+                shim_path=seccomp_plan.shim_path,
+                ready_file=seccomp_ready_file,
             )
-            notes.append(f"seccomp enforcement tier active — agent launched via ardur-exec-shim ({seccomp_plan.shim_path})")
+            notes.append(
+                f"seccomp enforcement tier active — agent launched via ardur-exec-shim ({seccomp_plan.shim_path})"
+            )
         elif seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP:
             # Recorded now so it's visible even if the run never reaches
             # _apply_kernel_policy's own (mission-content-gated) check of
@@ -1097,7 +1154,9 @@ def run_governed(
             run_command = _wrap_command_with_launch_gate(run_command, trace_exec=True)
         elif cgroup_handle is not None:
             launch_gate_read_fd, launch_gate_write_fd = os.pipe()
-            run_command = _wrap_command_with_launch_gate(run_command, ready_fd=launch_gate_read_fd)
+            run_command = _wrap_command_with_launch_gate(
+                run_command, ready_fd=launch_gate_read_fd
+            )
             popen_extra["pass_fds"] = (launch_gate_read_fd,)
 
         # 5. Launch the agent.
@@ -1125,7 +1184,9 @@ def run_governed(
                     proc.kill()
                 with suppress(Exception):
                     proc.wait(timeout=5)
-                raise KernelPolicyEnforcementError(f"BPF exec handoff failed closed: {exc}") from exc
+                raise KernelPolicyEnforcementError(
+                    f"BPF exec handoff failed closed: {exc}"
+                ) from exc
 
         if cgroup_handle is not None:
             try:
@@ -1137,7 +1198,9 @@ def run_governed(
                     proc.kill()
                     proc.wait()
                     bpf_exec_stopped = False
-                    raise KernelPolicyEnforcementError(f"BPF cgroup adoption failed closed: {exc}") from exc
+                    raise KernelPolicyEnforcementError(
+                        f"BPF cgroup adoption failed closed: {exc}"
+                    ) from exc
 
         correlation = _correlate_launch(
             session_id=session_id,
@@ -1180,9 +1243,12 @@ def run_governed(
                 enforce=enforce,
                 seccomp_plan=seccomp_plan,
                 control_plane_endpoint=(proxy_host, port)
-                if seccomp_plan.tier in {kc.ENFORCEMENT_TIER_BPF_LSM, kc.ENFORCEMENT_TIER_SECCOMP}
+                if seccomp_plan.tier
+                in {kc.ENFORCEMENT_TIER_BPF_LSM, kc.ENFORCEMENT_TIER_SECCOMP}
                 else None,
-                bootstrap_read_allow=BPF_BOOTSTRAP_READ_ALLOW if bpf_trace_handoff else (),
+                bootstrap_read_allow=BPF_BOOTSTRAP_READ_ALLOW
+                if bpf_trace_handoff
+                else (),
             )
         except KernelPolicyEnforcementError as exc:
             notes.append(f"ENFORCE abort: {exc}")
@@ -1202,7 +1268,9 @@ def run_governed(
                 proc.kill()
                 proc.wait()
                 bpf_exec_stopped = False
-                raise KernelPolicyEnforcementError(f"BPF exec release failed closed: {exc}") from exc
+                raise KernelPolicyEnforcementError(
+                    f"BPF exec release failed closed: {exc}"
+                ) from exc
             bpf_exec_stopped = False
 
         # 6. Wait for the agent to exit (bounded by the mission duration budget).
@@ -1215,7 +1283,9 @@ def run_governed(
             except subprocess.TimeoutExpired:
                 proc.kill()
                 exit_code = proc.wait()
-            notes.append(f"agent exceeded max-duration {max_duration_s}s and was terminated")
+            notes.append(
+                f"agent exceeded max-duration {max_duration_s}s and was terminated"
+            )
     finally:
         if bpf_exec_stopped and proc is not None:
             with suppress(OSError):
@@ -1238,7 +1308,9 @@ def run_governed(
                     session_id=session_id, trace_id=trace_id
                 )
             except (kc.DaemonUnavailable, kc.DaemonProtocolError):
-                notes.append("kernel daemon end_session unavailable during local cleanup")
+                notes.append(
+                    "kernel daemon end_session unavailable during local cleanup"
+                )
         if cgroup_handle is not None:
             cgroup_handle.cleanup()
         if seccomp_ready_file is not None:
@@ -1295,7 +1367,9 @@ def _wait_for_health(proxy_url: str, api_token: str, timeout_s: float = 5.0) -> 
         except (urllib.error.URLError, OSError) as exc:
             last_error = exc
             time.sleep(0.02)
-    raise RuntimeError(f"embedded governance proxy did not become healthy: {last_error}")
+    raise RuntimeError(
+        f"embedded governance proxy did not become healthy: {last_error}"
+    )
 
 
 # ── human-readable summary + CLI glue ──────────────────────────────────────────
@@ -1515,9 +1589,7 @@ def _run_max_tool_calls_invalid_next_steps(condition: str) -> list[dict[str, str
         {
             "action": "provide_valid_max_tool_calls",
             "command": "ardur run --mission <mission> --max-tool-calls <zero-or-positive-count> -- <command>",
-            "detail": (
-                "--max-tool-calls must be zero or a positive integer."
-            ),
+            "detail": ("--max-tool-calls must be zero or a positive integer."),
         },
     ]
 
@@ -1529,14 +1601,20 @@ def run_governed_cli(args: Any) -> int:
         command = command[1:]
     if not command:
         print("ardur run requires a command to govern after --", file=sys.stderr)
-        print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
+        print(
+            'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
+            file=sys.stderr,
+        )
         _print_run_governed_missing_command_next_steps()
         return 2
 
     mission_arg = getattr(args, "mission", None)
     if isinstance(mission_arg, str) and not mission_arg.strip():
         print("ardur run --mission must be a non-empty string.", file=sys.stderr)
-        print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
+        print(
+            'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
+            file=sys.stderr,
+        )
         _print_run_governed_mission_invalid_next_steps()
         return 2
 
@@ -1560,8 +1638,14 @@ def run_governed_cli(args: Any) -> int:
             print(f"ardur run: {exc}", file=sys.stderr)
             return 2
         if expanded_home.is_symlink() and not expanded_home.exists():
-            print("ardur run --home must not point to a dangling symlink.", file=sys.stderr)
-            print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+            print(
+                "ardur run --home must not point to a dangling symlink.",
+                file=sys.stderr,
+            )
+            print(
+                'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                file=sys.stderr,
+            )
             _print_run_governed_home_dangling_symlink_next_steps()
             return 2
         try:
@@ -1571,7 +1655,10 @@ def run_governed_cli(args: Any) -> int:
             return 2
         if resolved_home.exists() and not resolved_home.is_dir():
             print("ardur run --home must point to a directory path.", file=sys.stderr)
-            print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+            print(
+                'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                file=sys.stderr,
+            )
             _print_run_governed_home_not_directory_next_steps()
             return 2
 
@@ -1630,8 +1717,12 @@ def run_governed_cli(args: Any) -> int:
             mission=getattr(args, "mission", None),
             allowed_tools=allowed,
             forbidden_tools=forbidden,
-            max_tool_calls=DEFAULT_MAX_TOOL_CALLS if max_tool_calls_arg is None else int(max_tool_calls_arg),
-            max_duration_s=DEFAULT_MAX_DURATION_S if max_duration_s_arg is None else int(max_duration_s_arg),
+            max_tool_calls=DEFAULT_MAX_TOOL_CALLS
+            if max_tool_calls_arg is None
+            else int(max_tool_calls_arg),
+            max_duration_s=DEFAULT_MAX_DURATION_S
+            if max_duration_s_arg is None
+            else int(max_duration_s_arg),
             home=getattr(args, "home", None),
             via=getattr(args, "via", None) or "auto",
             enable_kernel_correlation=not getattr(args, "no_kernel_correlation", False),
@@ -1643,7 +1734,10 @@ def run_governed_cli(args: Any) -> int:
         print(f"ardur run: {exc}", file=sys.stderr)
         return 2
     except KernelPolicyEnforcementError as exc:
-        print(f"ardur run: --enforce requires kernel-level policy enforcement: {exc}", file=sys.stderr)
+        print(
+            f"ardur run: --enforce requires kernel-level policy enforcement: {exc}",
+            file=sys.stderr,
+        )
         return 3
     except ValueError as exc:
         print(f"ardur run: {exc}", file=sys.stderr)

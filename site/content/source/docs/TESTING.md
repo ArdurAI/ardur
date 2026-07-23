@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "efc37106dd7285a3a82e4ff1d5e8ef2c8a187f9ab84b3e4684404bb8f6f91607"
+source_sha256: "fc592e341f182abe5b125aa0f47ef44cc59c5c3502583fc1f7471a253c9404be"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -238,8 +238,12 @@ source python/.venv/bin/activate
 # Run a specific module
 (cd python && python -m pytest tests/test_passport.py -v)
 
-# End-to-end reproduce (Z3 proofs, signed proof bundle, corpus consistency)
-make reproduce
+# Full local gate, including the runtime suites and optional installed scanners
+./scripts/check-local.sh --full --with-network
+
+# Release-oriented protocol and maintained recognition-corpus gates
+make bench-protocol-test
+(cd go && go run ./cmd/ardur-agent-recognition-eval)
 ```
 
 `setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual

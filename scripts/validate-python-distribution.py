@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import configparser
 import email.policy
+import re
 import stat
 import tarfile
 import zipfile
+from datetime import date
 from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO
@@ -22,6 +24,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 release runner
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_ROOT = REPO_ROOT / "python"
 SOURCE_PLUGIN = REPO_ROOT / "plugins" / "claude-code"
+CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+CHANGELOG_RELEASE_HEADING = re.compile(
+    r"^## \[(?P<version>[^]]+)\] — (?P<release_date>\S+)$", re.MULTILINE
+)
 EXPECTED_URLS = {
     "Homepage": "https://github.com/ArdurAI/ardur",
     "Documentation": "https://github.com/ArdurAI/ardur/tree/main/docs",
@@ -66,6 +72,40 @@ class DistributionValidationError(ValueError):
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise DistributionValidationError(message)
+
+
+def validate_changelog_text(changelog: str, expected_version: str) -> None:
+    unreleased_matches = list(
+        re.finditer(r"^## \[Unreleased\]$", changelog, re.MULTILINE)
+    )
+    require(
+        len(unreleased_matches) == 1,
+        "changelog must contain exactly one Unreleased heading",
+    )
+    matches = [
+        match
+        for match in CHANGELOG_RELEASE_HEADING.finditer(changelog)
+        if match.group("version") == expected_version
+    ]
+    require(
+        len(matches) == 1,
+        f"changelog must contain exactly one release heading for {expected_version}",
+    )
+    release_date = matches[0].group("release_date")
+    try:
+        parsed_date = date.fromisoformat(release_date)
+    except ValueError as exc:
+        raise DistributionValidationError(
+            f"changelog release date is not valid ISO YYYY-MM-DD: {release_date}"
+        ) from exc
+    require(
+        parsed_date.isoformat() == release_date,
+        f"changelog release date is not canonical ISO YYYY-MM-DD: {release_date}",
+    )
+    require(
+        unreleased_matches[0].start() < matches[0].start(),
+        "changelog Unreleased heading must precede the current release heading",
+    )
 
 
 def one(paths: list[Path], description: str) -> Path:
@@ -201,7 +241,7 @@ def validate_wheel(wheel_path: Path, expected_version: str) -> None:
                 "ardur-drp-fixtures": "vibap.drp_conformance:main",
                 "ardur-policy-conformance": "vibap.policy_conformance:main",
                 "ardur-proxy": "vibap.cli:main",
-                "ardur-verify": "vibap.offline_verification:main",
+                "ardur-verify": "vibap.cli:verify_main",
             },
             "console entry points differ from the release contract",
         )
@@ -399,6 +439,7 @@ def validate(dist_dir: Path, expected_tag: str | None = None) -> tuple[Path, Pat
         "rfc8785>=0.1.4,<0.2" in config["dependencies"],
         "source project must declare the RFC 8785 runtime dependency",
     )
+    validate_changelog_text(CHANGELOG.read_text(encoding="utf-8"), expected_version)
     if expected_tag is not None:
         require(
             expected_tag == f"v{expected_version}",

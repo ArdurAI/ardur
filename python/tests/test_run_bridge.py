@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from vibap import kernel_correlation as kc
+from vibap import launch_gate
 from vibap import run_bridge
 from vibap.attestation import ATTESTATION_SCHEMA_VERSION, verify_attestation
 from vibap.passport import load_public_key, verify_passport
@@ -53,7 +54,7 @@ from vibap.run_bridge import (
 # (ARDUR_PROXY_URL / ARDUR_API_TOKEN / ARDUR_SESSION_ID) and routes three tool
 # calls through the governance proxy: one PERMIT-able (Read), one DENY-able
 # (Bash, which the mission forbids), one PERMIT-able (Glob).
-STANDIN_AGENT = '''\
+STANDIN_AGENT = """\
 import json, os, sys, urllib.request
 
 proxy = os.environ["ARDUR_PROXY_URL"]
@@ -80,7 +81,7 @@ for tool, args in [
     decisions[tool] = evaluate(tool, args)["decision"]
 
 sys.stdout.write(json.dumps(decisions))
-'''
+"""
 
 
 def test_bpf_bootstrap_read_roots_are_fixed_runtime_categories() -> None:
@@ -115,7 +116,7 @@ def fake_exec_shim(tmp_path: Path) -> Path:
     """
     path = tmp_path / "fake-exec-shim.sh"
     path.write_text(
-        "#!/bin/sh\nset -e\nshift 6\nshift\nexec \"$@\"\n",
+        '#!/bin/sh\nset -e\nshift 6\nshift\nexec "$@"\n',
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -146,7 +147,9 @@ class _FakeKernelDaemon:
     which opens one connection per call), and records every request it saw.
     """
 
-    def __init__(self, socket_path: Path, responses: dict[str, dict] | None = None) -> None:
+    def __init__(
+        self, socket_path: Path, responses: dict[str, dict] | None = None
+    ) -> None:
         self.socket_path = socket_path
         self.responses = responses or {}
         self.received: list[dict] = []
@@ -208,14 +211,18 @@ def sockdir():
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _live_kernel_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sockdir: Path) -> Path:
+def _live_kernel_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sockdir: Path
+) -> Path:
     """Point cgroup v2 + the daemon socket at fakes that look "available".
 
     Returns the socket path a :class:`_FakeKernelDaemon` should bind to.
     """
     fake_cgroup_root = tmp_path / "fake-cgroup"
     fake_cgroup_root.mkdir()
-    (fake_cgroup_root / "cgroup.controllers").write_text("cpu memory\n", encoding="utf-8")
+    (fake_cgroup_root / "cgroup.controllers").write_text(
+        "cpu memory\n", encoding="utf-8"
+    )
     monkeypatch.setenv(kc.CGROUP_ROOT_ENV, str(fake_cgroup_root))
     socket_path = sockdir / "daemon.sock"
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
@@ -277,7 +284,11 @@ def test_ardur_run_governs_launched_agent_zero_setup(
     public_key = load_public_key(keys_dir=home / "keys")
     receipts_path = Path(result.receipts_path)
     assert receipts_path.is_file()
-    entries = [json.loads(line) for line in receipts_path.read_text().splitlines() if line.strip()]
+    entries = [
+        json.loads(line)
+        for line in receipts_path.read_text().splitlines()
+        if line.strip()
+    ]
     assert len(entries) == 3
     verified = verify_chain(entries, public_key)
     assert len(verified) == 3
@@ -413,7 +424,11 @@ def test_ardur_run_applies_kernel_policy_when_daemon_available(
         if request.get("method") == "register_receipt"
     )
 
-    apply_req = next(req["apply_policy"] for req in daemon.received if req.get("method") == "apply_policy")
+    apply_req = next(
+        req["apply_policy"]
+        for req in daemon.received
+        if req.get("method") == "apply_policy"
+    )
     assert apply_req["session_id"] == result.session_id
     assert apply_req["generation"] == 1
     assert apply_req["enforce_mode"] == 1  # ENFORCE_MODE_ENFORCE
@@ -422,7 +437,9 @@ def test_ardur_run_applies_kernel_policy_when_daemon_available(
     from vibap.bpf_types import ACT_DENY, OP_EXEC
 
     op_by_code = {entry["op"]: entry for entry in apply_req["op_policies"]}
-    assert op_by_code[OP_EXEC]["action"] == ACT_DENY  # forbidden_tools=["Bash"] -> OP_EXEC deny
+    assert (
+        op_by_code[OP_EXEC]["action"] == ACT_DENY
+    )  # forbidden_tools=["Bash"] -> OP_EXEC deny
 
 
 def test_ardur_run_permissive_records_degradation_note_without_daemon(
@@ -492,7 +509,9 @@ def test_ardur_run_enforce_aborts_when_daemon_rejects_policy(
     )
     daemon.start()
     try:
-        with pytest.raises(KernelPolicyEnforcementError, match="no BPF-LSM guard loaded"):
+        with pytest.raises(
+            KernelPolicyEnforcementError, match="no BPF-LSM guard loaded"
+        ):
             run_governed(
                 command=[sys.executable, str(standin_agent)],
                 mission="Enforce mode aborts on daemon rejection.",
@@ -526,10 +545,14 @@ def _seccomp_health_response() -> dict:
 
 def test_plan_seccomp_shim_disabled_by_caller() -> None:
     plan = _plan_seccomp_shim(enabled=False)
-    assert plan == SeccompShimPlan(tier=None, wrapped=False, reason="kernel correlation disabled by caller")
+    assert plan == SeccompShimPlan(
+        tier=None, wrapped=False, reason="kernel correlation disabled by caller"
+    )
 
 
-def test_plan_seccomp_shim_no_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plan_seccomp_shim_no_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(tmp_path / "no-such-daemon.sock"))
     plan = _plan_seccomp_shim(enabled=True)
     assert plan.tier is None
@@ -537,7 +560,9 @@ def test_plan_seccomp_shim_no_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "socket not present" in plan.reason
 
 
-def test_plan_seccomp_shim_bpf_lsm_tier_does_not_wrap(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
+def test_plan_seccomp_shim_bpf_lsm_tier_does_not_wrap(
+    monkeypatch: pytest.MonkeyPatch, sockdir: Path
+) -> None:
     socket_path = sockdir / "daemon.sock"
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
     daemon = _FakeKernelDaemon(
@@ -566,7 +591,9 @@ def test_plan_seccomp_shim_seccomp_tier_resolves_shim(
     socket_path = sockdir / "daemon.sock"
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
     monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
-    daemon = _FakeKernelDaemon(socket_path, responses={"health": _seccomp_health_response()})
+    daemon = _FakeKernelDaemon(
+        socket_path, responses={"health": _seccomp_health_response()}
+    )
     daemon.start()
     try:
         plan = _plan_seccomp_shim(enabled=True)
@@ -577,11 +604,15 @@ def test_plan_seccomp_shim_seccomp_tier_resolves_shim(
     assert plan.shim_path == fake_exec_shim
 
 
-def test_plan_seccomp_shim_seccomp_tier_missing_binary(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
+def test_plan_seccomp_shim_seccomp_tier_missing_binary(
+    monkeypatch: pytest.MonkeyPatch, sockdir: Path
+) -> None:
     socket_path = sockdir / "daemon.sock"
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(socket_path))
     monkeypatch.setattr(kc, "exec_shim_path", lambda: None)
-    daemon = _FakeKernelDaemon(socket_path, responses={"health": _seccomp_health_response()})
+    daemon = _FakeKernelDaemon(
+        socket_path, responses={"health": _seccomp_health_response()}
+    )
     daemon.start()
     try:
         plan = _plan_seccomp_shim(enabled=True)
@@ -592,12 +623,17 @@ def test_plan_seccomp_shim_seccomp_tier_missing_binary(monkeypatch: pytest.Monke
     assert "not found" in plan.reason
 
 
-def test_wrap_command_with_seccomp_shim_builds_expected_argv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_wrap_command_with_seccomp_shim_builds_expected_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv(kc.SECCOMP_SOCKET_ENV, "/run/ardur/kernelcapture/seccomp.sock")
     shim_path = tmp_path / "ardur-exec-shim"
     ready_file = tmp_path / "seccomp-ready-sess-1"
     wrapped = _wrap_command_with_seccomp_shim(
-        ["claude", "--foo"], session_id="sess-1", shim_path=shim_path, ready_file=ready_file
+        ["claude", "--foo"],
+        session_id="sess-1",
+        shim_path=shim_path,
+        ready_file=ready_file,
     )
     assert wrapped == [
         str(shim_path),
@@ -614,7 +650,9 @@ def test_wrap_command_with_seccomp_shim_builds_expected_argv(monkeypatch: pytest
 
 
 def test_wrap_command_with_launch_gate_builds_expected_argv() -> None:
-    assert run_bridge._wrap_command_with_launch_gate(["agent", "--flag"], ready_fd=17) == [
+    assert run_bridge._wrap_command_with_launch_gate(
+        ["agent", "--flag"], ready_fd=17
+    ) == [
         sys.executable,
         "-I",
         str(Path(run_bridge.__file__).with_name("launch_gate.py")),
@@ -631,7 +669,11 @@ def test_trace_exec_gate_stops_target_until_parent_releases(tmp_path: Path) -> N
     marker = tmp_path / "target-ran"
     proc = subprocess.Popen(
         run_bridge._wrap_command_with_launch_gate(
-            [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+            [
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).touch()",
+            ],
             trace_exec=True,
         ),
         stdout=subprocess.PIPE,
@@ -654,7 +696,11 @@ def test_launch_gate_fails_closed_when_parent_does_not_release(tmp_path: Path) -
     read_fd, write_fd = os.pipe()
     proc = subprocess.Popen(
         run_bridge._wrap_command_with_launch_gate(
-            [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+            [
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).touch()",
+            ],
             ready_fd=read_fd,
         ),
         pass_fds=(read_fd,),
@@ -668,6 +714,37 @@ def test_launch_gate_fails_closed_when_parent_does_not_release(tmp_path: Path) -
     assert proc.returncode == 125
     assert b"parent exited before releasing target" in stderr
     assert not marker.exists()
+
+
+def test_launch_gate_fails_closed_when_readiness_channel_cannot_close(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class CloseFailingReadyChannel:
+        def __enter__(self) -> "CloseFailingReadyChannel":
+            return self
+
+        def read(self, size: int) -> bytes:
+            assert size == 1
+            return launch_gate.RELEASE_BYTE
+
+        def __exit__(self, *_args: object) -> None:
+            raise OSError("synthetic close failure")
+
+    monkeypatch.setattr(
+        launch_gate.os,
+        "fdopen",
+        lambda *_args, **_kwargs: CloseFailingReadyChannel(),
+    )
+
+    def unexpected_exec(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("launch gate executed the target after a readiness close failure")
+
+    monkeypatch.setattr(launch_gate.os, "execvpe", unexpected_exec)
+
+    exit_code = launch_gate.main(["--ready-fd", "17", "--", "agent"])
+
+    assert exit_code == launch_gate.PARENT_NOT_READY_EXIT
+    assert "parent readiness channel failed" in capsys.readouterr().err
 
 
 def test_launch_gate_ignores_project_local_module_shadow(tmp_path: Path) -> None:
@@ -684,7 +761,11 @@ def test_launch_gate_ignores_project_local_module_shadow(tmp_path: Path) -> None
     read_fd, write_fd = os.pipe()
     proc = subprocess.Popen(
         run_bridge._wrap_command_with_launch_gate(
-            [sys.executable, "-c", f"from pathlib import Path; Path({str(target_marker)!r}).touch()"],
+            [
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(target_marker)!r}).touch()",
+            ],
             ready_fd=read_fd,
         ),
         cwd=tmp_path,
@@ -728,12 +809,16 @@ def test_ardur_run_gates_target_through_registration_and_policy(
     monkeypatch.setattr(
         run_bridge,
         "_plan_seccomp_shim",
-        lambda *, enabled: SeccompShimPlan(tier=kc.ENFORCEMENT_TIER_BPF_LSM, wrapped=False),
+        lambda *, enabled: SeccompShimPlan(
+            tier=kc.ENFORCEMENT_TIER_BPF_LSM, wrapped=False
+        ),
     )
 
     def correlate(**kwargs: object) -> kc.CorrelationResult:
         assert fake_cgroup.adopted_pid == kwargs["pid"]
-        assert not marker.exists(), "target executed before daemon registration completed"
+        assert not marker.exists(), (
+            "target executed before daemon registration completed"
+        )
         return kc.CorrelationResult(
             available=True,
             reason="test registration complete",
@@ -743,7 +828,9 @@ def test_ardur_run_gates_target_through_registration_and_policy(
         )
 
     def apply_policy(**_kwargs: object) -> dict[str, object]:
-        assert not marker.exists(), "target executed before BPF policy application completed"
+        assert not marker.exists(), (
+            "target executed before BPF policy application completed"
+        )
         return {"applied": True, "reason": "test policy applied"}
 
     monkeypatch.setattr(run_bridge, "_correlate_launch", correlate)
@@ -762,7 +849,9 @@ def test_ardur_run_gates_target_through_registration_and_policy(
     assert fake_cgroup.cleaned is True
 
 
-def test_verify_seccomp_listener_attached_true(monkeypatch: pytest.MonkeyPatch, sockdir: Path) -> None:
+def test_verify_seccomp_listener_attached_true(
+    monkeypatch: pytest.MonkeyPatch, sockdir: Path
+) -> None:
     sock = sockdir / "c.sock"
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(sock))
     daemon = _FakeSessionStatusDaemon(
@@ -776,7 +865,12 @@ def test_verify_seccomp_listener_attached_true(monkeypatch: pytest.MonkeyPatch, 
         },
     )
     try:
-        assert _verify_seccomp_listener_attached("sess-1", timeout_s=1.0, poll_interval_s=0.05) is True
+        assert (
+            _verify_seccomp_listener_attached(
+                "sess-1", timeout_s=1.0, poll_interval_s=0.05
+            )
+            is True
+        )
     finally:
         daemon.close()
 
@@ -800,7 +894,12 @@ def test_verify_seccomp_listener_attached_times_out_when_never_true(
     )
     daemon.start()
     try:
-        assert _verify_seccomp_listener_attached("sess-1", timeout_s=0.3, poll_interval_s=0.05) is False
+        assert (
+            _verify_seccomp_listener_attached(
+                "sess-1", timeout_s=0.3, poll_interval_s=0.05
+            )
+            is False
+        )
     finally:
         daemon.close()
     # Genuinely polled more than once before giving up, not just a single
@@ -813,7 +912,10 @@ def test_verify_seccomp_listener_attached_false_when_daemon_unreachable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv(kc.DAEMON_SOCKET_ENV, str(tmp_path / "no-such-daemon.sock"))
-    assert _verify_seccomp_listener_attached("sess-1", timeout_s=1.0, poll_interval_s=0.05) is False
+    assert (
+        _verify_seccomp_listener_attached("sess-1", timeout_s=1.0, poll_interval_s=0.05)
+        is False
+    )
 
 
 def _seccomp_daemon_responses(*, listener_attached: bool) -> dict[str, dict]:
@@ -841,7 +943,11 @@ def _seccomp_daemon_responses(*, listener_attached: bool) -> dict[str, dict]:
 
 
 def test_ardur_run_launches_via_shim_and_confirms_enforcement_on_seccomp_tier(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    standin_agent: Path,
+    sockdir: Path,
+    fake_exec_shim: Path,
 ) -> None:
     """The headline #104 fix, the success path: on a seccomp-tier host the
     agent actually runs *through* ardur-exec-shim, and a genuinely-attached
@@ -849,7 +955,9 @@ def test_ardur_run_launches_via_shim_and_confirms_enforcement_on_seccomp_tier(
     """
     socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
     monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
-    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=True))
+    daemon = _FakeKernelDaemon(
+        socket_path, responses=_seccomp_daemon_responses(listener_attached=True)
+    )
     daemon.start()
     try:
         result = run_governed(
@@ -875,7 +983,11 @@ def test_ardur_run_launches_via_shim_and_confirms_enforcement_on_seccomp_tier(
 
 
 def test_no_resource_scope_omits_file_ops_from_lowered_plan(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    standin_agent: Path,
+    sockdir: Path,
+    fake_exec_shim: Path,
 ) -> None:
     """``no_resource_scope=True`` is what makes a mission genuinely
     seccomp-tier-coverable end to end: without it, every mission's default
@@ -885,7 +997,9 @@ def test_no_resource_scope_omits_file_ops_from_lowered_plan(
     """
     socket_path = _live_kernel_env(monkeypatch, tmp_path, sockdir)
     monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
-    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=True))
+    daemon = _FakeKernelDaemon(
+        socket_path, responses=_seccomp_daemon_responses(listener_attached=True)
+    )
     daemon.start()
     try:
         result = run_governed(
@@ -903,7 +1017,11 @@ def test_no_resource_scope_omits_file_ops_from_lowered_plan(
         daemon.close()
 
     assert result.kernel_policy["applied"] is True
-    apply_req = next(req["apply_policy"] for req in daemon.received if req.get("method") == "apply_policy")
+    apply_req = next(
+        req["apply_policy"]
+        for req in daemon.received
+        if req.get("method") == "apply_policy"
+    )
     assert "path_allow" not in apply_req
     endpoint = apply_req["control_plane_endpoint"]
     assert endpoint["ip"] == "127.0.0.1"
@@ -914,19 +1032,27 @@ def test_no_resource_scope_omits_file_ops_from_lowered_plan(
     assert ops == {OP_NET_CONNECT}
     assert OP_FILE_READ not in ops
     assert OP_FILE_WRITE not in ops
-    passport_token = (tmp_path / "seccomp-net-only-home" / "active_mission.jwt").read_text(
-        encoding="utf-8"
-    ).strip()
+    passport_token = (
+        (tmp_path / "seccomp-net-only-home" / "active_mission.jwt")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
     claims = verify_passport(
         passport_token,
         load_public_key(keys_dir=tmp_path / "seccomp-net-only-home" / "keys"),
     )
     assert claims["resource_scope"] == ["**"]
-    assert any("explicitly unrestricted resource scope" in note for note in result.notes)
+    assert any(
+        "explicitly unrestricted resource scope" in note for note in result.notes
+    )
 
 
 def test_ardur_run_enforce_aborts_when_seccomp_listener_never_attaches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    standin_agent: Path,
+    sockdir: Path,
+    fake_exec_shim: Path,
 ) -> None:
     """The false-success bug (#104), closed: apply_policy reporting
     ``applied_seccomp_tier`` must not be trusted on its own. Here the shim
@@ -939,10 +1065,14 @@ def test_ardur_run_enforce_aborts_when_seccomp_listener_never_attaches(
     monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
     monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_TIMEOUT_S", 0.3)
     monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S", 0.05)
-    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=False))
+    daemon = _FakeKernelDaemon(
+        socket_path, responses=_seccomp_daemon_responses(listener_attached=False)
+    )
     daemon.start()
     try:
-        with pytest.raises(KernelPolicyEnforcementError, match="seccomp listener never attached"):
+        with pytest.raises(
+            KernelPolicyEnforcementError, match="seccomp listener never attached"
+        ):
             run_governed(
                 command=[sys.executable, str(standin_agent)],
                 mission="Seccomp listener never attaches, must abort under --enforce.",
@@ -958,7 +1088,11 @@ def test_ardur_run_enforce_aborts_when_seccomp_listener_never_attaches(
 
 
 def test_ardur_run_permissive_degrades_when_seccomp_listener_never_attaches(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path, sockdir: Path, fake_exec_shim: Path
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    standin_agent: Path,
+    sockdir: Path,
+    fake_exec_shim: Path,
 ) -> None:
     """Same unattached-listener scenario, permissive mode: a recorded
     degrade, not an abort — the run still completes and still governs via
@@ -968,7 +1102,9 @@ def test_ardur_run_permissive_degrades_when_seccomp_listener_never_attaches(
     monkeypatch.setattr(kc, "exec_shim_path", lambda: fake_exec_shim)
     monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_TIMEOUT_S", 0.3)
     monkeypatch.setattr(run_bridge, "SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S", 0.05)
-    daemon = _FakeKernelDaemon(socket_path, responses=_seccomp_daemon_responses(listener_attached=False))
+    daemon = _FakeKernelDaemon(
+        socket_path, responses=_seccomp_daemon_responses(listener_attached=False)
+    )
     daemon.start()
     try:
         result = run_governed(
@@ -1019,7 +1155,9 @@ def test_ardur_run_enforce_aborts_when_seccomp_tier_active_but_shim_missing(
     )
     daemon.start()
     try:
-        with pytest.raises(KernelPolicyEnforcementError, match="seccomp tier active but not wired"):
+        with pytest.raises(
+            KernelPolicyEnforcementError, match="seccomp tier active but not wired"
+        ):
             run_governed(
                 command=[sys.executable, str(standin_agent)],
                 mission="Seccomp tier active, shim missing, must abort under --enforce.",
@@ -1034,13 +1172,17 @@ def test_ardur_run_enforce_aborts_when_seccomp_tier_active_but_shim_missing(
         daemon.close()
 
 
-def test_run_governed_rejects_empty_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_governed_rejects_empty_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _hermetic_kernel_env(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="requires a command"):
         run_governed(command=[], mission="x", home=tmp_path / "h")
 
 
-def test_run_governed_rejects_unknown_via(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_governed_rejects_unknown_via(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _hermetic_kernel_env(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="unknown --via"):
         run_governed(command=["true"], via="bogus", home=tmp_path / "h")
@@ -1061,8 +1203,18 @@ def test_resolve_run_resource_scope_narrows_relative_roots(tmp_path: Path) -> No
 
     from vibap.proxy import _check_resource_scope
 
-    assert _check_resource_scope({"file_path": str(source / "main.py")}, patterns, cwd=str(work_dir))[0] is True
-    assert _check_resource_scope({"file_path": str(work_dir / "README.md")}, patterns, cwd=str(work_dir))[0] is False
+    assert (
+        _check_resource_scope(
+            {"file_path": str(source / "main.py")}, patterns, cwd=str(work_dir)
+        )[0]
+        is True
+    )
+    assert (
+        _check_resource_scope(
+            {"file_path": str(work_dir / "README.md")}, patterns, cwd=str(work_dir)
+        )[0]
+        is False
+    )
 
     from vibap.bpf_lower import lower_to_bpf_policy_plan
 
@@ -1095,7 +1247,9 @@ def test_resolve_run_resource_scope_rejects_unsafe_or_ambiguous_inputs(
         )
 
 
-def test_run_governed_rejects_invalid_resource_scope_before_artifacts(tmp_path: Path) -> None:
+def test_run_governed_rejects_invalid_resource_scope_before_artifacts(
+    tmp_path: Path,
+) -> None:
     work_dir = tmp_path / "project"
     work_dir.mkdir()
     home = tmp_path / "ardur-home"
@@ -1155,7 +1309,9 @@ class TestKernelEnforcementClaim:
     """
 
     def test_returns_none_when_correlation_was_never_established(self) -> None:
-        correlation = kc.CorrelationResult(available=False, reason="cgroup v2 unavailable")
+        correlation = kc.CorrelationResult(
+            available=False, reason="cgroup v2 unavailable"
+        )
         assert _kernel_enforcement_claim("sess-x", correlation) is None
 
     def test_fetches_enforcement_summary_when_daemon_reachable(
@@ -1398,8 +1554,14 @@ def test_run_governed_cli_missing_command_reports_placeholder_next_steps(
     assert "usage: ardur run" in captured.err
     assert "Next steps:" in captured.err
     remediation = captured.err.split("Next steps:", 1)[1]
-    assert "ardur run --mission <mission> --allowed-tools <tools> -- <command>" in remediation
-    assert "ardur run --home <ardur-home> --mission <mission> --via env -- <command>" in remediation
+    assert (
+        "ardur run --mission <mission> --allowed-tools <tools> -- <command>"
+        in remediation
+    )
+    assert (
+        "ardur run --home <ardur-home> --mission <mission> --via env -- <command>"
+        in remediation
+    )
     assert "ardur doctor --home <ardur-home>" in remediation
     assert raw_mission not in remediation
     assert str(home) not in remediation
@@ -1445,7 +1607,10 @@ def test_run_governed_cli_empty_or_whitespace_mission_is_rejected(
     assert "ardur run --mission must be a non-empty string." in captured.err
     assert "Next steps:" in captured.err
     remediation = captured.err.split("Next steps:", 1)[1]
-    assert "ardur run --mission <mission> --allowed-tools <tools> -- <command>" in remediation
+    assert (
+        "ardur run --mission <mission> --allowed-tools <tools> -- <command>"
+        in remediation
+    )
     assert "ardur run -- <command>" in remediation
     # Remediation must be placeholder-only: no raw user input leaked.
     if bad_mission.strip():
@@ -1491,7 +1656,9 @@ def test_select_adapter_routes_by_mode_and_autodetect() -> None:
 
 
 def test_env_adapter_exports_governance_contract(tmp_path: Path) -> None:
-    env, command, notes = EnvProxyAdapter().prepare(_ctx(tmp_path), ["python", "a.py"], {})
+    env, command, notes = EnvProxyAdapter().prepare(
+        _ctx(tmp_path), ["python", "a.py"], {}
+    )
     assert env["ARDUR_PROXY_URL"] == "http://127.0.0.1:9"
     assert env["ARDUR_API_TOKEN"] == "api-tok"
     assert env["ARDUR_SESSION_ID"] == "sess-1"
@@ -1803,7 +1970,9 @@ def test_run_governed_cli_existing_file_home_is_rejected_before_artifacts(
     existing_file.write_text("sentinel")
 
     def fail_run_governed(**_kwargs: object) -> None:
-        raise AssertionError("existing-file home must be rejected before governed launch")
+        raise AssertionError(
+            "existing-file home must be rejected before governed launch"
+        )
 
     monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
 
@@ -1850,7 +2019,9 @@ def test_run_governed_cli_symlink_to_file_home_is_rejected_before_artifacts(
     symlink.symlink_to(real_file)
 
     def fail_run_governed(**_kwargs: object) -> None:
-        raise AssertionError("symlink-to-file home must be rejected before governed launch")
+        raise AssertionError(
+            "symlink-to-file home must be rejected before governed launch"
+        )
 
     monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
 
