@@ -3784,6 +3784,8 @@ class GovernanceProxy:
             isinstance(approval_policy, dict)
             and approval_policy.get("max_approvals_per_hour_per_operator") is not None
         )
+        tracker = None
+        operator_id = None
         if need_rate:
             try:
                 max_approvals = int(
@@ -3837,9 +3839,6 @@ class GovernanceProxy:
                     verifier_id=self.verifier_id,
                 )
                 return decision, reason, target.events[-1]
-        else:
-            tracker = None
-            operator_id = None
 
         decision, reason, event = target.check_and_record(
             tool_name,
