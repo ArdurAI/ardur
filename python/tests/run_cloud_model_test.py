@@ -29,17 +29,24 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vibap.proxy import GovernanceProxy
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-CLOUD_MODEL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+CLOUD_MODEL = (
+    sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+)
 MODEL_SAFE = CLOUD_MODEL.replace(":", "_").replace("/", "_")
 API_KEY = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
 
-WORK_DIR = Path(os.environ.get("ARDUR_TEST_WORKDIR", f"/tmp/ardur-cloud-test-{MODEL_SAFE}"))
+WORK_DIR = Path(
+    os.environ.get("ARDUR_TEST_WORKDIR", f"/tmp/ardur-cloud-test-{MODEL_SAFE}")
+)
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR = Path(__file__).resolve().parent / "test-results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,10 +56,12 @@ REPORT_PATH = RESULTS_DIR / f"{MODEL_SAFE}.json"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
 
 def _parse_tool_args(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
@@ -63,6 +72,7 @@ def _parse_tool_args(raw: Any) -> dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return {}
+
 
 def _post_tls(base: str, path: str, body: dict) -> tuple[int, dict, bytes]:
     ctx = ssl.create_default_context()
@@ -81,12 +91,17 @@ def _post_tls(base: str, path: str, body: dict) -> tuple[int, dict, bytes]:
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8")), b""
 
+
 # ---------------------------------------------------------------------------
 # Proxy lifecycle
 # ---------------------------------------------------------------------------
 
-def _start_proxy(port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_dir: Path) -> tuple[GovernanceProxy, threading.Thread, str]:
+
+def _start_proxy(
+    port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_dir: Path
+) -> tuple[GovernanceProxy, threading.Thread, str]:
     import signal as _signal
+
     _signal.signal = lambda *_a, **_kw: None  # only works in main thread
 
     from vibap.passport import generate_keypair
@@ -137,9 +152,11 @@ def _start_proxy(port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_di
 
     return proxy, thread, base
 
+
 # ---------------------------------------------------------------------------
 # Main test
 # ---------------------------------------------------------------------------
+
 
 def main():
     if not API_KEY:
@@ -164,7 +181,9 @@ def main():
     keys_dir.mkdir(parents=True, exist_ok=True)
 
     port = _free_port()
-    proxy, proxy_thread, base = _start_proxy(port, cert_path, key_path, keys_dir, WORK_DIR)
+    proxy, proxy_thread, base = _start_proxy(
+        port, cert_path, key_path, keys_dir, WORK_DIR
+    )
 
     print(f"\nProxy healthy at {base}\n")
     report: dict[str, Any] = {
@@ -206,8 +225,14 @@ def main():
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "File path relative to workspace"},
-                            "content": {"type": "string", "description": "File content"},
+                            "path": {
+                                "type": "string",
+                                "description": "File path relative to workspace",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "File content",
+                            },
                         },
                         "required": ["path", "content"],
                     },
@@ -221,7 +246,10 @@ def main():
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "File path to read"},
+                            "path": {
+                                "type": "string",
+                                "description": "File path to read",
+                            },
                         },
                         "required": ["path"],
                     },
@@ -249,8 +277,14 @@ def main():
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "Directory to search in"},
-                            "pattern": {"type": "string", "description": "Regex pattern to search for"},
+                            "path": {
+                                "type": "string",
+                                "description": "Directory to search in",
+                            },
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern to search for",
+                            },
                         },
                         "required": ["path", "pattern"],
                     },
@@ -386,6 +420,7 @@ def main():
 
         # ---- Run the model ----
         import ollama
+
         os.environ.setdefault("OLLAMA_API_KEY", API_KEY)
         client = ollama.Client()
 
@@ -398,7 +433,9 @@ def main():
 
         for turn in range(30):
             elapsed = time.time() - start_time
-            print(f"[Turn {turn + 1}] {elapsed:.0f}s elapsed, {tool_calls_total} tool calls so far...")
+            print(
+                f"[Turn {turn + 1}] {elapsed:.0f}s elapsed, {tool_calls_total} tool calls so far..."
+            )
 
             try:
                 resp = client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
@@ -424,19 +461,27 @@ def main():
                 tool_args = _parse_tool_args(tc.function.arguments)
 
                 # ---- Evaluate through Ardur proxy ----
-                status, decision, _ = _post_tls(base, "/evaluate", {
-                    "session_id": sid,
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                })
+                status, decision, _ = _post_tls(
+                    base,
+                    "/evaluate",
+                    {
+                        "session_id": sid,
+                        "tool_name": tool_name,
+                        "arguments": tool_args,
+                    },
+                )
 
                 if status != 200 or decision.get("decision") != "PERMIT":
-                    print(f"  DENIED: {tool_name}({list(tool_args.keys())}) → {decision.get('decision', 'UNKNOWN')}")
-                    report["errors"].append({
-                        "tool": tool_name,
-                        "args_keys": list(tool_args.keys()),
-                        "decision": decision,
-                    })
+                    print(
+                        f"  DENIED: {tool_name}({list(tool_args.keys())}) → {decision.get('decision', 'UNKNOWN')}"
+                    )
+                    report["errors"].append(
+                        {
+                            "tool": tool_name,
+                            "args_keys": list(tool_args.keys()),
+                            "decision": decision,
+                        }
+                    )
                     result = {"status": "denied", "reason": str(decision)}
                 else:
                     tool_calls_total += 1
@@ -446,7 +491,11 @@ def main():
                         content = tool_args.get("content", "")
                         files_created.add(path)
                         print(f"  ✓ write_file: {path} ({len(content)} bytes)")
-                        result = {"status": "ok", "path": path, "bytes_written": len(content)}
+                        result = {
+                            "status": "ok",
+                            "path": path,
+                            "bytes_written": len(content),
+                        }
 
                     elif tool_name == "read_file":
                         path = tool_args.get("path", "")
@@ -456,7 +505,11 @@ def main():
                     elif tool_name == "list_directory":
                         path = tool_args.get("path", "")
                         print(f"  ✓ list_directory: {path}")
-                        result = {"status": "ok", "path": path, "entries": sorted(files_created)}
+                        result = {
+                            "status": "ok",
+                            "path": path,
+                            "entries": sorted(files_created),
+                        }
 
                     elif tool_name == "search_files":
                         path = tool_args.get("path", "")
@@ -468,16 +521,20 @@ def main():
                         result = {"status": "ok"}
 
                 # ---- Append to conversation ----
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [tc],
-                })
-                messages.append({
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": json.dumps(result),
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tc],
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": json.dumps(result),
+                    }
+                )
 
             # Phase tracking
             new_phase = 0
@@ -500,34 +557,42 @@ def main():
             if new_phase > phase:
                 phase = new_phase
                 print(f"\n  >>> PHASE {phase}: {fc} files created <<<\n")
-                report["phases"].append({
-                    "phase": phase,
-                    "files_so_far": fc,
-                    "elapsed_s": elapsed,
-                    "tool_calls": tool_calls_total,
-                })
+                report["phases"].append(
+                    {
+                        "phase": phase,
+                        "files_so_far": fc,
+                        "elapsed_s": elapsed,
+                        "tool_calls": tool_calls_total,
+                    }
+                )
 
             # After files 18+, add a nudge for review
-            if fc >= 18 and not any("review" in str(m.get("content", "")).lower() for m in messages[-5:]):
-                messages.append({
-                    "role": "user",
-                    "content": "Excellent progress! Now do a thorough review pass: "
-                    "read back each file you've written and fix any bugs, "
-                    "add missing error handling, and ensure all modules are "
-                    "properly wired together. Then list the full directory.",
-                })
+            if fc >= 18 and not any(
+                "review" in str(m.get("content", "")).lower() for m in messages[-5:]
+            ):
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "Excellent progress! Now do a thorough review pass: "
+                        "read back each file you've written and fix any bugs, "
+                        "add missing error handling, and ensure all modules are "
+                        "properly wired together. Then list the full directory.",
+                    }
+                )
 
         # ---- End session ----
         _post_tls(base, "/session/end", {"session_id": sid})
         total_elapsed = time.time() - start_time
 
         # ---- Write report ----
-        report.update({
-            "completed": True,
-            "total_elapsed_s": total_elapsed,
-            "tool_calls_total": tool_calls_total,
-            "files_created": sorted(files_created),
-        })
+        report.update(
+            {
+                "completed": True,
+                "total_elapsed_s": total_elapsed,
+                "tool_calls_total": tool_calls_total,
+                "files_created": sorted(files_created),
+            }
+        )
 
         REPORT_PATH.write_text(json.dumps(report, indent=2))
         print("\n" + "=" * 72)
