@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "99c88f79bf5de52a48282e136d98f304d5d5576f1bc13ada900db5a6174d37b5"
+source_sha256: "9e9302a2dc9d51231b61482b7c3fd23e4968892deefff26eb415faf7caa7bcf5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -36,8 +36,9 @@ All notable changes to Ardur will be documented in this file.
   allowing an action to continue after governance fails
 - Update `golang.org/x/text` to the reviewed CVE-fixed release
 - Constrain the published Python `dev` extra to `pyasn1>=0.6.4,<0.7`, excluding
-  the network denial-of-service flaws in CVE-2026-59884, CVE-2026-59885, and
-  CVE-2026-59886
+  versions affected by CVE-2026-59884, CVE-2026-59885, and CVE-2026-59886;
+  primary-source links, reproducible checks, and the live-metadata limitation
+  are recorded in `docs/release-evidence-v0.2.0.md`
 - Reject empty or whitespace-only path and flag values across Python verifier,
   evidence, telemetry, hook, fixture, Hub, profile, and Go command boundaries
 - Scope Biscuit authority-baseline queries explicitly to the issuer-signed
@@ -138,8 +139,9 @@ All notable changes to Ardur will be documented in this file.
 - Keep the reference-paired agent-recognition benchmark active during release
   promotion by falling back to the reviewed v0.3 same-VM reference used to
   calibrate v0.4 evidence when the `main` target predates the daemon
-- Replace the yanked Python `build` 1.5.1 release-tool pin with the reviewed
-  non-yanked 1.5.0 predecessor
+- Replace the yanked Python `build` 1.5.1 release-tool pin with the non-yanked
+  1.5.0 predecessor; `docs/release-evidence-v0.2.0.md` records the auditable
+  PyPI metadata check and its revalidation boundary
 - Keep ignored Python package `build/` and `dist/` output out of generated Hugo
   source pages so release builds cannot make source-sync checks order-dependent
 - Replace the nonexistent `make reproduce` testing instruction with runnable

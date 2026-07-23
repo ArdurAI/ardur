@@ -26,6 +26,7 @@ SOURCE_PLUGIN = REPO_ROOT / "plugins" / "claude-code"
 PACKAGED_PLUGIN = PYTHON_ROOT / "vibap" / "_plugins" / "claude-code"
 PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "python-package.yml"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
+RELEASE_EVIDENCE = REPO_ROOT / "docs" / "release-evidence-v0.2.0.md"
 TESTING_GUIDE = REPO_ROOT / "docs" / "TESTING.md"
 VALIDATOR = REPO_ROOT / "scripts" / "validate-python-distribution.py"
 SOURCE_SYNC = REPO_ROOT / "site" / "scripts" / "sync_source_docs.py"
@@ -59,13 +60,29 @@ def test_changelog_has_one_dated_heading_for_the_package_version() -> None:
     _validate_changelog_text(CHANGELOG.read_text(encoding="utf-8"), expected_version)
 
 
-def test_release_build_frontend_uses_reviewed_non_yanked_pin() -> None:
+def test_release_build_frontend_uses_non_yanked_pin() -> None:
     config = _project_config()
     workflow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
 
     assert BUILD_TOOL_PIN in config["project"]["optional-dependencies"]["dev"]
     assert BUILD_TOOL_PIN in workflow
     assert "build==1.5.1" not in workflow
+
+
+def test_version_sensitive_release_claims_have_auditable_evidence() -> None:
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    evidence = RELEASE_EVIDENCE.read_text(encoding="utf-8")
+    normalized_evidence = " ".join(evidence.split())
+
+    assert "docs/release-evidence-v0.2.0.md" in changelog
+    for cve in ("CVE-2026-59884", "CVE-2026-59885", "CVE-2026-59886"):
+        assert f"https://nvd.nist.gov/vuln/detail/{cve}" in evidence
+    assert "https://pypi.org/pypi/build/1.5.0/json" in evidence
+    assert "https://pypi.org/pypi/build/1.5.1/json" in evidence
+    assert (
+        "do not independently attest current advisory or yank metadata"
+        in normalized_evidence
+    )
 
 
 def test_dev_extra_and_lock_exclude_vulnerable_pyasn1_releases() -> None:
@@ -76,11 +93,8 @@ def test_dev_extra_and_lock_exclude_vulnerable_pyasn1_releases() -> None:
     }
 
     assert PYASN1_SECURITY_FLOOR in config["project"]["optional-dependencies"]["dev"]
-    assert tuple(int(part) for part in locked_versions["pyasn1"].split(".")) >= (
-        0,
-        6,
-        4,
-    )
+    locked_version = tuple(int(part) for part in locked_versions["pyasn1"].split("."))
+    assert (0, 6, 4) <= locked_version < (0, 7)
 
 
 def test_source_sync_excludes_generated_package_build_directories() -> None:
