@@ -29,8 +29,9 @@ members:
    `authorization_details`, argument-constraint members, `mission_ref`,
    `reserved_budget_share`, and `lineage_budget_share`;
 2. the JWT mission passport emitted by `python/vibap/passport.py`, including
-   child-lineage claims added by `derive_child_passport` and the optional
-   runtime-only `risk_budget` extension; and
+   child-lineage and inherited MIC conformance claims added by
+   `derive_child_passport`, plus the optional runtime-only `risk_budget`
+   extension; and
 3. every top-level property in
    `docs/specs/execution-receipt-v0.2.schema.json`.
 
@@ -78,6 +79,7 @@ transformations are:
 | depth and delegation policy | `metadata.x-ardur.redelegation` | DRP describes depth behavior but has no Authorization Object fields for mode, depth, or maximum depth. |
 | budgets and policy references | `metadata.x-ardur.budget`, `metadata.x-ardur.policy` | Security-critical extensions that participate in attenuation checks. |
 | Python `risk_budget` | No projection in the current profile | The current emitter/verifier does not implement typed fact contracts or atomic session/agent/lineage risk accounting. An emitter presented with this claim MUST deny/fail closed instead of dropping it. A future profile may define a critical `metadata.x-ardur.riskBudget` extension. |
+| Python MIC `conformance_profile`, `receipt_policy`, `tool_manifest_digest` | No projection for the policy claims; `metadata.x-ardur.capabilityTokenRef.toolManifestDigest` for a standalone digest | The current DRP profile cannot preserve the MIC enforcement/evidence tier. If either policy claim is present, reject the entire source object and never export only the digest. A standalone digest changes its tag from `sha-256:` to `sha256:` without changing the 64 lowercase hexadecimal digest. |
 | `mission_ref` | `metadata.x-ardur.missionRef` | DRP instruction commitment does not replace the governing Mission Declaration reference. |
 
 ### 3.1. Critical Extension Rule
@@ -114,6 +116,24 @@ prohibitions into stable `deny:<operation>:<resource>` strings. When the source
 has no explicit prohibition, it MUST include
 `x-ardur:deny-unlisted-actions`, which records the profile's closed-world
 default without inventing a permission.
+
+### 3.3. MIC Bundle Fail-Closed Rule
+
+The legacy Python passport may carry `conformance_profile`, `receipt_policy`,
+and `tool_manifest_digest` as one signed MIC conformance bundle. The current
+DRP profile can preserve the manifest digest but cannot preserve or enforce the
+MIC profile and receipt-evidence tier. Therefore, if either
+`conformance_profile` or `receipt_policy` is present, the emitter MUST reject
+the entire source object. It MUST NOT project `tool_manifest_digest` while
+silently dropping either policy claim, and a partial or malformed MIC bundle
+MUST NOT be treated as a standalone digest.
+
+When `tool_manifest_digest` is genuinely standalone and neither MIC policy
+claim is present, the emitter MAY retain it at
+`metadata.x-ardur.capabilityTokenRef.toolManifestDigest`. The conversion
+changes only the algorithm tag from the legacy `sha-256:` spelling to the DRP
+profile's `sha256:` spelling; the 64 lowercase hexadecimal digest bytes remain
+identical.
 
 ## 4. Target Authorization Object
 
