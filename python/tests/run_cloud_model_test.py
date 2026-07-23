@@ -74,6 +74,13 @@ def _parse_tool_args(raw: Any) -> dict[str, Any]:
     return {}
 
 
+def _message_content(message: Any) -> str:
+    """Read content from either an Ollama Message object or a message dict."""
+    if isinstance(message, dict):
+        return str(message.get("content") or "")
+    return str(getattr(message, "content", "") or "")
+
+
 def _post_tls(base: str, path: str, body: dict) -> tuple[int, dict, bytes]:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -192,6 +199,7 @@ def main():
         "phases": [],
         "tool_calls_total": 0,
         "files_created": [],
+        "denials": [],
         "errors": [],
     }
 
@@ -428,6 +436,7 @@ def main():
         tool_calls_total = 0
         phase = 0
         start_time = time.time()
+        model_error: Exception | None = None
 
         print("Starting model interaction...\n")
 
@@ -442,6 +451,7 @@ def main():
             except Exception as exc:
                 print(f"  ERROR calling model: {exc}")
                 report["errors"].append({"turn": turn, "error": str(exc)})
+                model_error = exc
                 break
 
             tool_calls = getattr(resp.message, "tool_calls", None) or []
@@ -450,12 +460,20 @@ def main():
                 content = resp.message.content or ""
                 if content:
                     print(f"  Model message: {content[:200]}...")
-                    messages.append({"role": "assistant", "content": content})
+                    messages.append(resp.message)
+                    break
                 else:
                     print("  Model returned no tool calls and no content — ending")
+                    report["errors"].append(
+                        {
+                            "turn": turn,
+                            "error": "model returned no tool calls and no content",
+                        }
+                    )
                     break
-                continue
 
+            tool_results = []
+            turn_failed = False
             for tc in tool_calls:
                 tool_name = tc.function.name
                 tool_args = _parse_tool_args(tc.function.arguments)
@@ -471,17 +489,25 @@ def main():
                     },
                 )
 
-                if status != 200 or decision.get("decision") != "PERMIT":
+                decision_value = decision.get("decision")
+                evaluation = {
+                    "tool": tool_name,
+                    "args_keys": list(tool_args.keys()),
+                    "status": status,
+                    "decision": decision,
+                }
+
+                if status != 200 or decision_value not in {"PERMIT", "DENY"}:
                     print(
-                        f"  DENIED: {tool_name}({list(tool_args.keys())}) → {decision.get('decision', 'UNKNOWN')}"
+                        f"  ERROR: {tool_name}({list(tool_args.keys())}) → "
+                        f"HTTP {status} / {decision_value or 'UNKNOWN'}"
                     )
-                    report["errors"].append(
-                        {
-                            "tool": tool_name,
-                            "args_keys": list(tool_args.keys()),
-                            "decision": decision,
-                        }
-                    )
+                    report["errors"].append(evaluation)
+                    turn_failed = True
+                    break
+                elif decision_value == "DENY":
+                    print(f"  DENIED: {tool_name}({list(tool_args.keys())}) → DENY")
+                    report["denials"].append(evaluation)
                     result = {"status": "denied", "reason": str(decision)}
                 else:
                     tool_calls_total += 1
@@ -520,21 +546,21 @@ def main():
                     else:
                         result = {"status": "ok"}
 
-                # ---- Append to conversation ----
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [tc],
-                    }
-                )
-                messages.append(
+                tool_results.append(
                     {
                         "role": "tool",
-                        "name": tool_name,
+                        "tool_name": tool_name,
                         "content": json.dumps(result),
                     }
                 )
+
+            if turn_failed:
+                break
+
+            # Mutate the transcript only after every call has been processed:
+            # one original assistant turn, then its complete ordered results.
+            messages.append(resp.message)
+            messages.extend(tool_results)
 
             # Phase tracking
             new_phase = 0
@@ -568,7 +594,8 @@ def main():
 
             # After files 18+, add a nudge for review
             if fc >= 18 and not any(
-                "review" in str(m.get("content", "")).lower() for m in messages[-5:]
+                "review" in _message_content(message).lower()
+                for message in messages[-5:]
             ):
                 messages.append(
                     {
@@ -583,11 +610,12 @@ def main():
         # ---- End session ----
         _post_tls(base, "/session/end", {"session_id": sid})
         total_elapsed = time.time() - start_time
+        run_completed = not report["errors"]
 
         # ---- Write report ----
         report.update(
             {
-                "completed": True,
+                "completed": run_completed,
                 "total_elapsed_s": total_elapsed,
                 "tool_calls_total": tool_calls_total,
                 "files_created": sorted(files_created),
@@ -596,7 +624,7 @@ def main():
 
         REPORT_PATH.write_text(json.dumps(report, indent=2))
         print("\n" + "=" * 72)
-        print("TEST COMPLETE")
+        print("TEST COMPLETE" if run_completed else "TEST FAILED")
         print(f"  Duration:       {total_elapsed:.0f}s")
         print(f"  Tool calls:     {tool_calls_total}")
         print(f"  Files created:  {len(files_created)}")
@@ -610,10 +638,16 @@ def main():
             print(f"\nWARNING: {len(report['errors'])} errors encountered:")
             for e in report["errors"]:
                 print(f"  - {e}")
+            failure = RuntimeError(
+                f"cloud model run failed with {len(report['errors'])} error(s)"
+            )
+            if model_error is not None:
+                raise failure from model_error
+            raise failure
 
     finally:
         # Daemon thread will exit when process exits
-        print("\nProxy daemon thread running — exiting cleanly.")
+        print("\nProxy daemon thread will stop when this process exits.")
 
 
 if __name__ == "__main__":

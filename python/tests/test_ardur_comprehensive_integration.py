@@ -913,9 +913,10 @@ def _verify_ollama_multiturn(base, proxy, private_key):
 
         if not tool_calls:
             if resp.message.content:
-                messages.append({"role": "assistant", "content": resp.message.content})
+                messages.append(resp.message)
             continue
 
+        tool_results = []
         for tc in tool_calls:
             tool_name = tc.function.name
             tool_args = _parse_tool_args(tc.function.arguments)
@@ -957,14 +958,17 @@ def _verify_ollama_multiturn(base, proxy, private_key):
             else:
                 result = {"status": "ok"}
 
-            messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
-            messages.append(
+            tool_results.append(
                 {
                     "role": "tool",
-                    "name": tool_name,
+                    "tool_name": tool_name,
                     "content": json.dumps(result),
                 }
             )
+
+        # Preserve the complete assistant turn once before its ordered results.
+        messages.append(resp.message)
+        messages.extend(tool_results)
 
         # Phase transitions to keep the model working deeper
         if not review_pass_done and len(files_created) >= 6:

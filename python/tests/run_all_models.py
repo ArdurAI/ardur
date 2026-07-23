@@ -77,8 +77,31 @@ def write_summary(results: list[dict]) -> Path:
     # Build summary rows
     rows = []
     for r in results:
-        denials = len([e for e in r.get("errors", []) if e.get("decision")])
-        exceptions = len([e for e in r.get("errors", []) if "error" in e])
+        errors = r.get("errors", [])
+        if "denials" in r:
+            denials = len(r["denials"])
+            exceptions = len(errors)
+        else:
+            # Compatibility with reports written before denials had a
+            # dedicated collection. Only an explicit, otherwise clean DENY is
+            # a denial; every unknown or malformed error entry fails closed.
+            denials = 0
+            exceptions = 0
+            for entry in errors:
+                if not isinstance(entry, dict):
+                    exceptions += 1
+                    continue
+                decision = entry.get("decision")
+                if isinstance(decision, dict):
+                    decision = decision.get("decision")
+                if (
+                    decision == "DENY"
+                    and "error" not in entry
+                    and entry.get("status", 200) == 200
+                ):
+                    denials += 1
+                else:
+                    exceptions += 1
         rows.append(
             {
                 "model": r["model"],
