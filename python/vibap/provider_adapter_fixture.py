@@ -875,10 +875,39 @@ def _redact_shareable(value: Any, *, roots: Mapping[str, str | Path | None]) -> 
     return redact_local_paths(value, root_pairs=_root_pairs(roots))
 
 
-def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_expiry: bool = False) -> dict[str, Any]:
+class ProviderAdapterFixturePathError(ValueError):
+    """Raised when a ``--out-dir`` or ``--mission`` argument fails pre-validation.
+
+    A ``ValueError`` subclass so it is still caught by a generic handler, but
+    distinct enough for the CLI ``main()`` to emit a structured, sanitized
+    failure response (with a stable ``condition`` field) instead of the raw
+    exception text.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
+
+
+def run_fixture(*, adapter_id: str, out_dir: str | Path, mission_path: str | Path, verify_expiry: bool = False) -> dict[str, Any]:
     adapter = ADAPTERS[adapter_id]
-    output = out_dir.expanduser().resolve(strict=False)
-    mission_file = mission_path.expanduser().resolve(strict=False)
+
+    out_dir_raw = str(out_dir)
+    if not out_dir_raw.strip():
+        raise ProviderAdapterFixturePathError(
+            "out-dir must not be empty or whitespace-only",
+            condition="provider_adapter_fixture_out_dir_empty",
+        )
+    mission_raw = str(mission_path)
+    if not mission_raw.strip():
+        raise ProviderAdapterFixturePathError(
+            "mission must not be empty or whitespace-only",
+            condition="provider_adapter_fixture_mission_empty",
+        )
+
+    output = Path(out_dir_raw).expanduser().resolve(strict=False)
+    mission_file = Path(mission_raw).expanduser().resolve(strict=False)
     output.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         output.chmod(0o700)
@@ -1038,8 +1067,8 @@ def run_fixture(*, adapter_id: str, out_dir: Path, mission_path: Path, verify_ex
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a no-key Ardur provider-adapter proof fixture")
     parser.add_argument("--adapter", choices=sorted(ADAPTERS), required=True)
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--mission", type=Path, required=True)
+    parser.add_argument("--out-dir", type=str, required=True)
+    parser.add_argument("--mission", type=str, required=True)
     parser.add_argument("--verify-expiry", action="store_true")
     return parser.parse_args(argv)
 
@@ -1049,12 +1078,26 @@ def main(argv: Sequence[str] | None = None, *, adapter_id: str | None = None) ->
     selected_adapter = adapter_id or args.adapter
     if selected_adapter != args.adapter:
         raise ValueError(f"adapter mismatch: wrapper requested {selected_adapter!r}, argv requested {args.adapter!r}")
-    report = run_fixture(
-        adapter_id=selected_adapter,
-        out_dir=args.out_dir,
-        mission_path=args.mission,
-        verify_expiry=args.verify_expiry,
-    )
+    try:
+        report = run_fixture(
+            adapter_id=selected_adapter,
+            out_dir=args.out_dir,
+            mission_path=args.mission,
+            verify_expiry=args.verify_expiry,
+        )
+    except ProviderAdapterFixturePathError as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "provider_adapter_fixture_path_invalid",
+                    "condition": exc.condition,
+                    "message": exc.detail,
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 

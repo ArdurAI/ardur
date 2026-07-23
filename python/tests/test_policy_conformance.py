@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from vibap.canonical_json import canonical_json_bytes
 from vibap.policy_conformance import (
+    PolicyConformancePathError,
     load_policy_conformance_bundle,
     main as fixture_main,
     run_policy_conformance_bundle,
@@ -209,3 +210,91 @@ def test_generator_emits_public_self_verifying_bundle(tmp_path: Path) -> None:
     fixture_text = bundle.read_text(encoding="utf-8")
     assert "BEGIN PRIVATE KEY" not in fixture_text
     assert "BEGIN EC PRIVATE KEY" not in fixture_text
+
+
+def test_bundle_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Empty --bundle must produce a clean JSON error, no traceback, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    code = fixture_main(["--bundle", ""])
+    captured = capsys.readouterr()
+    report = json.loads(captured.err)
+
+    assert code == 2
+    assert captured.out == ""
+    assert report["ok"] is False
+    assert report["error"] == "policy_conformance_path_invalid"
+    assert report["condition"] == "policy_conformance_bundle_empty"
+    assert "Traceback" not in captured.err
+    assert not any(tmp_path.iterdir()), "no files written to CWD on empty --bundle"
+
+
+def test_bundle_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whitespace-only --bundle must produce a clean JSON error, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    code = fixture_main(["--bundle", "   "])
+    captured = capsys.readouterr()
+    report = json.loads(captured.err)
+
+    assert code == 2
+    assert captured.out == ""
+    assert report["ok"] is False
+    assert report["error"] == "policy_conformance_path_invalid"
+    assert report["condition"] == "policy_conformance_bundle_empty"
+    assert "Traceback" not in captured.err
+    assert not any(tmp_path.iterdir()), "no files written to CWD on whitespace --bundle"
+
+
+def test_output_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Empty --output must produce a clean JSON error, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    code = fixture_main(["--bundle", str(BUNDLE), "--output", ""])
+    captured = capsys.readouterr()
+    report = json.loads(captured.err)
+
+    assert code == 2
+    assert report["ok"] is False
+    assert report["error"] == "policy_conformance_path_invalid"
+    assert report["condition"] == "policy_conformance_output_empty"
+    assert "Traceback" not in captured.err
+    assert not any(tmp_path.iterdir()), "no report written to CWD on empty --output"
+
+
+def test_output_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whitespace-only --output must produce a clean JSON error, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    code = fixture_main(["--bundle", str(BUNDLE), "--output", "   "])
+    captured = capsys.readouterr()
+    report = json.loads(captured.err)
+
+    assert code == 2
+    assert report["ok"] is False
+    assert report["error"] == "policy_conformance_path_invalid"
+    assert report["condition"] == "policy_conformance_output_empty"
+    assert "Traceback" not in captured.err
+    assert not any(p.name.strip() == "" or p.name == "   " for p in tmp_path.iterdir()), (
+        "no whitespace-named file created on whitespace-only --output"
+    )
+
+
+def test_bundle_empty_raises_specialized_error() -> None:
+    with pytest.raises(PolicyConformancePathError) as exc_info:
+        load_policy_conformance_bundle("")
+    assert exc_info.value.condition == "policy_conformance_bundle_empty"
+
+
+def test_output_empty_raises_specialized_error() -> None:
+    with pytest.raises(PolicyConformancePathError) as exc_info:
+        write_policy_conformance_report("   ", {"ok": True})
+    assert exc_info.value.condition == "policy_conformance_output_empty"

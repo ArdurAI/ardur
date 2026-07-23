@@ -34,6 +34,7 @@ from vibap.receiver_attestation import (
 )
 from vibap.receiver_attestation_fixture import (
     ReceiverAttestationFixtureOutputError,
+    main as fixture_main,
     run_receiver_attestation_fixture,
 )
 
@@ -893,3 +894,41 @@ def test_fixture_output_existing_empty_dir_behavior_preserved(
     assert captured.err == ""
     assert report["ok"] is True
     assert (existing_dir / "receiver-attestation.json").is_file()
+
+
+def test_module_main_output_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Module-level main() with empty --output must produce a clean JSON error, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    code = fixture_main(["--output", ""])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "receiver_attestation_fixture_output_invalid"
+    assert report["condition"] == "receiver_attestation_fixture_output_empty"
+    assert "Traceback" not in captured.out
+    assert not any(tmp_path.iterdir()), "no fixtures written to CWD on empty --output"
+
+
+def test_module_main_output_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Module-level main() with whitespace-only --output must produce a clean JSON error."""
+    monkeypatch.chdir(tmp_path)
+
+    code = fixture_main(["--output", "   "])
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "receiver_attestation_fixture_output_invalid"
+    assert report["condition"] == "receiver_attestation_fixture_output_empty"
+    assert "Traceback" not in captured.out
+    assert not any(tmp_path.iterdir()), "no fixtures written to CWD on whitespace --output"

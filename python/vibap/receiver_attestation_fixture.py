@@ -220,10 +220,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate a synthetic MCP receiver-attestation evidence fixture."
     )
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=str, required=True)
     args = parser.parse_args(argv)
     try:
         report = run_receiver_attestation_fixture(args.output)
+    except ReceiverAttestationFixtureOutputError as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "receiver_attestation_fixture_output_invalid",
+                    "condition": exc.condition,
+                    "message": exc.detail,
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
     except (OSError, TypeError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         return 1

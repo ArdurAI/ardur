@@ -107,10 +107,31 @@ def _validate_bundle(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
+class DrpConformancePathError(ValueError):
+    """Raised when a ``--bundle`` or ``--output`` argument fails pre-validation.
+
+    A ``ValueError`` subclass so it is still caught by a generic handler, but
+    distinct enough for the CLI ``main()`` to emit a structured, sanitized
+    failure response (with a stable ``condition`` field) instead of the raw
+    exception text.
+    """
+
+    def __init__(self, detail: str, *, condition: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.condition = condition
+
+
 def load_drp_conformance_bundle(path: str | Path) -> dict[str, Any]:
     """Load a bounded, duplicate-safe fixture bundle and validate its schema."""
 
-    bundle_path = Path(path).expanduser()
+    bundle_raw = str(path)
+    if not bundle_raw.strip():
+        raise DrpConformancePathError(
+            "bundle path must not be empty or whitespace-only",
+            condition="drp_conformance_bundle_empty",
+        )
+    bundle_path = Path(bundle_raw).expanduser()
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(bundle_path, flags)
@@ -304,7 +325,13 @@ def run_drp_conformance_bundle(path: str | Path) -> dict[str, Any]:
 def write_drp_conformance_report(path: str | Path, report: Mapping[str, Any]) -> None:
     """Atomically write a canonical report without following a target symlink."""
 
-    output = Path(path).expanduser()
+    output_raw = str(path)
+    if not output_raw.strip():
+        raise DrpConformancePathError(
+            "report output path must not be empty or whitespace-only",
+            condition="drp_conformance_output_empty",
+        )
+    output = Path(output_raw).expanduser()
     if output.is_symlink():
         raise ValueError("report output must not be a symlink")
     if not output.parent.is_dir():
@@ -333,13 +360,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run a portable Ardur DRP implementation fixture bundle."
     )
-    parser.add_argument("--bundle", type=Path, required=True)
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--bundle", type=str, required=True)
+    parser.add_argument("--output", type=str)
     args = parser.parse_args(argv)
     try:
         report = run_drp_conformance_bundle(args.bundle)
         if args.output is not None:
             write_drp_conformance_report(args.output, report)
+    except DrpConformancePathError as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "drp_conformance_path_invalid",
+                    "condition": exc.condition,
+                    "message": exc.detail,
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
     except (OSError, TypeError, ValueError) as exc:
         print(
             json.dumps({"ok": False, "error": str(exc)}, sort_keys=True),
