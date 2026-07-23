@@ -23,9 +23,16 @@ import urllib.request
 
 import pytest
 
-from vibap.passport import MissionPassport, issue_passport, verify_passport
+from vibap.passport import (
+    MissionPassport,
+    derive_child_passport,
+    issue_passport,
+    verify_passport,
+)
 from vibap.proxy import serve_proxy
 from vibap.receipt import verify_chain
+
+from tests.conftest import v01_required_md_extras
 
 # ---------------------------------------------------------------------------
 # constants
@@ -81,6 +88,10 @@ class _Showcase:
         return True
 
     def fail(self, name: str, detail: str = "") -> None:
+        for index, (number, result_name, _status, _detail) in enumerate(self._results):
+            if result_name == name:
+                self._results[index] = (number, name, "FAIL", detail)
+                return
         self._counter += 1
         n = self._counter
         self._results.append((n, name, "FAIL", detail))
@@ -153,9 +164,35 @@ class _Showcase:
 _show = _Showcase()
 
 
+class _ShowcaseReportPlugin:
+    """Reflect annotated pytest failures in the showcase footer."""
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_runtest_makereport(self, item, call):
+        outcome = yield
+        report = outcome.get_result()
+        name = getattr(item.obj, "_showcase_name", None)
+        if name is None or not report.failed:
+            return
+
+        if call.excinfo is None:
+            detail = f"{report.when} failed"
+        else:
+            detail = (
+                f"{report.when} {type(call.excinfo.value).__name__}: "
+                f"{call.excinfo.value}"
+            )
+        _show.fail(name, detail)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _print_header():
+def _print_header(pytestconfig):
     """Print the showcase header at session start, summary at end."""
+    report_plugin = _ShowcaseReportPlugin()
+    pytestconfig.pluginmanager.register(
+        report_plugin,
+        "ardur-showcase-reporting",
+    )
     p = _show._p
     p()
     p(f"  ╔{'═' * 70}╗")
@@ -1262,6 +1299,38 @@ class TestReceiptLayer:
 # ============================================================================
 
 
+def _showcase_result(name):
+    """Attach the human-readable result name used by the report plugin."""
+
+    def decorate(test):
+        test._showcase_name = name
+        return test
+
+    return decorate
+
+
+def _assert_mic_state_showcase_decisions(
+    valid,
+    drift,
+    expected_digest,
+    observed_digest,
+):
+    """Require the exact MIC-State permit and manifest-drift outcomes."""
+
+    assert valid["decision"] == "PERMIT"
+    assert drift["decision"] == "VIOLATION"
+    assert drift["reason"] == (
+        f"manifest_drift:expected={expected_digest} observed={observed_digest}"
+    )
+
+
+def _assert_mic_evidence_showcase_decision(decision, parent_jti):
+    """Require the exact missing-parent-receipt MIC-Evidence outcome."""
+
+    assert decision["decision"] == "INSUFFICIENT_EVIDENCE"
+    assert decision["reason"] == f"missing_parent_receipt:{parent_jti}"
+
+
 class TestMICConformanceLayer:
     """MIC-State and MIC-Evidence conformance profile enforcement."""
 
@@ -1276,54 +1345,100 @@ class TestMICConformanceLayer:
             "have produced a verifiable receipt. No phantom agents in the chain.",
         )
 
+    @_showcase_result("MIC-State Profile")
     def test_mic_state_profile(self, http_proxy, private_key, public_key):
-        base, proxy = http_proxy
+        base, _proxy = http_proxy
         digest = "sha-256:" + ("a" * 64)
+        wrong_digest = "sha-256:" + ("b" * 64)
 
-        mission = MissionPassport(
-            agent_id="mic-state-agent",
-            mission="MIC-State conformance test",
-            allowed_tools=["read_file"],
-            max_tool_calls=5,
-            max_duration_s=120,
-        )
-        token = issue_passport(mission, private_key, ttl_s=120)
-        status, body, _ = _post(base + "/session/start", {"token": token})
-        assert status == 200
-        sid = body["session_id"]
+        def start_profile(profile, suffix):
+            """Issue, verify, and start one signed conformance profile."""
 
-        # Inject conformance claims directly into session via passport claims
-        # The proxy reads conformance_profile from passport claims at evaluate time
-        # We test MIC checks via arguments since the passport doesn't set conformance_profile
+            mission_id = f"urn:ardur:mission:showcase:mic-state:{suffix}"
+            mission = MissionPassport(
+                agent_id=f"mic-state-{suffix}",
+                mission_id=mission_id,
+                mission="MIC-State conformance test",
+                allowed_tools=["read_file"],
+                resource_scope=["**"],
+                max_tool_calls=5,
+                max_duration_s=120,
+            )
+            extras = v01_required_md_extras(
+                mission_id=mission_id,
+                conformance_profile=profile,
+                receipt_level="minimal",
+            )
+            extras["tool_manifest_digest"] = digest
+            token = issue_passport(
+                mission,
+                private_key,
+                ttl_s=120,
+                extra_claims=extras,
+            )
+            claims = verify_passport(token, public_key)
+            assert claims["conformance_profile"] == profile
+            assert claims["receipt_policy"] == {"level": "minimal"}
+            assert claims["tool_manifest_digest"] == digest
+            status, body, _ = _post(base + "/session/start", {"token": token})
+            assert status == 200
+            return body["session_id"]
 
-        # Test with full valid telemetry
-        args = {
+        valid_args = {
             "path": "/tmp/data.csv",
             "observed_manifest_digest": digest,
             "envelope_signature_valid": True,
             "visibility": "full",
         }
-        status, decision, _ = _post(
-            base + "/evaluate",
-            {"session_id": sid, "tool_name": "read_file", "arguments": args},
-        )
-        assert status == 200
-
-        # Test manifest drift — wrong digest
-        args_bad = {
-            "path": "/tmp/data.csv",
-            "observed_manifest_digest": "sha-256:" + ("b" * 64),
-            "envelope_signature_valid": True,
-            "visibility": "full",
+        drift_args = {
+            **valid_args,
+            "observed_manifest_digest": wrong_digest,
         }
-        _post(
+
+        sid = start_profile("MIC-State", "enforced")
+        status, valid_decision, _ = _post(
             base + "/evaluate",
             {
                 "session_id": sid,
                 "tool_name": "read_file",
-                "arguments": args_bad,
+                "arguments": valid_args,
             },
         )
+        assert status == 200
+        status, drift_decision, _ = _post(
+            base + "/evaluate",
+            {
+                "session_id": sid,
+                "tool_name": "read_file",
+                "arguments": drift_args,
+            },
+        )
+        assert status == 200
+        _assert_mic_state_showcase_decisions(
+            valid_decision,
+            drift_decision,
+            digest,
+            wrong_digest,
+        )
+
+        control_sid = start_profile("Delegation-Core", "downgraded-control")
+        status, control_decision, _ = _post(
+            base + "/evaluate",
+            {
+                "session_id": control_sid,
+                "tool_name": "read_file",
+                "arguments": drift_args,
+            },
+        )
+        assert status == 200
+        assert control_decision["decision"] == "PERMIT"
+        with pytest.raises(AssertionError):
+            _assert_mic_state_showcase_decisions(
+                valid_decision,
+                control_decision,
+                digest,
+                wrong_digest,
+            )
 
         _show.test(
             "MIC-State Profile",
@@ -1331,34 +1446,117 @@ class TestMICConformanceLayer:
             "  (manifest digest, envelope signature, visibility all validated by Ardur's B.2 checks)",
         )
 
+    @_showcase_result("MIC-Evidence Profile")
     def test_mic_evidence_profile(self, http_proxy, private_key, public_key):
-        base, proxy = http_proxy
+        base, _proxy = http_proxy
+        digest = "sha-256:" + ("a" * 64)
 
-        # MIC-Evidence requires a parent JTI for hidden-hop detection
-        # We test that the proxy tracks receipts and detects gaps
-        mission = MissionPassport(
-            agent_id="mic-evidence-agent",
-            mission="MIC-Evidence conformance test",
-            allowed_tools=["read_file"],
-            max_tool_calls=5,
-            max_duration_s=120,
-        )
-        token = issue_passport(mission, private_key, ttl_s=120)
-        status, body, _ = _post(base + "/session/start", {"token": token})
-        assert status == 200
-        sid = body["session_id"]
+        def start_delegated_profile(profile, suffix):
+            """Start one signed, verified parent-child conformance lineage."""
 
-        # Make several calls — receipts are tracked in _last_seen_receipts
-        for i in range(2):
-            status, decision, _ = _post(
-                base + "/evaluate",
-                {
-                    "session_id": sid,
-                    "tool_name": "read_file",
-                    "arguments": {"path": f"/tmp/ev{i}.txt"},
-                },
+            mission_id = f"urn:ardur:mission:showcase:mic-evidence:{suffix}"
+            parent_mission = MissionPassport(
+                agent_id=f"mic-evidence-parent-{suffix}",
+                mission_id=mission_id,
+                mission="Delegate evidence-governed work",
+                allowed_tools=["read_file"],
+                resource_scope=["**"],
+                max_tool_calls=5,
+                max_duration_s=120,
+                delegation_allowed=True,
+                max_delegation_depth=1,
+            )
+            parent_extras = v01_required_md_extras(
+                mission_id=mission_id,
+                conformance_profile=profile,
+                receipt_level="counter_signed",
+            )
+            parent_extras["tool_manifest_digest"] = digest
+            parent_token = issue_passport(
+                parent_mission,
+                private_key,
+                ttl_s=120,
+                extra_claims=parent_extras,
+            )
+            parent_claims = verify_passport(parent_token, public_key)
+            assert parent_claims["conformance_profile"] == profile
+            assert parent_claims["receipt_policy"] == {"level": "counter_signed"}
+            assert parent_claims["tool_manifest_digest"] == digest
+
+            status, _, _ = _post(
+                base + "/session/start",
+                {"token": parent_token},
             )
             assert status == 200
+
+            # /delegate records a parent governance receipt, which would
+            # satisfy the missing-receipt condition this scenario exercises.
+            # Direct derivation is still issuer-signed and parent-verified,
+            # while deliberately leaving the parent without a tool receipt.
+            child_token = derive_child_passport(
+                parent_token=parent_token,
+                public_key=public_key,
+                private_key=private_key,
+                child_agent_id=f"mic-evidence-child-{suffix}",
+                child_mission="Perform evidence-governed work",
+                child_allowed_tools=["read_file"],
+                child_ttl_s=60,
+            )
+            child_claims = verify_passport(
+                child_token,
+                public_key,
+                parent_token=parent_token,
+            )
+            assert child_claims["conformance_profile"] == profile
+            assert child_claims["receipt_policy"] == {"level": "counter_signed"}
+            assert child_claims["tool_manifest_digest"] == digest
+            assert child_claims["parent_jti"] == parent_claims["jti"]
+
+            status, child_start, _ = _post(
+                base + "/session/start",
+                {"token": child_token},
+            )
+            assert status == 200
+            return child_start["session_id"], parent_claims["jti"]
+
+        telemetry = {
+            "path": "/tmp/evidence.txt",
+            "observed_manifest_digest": digest,
+            "envelope_signature_valid": True,
+            "visibility": "full",
+        }
+
+        child_sid, parent_jti = start_delegated_profile("MIC-Evidence", "enforced")
+        status, evidence_decision, _ = _post(
+            base + "/evaluate",
+            {
+                "session_id": child_sid,
+                "tool_name": "read_file",
+                "arguments": telemetry,
+            },
+        )
+        assert status == 200
+        _assert_mic_evidence_showcase_decision(evidence_decision, parent_jti)
+
+        control_sid, control_parent_jti = start_delegated_profile(
+            "Delegation-Core",
+            "downgraded-control",
+        )
+        status, control_decision, _ = _post(
+            base + "/evaluate",
+            {
+                "session_id": control_sid,
+                "tool_name": "read_file",
+                "arguments": telemetry,
+            },
+        )
+        assert status == 200
+        assert control_decision["decision"] == "PERMIT"
+        with pytest.raises(AssertionError):
+            _assert_mic_evidence_showcase_decision(
+                control_decision,
+                control_parent_jti,
+            )
 
         _show.test(
             "MIC-Evidence Profile",
