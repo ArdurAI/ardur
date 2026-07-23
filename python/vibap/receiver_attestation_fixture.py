@@ -63,6 +63,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
         try:
             tmp.unlink()
         except FileNotFoundError:
+            # The atomic replace already consumed the temporary path.
             pass
 
 

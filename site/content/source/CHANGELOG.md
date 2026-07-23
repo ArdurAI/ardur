@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "95e7efe9b6fb1864da1a279c4c8e5da4ad0ec250e8071fd90e45ad9fa708e4b5"
+source_sha256: "9e9302a2dc9d51231b61482b7c3fd23e4968892deefff26eb415faf7caa7bcf5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -29,9 +29,18 @@ All notable changes to Ardur will be documented in this file.
 
 ### Fixed
 
-## [0.2.0] — 2026-07-19
+## [0.2.0] — 2026-07-22
 
 ### Security
+- Fail closed on every Claude Code `PreToolUse` processing error instead of
+  allowing an action to continue after governance fails
+- Update `golang.org/x/text` to the reviewed CVE-fixed release
+- Constrain the published Python `dev` extra to `pyasn1>=0.6.4,<0.7`, excluding
+  versions affected by CVE-2026-59884, CVE-2026-59885, and CVE-2026-59886;
+  primary-source links, reproducible checks, and the live-metadata limitation
+  are recorded in `docs/release-evidence-v0.2.0.md`
+- Reject empty or whitespace-only path and flag values across Python verifier,
+  evidence, telemetry, hook, fixture, Hub, profile, and Go command boundaries
 - Scope Biscuit authority-baseline queries explicitly to the issuer-signed
   authority block and reject duplicate required or optional scalar facts
   instead of selecting a row by dependency-defined ordering; verified by
@@ -105,6 +114,11 @@ All notable changes to Ardur will be documented in this file.
 - Posture detector for agent behavioral profiling
 
 ### Changed
+- Make root `AGENTS.md` the canonical public agent contract and add a staleness
+  gate for derived guidance
+- Complete the documented CLI surface across operator and evidence workflows
+- Route source-install quickstarts through the supported `setup-dev.sh` path
+  instead of fragile ad-hoc virtual-environment commands
 - Complete the bounded Linux agent-recognition evidence contract with separate
   name-only and synthetic content-fingerprint corpus strata, fail-closed
   match/mismatch transition gates, independently supplied launcher-interpreter
@@ -116,6 +130,22 @@ All notable changes to Ardur will be documented in this file.
 - Removed stale adversarial test-results directory from tracking
 
 ### Fixed
+- Keep the fresh-user evidence harness out of gitignored virtual-environment
+  symlink trees and resolve the tested Ardur version from the harness environment
+- Tolerate non-object Claude Code tool input and response payloads without
+  crashing the hook
+- Require explicit fixture project directories and remove unused locals and
+  imports reported by the release CodeQL quality scan
+- Keep the reference-paired agent-recognition benchmark active during release
+  promotion by falling back to the reviewed v0.3 same-VM reference used to
+  calibrate v0.4 evidence when the `main` target predates the daemon
+- Replace the yanked Python `build` 1.5.1 release-tool pin with the non-yanked
+  1.5.0 predecessor; `docs/release-evidence-v0.2.0.md` records the auditable
+  PyPI metadata check and its revalidation boundary
+- Keep ignored Python package `build/` and `dist/` output out of generated Hugo
+  source pages so release builds cannot make source-sync checks order-dependent
+- Replace the nonexistent `make reproduce` testing instruction with runnable
+  repository, protocol, and maintained-corpus release gates
 - Keep seccomp listener ownership in one goroutine and wake cancellation through
   a dedicated eventfd, preventing listener teardown from closing a reused
   control-connection descriptor

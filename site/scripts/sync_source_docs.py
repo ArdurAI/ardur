@@ -34,8 +34,10 @@ PUBLIC_MARKDOWN_EXCLUDED_PREFIXES = (
 PUBLIC_MARKDOWN_EXCLUDED_DIR_NAMES = {
     ".git",
     "__pycache__",
+    "build",
+    "dist",
     "node_modules",
-    "vendor"
+    "vendor",
 }
 
 PUBLIC_MARKDOWN_INCLUDED_HIDDEN_DIRS: set[str] = set()

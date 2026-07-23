@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "build==1.5.1",
+    "build==1.5.0",
     "pytest>=8.0,<10",
     "pytest-cov>=5.0,<8",
     "setuptools==83.0.0",
@@ -53,6 +53,9 @@ dev = [
     "z3-solver>=4.16,<5",
     "biscuit-python==0.4.0",
     "spiffe>=0.2,<0.4",
+    # spiffe's ASN.1 dependency must stay above the three network-DoS fixes in
+    # pyasn1 0.6.4 (CVE-2026-59884, CVE-2026-59885, CVE-2026-59886).
+    "pyasn1>=0.6.4,<0.7",
     "mcp>=1.23.0,<2",
     "python-multipart>=0.0.26,<1",
 ]
@@ -74,7 +77,7 @@ patch = ["subprocess"]
 
 [project.scripts]
 ardur = "vibap.cli:main"
-ardur-verify = "vibap.offline_verification:main"
+ardur-verify = "vibap.cli:verify_main"
 ardur-drp-fixtures = "vibap.drp_conformance:main"
 ardur-policy-conformance = "vibap.policy_conformance:main"
 # Deprecated alias retained for one release cycle to ease migration

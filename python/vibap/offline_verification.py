@@ -9,7 +9,6 @@ import json
 import os
 import re
 import stat
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -385,7 +384,8 @@ def _timeline_item(
         "step_id": claims["step_id"],
         "verdict": claims["verdict"],
         "decision": _verdict_label(str(claims["verdict"])),
-        "reason_code": claims.get("internal_denial_code") or (
+        "reason_code": claims.get("internal_denial_code")
+        or (
             "policy_permit"
             if claims["verdict"] == "compliant"
             else "insufficient_evidence"
@@ -1041,13 +1041,5 @@ def write_html_report(path: str | Path, report: Mapping[str, Any]) -> None:
         try:
             temporary.unlink()
         except FileNotFoundError:
+            # The atomic replace already consumed the temporary path.
             pass
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Dedicated ``ardur-verify`` console entry point."""
-
-    from .cli import main as ardur_main
-
-    arguments = sys.argv[1:] if argv is None else argv
-    return ardur_main(["verify", *arguments])

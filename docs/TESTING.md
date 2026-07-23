@@ -221,8 +221,12 @@ source python/.venv/bin/activate
 # Run a specific module
 (cd python && python -m pytest tests/test_passport.py -v)
 
-# End-to-end reproduce (Z3 proofs, signed proof bundle, corpus consistency)
-make reproduce
+# Full local gate, including the runtime suites and optional installed scanners
+./scripts/check-local.sh --full --with-network
+
+# Release-oriented protocol and maintained recognition-corpus gates
+make bench-protocol-test
+(cd go && go run ./cmd/ardur-agent-recognition-eval)
 ```
 
 `setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual

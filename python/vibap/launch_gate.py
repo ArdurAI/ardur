@@ -42,7 +42,9 @@ def _wait_for_stop(pid: int, *, timeout_s: float) -> int:
         if waited_pid == pid:
             return status
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"process {pid} did not reach ptrace stop within {timeout_s}s")
+            raise TimeoutError(
+                f"process {pid} did not reach ptrace stop within {timeout_s}s"
+            )
         time.sleep(0.01)
 
 
@@ -50,15 +52,23 @@ def wait_for_exec_stop(pid: int, *, timeout_s: float = TRACE_STOP_TIMEOUT_S) -> 
     """Hold ``pid`` at its post-exec kernel stop until policy is installed."""
     status = _wait_for_stop(pid, timeout_s=timeout_s)
     if not os.WIFSTOPPED(status) or os.WSTOPSIG(status) != signal.SIGSTOP:
-        raise RuntimeError(f"launch gate {pid} did not report its initial SIGSTOP (status={status:#x})")
+        raise RuntimeError(
+            f"launch gate {pid} did not report its initial SIGSTOP (status={status:#x})"
+        )
 
     _ptrace(PTRACE_SETOPTIONS, pid, PTRACE_O_TRACEEXEC | PTRACE_O_EXITKILL)
     _ptrace(PTRACE_CONT, pid)
 
     status = _wait_for_stop(pid, timeout_s=timeout_s)
     event = status >> 16
-    if not os.WIFSTOPPED(status) or os.WSTOPSIG(status) != signal.SIGTRAP or event != PTRACE_EVENT_EXEC:
-        raise RuntimeError(f"launch gate {pid} did not reach PTRACE_EVENT_EXEC (status={status:#x})")
+    if (
+        not os.WIFSTOPPED(status)
+        or os.WSTOPSIG(status) != signal.SIGTRAP
+        or event != PTRACE_EVENT_EXEC
+    ):
+        raise RuntimeError(
+            f"launch gate {pid} did not reach PTRACE_EVENT_EXEC (status={status:#x})"
+        )
 
 
 def release_exec_stop(pid: int) -> None:
@@ -67,7 +77,9 @@ def release_exec_stop(pid: int) -> None:
 
 
 def _parse_args(argv: list[str]) -> tuple[int | None, bool, list[str]]:
-    parser = argparse.ArgumentParser(description="wait for Ardur registration, then exec a command")
+    parser = argparse.ArgumentParser(
+        description="wait for Ardur registration, then exec a command"
+    )
     gate = parser.add_mutually_exclusive_group(required=True)
     gate.add_argument("--ready-fd", type=int, help=argparse.SUPPRESS)
     gate.add_argument("--trace-exec", action="store_true", help=argparse.SUPPRESS)
@@ -82,7 +94,9 @@ def _parse_args(argv: list[str]) -> tuple[int | None, bool, list[str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ready_fd, trace_exec, command = _parse_args(list(sys.argv[1:] if argv is None else argv))
+    ready_fd, trace_exec, command = _parse_args(
+        list(sys.argv[1:] if argv is None else argv)
+    )
     if trace_exec:
         try:
             _ptrace(PTRACE_TRACEME, 0)
@@ -93,18 +107,20 @@ def main(argv: list[str] | None = None) -> int:
     else:
         assert ready_fd is not None
         try:
-            release = os.read(ready_fd, 1)
+            with os.fdopen(ready_fd, "rb", buffering=0, closefd=True) as ready_channel:
+                release = ready_channel.read(1)
         except OSError as exc:
-            print(f"ardur launch gate: parent readiness channel failed: {exc}", file=sys.stderr)
+            print(
+                f"ardur launch gate: parent readiness channel failed: {exc}",
+                file=sys.stderr,
+            )
             return PARENT_NOT_READY_EXIT
-        finally:
-            try:
-                os.close(ready_fd)
-            except OSError:
-                pass
 
         if release != RELEASE_BYTE:
-            print("ardur launch gate: parent exited before releasing target", file=sys.stderr)
+            print(
+                "ardur launch gate: parent exited before releasing target",
+                file=sys.stderr,
+            )
             return PARENT_NOT_READY_EXIT
 
     try:

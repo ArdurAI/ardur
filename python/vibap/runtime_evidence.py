@@ -1443,18 +1443,29 @@ def write_report(path: str | Path, payload: bytes) -> None:
             "runtime evidence report could not be written safely",
         ) from exc
     finally:
+        cleanup_error: OSError | None = None
         if temporary_fd >= 0:
             try:
                 os.close(temporary_fd)
             except OSError:
+                # Cleanup cannot recover from a close failure after the write path exits.
                 pass
         if temporary_name is not None and parent_fd >= 0:
             try:
                 os.unlink(temporary_name, dir_fd=parent_fd)
-            except OSError:
+            except FileNotFoundError:
+                # A concurrent cleanup already removed the private temporary output.
                 pass
+            except OSError as exc:
+                cleanup_error = exc
         if parent_fd >= 0:
             try:
                 os.close(parent_fd)
             except OSError:
+                # Cleanup cannot recover from a close failure after the write path exits.
                 pass
+        if cleanup_error is not None:
+            raise RuntimeEvidenceError(
+                "output_cleanup_failed",
+                "runtime evidence temporary output could not be removed safely",
+            ) from cleanup_error

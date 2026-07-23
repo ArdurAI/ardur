@@ -1077,7 +1077,7 @@ def _hub_token_invalid_response() -> dict[str, object]:
             "A whitespace-only --hub-token was provided. Provide an explicit "
             "Hub bearer token, or omit --hub-token so ardur resolves the token "
             "from ARDUR_HUB_TOKEN or the local Personal Hub config. An empty "
-            "string --hub-token \"\" is intentionally valid and means fall "
+            'string --hub-token "" is intentionally valid and means fall '
             "through to env/config."
         ),
         "next_steps": [
@@ -1092,7 +1092,7 @@ def _hub_token_invalid_response() -> dict[str, object]:
                 "detail": (
                     "Omit --hub-token so ardur resolves the token from "
                     "ARDUR_HUB_TOKEN or the Personal Hub config. An empty "
-                    "--hub-token \"\" has the same fall-through semantics."
+                    '--hub-token "" has the same fall-through semantics.'
                 ),
             },
         ],
@@ -6454,6 +6454,13 @@ def build_parser() -> argparse.ArgumentParser:
     protect_cc.set_defaults(func=cmd_protect_claude_code)
 
     return parser
+
+
+def verify_main(argv: Sequence[str] | None = None) -> int:
+    """Dedicated ``ardur-verify`` console entry point."""
+
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    return main(["verify", *arguments])
 
 
 def main(argv: Sequence[str] | None = None) -> int:
