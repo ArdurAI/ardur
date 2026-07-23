@@ -376,11 +376,8 @@ def _chat_with_retry(client, messages, tools, max_retries=3):
 
 
 def _ollama_chat_single(client, messages, tools):
-    """Single chat call — may return text or tool_calls."""
-    try:
-        return client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
-    except Exception:
-        return None
+    """Make one model request and propagate provider or transcript errors."""
+    return client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
 
 
 # ---------------------------------------------------------------------------
@@ -811,7 +808,7 @@ class TestSessionAndPassportLayer:
         )
 
     def test_multi_turn_conversation(self, ollama_client, session):
-        base, sid, _token, proxy = session
+        base, sid, _token, _proxy = session
         tools = [
             {
                 "type": "function",
@@ -868,6 +865,7 @@ class TestSessionAndPassportLayer:
                     {"role": "assistant", "content": resp.message.content or ""}
                 )
                 break
+            messages.append(resp.message)
             for tc in tcs:
                 args = _parse_tool_args(tc.function.arguments)
                 status, decision, _ = _post(
@@ -881,12 +879,9 @@ class TestSessionAndPassportLayer:
                 if status == 200:
                     evaluations += 1
                 messages.append(
-                    {"role": "assistant", "content": None, "tool_calls": [tc]}
-                )
-                messages.append(
                     {
                         "role": "tool",
-                        "name": tc.function.name,
+                        "tool_name": tc.function.name,
                         "content": json.dumps({"status": "ok", "result": "processed"}),
                     }
                 )
