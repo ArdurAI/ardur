@@ -49,6 +49,12 @@ func main() {
 	quiet := flag.Bool("quiet", false, "suppress result table on stdout")
 	flag.Parse()
 
+	if strings.TrimSpace(*outDir) == "" {
+		fmt.Fprintln(os.Stderr, "benchcheck: -out must be a non-empty path after trimming whitespace")
+		flag.Usage()
+		os.Exit(2)
+	}
+
 	packDir := flag.Arg(0)
 	if shouldUseDefaultPackDir(packDir) {
 		packDir = defaultPackDir()
