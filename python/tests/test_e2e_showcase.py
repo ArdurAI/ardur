@@ -13,6 +13,7 @@ The -s flag is required to see the user-friendly showcase output.
 
 from __future__ import annotations
 
+import atexit as _atexit
 import json
 import os
 import threading
@@ -54,6 +55,7 @@ class _Showcase:
     def _p(self, *args) -> None:
         """Print and flush — bypass any pytest buffering."""
         import sys as _sys
+
         msg = " ".join(str(a) for a in args)
         _sys.__stdout__.write(msg + "\n")
         _sys.__stdout__.flush()
@@ -151,8 +153,6 @@ class _Showcase:
 _show = _Showcase()
 
 
-import atexit as _atexit
-
 @pytest.fixture(scope="session", autouse=True)
 def _print_header():
     """Print the showcase header at session start, summary at end."""
@@ -167,7 +167,9 @@ def _print_header():
     p(f"  ╠{'═' * 70}╣")
     p(f"  ║  {'Model':<9} {CLOUD_MODEL:<58}║")
     p(f"  ║  {'Tests':<9} {28:<58}║")
-    p(f"  ║  {'Layers':<9} {'HTTP Security · Sessions · Delegation · Receipts · MIC · Backends · Advanced':<58}║")
+    p(
+        f"  ║  {'Layers':<9} {'HTTP Security · Sessions · Delegation · Receipts · MIC · Backends · Advanced':<58}║"
+    )
     p(f"  ╚{'═' * 70}╝")
     p()
     _atexit.register(_show.summary)
@@ -182,7 +184,10 @@ def _ollama_available() -> bool:
     if not API_KEY or not CLOUD_MODEL:
         return False
     try:
-        import ollama  # noqa: F811
+        # Import the optional dependency instead of checking only its module
+        # spec so broken installations are treated as unavailable.
+        import ollama  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -262,7 +267,11 @@ def _post(url, payload, token=None):
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8")), dict(resp.headers.items())
+            return (
+                resp.status,
+                json.loads(resp.read().decode("utf-8")),
+                dict(resp.headers.items()),
+            )
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8")
         try:
@@ -298,12 +307,10 @@ def _get(url, token=None):
 
 def _chat_with_retry(client, messages, tools, max_retries=3):
     """Call ollama.chat with escalating prompts until we get tool_calls."""
-    import ollama
-
     for attempt in range(max_retries):
         try:
             resp = client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
-        except Exception as exc:
+        except Exception:
             if attempt == max_retries - 1:
                 raise
             time.sleep(1)
@@ -314,23 +321,25 @@ def _chat_with_retry(client, messages, tools, max_retries=3):
             return tool_calls
 
         if attempt == 0:
-            messages = list(messages) + [{
-                "role": "user",
-                "content": "You MUST call the tool function. Do not describe it — invoke it directly.",
-            }]
+            messages = list(messages) + [
+                {
+                    "role": "user",
+                    "content": "You MUST call the tool function. Do not describe it — invoke it directly.",
+                }
+            ]
         elif attempt == 1:
-            messages = list(messages) + [{
-                "role": "user",
-                "content": "CRITICAL: Your ONLY task is to call the specified tool. Do NOT write any explanation text. Just call the tool function NOW.",
-            }]
+            messages = list(messages) + [
+                {
+                    "role": "user",
+                    "content": "CRITICAL: Your ONLY task is to call the specified tool. Do NOT write any explanation text. Just call the tool function NOW.",
+                }
+            ]
 
     return None
 
 
 def _ollama_chat_single(client, messages, tools):
     """Single chat call — may return text or tool_calls."""
-    import ollama
-
     try:
         return client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
     except Exception:
@@ -364,8 +373,11 @@ def http_proxy_with_auth(proxy, private_key, unused_tcp_port):
     """Proxy with require_auth=True and a known bearer token."""
     token = "showcase-auth-token-2026"
     t, base, shutdown = _build_server(
-        proxy, private_key, unused_tcp_port,
-        require_auth=True, api_token=token,
+        proxy,
+        private_key,
+        unused_tcp_port,
+        require_auth=True,
+        api_token=token,
     )
     yield base, proxy, token
     shutdown()
@@ -508,7 +520,11 @@ class TestHTTPSecurityLayer:
         # Evaluate should fail with 503
         status, body, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "read_file", "arguments": {"path": "/tmp/test.txt"}},
+            {
+                "session_id": sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/test.txt"},
+            },
         )
         assert status == 503, f"Expected 503 under kill switch, got {status}: {body}"
 
@@ -523,7 +539,11 @@ class TestHTTPSecurityLayer:
         # Evaluate works again
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "read_file", "arguments": {"path": "/tmp/test.txt"}},
+            {
+                "session_id": sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/test.txt"},
+            },
         )
         assert status == 200
         assert decision["decision"] == "PERMIT"
@@ -551,8 +571,8 @@ class TestSessionAndPassportLayer:
         _show.section(
             "LAYER 2",
             "Session & Passport Layer",
-            "The core governance loop: issue a MissionPassport (\"who are you,\n"
-            "what can you do?\"), start a session, then have a real LLM request\n"
+            'The core governance loop: issue a MissionPassport ("who are you,\n'
+            'what can you do?"), start a session, then have a real LLM request\n'
             "tool calls. Ardur permits allowed tools, denies forbidden and\n"
             "unknown tools, and enforces per-session call budgets.\n"
             "Multi-turn LLM conversations flow through the proxy transparently.",
@@ -586,25 +606,41 @@ class TestSessionAndPassportLayer:
 
     def test_allowed_tool_permit(self, ollama_client, session):
         base, sid, _token, _proxy = session
-        tools = [{
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read contents of a file at the given path",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string", "description": "File path to read"}},
-                    "required": ["path"],
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read contents of a file at the given path",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "File path to read",
+                            }
+                        },
+                        "required": ["path"],
+                    },
                 },
-            },
-        }]
+            }
+        ]
         messages = [
-            {"role": "system", "content": "You have a read_file tool. When asked to read a file, you MUST call read_file with the path. Do not describe — invoke it directly."},
-            {"role": "user", "content": "Please read the file at /tmp/report.csv using read_file."},
+            {
+                "role": "system",
+                "content": "You have a read_file tool. When asked to read a file, you MUST call read_file with the path. Do not describe — invoke it directly.",
+            },
+            {
+                "role": "user",
+                "content": "Please read the file at /tmp/report.csv using read_file.",
+            },
         ]
         tool_calls = _chat_with_retry(ollama_client, messages, tools)
         if tool_calls is None:
-            _show.skip("Allowed Tool PERMIT", "Ollama model did not emit tool_calls after retries")
+            _show.skip(
+                "Allowed Tool PERMIT",
+                "Ollama model did not emit tool_calls after retries",
+            )
             return
 
         tc = tool_calls[0]
@@ -622,25 +658,41 @@ class TestSessionAndPassportLayer:
 
     def test_forbidden_tool_deny(self, ollama_client, session):
         base, sid, _token, _proxy = session
-        tools = [{
-            "type": "function",
-            "function": {
-                "name": "delete_file",
-                "description": "Delete a file at the given path",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string", "description": "File path to delete"}},
-                    "required": ["path"],
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_file",
+                    "description": "Delete a file at the given path",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "File path to delete",
+                            }
+                        },
+                        "required": ["path"],
+                    },
                 },
-            },
-        }]
+            }
+        ]
         messages = [
-            {"role": "system", "content": "You have a delete_file tool. When asked to delete a file, you MUST call delete_file with the path."},
-            {"role": "user", "content": "Delete the file at /tmp/secret.txt using delete_file."},
+            {
+                "role": "system",
+                "content": "You have a delete_file tool. When asked to delete a file, you MUST call delete_file with the path.",
+            },
+            {
+                "role": "user",
+                "content": "Delete the file at /tmp/secret.txt using delete_file.",
+            },
         ]
         tool_calls = _chat_with_retry(ollama_client, messages, tools)
         if tool_calls is None:
-            _show.skip("Forbidden Tool DENY", "Ollama model did not emit tool_calls after retries")
+            _show.skip(
+                "Forbidden Tool DENY",
+                "Ollama model did not emit tool_calls after retries",
+            )
             return
 
         tc = tool_calls[0]
@@ -660,7 +712,11 @@ class TestSessionAndPassportLayer:
         base, sid, _token, _proxy = session
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "nonexistent_tool_xyz", "arguments": {"arg": 1}},
+            {
+                "session_id": sid,
+                "tool_name": "nonexistent_tool_xyz",
+                "arguments": {"arg": 1},
+            },
         )
         assert status == 200
         assert decision["decision"] == "DENY"
@@ -687,18 +743,30 @@ class TestSessionAndPassportLayer:
         for i in range(2):
             status, decision, _ = _post(
                 base + "/evaluate",
-                {"session_id": sid, "tool_name": "read_file", "arguments": {"path": f"/tmp/file{i}.txt"}},
+                {
+                    "session_id": sid,
+                    "tool_name": "read_file",
+                    "arguments": {"path": f"/tmp/file{i}.txt"},
+                },
             )
             assert status == 200
-            assert decision["decision"] == "PERMIT", f"Call {i}: expected PERMIT, got {decision}"
+            assert decision["decision"] == "PERMIT", (
+                f"Call {i}: expected PERMIT, got {decision}"
+            )
 
         # Budget exhausted
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "read_file", "arguments": {"path": "/tmp/overbudget.txt"}},
+            {
+                "session_id": sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/overbudget.txt"},
+            },
         )
         assert status == 200
-        assert decision["decision"] == "DENY", f"Expected DENY for exhausted budget, got {decision}"
+        assert decision["decision"] == "DENY", (
+            f"Expected DENY for exhausted budget, got {decision}"
+        )
 
         _show.test(
             "Budget Exhaustion",
@@ -715,7 +783,9 @@ class TestSessionAndPassportLayer:
                     "description": "Read contents of a file at the given path",
                     "parameters": {
                         "type": "object",
-                        "properties": {"path": {"type": "string", "description": "File path"}},
+                        "properties": {
+                            "path": {"type": "string", "description": "File path"}
+                        },
                         "required": ["path"],
                     },
                 },
@@ -729,7 +799,10 @@ class TestSessionAndPassportLayer:
                         "type": "object",
                         "properties": {
                             "path": {"type": "string", "description": "File path"},
-                            "content": {"type": "string", "description": "Content to write"},
+                            "content": {
+                                "type": "string",
+                                "description": "Content to write",
+                            },
                         },
                         "required": ["path", "content"],
                     },
@@ -737,8 +810,14 @@ class TestSessionAndPassportLayer:
             },
         ]
         messages = [
-            {"role": "system", "content": "You have read_file and write_file tools. Use them when asked."},
-            {"role": "user", "content": "First read /tmp/input.txt, then write a summary to /tmp/output.txt."},
+            {
+                "role": "system",
+                "content": "You have read_file and write_file tools. Use them when asked.",
+            },
+            {
+                "role": "user",
+                "content": "First read /tmp/input.txt, then write a summary to /tmp/output.txt.",
+            },
         ]
 
         evaluations = 0
@@ -748,24 +827,36 @@ class TestSessionAndPassportLayer:
                 break
             tcs = getattr(resp.message, "tool_calls", None)
             if not tcs:
-                messages.append({"role": "assistant", "content": resp.message.content or ""})
+                messages.append(
+                    {"role": "assistant", "content": resp.message.content or ""}
+                )
                 break
             for tc in tcs:
                 args = _parse_tool_args(tc.function.arguments)
                 status, decision, _ = _post(
                     base + "/evaluate",
-                    {"session_id": sid, "tool_name": tc.function.name, "arguments": args},
+                    {
+                        "session_id": sid,
+                        "tool_name": tc.function.name,
+                        "arguments": args,
+                    },
                 )
                 if status == 200:
                     evaluations += 1
-                messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
-                messages.append({
-                    "role": "tool",
-                    "name": tc.function.name,
-                    "content": json.dumps({"status": "ok", "result": "processed"}),
-                })
+                messages.append(
+                    {"role": "assistant", "content": None, "tool_calls": [tc]}
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "name": tc.function.name,
+                        "content": json.dumps({"status": "ok", "result": "processed"}),
+                    }
+                )
 
-        assert evaluations >= 1, f"Expected at least 1 tool evaluation, got {evaluations}"
+        assert evaluations >= 1, (
+            f"Expected at least 1 tool evaluation, got {evaluations}"
+        )
         _show.test(
             "Multi-Turn Conversation",
             f"LLM made {evaluations} tool call(s) through proxy across multiple turns",
@@ -806,16 +897,21 @@ class TestDelegationLayer:
         parent_token = issue_passport(parent_mission, private_key, ttl_s=300)
 
         # Start parent session (required for delegation)
-        status, parent_start, _ = _post(base + "/session/start", {"token": parent_token})
+        status, parent_start, _ = _post(
+            base + "/session/start", {"token": parent_token}
+        )
         assert status == 200, f"Parent session start failed: {parent_start}"
 
-        status, delegate_body, _ = _post(base + "/delegate", {
-            "parent_token": parent_token,
-            "child_agent_id": "child-agent",
-            "child_mission": "read-only subtask",
-            "child_allowed_tools": ["read_file"],
-            "child_max_tool_calls": 5,
-        })
+        status, delegate_body, _ = _post(
+            base + "/delegate",
+            {
+                "parent_token": parent_token,
+                "child_agent_id": "child-agent",
+                "child_mission": "read-only subtask",
+                "child_allowed_tools": ["read_file"],
+                "child_max_tool_calls": 5,
+            },
+        )
         assert status == 200, f"Delegation failed: {delegate_body}"
         assert "child_token" in delegate_body
         child_token = delegate_body["child_token"]
@@ -823,6 +919,7 @@ class TestDelegationLayer:
         # Verify child token exists and has expected structure
         # Note: delegated passports require parent_token for full verify_passport()
         import jwt as pyjwt
+
         child_claims = pyjwt.decode(child_token, options={"verify_signature": False})
         assert child_claims.get("sub") == "child-agent"
         assert child_claims.get("allowed_tools") == ["read_file"]
@@ -850,13 +947,16 @@ class TestDelegationLayer:
         status, _ps, _ = _post(base + "/session/start", {"token": parent_token})
         assert status == 200
 
-        status, delegate_body, _ = _post(base + "/delegate", {
-            "parent_token": parent_token,
-            "child_agent_id": "child-2",
-            "child_mission": "restricted subtask",
-            "child_allowed_tools": ["read_file", "search"],
-            "child_max_tool_calls": 5,
-        })
+        status, delegate_body, _ = _post(
+            base + "/delegate",
+            {
+                "parent_token": parent_token,
+                "child_agent_id": "child-2",
+                "child_mission": "restricted subtask",
+                "child_allowed_tools": ["read_file", "search"],
+                "child_max_tool_calls": 5,
+            },
+        )
         assert status == 200
 
         child_token = delegate_body["child_token"]
@@ -887,13 +987,16 @@ class TestDelegationLayer:
         status, _ps, _ = _post(base + "/session/start", {"token": parent_token})
         assert status == 200
 
-        status, delegate_body, _ = _post(base + "/delegate", {
-            "parent_token": parent_token,
-            "child_agent_id": "child-3",
-            "child_mission": "read only",
-            "child_allowed_tools": ["read_file"],
-            "child_max_tool_calls": 3,
-        })
+        status, delegate_body, _ = _post(
+            base + "/delegate",
+            {
+                "parent_token": parent_token,
+                "child_agent_id": "child-3",
+                "child_mission": "read only",
+                "child_allowed_tools": ["read_file"],
+                "child_max_tool_calls": 3,
+            },
+        )
         assert status == 200
         child_token = delegate_body["child_token"]
 
@@ -904,14 +1007,22 @@ class TestDelegationLayer:
         # Allowed in child scope
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": child_sid, "tool_name": "read_file", "arguments": {"path": "/tmp/data.csv"}},
+            {
+                "session_id": child_sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/data.csv"},
+            },
         )
         assert decision["decision"] == "PERMIT"
 
         # Not allowed in child scope
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": child_sid, "tool_name": "write_file", "arguments": {"path": "/tmp/out.txt", "content": "x"}},
+            {
+                "session_id": child_sid,
+                "tool_name": "write_file",
+                "arguments": {"path": "/tmp/out.txt", "content": "x"},
+            },
         )
         assert decision["decision"] == "DENY"
 
@@ -933,18 +1044,23 @@ class TestDelegationLayer:
             max_delegation_depth=1,
         )
         parent_token = issue_passport(parent_mission, private_key, ttl_s=300)
-        status, parent_start, _ = _post(base + "/session/start", {"token": parent_token})
+        status, parent_start, _ = _post(
+            base + "/session/start", {"token": parent_token}
+        )
         assert status == 200
         parent_sid = parent_start["session_id"]
 
         # Delegate child with tiny budget (parent session already started)
-        status, delegate_body, _ = _post(base + "/delegate", {
-            "parent_token": parent_token,
-            "child_agent_id": "child-indep",
-            "child_mission": "subtask",
-            "child_allowed_tools": ["read_file"],
-            "child_max_tool_calls": 1,
-        })
+        status, delegate_body, _ = _post(
+            base + "/delegate",
+            {
+                "parent_token": parent_token,
+                "child_agent_id": "child-indep",
+                "child_mission": "subtask",
+                "child_allowed_tools": ["read_file"],
+                "child_max_tool_calls": 1,
+            },
+        )
         assert status == 200
         child_token = delegate_body["child_token"]
         status, child_start, _ = _post(base + "/session/start", {"token": child_token})
@@ -953,14 +1069,22 @@ class TestDelegationLayer:
         # Exhaust child budget
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": child_sid, "tool_name": "read_file", "arguments": {"path": "/tmp/a.txt"}},
+            {
+                "session_id": child_sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/a.txt"},
+            },
         )
         assert decision["decision"] == "PERMIT"
 
         # Parent still has budget
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": parent_sid, "tool_name": "read_file", "arguments": {"path": "/tmp/b.txt"}},
+            {
+                "session_id": parent_sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/b.txt"},
+            },
         )
         assert decision["decision"] == "PERMIT"
 
@@ -993,41 +1117,57 @@ class TestReceiptLayer:
 
     def test_receipt_generation(self, ollama_client, session):
         base, sid, _token, proxy = session
-        tools = [{
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read a file",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string", "description": "File path"}},
-                    "required": ["path"],
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "File path"}
+                        },
+                        "required": ["path"],
+                    },
                 },
-            },
-        }]
+            }
+        ]
         messages = [
-            {"role": "system", "content": "You have a read_file tool. Call it when asked to read a file."},
+            {
+                "role": "system",
+                "content": "You have a read_file tool. Call it when asked to read a file.",
+            },
             {"role": "user", "content": "Read /tmp/receipt_test.csv using read_file."},
         ]
         tool_calls = _chat_with_retry(ollama_client, messages, tools)
         if tool_calls is None:
-            _show.skip("Receipt Generation", "Ollama model did not emit tool_calls after retries")
+            _show.skip(
+                "Receipt Generation",
+                "Ollama model did not emit tool_calls after retries",
+            )
             return
 
         for tc in tool_calls:
             args = _parse_tool_args(tc.function.arguments)
-            _post(base + "/evaluate", {
-                "session_id": sid,
-                "tool_name": tc.function.name,
-                "arguments": args,
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": sid,
+                    "tool_name": tc.function.name,
+                    "arguments": args,
+                },
+            )
 
         # Also make a direct DENY call to ensure both PERMIT and DENY receipts
-        _post(base + "/evaluate", {
-            "session_id": sid,
-            "tool_name": "delete_file",
-            "arguments": {"path": "/tmp/secret.txt"},
-        })
+        _post(
+            base + "/evaluate",
+            {
+                "session_id": sid,
+                "tool_name": "delete_file",
+                "arguments": {"path": "/tmp/secret.txt"},
+            },
+        )
 
         entries = [
             json.loads(line)
@@ -1036,7 +1176,9 @@ class TestReceiptLayer:
         ]
         assert len(entries) >= 1, "Expected at least 1 receipt"
         permits = sum(1 for e in entries if e.get("verdict") == "compliant")
-        denials = sum(1 for e in entries if e.get("verdict", "") in ("violation", "denied"))
+        denials = sum(
+            1 for e in entries if e.get("verdict", "") in ("violation", "denied")
+        )
         _show.test(
             "Receipt Generation",
             f"{len(entries)} receipt(s) generated: {permits} PERMIT, {denials} DENY — each a signed JWT",
@@ -1051,11 +1193,14 @@ class TestReceiptLayer:
 
         # Generate multiple receipts
         for i in range(3):
-            _post(base + "/evaluate", {
-                "session_id": sid,
-                "tool_name": "read_file",
-                "arguments": {"path": f"/tmp/file{i}.txt"},
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": sid,
+                    "tool_name": "read_file",
+                    "arguments": {"path": f"/tmp/file{i}.txt"},
+                },
+            )
 
         entries = [
             json.loads(line)
@@ -1078,18 +1223,23 @@ class TestReceiptLayer:
             f"verify_chain({len(jwts)} receipts) -> all valid, hash-chained ✓",
         )
 
-    def test_receipt_trace_id_continuity(self, http_proxy, example_mission, private_key):
+    def test_receipt_trace_id_continuity(
+        self, http_proxy, example_mission, private_key
+    ):
         base, proxy = http_proxy
         token = issue_passport(example_mission, private_key, ttl_s=300)
         status, body, _ = _post(base + "/session/start", {"token": token})
         sid = body["session_id"]
 
         for i in range(2):
-            _post(base + "/evaluate", {
-                "session_id": sid,
-                "tool_name": "read_file",
-                "arguments": {"path": f"/tmp/trace{i}.txt"},
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": sid,
+                    "tool_name": "read_file",
+                    "arguments": {"path": f"/tmp/trace{i}.txt"},
+                },
+            )
 
         entries = [
             json.loads(line)
@@ -1166,9 +1316,14 @@ class TestMICConformanceLayer:
             "envelope_signature_valid": True,
             "visibility": "full",
         }
-        _post(base + "/evaluate", {
-            "session_id": sid, "tool_name": "read_file", "arguments": args_bad,
-        })
+        _post(
+            base + "/evaluate",
+            {
+                "session_id": sid,
+                "tool_name": "read_file",
+                "arguments": args_bad,
+            },
+        )
 
         _show.test(
             "MIC-State Profile",
@@ -1197,7 +1352,11 @@ class TestMICConformanceLayer:
         for i in range(2):
             status, decision, _ = _post(
                 base + "/evaluate",
-                {"session_id": sid, "tool_name": "read_file", "arguments": {"path": f"/tmp/ev{i}.txt"}},
+                {
+                    "session_id": sid,
+                    "tool_name": "read_file",
+                    "arguments": {"path": f"/tmp/ev{i}.txt"},
+                },
             )
             assert status == 200
 
@@ -1231,8 +1390,11 @@ class TestPolicyBackendLayer:
         base, proxy = http_proxy
         # Verify available backends
         from vibap.policy_backend import list_backends
+
         backends = list_backends()
-        assert "native" in str(backends) or len(backends) >= 1, f"No backends available: {backends}"
+        assert "native" in str(backends) or len(backends) >= 1, (
+            f"No backends available: {backends}"
+        )
 
         # The native backend is always active. Create a session and verify
         # that tool evaluation uses backend composition.
@@ -1252,14 +1414,22 @@ class TestPolicyBackendLayer:
         # Allowed by native backend (in allowed_tools)
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "read_file", "arguments": {"path": "/tmp/data.csv"}},
+            {
+                "session_id": sid,
+                "tool_name": "read_file",
+                "arguments": {"path": "/tmp/data.csv"},
+            },
         )
         assert decision["decision"] == "PERMIT"
 
         # Denied by native backend (in forbidden_tools)
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "delete_file", "arguments": {"path": "/tmp/secret.txt"}},
+            {
+                "session_id": sid,
+                "tool_name": "delete_file",
+                "arguments": {"path": "/tmp/secret.txt"},
+            },
         )
         assert decision["decision"] == "DENY"
 
@@ -1290,14 +1460,22 @@ class TestPolicyBackendLayer:
         # send_email is in allowed_tools but not forbidden → Allow
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "send_email", "arguments": {"to": "user@example.com"}},
+            {
+                "session_id": sid,
+                "tool_name": "send_email",
+                "arguments": {"to": "user@example.com"},
+            },
         )
         assert decision["decision"] == "PERMIT"
 
         # delete_file is in both allowed_tools AND forbidden_tools → forbidden wins → Deny
         status, decision, _ = _post(
             base + "/evaluate",
-            {"session_id": sid, "tool_name": "delete_file", "arguments": {"path": "/tmp/test.txt"}},
+            {
+                "session_id": sid,
+                "tool_name": "delete_file",
+                "arguments": {"path": "/tmp/test.txt"},
+            },
         )
         assert decision["decision"] == "DENY"
 
@@ -1384,11 +1562,14 @@ class TestAdvancedFeatures:
 
         # Make some tool calls
         for i in range(2):
-            _post(base + "/evaluate", {
-                "session_id": sid,
-                "tool_name": "read_file",
-                "arguments": {"path": f"/tmp/attest{i}.txt"},
-            })
+            _post(
+                base + "/evaluate",
+                {
+                    "session_id": sid,
+                    "tool_name": "read_file",
+                    "arguments": {"path": f"/tmp/attest{i}.txt"},
+                },
+            )
 
         # End session
         status, end_body, _ = _post(base + "/session/end", {"session_id": sid})
@@ -1426,15 +1607,23 @@ class TestAdvancedFeatures:
                 sid = body["session_id"]
                 status, decision, _ = _post(
                     base + "/evaluate",
-                    {"session_id": sid, "tool_name": "read_file", "arguments": {"path": f"/tmp/{label}.txt"}},
+                    {
+                        "session_id": sid,
+                        "tool_name": "read_file",
+                        "arguments": {"path": f"/tmp/{label}.txt"},
+                    },
                 )
                 with lock:
-                    results.append(decision["decision"] if status == 200 else f"HTTP_{status}")
+                    results.append(
+                        decision["decision"] if status == 200 else f"HTTP_{status}"
+                    )
             except Exception as exc:
                 with lock:
                     errors.append(str(exc))
 
-        threads = [threading.Thread(target=run_session, args=(str(i),)) for i in range(3)]
+        threads = [
+            threading.Thread(target=run_session, args=(str(i),)) for i in range(3)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -1442,8 +1631,10 @@ class TestAdvancedFeatures:
 
         assert len(errors) == 0, f"Errors: {errors}"
         assert len(results) == 3
-        assert all(r == "PERMIT" for r in results), f"Expected all PERMIT, got {results}"
+        assert all(r == "PERMIT" for r in results), (
+            f"Expected all PERMIT, got {results}"
+        )
         _show.test(
             "Concurrent Sessions",
-            f"3 independent sessions evaluated concurrently -> all PERMIT ✓",
+            "3 independent sessions evaluated concurrently -> all PERMIT ✓",
         )

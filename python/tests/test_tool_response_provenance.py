@@ -126,7 +126,6 @@ class TestVerifyEnvelopeIatGate:
 
 class TestVerifyEnvelopeIntegrity:
     def test_unknown_signer_key_rejected(self):
-        signer, _ = generate_es256_keypair(), generate_es256_keypair()  # not registered
         priv, _ = generate_es256_keypair()
         registry = InMemoryToolKeyRegistry()  # empty registry
         s = ToolResponseSigner(
@@ -163,7 +162,10 @@ class TestVerifyEnvelopeIntegrity:
         )
         assert verdict.verdict == "INVALID"
         # Reason mentions the invocation hash mismatch.
-        assert "invocation" in verdict.reason.lower() or "mismatch" in verdict.reason.lower()
+        assert (
+            "invocation" in verdict.reason.lower()
+            or "mismatch" in verdict.reason.lower()
+        )
 
     def test_unsigned_envelope_returns_unsigned_verdict(self):
         registry = InMemoryToolKeyRegistry()
@@ -183,6 +185,7 @@ class TestVerifyEnvelopeIntegrity:
         ``body`` field after signing; the JWS over ``body_sha256`` becomes
         invalid because the recomputed digest no longer matches."""
         from dataclasses import replace
+
         signer, registry, _ = _signer()
         envelope = signer.sign(body={"reply": "ok"}, **_INV)
         # Tamper the body — the signed body_sha256 no longer matches.
@@ -198,6 +201,5 @@ class TestVerifyEnvelopeIntegrity:
         assert verdict.verdict == "INVALID"
         # The reason mentions body / sha mismatch.
         assert any(
-            term in verdict.reason.lower()
-            for term in ("body", "sha", "digest", "hash")
+            term in verdict.reason.lower() for term in ("body", "sha", "digest", "hash")
         ), f"unexpected rejection reason: {verdict.reason}"

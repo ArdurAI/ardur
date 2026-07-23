@@ -235,6 +235,14 @@ graph_build() {
   "$PYTHON_RUN" -m json.tool .context/ardur-graph.json >/dev/null
 }
 
+graph_compile() {
+  if [ ! -f scripts/build-knowledge-graph.py ]; then
+    echo "knowledge graph script not yet implemented; skipping compile check"
+    return 0
+  fi
+  "$PYTHON_RUN" -m py_compile scripts/build-knowledge-graph.py
+}
+
 go_version_ok() {
   local required actual
   required="$(awk '/^go / {print $2; exit}' go/go.mod)"
@@ -289,7 +297,7 @@ optional_lychee() {
 
 run_step "shell syntax" shell_syntax
 run_step "knowledge graph build" graph_build
-run_step "Python graph script compiles" sh -c 'if [ -f scripts/build-knowledge-graph.py ]; then "$PYTHON_RUN" -m py_compile scripts/build-knowledge-graph.py; else echo "knowledge graph script not yet implemented; skipping compile check"; fi'
+run_step "Python graph script compiles" graph_compile
 run_step "tracked JSON parses" validate_json
 run_step "tracked YAML parses" validate_yaml
 run_step "embedded spec schemas match canonical docs" validate_schema_sync
