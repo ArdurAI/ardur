@@ -448,7 +448,8 @@ class TestHTTPSecurityLayer:
     These tests use direct HTTP calls; no Ollama needed."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 1",
             "HTTP Security Layer",
@@ -611,7 +612,8 @@ class TestSessionAndPassportLayer:
     driven by real Ollama tool requests."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 2",
             "Session & Passport Layer",
@@ -915,7 +917,8 @@ class TestDelegationLayer:
     """Parent-child delegation with budget escrow and scope narrowing."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 3",
             "Delegation Layer",
@@ -1147,7 +1150,8 @@ class TestReceiptLayer:
     """Receipt generation, hash chaining, and trace_id continuity."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 4",
             "Receipt Layer",
@@ -1341,7 +1345,8 @@ class TestMICConformanceLayer:
     """MIC-State and MIC-Evidence conformance profile enforcement."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 5",
             "MIC Conformance Layer",
@@ -1580,7 +1585,8 @@ class TestPolicyBackendLayer:
     """Multi-backend policy composition with Deny-wins semantics."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 6",
             "Policy Backend Layer",
@@ -1700,7 +1706,8 @@ class TestAdvancedFeatures:
     """Declared telemetry, session attestation, and concurrent sessions."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def _section_header(self):
+    @classmethod
+    def _section_header(cls):
         _show.section(
             "LAYER 7",
             "Advanced Features",
