@@ -29,6 +29,12 @@ ROOT_RUNTIME_ARTIFACTS = (
     "claude-code-hook-python",
     "claude-code-pre_tool_use",
     "claude-code-pre_tool_use.sha256",
+    # Runtime receipt/state artifacts from the hook lifecycle.
+    "claude-code-hook/receipts.jsonl",
+    "governance_log.jsonl",
+    "state/session.json",
+    "claude-code-hook-daemon.sock",
+    "seccomp-ready-abc123",
 )
 
 VISIBLE_FILES = (
@@ -37,6 +43,9 @@ VISIBLE_FILES = (
     "docs/specs/fixtures/new-public.pem",
     "docs/specs/conformance/runtime-evidence-v0.1/new-public.pem",
     "site/static/repo/docs/specs/fixtures/new-public.pem",
+    # The root-anchored /claude-code-hook/ pattern must not hide this tracked
+    # source file under examples/ — only the root-level runtime dir is ignored.
+    "examples/claude-code-hook/README.md",
 )
 
 REVIEWED_PEM_PREFIXES = (

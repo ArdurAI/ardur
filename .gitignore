@@ -92,3 +92,14 @@ active_mission.jwt
 claude-code-pre_tool_use
 claude-code-pre_tool_use.sha256
 claude-code-hook-python
+
+# Runtime receipt/state artifacts that ardur protect + the hook lifecycle write
+# to the project root. The claude-code-hook/ directory contains signed receipt
+# chains; governance_log.jsonl holds session decisions; state/ has budget and
+# session snapshots; the daemon socket and seccomp-ready markers are ephemeral.
+# Root-anchored so they don't hide unrelated source dirs with similar names.
+/claude-code-hook/
+/governance_log.jsonl
+/state/
+/claude-code-hook-daemon.sock
+/seccomp-ready-*
