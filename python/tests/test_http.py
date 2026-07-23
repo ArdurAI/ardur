@@ -28,7 +28,7 @@ import pytest
 # to stand up an HTTP server for testing. If serve_proxy gets refactored into
 # a factory, swap this for a direct call.
 import vibap.mission as mission_module
-from vibap.passport import ALGORITHM, MissionPassport, issue_passport
+from vibap.passport import ALGORITHM, MissionPassport, issue_passport, verify_passport
 from vibap.proxy import GovernanceProxy, serve_proxy
 from vibap.receipt import verify_chain
 from vibap.risk_budget import ToolRiskContract, ToolRiskRegistry
@@ -392,6 +392,213 @@ class TestHTTPDelegate:
         assert status == 200
         assert "child_token" in body
         assert body["child_claims"]["allowed_tools"] == ["read"]
+        assert "conformance_profile" not in body["child_claims"]
+        assert "receipt_policy" not in body["child_claims"]
+        assert "tool_manifest_digest" not in body["child_claims"]
+
+    def test_mic_evidence_delegation_preserves_bundle_and_enforcement(
+        self,
+        http_proxy,
+        private_key,
+        public_key,
+    ):
+        base, _ = http_proxy
+        mission_id = "urn:ardur:mission:http-mic-evidence"
+        manifest_digest = "sha-256:" + ("a" * 64)
+        parent_mission = MissionPassport(
+            agent_id="mic-parent",
+            mission_id=mission_id,
+            mission="delegate evidence-governed work",
+            allowed_tools=["read_file"],
+            resource_scope=["**"],
+            max_tool_calls=5,
+            delegation_allowed=True,
+            max_delegation_depth=1,
+            max_duration_s=120,
+        )
+        parent_extras = v01_required_md_extras(
+            mission_id=mission_id,
+            conformance_profile="MIC-Evidence",
+            receipt_level="counter_signed",
+        )
+        parent_extras["tool_manifest_digest"] = manifest_digest
+        parent_token = issue_passport(
+            parent_mission,
+            private_key,
+            ttl_s=120,
+            extra_claims=parent_extras,
+        )
+        start_status, _ = _post(base + "/session/start", {"token": parent_token})
+        assert start_status == 200
+
+        status, body = _post(
+            base + "/delegate",
+            {
+                "parent_token": parent_token,
+                "child_agent_id": "mic-child",
+                "child_mission": "perform evidence-governed work",
+                "child_allowed_tools": ["read_file"],
+                "child_ttl_s": 60,
+            },
+        )
+        assert status == 200
+
+        child_claims = verify_passport(
+            body["child_token"],
+            public_key,
+            parent_token=parent_token,
+        )
+        assert child_claims["conformance_profile"] == "MIC-Evidence"
+        assert child_claims["receipt_policy"] == {"level": "counter_signed"}
+        assert child_claims["tool_manifest_digest"] == manifest_digest
+        assert "revocation_ref" not in child_claims
+        assert "governed_memory_stores" not in child_claims
+        assert "probing_rate_limit" not in child_claims
+
+        child_start_status, child_start = _post(
+            base + "/session/start",
+            {"token": body["child_token"]},
+        )
+        assert child_start_status == 200
+        telemetry = {
+            "path": "/tmp/http-mic.txt",
+            "observed_manifest_digest": "sha-256:" + ("b" * 64),
+            "envelope_signature_valid": True,
+            "visibility": "full",
+        }
+        evaluation_status, evaluation = _post(
+            base + "/evaluate",
+            {
+                "session_id": child_start["session_id"],
+                "tool_name": "read_file",
+                "arguments": telemetry,
+            },
+        )
+        assert evaluation_status == 200
+        assert evaluation["decision"] == "VIOLATION"
+        assert evaluation["reason"].startswith("manifest_drift:")
+
+        telemetry["observed_manifest_digest"] = manifest_digest
+        telemetry["visibility"] = "partial"
+        _, evidence_evaluation = _post(
+            base + "/evaluate",
+            {
+                "session_id": child_start["session_id"],
+                "tool_name": "read_file",
+                "arguments": telemetry,
+            },
+        )
+        assert evidence_evaluation["decision"] == "INSUFFICIENT_EVIDENCE"
+        assert evidence_evaluation["reason"] == "visibility_insufficient:partial"
+
+    def test_profile_present_partial_bundle_rejected_without_child_reservation(
+        self,
+        http_proxy,
+        private_key,
+    ):
+        base, proxy = http_proxy
+        parent_mission = MissionPassport(
+            agent_id="partial-mic-parent",
+            mission="must not mint a downgraded child",
+            allowed_tools=["read"],
+            max_tool_calls=2,
+            delegation_allowed=True,
+            max_delegation_depth=1,
+            max_duration_s=120,
+        )
+        parent_token = issue_passport(
+            parent_mission,
+            private_key,
+            ttl_s=120,
+            extra_claims={"conformance_profile": "MIC-State"},
+        )
+        start_status, start = _post(
+            base + "/session/start",
+            {"token": parent_token},
+        )
+        assert start_status == 200
+
+        status, body = _post(
+            base + "/delegate",
+            {
+                "parent_token": parent_token,
+                "child_agent_id": "blocked-child",
+                "child_mission": "must not be minted",
+                "child_allowed_tools": ["read"],
+                "child_max_tool_calls": 1,
+                "delegation_request_id": "partial-mic-bundle",
+            },
+        )
+
+        assert status == 403
+        assert "MIC conformance claim bundle is incomplete" in body["error"]
+        assert "child_token" not in body
+        snapshot = proxy.lineage_budget_ledger.snapshot(start["session_id"])
+        assert snapshot["reserved_total"] == 0
+        assert snapshot["reservations"] == {}
+        parent_session = proxy.get_session(start["session_id"])
+        assert parent_session.delegated_children == []
+
+    def test_idempotent_replay_rejects_pre_fix_downgraded_mic_child(
+        self,
+        http_proxy,
+        private_key,
+        monkeypatch,
+    ):
+        base, proxy = http_proxy
+        parent_mission = MissionPassport(
+            agent_id="replay-mic-parent",
+            mission="reject downgraded replay",
+            allowed_tools=["read"],
+            max_tool_calls=2,
+            delegation_allowed=True,
+            max_delegation_depth=1,
+            max_duration_s=120,
+        )
+        parent_token = issue_passport(
+            parent_mission,
+            private_key,
+            ttl_s=120,
+            extra_claims={
+                "conformance_profile": "MIC-State",
+                "receipt_policy": {"level": "minimal"},
+                "tool_manifest_digest": "sha-256:" + ("a" * 64),
+            },
+        )
+        _, start = _post(base + "/session/start", {"token": parent_token})
+        request = {
+            "parent_token": parent_token,
+            "child_agent_id": "pre-fix-child",
+            "child_mission": "old downgraded child",
+            "child_allowed_tools": ["read"],
+            "child_max_tool_calls": 1,
+            "delegation_request_id": "mic-replay",
+        }
+
+        # Reproduce the old derivation/verification boundary once so the
+        # idempotency ledger contains a signed child with no MIC bundle.
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                "vibap.passport._inherited_mic_conformance_claims",
+                lambda *_args, **_kwargs: {},
+            )
+            first_status, first_body = _post(base + "/delegate", request)
+
+        assert first_status == 200
+        assert "conformance_profile" not in first_body["child_claims"]
+        before_replay = proxy.lineage_budget_ledger.snapshot(start["session_id"])
+        assert before_replay["reserved_total"] == 1
+
+        replay_status, replay_body = _post(base + "/delegate", request)
+
+        assert replay_status == 403
+        assert (
+            replay_body["error"]
+            == "child MIC conformance claim bundle does not match parent"
+        )
+        assert "child_token" not in replay_body
+        after_replay = proxy.lineage_budget_ledger.snapshot(start["session_id"])
+        assert after_replay == before_replay
 
     def test_delegation_escalation_returns_403(self, http_proxy, private_key):
         base, _ = http_proxy
