@@ -11,6 +11,32 @@ All notable changes to Ardur will be documented in this file.
 ### Changed
 
 ### Fixed
+- Preserve MIC conformance claims across delegation: `derive_child_passport`
+  now inherits and validates the closed MIC policy bundle
+  (`conformance_profile`, `receipt_policy`, `tool_manifest_digest`) on
+  supported child derivation, enforcing exact parent-aware verification.
+  Incomplete or partial MIC bundles now raise `PermissionError` during
+  delegation, matching the fail-closed rule in
+  `docs/specs/ardur-drp-mapping-v0.1.md` §3.3.
+- Resolve CodeQL `py/unused-local-variable` in `proxy.py` by hoisting
+  `tracker`/`operator_id` initialization before the `if`/`else` block and
+  removing the redundant `else` branch.
+- Restore full local lint hygiene: resolve all pre-existing Ruff and
+  ShellCheck findings and add a regression guard for the selected-Python
+  graph compile path.
+- Harden the MIC showcase test suite: issue signed MIC-State and
+  MIC-Evidence passports, assert exact fail-closed outcomes, and reflect
+  annotated failures in the test footer.
+- Preserve each original assistant turn around its ordered tool calls in
+  multi-tool transcript tests, emit current Ollama tool-result fields, and
+  fail honestly on rejected follow-up turns.
+- Enforce fail-closed evaluation semantics in tests: only explicit
+  `PERMIT` produces success; `DENY` is denied; missing or unusable
+  evidence is unknown.
+- Convert showcase class-scoped fixtures to `@classmethod` form so
+  class-wide setup is preserved after pytest 10 removes instance-method
+  fixture support.
+- Normalize Ollama tool-call transcript formats in the test harness.
 
 ## [0.2.0] — 2026-07-22
 
