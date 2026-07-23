@@ -65,6 +65,12 @@ site/public/
 site/resources/_gen/
 site/.hugo_build.lock
 
+# Local git worktree checkouts. These are real Ardur repo clones used for
+# parallel development and should never appear in the public tree or be
+# picked up by the Hugo source-mirror sync script.
+worktrees/
+.worktrees/
+
 # Runtime-generated security artifacts produced by ardur commands (passport
 # keys, mission JWTs, compiled native hooks). These are never safe to commit
 # — they contain private keys or session-bound credentials. Listed explicitly

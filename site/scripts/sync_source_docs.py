@@ -23,12 +23,14 @@ INTERNAL_URL_PREFIX = "/__ardur_internal__/"
 
 PUBLIC_MARKDOWN_EXCLUDED_PREFIXES = (
     ".context/",
+    ".worktrees/",
     "_internal/",
     "logs/",
     "site/content/",
     "site/public/",
     "site/resources/",
     "python/tests/test-results/",
+    "worktrees/",
 )
 
 PUBLIC_MARKDOWN_EXCLUDED_DIR_NAMES = {
@@ -38,6 +40,7 @@ PUBLIC_MARKDOWN_EXCLUDED_DIR_NAMES = {
     "dist",
     "node_modules",
     "vendor",
+    "worktrees",
 }
 
 PUBLIC_MARKDOWN_INCLUDED_HIDDEN_DIRS: set[str] = set()
