@@ -24,9 +24,33 @@ from tests import test_e2e_showcase as showcase
     ],
     ids=["single-call", "multi-call"],
 )
+@pytest.mark.parametrize(
+    ("decision_body", "expected_tool_result"),
+    [
+        (
+            {"decision": "PERMIT"},
+            {"status": "ok", "result": "processed"},
+        ),
+        (
+            {"decision": "DENY"},
+            {"status": "denied", "result": "not processed"},
+        ),
+        (
+            {"decision": "VIOLATION"},
+            {"status": "unknown", "result": "not processed"},
+        ),
+        (
+            None,
+            {"status": "unknown", "result": "not processed"},
+        ),
+    ],
+    ids=["permit", "deny", "other-decision", "missing-decision"],
+)
 def test_tool_turn_preserves_original_assistant_message_and_order(
     monkeypatch,
     call_specs,
+    decision_body,
+    expected_tool_result,
 ):
     """Single and parallel tool turns reach the next request without reshaping."""
     tool_calls = [
@@ -58,7 +82,7 @@ def test_tool_turn_preserves_original_assistant_message_and_order(
 
     def fake_post(url, payload, token=None):
         evaluations.append((url, payload, token))
-        return 200, {"decision": "PERMIT"}, {}
+        return 200, decision_body, {}
 
     showcase_results = []
     monkeypatch.setattr(showcase, "_post", fake_post)
@@ -81,7 +105,7 @@ def test_tool_turn_preserves_original_assistant_message_and_order(
         {
             "role": "tool",
             "tool_name": name,
-            "content": json.dumps({"status": "ok", "result": "processed"}),
+            "content": json.dumps(expected_tool_result),
         }
         for name, _arguments in call_specs
     ]
@@ -109,6 +133,27 @@ def test_tool_turn_preserves_original_assistant_message_and_order(
             f"LLM made {len(call_specs)} tool call(s) through proxy across multiple turns",
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("status", "decision", "expected"),
+    [
+        (
+            503,
+            {"decision": "PERMIT"},
+            {"status": "unknown", "result": "not processed"},
+        ),
+        (
+            200,
+            "not-a-decision-object",
+            {"status": "unknown", "result": "not processed"},
+        ),
+    ],
+    ids=["non-200", "unusable-decision"],
+)
+def test_tool_result_without_valid_evidence_is_unknown(status, decision, expected):
+    """Missing or unusable evaluation evidence never becomes success."""
+    assert showcase._tool_result_for_evaluation(status, decision) == expected
 
 
 def test_follow_up_model_error_fails_multi_turn_showcase(monkeypatch):

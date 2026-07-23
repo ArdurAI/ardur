@@ -380,6 +380,16 @@ def _ollama_chat_single(client, messages, tools):
     return client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
 
 
+def _tool_result_for_evaluation(status, decision):
+    """Return a fail-closed simulated result for one governance evaluation."""
+    decision_value = decision.get("decision") if isinstance(decision, dict) else None
+    if status == 200 and decision_value == "PERMIT":
+        return {"status": "ok", "result": "processed"}
+    if status == 200 and decision_value == "DENY":
+        return {"status": "denied", "result": "not processed"}
+    return {"status": "unknown", "result": "not processed"}
+
+
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
@@ -878,11 +888,12 @@ class TestSessionAndPassportLayer:
                 )
                 if status == 200:
                     evaluations += 1
+                tool_result = _tool_result_for_evaluation(status, decision)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_name": tc.function.name,
-                        "content": json.dumps({"status": "ok", "result": "processed"}),
+                        "content": json.dumps(tool_result),
                     }
                 )
 
