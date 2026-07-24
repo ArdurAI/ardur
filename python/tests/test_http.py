@@ -33,7 +33,7 @@ from vibap.proxy import GovernanceProxy, serve_proxy
 from vibap.receipt import verify_chain
 from vibap.risk_budget import ToolRiskContract, ToolRiskRegistry
 
-from tests.conftest import (
+from conftest import (
     v01_default_status_list_token,
     v01_default_status_url,
     v01_required_md_extras,

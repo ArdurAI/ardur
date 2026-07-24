@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests import test_e2e_showcase as showcase
+import test_e2e_showcase as showcase
 
 
 @pytest.mark.parametrize(

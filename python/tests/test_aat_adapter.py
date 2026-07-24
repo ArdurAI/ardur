@@ -15,7 +15,7 @@ from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import Decision
 from vibap.receipt import verify_chain
 
-from tests.conftest import (
+from conftest import (
     v01_default_status_list_token,
     v01_default_status_url,
     v01_required_md_extras,

@@ -25,7 +25,7 @@ from vibap.passport import (
 )
 from vibap.proxy import Decision
 
-from tests.conftest import v01_required_md_extras
+from conftest import v01_required_md_extras
 
 DIGEST = "sha-256:" + hashlib.sha256(b"test-manifest").hexdigest()
 WRONG_DIGEST = "sha-256:" + hashlib.sha256(b"wrong-manifest").hexdigest()

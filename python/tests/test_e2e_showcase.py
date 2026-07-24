@@ -32,7 +32,7 @@ from vibap.passport import (
 from vibap.proxy import serve_proxy
 from vibap.receipt import verify_chain
 
-from tests.conftest import v01_required_md_extras
+from conftest import v01_required_md_extras
 
 # ---------------------------------------------------------------------------
 # constants
