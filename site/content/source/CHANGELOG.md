@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "7ed85e80564e24838b5c405f711ff2c3c195ab1ddad654869bc2efe4735f275f"
+source_sha256: "9d869cff7386a857d3144e93b9f649543cb8802d5119cbb10af47ad46b606708"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,12 +22,31 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Detect PKCS#8 private keys in the root-level protect artifact scanner so
+  leaked private-key material is flagged alongside existing PEM detection
+- Cover hook-lifecycle runtime artifacts in `.gitignore` (receipt chains,
+  governance log, state directory, daemon socket, seccomp markers)
 
 ### Added
 
 ### Changed
+- Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
+  cannot accidentally absorb worktree-local build state
 
 ### Fixed
+- Reject empty or whitespace-only `type=Path` arguments in sibling CLI
+  entry-point modules (`receiver_attestation_fixture`,
+  `provider_adapter_fixture`, `drp_conformance`, `policy_conformance`)
+  so they fail closed before file IO instead of silently resolving to the
+  working directory
+- Reject empty or whitespace-only `-out` in `benchcheck` and the path
+  argument in `enforce-verify` before file operations
+- Reject whitespace-only `--signing-key` in the operator reconciler so
+  `loadSigningKey` is not called with a blank path
+- Resolve cross-package `conftest` imports so `pytest` collection works from
+  the repository root, not only from `python/`
+- Eliminate `InsecureKeyLengthWarning` from the forged-JWT test fixture by
+  using a 53-byte wrong secret (still fails verification, no warning)
 - Preserve MIC conformance claims across delegation: `derive_child_passport`
   now inherits and validates the closed MIC policy bundle
   (`conformance_profile`, `receipt_policy`, `tool_manifest_digest`) on
