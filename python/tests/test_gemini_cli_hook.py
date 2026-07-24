@@ -559,7 +559,7 @@ def test_gemini_report_excludes_invalid_jwt_claims_from_trusted_counts(tmp_path)
             "verdict": "compliant",
             "measurements": {"gemini_cli": {"unknown_boundaries": ["forged_gap"]}},
         },
-        "wrong-secret",
+        "this-is-a-wrong-secret-that-is-at-least-32-bytes-long",
         algorithm="HS256",
     )
     chain_file.parent.mkdir(parents=True)
