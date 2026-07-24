@@ -2213,7 +2213,7 @@ func prevalidateKernelReceiptPathNotSymlink(fsys evidenceFS, path string, label 
 }
 
 func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, perm)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND|evidenceOpenNoFollow, perm)
 	if err != nil {
 		return err
 	}
@@ -2298,6 +2298,14 @@ func main() {
 		"platform", platformName(),
 	)
 
+	// Set a restrictive umask so all daemon-created files (evidence logs,
+	// socket dirs, bootstrap files, state) are owner-only regardless of the
+	// inherited process umask. This is defense-in-depth: MkdirAll/AppendFile
+	// already request restrictive modes, but umask masking could loosen them
+	// (e.g. systemd units with UMask=0000). Umask is process-global and
+	// inherited by all goroutines.
+	syscall.Umask(0o077)
+
 	ownerUID := uint32(os.Getuid())
 	d, err := newDaemon(log, *socketPath, *evidenceDir, *stateDir, ownerUID)
 	if err != nil {
@@ -2343,8 +2351,10 @@ func main() {
 		}
 	}
 
-	// Ensure socket directory exists.
-	if mkErr := os.MkdirAll(filepath.Dir(*socketPath), 0o755); mkErr != nil {
+	// Ensure socket directory exists. Mode 0o700 restricts listing/access to
+	// the owner (root in production); a tighter directory narrows symlink-race
+	// windows for stale-socket removal and the socket bind itself.
+	if mkErr := os.MkdirAll(filepath.Dir(*socketPath), 0o700); mkErr != nil {
 		log.Error("create socket directory", "path", filepath.Dir(*socketPath), "error", mkErr)
 		os.Exit(1)
 	}
