@@ -2303,8 +2303,8 @@ func main() {
 	// inherited process umask. This is defense-in-depth: MkdirAll/AppendFile
 	// already request restrictive modes, but umask masking could loosen them
 	// (e.g. systemd units with UMask=0000). Umask is process-global and
-	// inherited by all goroutines.
-	syscall.Umask(0o077)
+	// inherited by all goroutines. No-op on platforms without umask.
+	setRestrictiveUmask()
 
 	ownerUID := uint32(os.Getuid())
 	d, err := newDaemon(log, *socketPath, *evidenceDir, *stateDir, ownerUID)

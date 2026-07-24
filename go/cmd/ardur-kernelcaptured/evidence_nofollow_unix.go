@@ -14,3 +14,10 @@ import "syscall"
 // (prevalidateKernelReceiptParentChain) already rejects symlinked parents, so
 // together the two checks cover the full path.
 const evidenceOpenNoFollow = syscall.O_NOFOLLOW
+
+// setRestrictiveUmask sets the process umask to 0o077 so that all
+// daemon-created files are owner-only regardless of the inherited umask
+// (e.g. a permissive systemd UMask=0000).
+func setRestrictiveUmask() {
+	syscall.Umask(0o077)
+}
