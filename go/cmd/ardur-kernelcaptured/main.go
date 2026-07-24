@@ -2258,6 +2258,19 @@ func splitCommaSeparatedValues(raw string) []string {
 	return values
 }
 
+// validateDaemonPathFlags checks that all four required path flags are
+// non-empty after trimming. It returns a non-empty error message (for stderr)
+// when any path is missing, or an empty string when all are valid. Extracted
+// from main() so the whitespace guard can be unit tested independently of the
+// daemon's socket/process/eBPF initialization.
+func validateDaemonPathFlags(socket, seccompSocket, evidenceDir, stateDir string) string {
+	if strings.TrimSpace(socket) == "" || strings.TrimSpace(seccompSocket) == "" ||
+		strings.TrimSpace(evidenceDir) == "" || strings.TrimSpace(stateDir) == "" {
+		return "--socket, --seccomp-socket, --evidence-dir, and --state-dir must be non-empty paths after trimming whitespace"
+	}
+	return ""
+}
+
 func main() {
 	var (
 		socketPath               = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
@@ -2284,6 +2297,17 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Trim whitespace from path flags so a whitespace-only value produces a
+	// clear "empty path" error rather than a confusing OS-level failure.
+	socket := strings.TrimSpace(*socketPath)
+	seccompSocket := strings.TrimSpace(*seccompSocketPath)
+	evidenceDirectory := strings.TrimSpace(*evidenceDir)
+	stateDirectory := strings.TrimSpace(*stateDir)
+	if msg := validateDaemonPathFlags(socket, seccompSocket, evidenceDirectory, stateDirectory); msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+		os.Exit(2)
+	}
+
 	level := slog.LevelInfo
 	if *debug {
 		level = slog.LevelDebug
@@ -2291,9 +2315,9 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	log.Info("ardur-kernelcaptured starting",
-		"socket", *socketPath,
-		"evidence_dir", *evidenceDir,
-		"state_dir", *stateDir,
+		"socket", socket,
+		"evidence_dir", evidenceDirectory,
+		"state_dir", stateDirectory,
 		"no_ringbuf", *noRingbuf,
 		"platform", platformName(),
 	)
@@ -2307,7 +2331,7 @@ func main() {
 	setRestrictiveUmask()
 
 	ownerUID := uint32(os.Getuid())
-	d, err := newDaemon(log, *socketPath, *evidenceDir, *stateDir, ownerUID)
+	d, err := newDaemon(log, socket, evidenceDirectory, stateDirectory, ownerUID)
 	if err != nil {
 		log.Error("init daemon", "error", err)
 		os.Exit(1)
