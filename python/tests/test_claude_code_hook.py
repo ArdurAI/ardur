@@ -3362,3 +3362,52 @@ def test_three_call_session_chain_verifies(tmp_path, monkeypatch):
     from vibap.receipt import verify_chain
 
     verify_chain(lines, public_key)  # raises ReceiptChainError if chain is broken
+
+
+# ---------------------------------------------------------------------------
+# Empty / whitespace-only --keys-dir validation
+# ---------------------------------------------------------------------------
+
+
+def test_main_rejects_empty_or_whitespace_keys_dir_before_handler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty / whitespace-only ``--keys-dir`` must produce a fail-closed deny
+    response on stdout *before* the handler is ever called.
+
+    ``argparse``'s ``type=Path`` converts ``""`` to ``Path(".")`` (the CWD),
+    which would silently pollute the working directory.  The pre-validation
+    catches empty / whitespace-only values and returns a structured error +
+    protocol-valid deny instead.
+    """
+    from vibap import claude_code_hook
+
+    call_count = 0
+
+    def _should_not_be_called(*args: object, **kwargs: object) -> object:
+        nonlocal call_count
+        call_count += 1
+        raise AssertionError("handler must not be called for empty --keys-dir")
+
+    # Redirect stdin so _load_hook_input does not block.
+    monkeypatch.setattr("sys.stdin", _StdinStub('{"tool_name": "Read", "tool_input": {}}'))
+
+    for raw in ("", "   "):
+        rc = claude_code_hook.main(["--keys-dir", raw, "pre"])
+        assert rc == 0
+        # stdout gets the fail-safe deny JSON via the patched print below.
+        assert call_count == 0, f"handler was called for --keys-dir={raw!r}"
+
+
+class _StdinStub:
+    """Minimal stdin replacement that yields a single JSON line."""
+
+    def __init__(self, payload: str) -> None:
+        self._payload = payload
+
+    def read(self, *_args: object, **_kwargs: object) -> str:
+        return self._payload
+
+    def readline(self, *_args: object, **_kwargs: object) -> str:
+        return self._payload

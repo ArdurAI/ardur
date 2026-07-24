@@ -1105,13 +1105,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vibap.claude_code_daemon")
     parser.add_argument(
         "--socket-path",
-        type=Path,
+        # Keep raw strings through argparse so explicit "" / whitespace values
+        # are rejected before Path("") collapses to Path(".").
+        type=str,
         default=None,
         help=f"unix socket path (default: ${DAEMON_SOCKET_ENV_VAR} or derived VIBAP_HOME path)",
     )
     parser.add_argument(
         "--keys-dir",
-        type=Path,
+        # Same pre-validation pattern as cli.py: parse as str, reject empty or
+        # whitespace-only values, then coerce back to Path for downstream code.
+        type=str,
         default=None,
         help="keys directory passed to hook handler (default: hook resolver)",
     )
@@ -1123,9 +1127,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Validate before any Path() conversion or daemon startup; argparse's
+    # Path type would turn an explicit empty string into Path(".").
+    if isinstance(args.socket_path, str) and not args.socket_path.strip():
+        parser.error("--socket-path must be a non-empty path after trimming whitespace")
+    if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
+        parser.error("--keys-dir must be a non-empty path after trimming whitespace")
+
+    socket_path = Path(args.socket_path) if isinstance(args.socket_path, str) else None
+    keys_dir = Path(args.keys_dir) if isinstance(args.keys_dir, str) else None
+
     serve_pre_tool_use_daemon(
-        socket_path=args.socket_path,
-        keys_dir=args.keys_dir,
+        socket_path=socket_path,
+        keys_dir=keys_dir,
         max_requests=args.max_requests,
     )
     return 0

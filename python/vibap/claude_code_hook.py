@@ -1523,6 +1523,42 @@ def _fail_safe_output(phase: str) -> dict[str, Any]:
     return {"continue": True}
 
 
+def _claude_code_hook_keys_dir_invalid_response(*, phase: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": "claude_code_hook_keys_dir_invalid",
+        "error_code": "claude_code_hook_keys_dir_invalid",
+        "condition": "claude_code_hook_keys_dir_invalid",
+        "message": (
+            "vibap.claude_code_hook --keys-dir must be a non-empty path "
+            "after trimming whitespace."
+        ),
+        "detail": (
+            "An empty or whitespace-only --keys-dir path was provided. "
+            "Provide an explicit keys directory, or omit --keys-dir to use "
+            "$VIBAP_KEYS_DIR or the default Ardur keys directory."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_keys_dir",
+                "command": (
+                    f"ardur claude-code-hook {phase} --keys-dir <keys-dir> "
+                    "< <claude-code-hook-event-json-file>"
+                ),
+                "detail": "Provide an explicit --keys-dir path.",
+            },
+            {
+                "action": "omit_keys_dir_to_use_default",
+                "command": (
+                    f"ardur claude-code-hook {phase} "
+                    "< <claude-code-hook-event-json-file>"
+                ),
+                "detail": "Omit --keys-dir to use the configured default keys directory.",
+            },
+        ],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Reads hook input JSON from stdin, writes hook
     output JSON to stdout.
@@ -1542,13 +1578,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--keys-dir",
-        type=Path,
+        # Keep raw strings through argparse so explicit "" / whitespace values
+        # can fail closed before Path("") collapses to Path(".").
+        type=str,
         default=None,
         help="signing keys directory (default: $VIBAP_KEYS_DIR or DEFAULT_HOME/keys)",
     )
     args = parser.parse_args(argv)
 
     fail_safe = _fail_safe_output(args.phase)
+    if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
+        sys.stderr.write(
+            json.dumps(
+                _claude_code_hook_keys_dir_invalid_response(phase=args.phase),
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        print(json.dumps(fail_safe))
+        return 0
+    keys_dir = Path(args.keys_dir) if isinstance(args.keys_dir, str) else None
 
     try:
         hook_input = _load_hook_input(sys.stdin)
@@ -1577,7 +1626,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     handler = handlers[args.phase]
     try:
-        output = handler(hook_input, keys_dir=args.keys_dir)
+        output = handler(hook_input, keys_dir=keys_dir)
     except Exception as exc:  # pylint: disable=broad-except
         sys.stderr.write(f"ardur: hook handler crashed: {exc}\n")
         print(json.dumps(fail_safe))
