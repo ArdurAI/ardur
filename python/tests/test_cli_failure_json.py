@@ -1653,6 +1653,84 @@ def test_issue_valid_identity_still_succeeds(tmp_path, capsys):
     assert (keys_dir / "passport_public.pem").exists()
 
 
+@pytest.mark.parametrize(
+    ("flag", "values", "field_name"),
+    [
+        ("--allowed-tools", ["", "valid_tool"], "allowed_tools"),
+        ("--allowed-tools", ["   "], "allowed_tools"),
+        ("--forbidden-tools", [""], "forbidden_tools"),
+        ("--forbidden-tools", ["   ", "Bash"], "forbidden_tools"),
+        ("--resource-scope", [""], "resource_scope"),
+        ("--resource-scope", ["   "], "resource_scope"),
+    ],
+)
+def test_issue_empty_or_whitespace_nargs_list_returns_safe_json_failure(
+    tmp_path, capsys, flag, values, field_name
+):
+    keys_dir = tmp_path / "keys"
+    cli_args = [
+        "issue",
+        "--agent-id",
+        "test-agent",
+        "--mission",
+        "test mission",
+        "--keys-dir",
+        str(keys_dir),
+        flag,
+        *values,
+    ]
+    rc, payload = _run_cli_and_read_json(cli_args, capsys)
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "issue_tool_list_invalid"
+    assert payload["error"] == "issue_tool_list_invalid"
+    assert payload["error_code"] == "issue_tool_list_invalid"
+    assert payload["detail"]
+    assert field_name in payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "claims" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No signing keys may be created when validation rejects the input.
+    assert not keys_dir.exists() or not any(keys_dir.iterdir())
+    assert all(
+        "<" in step["command"] and ">" in step["command"]
+        for step in payload["next_steps"]
+    )
+
+
+def test_issue_valid_nargs_list_still_succeeds(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--allowed-tools",
+            "Read",
+            "Write",
+            "--forbidden-tools",
+            "Bash",
+            "--resource-scope",
+            "file://**",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["allowed_tools"] == ["Read", "Write"]
+    assert payload["claims"]["forbidden_tools"] == ["Bash"]
+    assert payload["claims"]["resource_scope"] == ["file://**"]
+
+
 def test_issue_zero_tool_call_budget_remains_valid(tmp_path, capsys):
     rc, payload = _run_cli_and_read_json(
         [

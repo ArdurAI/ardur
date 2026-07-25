@@ -1449,6 +1449,46 @@ def _issue_identity_failure(args: argparse.Namespace) -> tuple[dict, int] | None
     return None
 
 
+def _issue_tool_list_invalid_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
+    """Reject empty or whitespace-only elements in nargs list arguments."""
+    for field_name, flag_name in (
+        ("allowed_tools", "--allowed-tools"),
+        ("forbidden_tools", "--forbidden-tools"),
+        ("resource_scope", "--resource-scope"),
+    ):
+        values = getattr(args, field_name, None) or []
+        for element in values:
+            if not isinstance(element, str) or not element.strip():
+                return (
+                    {
+                        "ok": False,
+                        "error": "issue_tool_list_invalid",
+                        "error_code": "issue_tool_list_invalid",
+                        "condition": "issue_tool_list_invalid",
+                        "detail": (
+                            f"{flag_name} must not contain empty or whitespace-only"
+                            f" elements (offending value in {field_name})."
+                        ),
+                        "next_steps": [
+                            {
+                                "condition": "issue_tool_list_invalid",
+                                "action": "rerun_issue_with_valid_tool_list",
+                                "command": (
+                                    "ardur issue --agent-id <id> --mission <mission>"
+                                    " --allowed-tools <tool> ... --keys-dir <dir>"
+                                ),
+                                "detail": (
+                                    "Each tool name or resource scope pattern must be"
+                                    " a non-empty string after trimming whitespace."
+                                ),
+                            }
+                        ],
+                    },
+                    1,
+                )
+    return None
+
+
 def cmd_issue(args: argparse.Namespace) -> int:
     path_failure = _path_arg_invalid_failure(args)
     if path_failure is not None:
@@ -1462,6 +1502,11 @@ def cmd_issue(args: argparse.Namespace) -> int:
     issue_budget_failure = _issue_budget_failure(args)
     if issue_budget_failure is not None:
         response, exit_code = issue_budget_failure
+        _print_json(response)
+        return exit_code
+    issue_tool_list_failure = _issue_tool_list_invalid_failure(args)
+    if issue_tool_list_failure is not None:
+        response, exit_code = issue_tool_list_failure
         _print_json(response)
         return exit_code
     requested_scope = list(args.resource_scope or [])
