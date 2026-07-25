@@ -64,6 +64,32 @@ if [[ "$PYTHON_RUN" == */* && "$PYTHON_RUN" != /* ]]; then
   PYTHON_RUN="$ROOT/$PYTHON_RUN"
 fi
 
+version_lt() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def parts(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split(".") if part.isdigit())
+
+sys.exit(0 if parts(sys.argv[1]) < parts(sys.argv[2]) else 1)
+PY
+}
+
+# Enforce Ardur's Python minimum before running validation checks. Mirrors the
+# guard in scripts/setup-dev.sh: a below-minimum PYTHON_BIN (common on macOS
+# where python3 is the system 3.9.6) produces confusing tracebacks instead of
+# a clear message. Even the default python/.venv fallback can be stale if
+# setup-dev.sh was never run, so verify the resolved interpreter explicitly.
+required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+if [ -z "$required_python_min" ]; then
+  required_python_min="3.10"
+fi
+actual_python="$("$PYTHON_RUN" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+if version_lt "$actual_python" "$required_python_min"; then
+  echo "ERROR: Python $actual_python is below Ardur's minimum ($required_python_min). Install Python ${required_python_min}+ or pass --python PATH." >&2
+  exit 1
+fi
+
 failures=0
 
 run_step() {
