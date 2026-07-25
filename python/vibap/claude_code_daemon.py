@@ -1134,6 +1134,13 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
         parser.error("--keys-dir must be a non-empty path after trimming whitespace")
 
+    if args.max_requests is not None and args.max_requests <= 0:
+        parser.error(
+            "--max-requests must be a positive integer (got {})".format(
+                args.max_requests
+            )
+        )
+
     socket_path = Path(args.socket_path) if isinstance(args.socket_path, str) else None
     keys_dir = Path(args.keys_dir) if isinstance(args.keys_dir, str) else None
 
