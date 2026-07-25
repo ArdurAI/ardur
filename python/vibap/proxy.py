@@ -6899,6 +6899,46 @@ def _proxy_port_failure_exit_code(port: int) -> int | None:
     return 1
 
 
+_PROXY_PATH_ARG_NAMES = ("keys_dir", "log_path", "state_dir", "tls_cert", "tls_key")
+
+
+def _proxy_path_arg_invalid_response(arg_name: str) -> dict[str, object]:
+    option = arg_name.replace("_", "-")
+    return {
+        "ok": False,
+        "error": "proxy_path_arg_invalid",
+        "error_code": "proxy_path_arg_invalid",
+        "condition": "proxy_path_arg_invalid",
+        "message": f"python -m vibap.proxy --{option} must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only path argument was provided. "
+            "Pass an explicit directory or file path, or use '.' for the current working directory."
+        ),
+        "next_steps": [
+            {
+                "action": f"pass_{arg_name}",
+                "command": f"python -m vibap.proxy --{option} <{option}>",
+                "detail": f"Provide an explicit --{option} path.",
+            },
+            {
+                "action": "use_cwd",
+                "command": f"python -m vibap.proxy --{option} .",
+                "detail": "Use '.' explicitly to target the current working directory.",
+            },
+        ],
+    }
+
+
+def _proxy_path_arg_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
+    for arg_name in _PROXY_PATH_ARG_NAMES:
+        value = getattr(args, arg_name, None)
+        if isinstance(value, str) and not value.strip():
+            return _proxy_path_arg_invalid_response(arg_name)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the Ardur governance proxy")
     parser.add_argument("--host", default="127.0.0.1")
@@ -6920,6 +6960,12 @@ def main(argv: list[str] | None = None) -> int:
     port_failure = _proxy_port_failure_exit_code(args.port)
     if port_failure is not None:
         return port_failure
+
+    path_failure = _proxy_path_arg_invalid_failure(args)
+    if path_failure is not None:
+        json.dump(path_failure, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
 
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     proxy = GovernanceProxy(
