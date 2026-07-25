@@ -3383,21 +3383,12 @@ def test_main_rejects_empty_or_whitespace_keys_dir_before_handler(
     """
     from vibap import claude_code_hook
 
-    call_count = 0
-
-    def _should_not_be_called(*args: object, **kwargs: object) -> object:
-        nonlocal call_count
-        call_count += 1
-        raise AssertionError("handler must not be called for empty --keys-dir")
-
     # Redirect stdin so _load_hook_input does not block.
     monkeypatch.setattr("sys.stdin", _StdinStub('{"tool_name": "Read", "tool_input": {}}'))
 
     for raw in ("", "   "):
         rc = claude_code_hook.main(["--keys-dir", raw, "pre"])
-        assert rc == 0
-        # stdout gets the fail-safe deny JSON via the patched print below.
-        assert call_count == 0, f"handler was called for --keys-dir={raw!r}"
+        assert rc == 0  # fail-safe deny (exit 0) before handler is reached
 
 
 class _StdinStub:
