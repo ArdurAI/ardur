@@ -6858,6 +6858,47 @@ def serve_proxy(
         httpd.server_close()
 
 
+def _proxy_port_failure_condition() -> str:
+    return "proxy_port_invalid"
+
+
+def _proxy_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_proxy_port",
+            "command": (
+                "python -m vibap.proxy --host <loopback-host> --port <port>"
+            ),
+            "detail": (
+                "Use an integer TCP port from 0 through 65535. Use 0 when you "
+                "want the operating system to choose an available local port."
+            ),
+        },
+    ]
+
+
+def _proxy_port_failure_response() -> dict:
+    condition = _proxy_port_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur governance proxy port must be within the valid TCP port range.",
+        "detail": "Choose an integer port from 0 through 65535 before starting the proxy.",
+        "next_steps": _proxy_port_failure_next_steps(condition),
+    }
+
+
+def _proxy_port_failure_exit_code(port: int) -> int | None:
+    if 0 <= port <= 65535:
+        return None
+    json.dump(_proxy_port_failure_response(), sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the Ardur governance proxy")
     parser.add_argument("--host", default="127.0.0.1")
@@ -6875,6 +6916,10 @@ def main(argv: list[str] | None = None) -> int:
         "--no-tls", action="store_true", help="disable TLS (plain HTTP only)"
     )
     args = parser.parse_args(argv)
+
+    port_failure = _proxy_port_failure_exit_code(args.port)
+    if port_failure is not None:
+        return port_failure
 
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     proxy = GovernanceProxy(
