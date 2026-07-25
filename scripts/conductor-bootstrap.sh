@@ -37,7 +37,11 @@ PY
 # on macOS where python3 is the system 3.9.6) produces confusing tracebacks
 # instead of a clear, actionable message. conductor-bootstrap.sh is documented
 # as the first command in every new session, so this check must fire here too.
-required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+if [ -f python/pyproject.toml ]; then
+  required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+else
+  required_python_min=""
+fi
 if [ -z "$required_python_min" ]; then
   required_python_min="3.10"
 fi

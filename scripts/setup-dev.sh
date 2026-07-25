@@ -73,7 +73,11 @@ if [ "$SKIP_PYTHON" -eq 0 ]; then
   # PYTHON_BIN (common on macOS where python3 is the system 3.9) creates a broken
   # venv and fails deep inside a pyproject.toml build-dependency traceback instead
   # of a clear, actionable message.
-  required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+  if [ -f python/pyproject.toml ]; then
+    required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+  else
+    required_python_min=""
+  fi
   if [ -z "$required_python_min" ]; then
     required_python_min="3.10"
   fi
