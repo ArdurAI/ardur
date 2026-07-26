@@ -2362,6 +2362,17 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     config_ok = paths.config.exists()
     hub_token_ok = bool(token)
     hub_ok = bool(hub.get("ok"))
+    # Mirror how hub_request resolves the URL: when the caller passed the
+    # plain-HTTP argparse default, consult the Personal home config so the
+    # doctor detail shows the real HTTPS URL the Hub serves on instead of the
+    # default. Explicit overrides are honoured as-is; hub errors short-circuit
+    # the detail below so resolution here is purely for the success display.
+    display_hub_url = str(args.hub_url)
+    if display_hub_url.strip() == DEFAULT_HUB_URL:
+        try:
+            display_hub_url = resolve_hub_url(home=args.home)
+        except HubError:
+            pass
     checks = [
         {"name": "home", "ok": home_ok, "detail": "<ardur-home>"},
         {"name": "config", "ok": config_ok, "detail": "<ardur-config>"},
@@ -2373,8 +2384,7 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
         {
             "name": "hub",
             "ok": hub_ok,
-            "detail": hub.get("error")
-            or _redact_url_for_user_output(str(args.hub_url)),
+            "detail": hub.get("error") or _redact_url_for_user_output(display_hub_url),
         },
         {
             "name": "desktop_permissions",
