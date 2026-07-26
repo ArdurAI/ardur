@@ -1434,9 +1434,12 @@ in the form `ardur-native: stage=<stage> errno=<N> name=<SYMBOL>
 desc=<strerror>` containing only the operation stage, the numeric errno, a
 portable symbolic name, and the `strerror` text. The diagnostics never include
 request bodies, hook payloads, tokens, local file paths, host data, or secrets
-(verified by a dedicated test). Callers can disable the native client and force
-the Python path with `ARDUR_CC_HOOK_STRICT_NATIVE=0` and
-`ARDUR_CC_HOOK_DAEMON=0`.
+(verified by a dedicated test). The native client and daemon paths are enabled
+by default. To bypass both and force the local Python hook path, set
+`ARDUR_CC_HOOK_DAEMON=0`. Setting `ARDUR_CC_HOOK_STRICT_NATIVE=1` does the
+opposite — it `exec`s the native client with no Python fallback, for
+environments that want native-only behavior or want the hook to fail loudly if
+the native client is unavailable.
 
 ### `ardur claude-code-report`
 
