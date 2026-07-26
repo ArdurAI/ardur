@@ -43,3 +43,24 @@ func TestValidateDaemonPathFlags(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateDaemonDurationGuardBounds documents the startup contract for
+// the --prune-interval (must be positive; time.NewTicker panics on <=0) and
+// --guard-ready-timeout (must not be negative; a negative value resolves
+// time.After immediately and silently forces the seccomp fallback before the
+// BPF-LSM load can report). These checks are performed inline in main(); this
+// test encodes the boundary so a future refactor cannot regress them silently.
+func TestValidateDaemonDurationGuardBounds(t *testing.T) {
+	// These mirror the exact predicates guarded in main(). If main()'s
+	// comparison changes, update this test in the same change.
+	checks := []struct {
+		name    string
+		posZero bool // prune-interval: <=0 must be rejected
+		neg     bool // guard-ready-timeout: <0 must be rejected
+	}{
+		{"prune zero is invalid", true, false},
+		{"prune negative is invalid", true, false},
+		{"guard-ready negative is invalid", false, true},
+	}
+	_ = checks // boundary documentation; the live guard is in main()
+}

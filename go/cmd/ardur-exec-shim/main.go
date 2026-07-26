@@ -123,11 +123,17 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Trim whitespace from session-id and ready-file so whitespace-only
-	// values are handled consistently with the validation guard above.
+	// Trim whitespace from session-id, seccomp-socket, and ready-file so
+	// whitespace-only values are handled consistently with the validation
+	// guard above.
 	trimmedSessionID := strings.TrimSpace(*sessionID)
+	trimmedSeccompSocket := strings.TrimSpace(*seccompSocket)
 	trimmedReadyFile := strings.TrimSpace(*readyFile)
-	if err := run(trimmedSessionID, *seccompSocket, trimmedReadyFile, args); err != nil {
+	if trimmedSeccompSocket == "" {
+		fmt.Fprintln(os.Stderr, "ardur-exec-shim: --seccomp-socket must not be empty or whitespace-only")
+		os.Exit(2)
+	}
+	if err := run(trimmedSessionID, trimmedSeccompSocket, trimmedReadyFile, args); err != nil {
 		fmt.Fprintf(os.Stderr, "ardur-exec-shim: %v\n", err)
 		os.Exit(1)
 	}

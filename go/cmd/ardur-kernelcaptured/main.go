@@ -2308,6 +2308,19 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Guard non-positive durations: time.NewTicker panics on <=0, and a
+	// negative guard-ready-timeout resolves immediately (silent fallback
+	// to seccomp before the BPF-LSM load can report). Reject both at
+	// startup with a clear error instead of a confusing runtime failure.
+	if *pruneEvery <= 0 {
+		fmt.Fprintln(os.Stderr, "--prune-interval must be a positive duration")
+		os.Exit(2)
+	}
+	if *guardReadyTimeout < 0 {
+		fmt.Fprintln(os.Stderr, "--guard-ready-timeout must not be negative")
+		os.Exit(2)
+	}
+
 	level := slog.LevelInfo
 	if *debug {
 		level = slog.LevelDebug
@@ -2378,12 +2391,12 @@ func main() {
 	// Ensure socket directory exists. Mode 0o700 restricts listing/access to
 	// the owner (root in production); a tighter directory narrows symlink-race
 	// windows for stale-socket removal and the socket bind itself.
-	if mkErr := os.MkdirAll(filepath.Dir(*socketPath), 0o700); mkErr != nil {
-		log.Error("create socket directory", "path", filepath.Dir(*socketPath), "error", mkErr)
+	if mkErr := os.MkdirAll(filepath.Dir(socket), 0o700); mkErr != nil {
+		log.Error("create socket directory", "path", filepath.Dir(socket), "error", mkErr)
 		os.Exit(1)
 	}
 	// Remove stale socket file from a previous run.
-	_ = os.Remove(*socketPath)
+	_ = os.Remove(socket)
 
 	svr, err := kernelcapture.ListenDaemonUnixSocketServer(
 		kernelcapture.DaemonUnixSocketServerConfig{
@@ -2395,7 +2408,7 @@ func main() {
 		},
 	)
 	if err != nil {
-		log.Error("bind control socket", "socket", *socketPath, "error", err)
+		log.Error("bind control socket", "socket", socket, "error", err)
 		os.Exit(1)
 	}
 	d.setControlHandlerDrain(svr.HandlersDrained(), svr.ServeDone())
@@ -2503,12 +2516,12 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := runSeccompHandoffServer(ctx, *seccompSocketPath, d, log); err != nil && ctx.Err() == nil {
+				if err := runSeccompHandoffServer(ctx, seccompSocket, d, log); err != nil && ctx.Err() == nil {
 					log.Error("seccomp handoff server stopped", "error", err)
 				}
 			}()
 		}
-		log.Info("enforcement tier selected", "tier", d.getActiveTier(), "seccomp_socket", *seccompSocketPath)
+		log.Info("enforcement tier selected", "tier", d.getActiveTier(), "seccomp_socket", seccompSocket)
 	} else {
 		log.Info("eBPF ringbuf consumers disabled (--no-ringbuf); enforcement tiers unavailable")
 	}
