@@ -245,3 +245,103 @@ def test_loopback_hub_ssl_context_returns_none_when_cert_missing(
     assert (
         _loopback_hub_ssl_context("https://127.0.0.1:8765", home=str(home)) is None
     )
+
+
+def test_hub_request_resolves_hub_url_from_config_when_default_passed(
+    tmp_path: Path,
+) -> None:
+    """``hub_request`` must use the ``hub_url`` recorded in the Personal home
+    config when the caller passes the unchanged ``DEFAULT_HUB_URL`` (the
+    ``--hub-url`` default for ``status``/``doctor``). The Personal Hub records
+    the real scheme it serves on (HTTPS when TLS is active) into config, so the
+    client must honour that instead of forcing plain HTTP."""
+
+    from vibap.personal_hub import (
+        DEFAULT_HUB_URL,
+        HubPaths,
+        _ensure_hub_config,
+        hub_request,
+    )
+
+    home = tmp_path / "personal-home"
+    paths = HubPaths.from_home(str(home))
+    _ensure_hub_config(paths, hub_url="https://127.0.0.1:8765")
+
+    captured: dict[str, str] = {}
+
+    class _RecordingRequest(urllib.request.Request):
+        def __init__(self, url, *args, **kwargs):  # type: ignore[no-untyped-def]
+            captured["url"] = str(url)
+            super().__init__(url, *args, **kwargs)
+
+    original_request = urllib.request.Request
+    original_urlopen = urllib.request.urlopen
+
+    def fake_urlopen(req, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise urllib.error.URLError("connection blocked by test")
+
+    urllib.request.Request = _RecordingRequest  # type: ignore[misc,assignment]
+    urllib.request.urlopen = fake_urlopen  # type: ignore[assignment]
+    try:
+        # Caller (cmd_status / cmd_doctor) passes the unchanged CLI default.
+        response = hub_request(
+            "GET",
+            "/v1/status",
+            hub_url=DEFAULT_HUB_URL,
+            home=str(home),
+        )
+    finally:
+        urllib.request.Request = original_request  # type: ignore[misc,assignment]
+        urllib.request.urlopen = original_urlopen  # type: ignore[assignment]
+
+    # The request URL must use the configured HTTPS scheme, not the HTTP default.
+    assert captured["url"].startswith("https://127.0.0.1:8765"), captured
+    # ``hub_unavailable`` is the expected outcome because the fake urlopen raises
+    # — this proves the request was actually issued against the config URL.
+    assert response.get("error_code") == "hub_unavailable"
+
+
+def test_hub_request_honours_explicit_hub_url_override(tmp_path: Path) -> None:
+    """An explicit ``--hub-url`` that differs from the default must override
+    the config value, preserving the existing CLI override contract."""
+
+    from vibap.personal_hub import (
+        DEFAULT_HUB_URL,
+        HubPaths,
+        _ensure_hub_config,
+        hub_request,
+    )
+
+    home = tmp_path / "personal-home"
+    paths = HubPaths.from_home(str(home))
+    _ensure_hub_config(paths, hub_url="https://127.0.0.1:8765")
+
+    captured: dict[str, str] = {}
+
+    class _RecordingRequest(urllib.request.Request):
+        def __init__(self, url, *args, **kwargs):  # type: ignore[no-untyped-def]
+            captured["url"] = str(url)
+            super().__init__(url, *args, **kwargs)
+
+    original_request = urllib.request.Request
+    original_urlopen = urllib.request.urlopen
+
+    def fake_urlopen(req, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise urllib.error.URLError("connection blocked by test")
+
+    urllib.request.Request = _RecordingRequest  # type: ignore[misc,assignment]
+    urllib.request.urlopen = fake_urlopen  # type: ignore[assignment]
+    try:
+        response = hub_request(
+            "GET",
+            "/v1/status",
+            hub_url="http://10.0.0.7:9999",  # explicit, differs from default
+            home=str(home),
+        )
+    finally:
+        urllib.request.Request = original_request  # type: ignore[misc,assignment]
+        urllib.request.urlopen = original_urlopen  # type: ignore[assignment]
+
+    assert captured["url"].startswith("http://10.0.0.7:9999"), captured
+    assert DEFAULT_HUB_URL != "http://10.0.0.7:9999"
+    assert response.get("error_code") == "hub_unavailable"

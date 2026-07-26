@@ -801,6 +801,42 @@ def resolve_hub_token(
     return str(token) if token else None
 
 
+def resolve_hub_url(
+    *,
+    home: str | Path | None = None,
+    explicit: str | None = None,
+) -> str:
+    """Resolve the Hub base URL mirroring :func:`resolve_hub_token`.
+
+    Resolution order: explicit override → ``ARDUR_PERSONAL_HUB_URL`` env var →
+    ``hub_url`` recorded in the Personal home config → :data:`DEFAULT_HUB_URL`.
+
+    ``hub_request`` uses this when a caller passes the unchanged CLI default
+    (plain HTTP) so that a Hub which serves TLS is still reached once
+    ``ardur hub`` has recorded its real HTTPS URL in config. An explicit
+    override that differs from the default is always honoured as-is.
+    """
+
+    paths = HubPaths.from_home(home)
+    validate_personal_home_directory(paths)
+    if explicit:
+        return explicit
+    env_url = os.environ.get("ARDUR_PERSONAL_HUB_URL", "").strip()
+    if env_url:
+        return env_url
+    try:
+        config_url = _load_hub_config(paths).get("hub_url")
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc) or _is_setup_home_invalid_error(
+            exc
+        ):
+            raise
+        config_url = None
+    if config_url:
+        return str(config_url)
+    return DEFAULT_HUB_URL
+
+
 def _clip(value: Any, limit: int = MAX_EXCERPT_CHARS) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if len(text) <= limit:
@@ -1758,6 +1794,20 @@ def hub_request(
     if token:
         headers["authorization"] = f"Bearer {token}"
         headers[HUB_TOKEN_HEADER] = token
+    # When a caller (typically a CLI command whose ``--hub-url`` argument
+    # defaults to the plain-HTTP :data:`DEFAULT_HUB_URL`) has not supplied an
+    # explicit override, consult the Personal home config so a Hub that is
+    # actually serving HTTPS is reached with the correct scheme. ``ardur hub``
+    # records the real scheme://host:port it serves on into config, so this
+    # mirrors how :func:`resolve_hub_token` already resolves the token.
+    if str(hub_url).strip() == DEFAULT_HUB_URL:
+        try:
+            hub_url = resolve_hub_url(home=home)
+        except HubError as exc:
+            mapped = _personal_home_failure_response_for(exc)
+            if mapped is not None:
+                return mapped
+            raise
     request_url = _validated_hub_request_url(hub_url, path)
     if request_url is None:
         return _hub_url_invalid_response()
