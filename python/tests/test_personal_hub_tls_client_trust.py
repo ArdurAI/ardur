@@ -122,7 +122,7 @@ def test_hub_request_trusts_pinned_self_signed_cert(tmp_path: Path) -> None:
             home=str(home),
         )
     finally:
-        _stdout, _stderr = _stop_process(process)
+        _stop_process(process)
 
     assert response.get("ok") is True
     assert response.get("error_code") in (None, "")
