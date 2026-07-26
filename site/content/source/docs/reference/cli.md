@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "4665640fc48cdf2c0c9a7377934fae4b908bfd270594403b76988713057d08b8"
+source_sha256: "a7c42c3d072dc8105defb8bd67e7593f92c9f8bc268800a4d703b8f36514cda0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1431,6 +1431,29 @@ stderr empty, emits no traceback, does not echo raw local paths or secrets, and
 writes no receipt or chain artifact. Omit `--keys-dir` to use the default local
 Ardur signing-keys location; pass `.` explicitly when the current working
 directory is intended.
+
+When a C compiler is available, the hook automatically compiles and installs a
+small native client binary that dispatches `pre` requests to the optional
+Claude Code hook daemon over a local Unix socket for sub-millisecond latency.
+This native client is a performance optimization; if the daemon is unavailable
+or the native binary is absent, the hook falls back to the Python path
+described above (exit code `1`, stdout JSON, empty stderr). The native client
+binary uses a separate exit-code range (`2`–`21`) because it is a standalone
+program, not an `ardur` CLI subcommand. Key codes: `2` = missing socket-path
+argument, `3`–`5` = stdin payload read errors, `6`–`12` = socket/connect/
+write/read/empty-response transport errors (`11` specifically = response-read
+error), `13`–`18` = malformed daemon protocol envelope, `19`–`20` = stdout
+write errors, and `21` = `setsockopt(SO_RCVTIMEO)` failure. On recoverable
+transport errors the client retries `EINTR` within the configured response
+timeout; `EAGAIN`, `EWOULDBLOCK`, `ETIMEDOUT`, and persistent errors are
+terminal. Exit codes `11` and `21` emit a sanitized diagnostic line on stderr
+in the form `ardur-native: stage=<stage> errno=<N> name=<SYMBOL>
+desc=<strerror>` containing only the operation stage, the numeric errno, a
+portable symbolic name, and the `strerror` text. The diagnostics never include
+request bodies, hook payloads, tokens, local file paths, host data, or secrets
+(verified by a dedicated test). Callers can disable the native client and force
+the Python path with `ARDUR_CC_HOOK_STRICT_NATIVE=0` and
+`ARDUR_CC_HOOK_DAEMON=0`.
 
 ### `ardur claude-code-report`
 
