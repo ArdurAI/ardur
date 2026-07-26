@@ -19,6 +19,7 @@ import plistlib
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -1675,6 +1676,64 @@ def _validated_hub_request_url(hub_url: str, path: str) -> str | None:
     return base_url.rstrip("/") + path
 
 
+# Loopback hostnames for which the Personal Hub serves a self-signed cert that
+# is not present in the system trust store. The Hub's pinned certificate lives
+# at ``<home>/tls/cert.pem`` and is the only trust root the client should add.
+_LOOPBACK_HUB_HOSTS = frozenset({"127.0.0.1", "localhost"})
+
+
+def _is_loopback_https_hub(hub_url: str) -> bool:
+    """True when ``hub_url`` is an https URL pinned to a loopback host."""
+
+    try:
+        parsed = urlparse.urlsplit(str(hub_url).strip())
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != "https":
+        return False
+    return (parsed.hostname or "").lower() in _LOOPBACK_HUB_HOSTS
+
+
+def _loopback_hub_ssl_context(
+    hub_url: str,
+    home: str | Path | None,
+) -> ssl.SSLContext | None:
+    """Return a client SSL context that trusts only the Hub's pinned cert.
+
+    The Personal Hub auto-generates a self-signed certificate under
+    ``<home>/tls/cert.pem`` and serves HTTPS on loopback. That certificate is
+    not installed in the system trust store, so the default ``urlopen`` SSL
+    context rejects it and the client reports ``hub_unavailable`` even when the
+    Hub is healthy.
+
+    This helper builds a strict client context that trusts *only* the pinned
+    Hub certificate (CA = ``<home>/tls/cert.pem``) and still validates the
+    hostname and certificate chain against that single CA. It is used solely
+    for loopback https Hub URLs whose pinned cert file exists. For any other
+    case (non-https, non-loopback, http, or missing cert file) it returns
+    ``None`` so ``urlopen`` falls back to the default system trust store.
+    """
+
+    if not _is_loopback_https_hub(hub_url):
+        return None
+    try:
+        resolved_home = _resolve_personal_home(home)
+    except HubError:
+        return None
+    pinned_cert = resolved_home / "tls" / "cert.pem"
+    if not pinned_cert.is_file():
+        return None
+    try:
+        context = ssl.create_default_context(cafile=str(pinned_cert))
+    except (OSError, ssl.SSLError):
+        return None
+    # Keep default strict verification against the pinned CA. Hostname
+    # validation stays enabled so only a cert issued for the loopback host
+    # is accepted.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 def hub_request(
     method: str,
     path: str,
@@ -1706,8 +1765,12 @@ def hub_request(
         req = urlrequest.Request(request_url, data=data, method=method, headers=headers)
     except ValueError:
         return _hub_url_invalid_response()
+    # The loopback Personal Hub serves a self-signed cert pinned at
+    # ``<home>/tls/cert.pem``; trust only that cert, and only for loopback
+    # https. Fall back to the default (system) trust store otherwise.
+    ssl_context = _loopback_hub_ssl_context(hub_url, home=home)
     try:
-        with urlrequest.urlopen(req, timeout=5) as response:
+        with urlrequest.urlopen(req, timeout=5, context=ssl_context) as response:
             return json.loads(response.read().decode("utf-8"))
     except httpclient.InvalidURL:
         return _hub_url_invalid_response()
