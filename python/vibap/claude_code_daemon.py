@@ -57,6 +57,20 @@ def _native_pre_tool_use_client_c_source() -> str:
     output dict or ``{"ok": true, "output": ...}`` envelope), writes only the
     hook output dict to stdout, and exits non-zero on any malformed/error
     daemon payload so callers can safely fall back to local Python handling.
+
+    Native exit-code contract:
+      - 2: missing socket path argument
+      - 3..5: stdin payload read errors
+      - 6..12: socket/connect/write/read/empty-response transport errors
+      - 11 specifically: response-read error (now emits sanitized
+        ``stage=response-read errno=N name=SYMBOL desc=...`` on stderr before
+        exiting; preserves the original errno instead of collapsing all
+        negative reads into an empty-stderr exit)
+      - 13..18: malformed/invalid daemon protocol envelope (unchanged)
+      - 19..20: stdout write errors
+      - 21: ``setsockopt(SO_RCVTIMEO)`` failed (visible diagnostic on stderr;
+        previous code ignored the return value and silently ran without a
+        receive timeout)
     """
     return r'''
 #include <ctype.h>
@@ -68,6 +82,140 @@ def _native_pre_tool_use_client_c_source() -> str:
 #include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+static const char *ardur_errno_symbol(int errnum) {
+    switch (errnum) {
+        case EINTR: return "EINTR";
+        case EIO: return "EIO";
+        case EAGAIN: return "EAGAIN";
+#if EWOULDBLOCK != EAGAIN
+        case EWOULDBLOCK: return "EWOULDBLOCK";
+#endif
+        case ETIMEDOUT: return "ETIMEDOUT";
+        case ECONNRESET: return "ECONNRESET";
+        case ENOTCONN: return "ENOTCONN";
+        case ECONNREFUSED: return "ECONNREFUSED";
+        case EBADF: return "EBADF";
+        case EINVAL: return "EINVAL";
+        default: return "UNKNOWN";
+    }
+}
+
+/* Emit a sanitized diagnostic to stderr containing ONLY: the operation
+ * stage, numeric errno, a portable symbolic errno name, and strerror text.
+ * No request bodies, mission passports, tokens, tool arguments, socket
+ * paths, temp paths, env dumps, or host-specific data are ever emitted. */
+static void ardur_emit_diag(const char *stage, int errnum) {
+    const char *desc = strerror(errnum);
+    if (!desc) {
+        desc = "unknown";
+    }
+    (void)fprintf(stderr, "ardur-native: stage=%s errno=%d name=%s desc=%s\n",
+                  stage, errnum, ardur_errno_symbol(errnum), desc);
+    (void)fflush(stderr);
+}
+
+#ifdef ARDUR_NATIVE_FAULT_HOOK
+/* ---- Test-only fault injection seam (never compiled into production) ----
+ *
+ * When compiled with -DARDUR_NATIVE_FAULT_HOOK, response-read and setsockopt
+ * calls route through deterministic fault hooks controlled by environment
+ * variables. This lets tests inject EINTR / EIO / EAGAIN / setsockopt-failure
+ * without relying on scheduler timing.
+ *
+ * ARDUR_NATIVE_TEST_FAULT: comma-separated fault script for response reads.
+ *   Tokens: EINTR, EIO, EAGAIN, ETIMEDOUT, ECONNRESET, OK (pass-through).
+ *   After the script is exhausted, calls fall through to the real syscall.
+ *
+ * ARDUR_NATIVE_TEST_SOCKOPT_FAIL: when set (any non-empty value), the
+ *   setsockopt call for SO_RCVTIMEO fails with EINVAL.
+ *
+ * Production builds (no -DARDUR_NATIVE_FAULT_HOOK) compile these macros to
+ * direct syscall calls with zero overhead. */
+enum {
+    ARDUR_FLT_NONE = 0,
+    ARDUR_FLT_EINTR,
+    ARDUR_FLT_EIO,
+    ARDUR_FLT_EAGAIN,
+    ARDUR_FLT_ETIMEDOUT,
+    ARDUR_FLT_ECONNRESET,
+    ARDUR_FLT_PASS
+};
+
+#define ARDUR_FLT_MAX 256
+
+static ssize_t ardur_fault_read(int fd, void *buf, size_t count) {
+    static int faults[ARDUR_FLT_MAX];
+    static int fault_count = -1;
+    static int fault_index = 0;
+
+    if (fault_count < 0) {
+        fault_count = 0;
+        const char *spec = getenv("ARDUR_NATIVE_TEST_FAULT");
+        if (spec && *spec) {
+            const char *p = spec;
+            while (*p && fault_count < ARDUR_FLT_MAX) {
+                while (*p && (*p == ',' || isspace((unsigned char)*p))) {
+                    p++;
+                }
+                if (!*p) {
+                    break;
+                }
+                const char *beg = p;
+                while (*p && *p != ',' && !isspace((unsigned char)*p)) {
+                    p++;
+                }
+                size_t tok_len = (size_t)(p - beg);
+                if (tok_len == 5 && strncmp(beg, "EINTR", 5) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_EINTR;
+                } else if (tok_len == 3 && strncmp(beg, "EIO", 3) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_EIO;
+                } else if (tok_len == 6 && strncmp(beg, "EAGAIN", 6) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_EAGAIN;
+                } else if (tok_len == 9 && strncmp(beg, "ETIMEDOUT", 9) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_ETIMEDOUT;
+                } else if (tok_len == 10 && strncmp(beg, "ECONNRESET", 10) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_ECONNRESET;
+                } else {
+                    faults[fault_count++] = ARDUR_FLT_PASS;
+                }
+            }
+        }
+    }
+
+    if (fault_index < fault_count) {
+        int f = faults[fault_index++];
+        switch (f) {
+            case ARDUR_FLT_EINTR:      errno = EINTR;      return -1;
+            case ARDUR_FLT_EIO:        errno = EIO;        return -1;
+            case ARDUR_FLT_EAGAIN:     errno = EAGAIN;     return -1;
+            case ARDUR_FLT_ETIMEDOUT:  errno = ETIMEDOUT;  return -1;
+            case ARDUR_FLT_ECONNRESET: errno = ECONNRESET; return -1;
+            default: break;  /* PASS: fall through to real read */
+        }
+    }
+
+    return read(fd, buf, count);
+}
+
+static int ardur_fault_setsockopt(int sockfd, int level, int optname,
+                                  const void *optval, socklen_t optlen) {
+    const char *fail = getenv("ARDUR_NATIVE_TEST_SOCKOPT_FAIL");
+    if (fail && *fail && optname == SO_RCVTIMEO) {
+        errno = EINVAL;
+        return -1;
+    }
+    return setsockopt(sockfd, level, optname, optval, optlen);
+}
+
+#define ARDUR_READ(fd, buf, count) ardur_fault_read((fd), (buf), (count))
+#define ARDUR_SETSOCKOPT(fd, lvl, opt, val, len) \
+    ardur_fault_setsockopt((fd), (lvl), (opt), (val), (len))
+#else
+#define ARDUR_READ(fd, buf, count) read((fd), (buf), (count))
+#define ARDUR_SETSOCKOPT(fd, lvl, opt, val, len) \
+    setsockopt((fd), (lvl), (opt), (val), (len))
+#endif
 
 #define MAX_PAYLOAD_BYTES 1048576
 #define MAX_RESPONSE_BYTES 1048576
@@ -364,7 +512,12 @@ static int connect_and_roundtrip(
     struct timeval tv;
     tv.tv_sec = timeout_ms / 1000;
     tv.tv_usec = (timeout_ms % 1000) * 1000;
-    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (ARDUR_SETSOCKOPT(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+        int saved_errno = errno;
+        ardur_emit_diag("setsockopt-rcvtimeo", saved_errno);
+        close(fd);
+        return 21;
+    }
     (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_un addr;
@@ -397,10 +550,34 @@ static int connect_and_roundtrip(
         return 10;
     }
 
+    /* Bounded EINTR retry policy. Repeated interruptions must not extend the
+     * configured overall response budget indefinitely. The deadline is
+     * derived from the configured timeout_ms; a hard retry cap provides a
+     * second guarantee independent of clock drift. EAGAIN / EWOULDBLOCK /
+     * ETIMEDOUT / EIO / ECONNRESET / ENOTCONN and any other read error
+     * remain terminal (non-retried) outcomes and preserve their errno.
+     *
+     * The hard retry cap is deliberately smaller than ARDUR_FLT_MAX (256)
+     * so fault-injection tests can overrun the cap with a script longer
+     * than 64 entries and still reach the deterministic terminal path
+     * without exhausting the fault array first. */
     size_t out_len = 0;
+    int read_errno = 0;
+    int eintr_retries = 0;
+    const int eintr_retry_cap = 64;
+    time_t deadline_sec = (timeout_ms > 0) ? time(NULL) + (timeout_ms / 1000) + 1 : 0;
+
     while (out_len < MAX_RESPONSE_BYTES) {
-        ssize_t n = read(fd, buf + out_len, MAX_RESPONSE_BYTES - out_len);
+        ssize_t n = ARDUR_READ(fd, buf + out_len, MAX_RESPONSE_BYTES - out_len);
         if (n < 0) {
+            read_errno = errno;
+            if (errno == EINTR
+                && eintr_retries < eintr_retry_cap
+                && (deadline_sec == 0 || time(NULL) < deadline_sec)) {
+                eintr_retries++;
+                continue;
+            }
+            ardur_emit_diag("response-read", read_errno);
             free(buf);
             close(fd);
             return 11;
@@ -881,6 +1058,59 @@ def install_native_pre_tool_use_command(
                 target=target,
                 target_stamp=target_stamp,
             )
+            return target
+
+    return None
+
+
+def build_fault_injection_native_client(target_dir: Path) -> Path | None:
+    """Compile a test-only native client with the fault-injection seam enabled.
+
+    The resulting binary is identical to the production client except that
+    ``ARDUR_NATIVE_FAULT_HOOK`` is defined at compile time, so response
+    ``read()`` and ``setsockopt(SO_RCVTIMEO)`` calls route through env-var
+    controlled fault hooks. Tests set ``ARDUR_NATIVE_TEST_FAULT`` and
+    ``ARDUR_NATIVE_TEST_SOCKOPT_FAIL`` to inject deterministic EINTR / EIO /
+    EAGAIN / ETIMEDOUT / ECONNRESET / setsockopt-failure.
+
+    Returns the executable path on success, ``None`` if no compiler/build is
+    available. This helper is intended exclusively for the test suite; the
+    production install path never defines ``ARDUR_NATIVE_FAULT_HOOK``.
+    """
+    source_text = _native_pre_tool_use_client_c_source()
+    target = target_dir / "pre_tool_use_client_fault"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for compiler in _candidate_native_compilers():
+        with tempfile.TemporaryDirectory(prefix="ardur-hook-native-fault-") as tmpdir:
+            tmp_root = Path(tmpdir)
+            src = tmp_root / "pre_tool_use_client.c"
+            out = tmp_root / "pre_tool_use_client_fault"
+            src.write_text(source_text, encoding="utf-8")
+
+            cmd = [
+                compiler,
+                "-O3",
+                "-std=c99",
+                "-Wall",
+                "-Wextra",
+                "-DARDUR_NATIVE_FAULT_HOOK",
+                "-o",
+                str(out),
+                str(src),
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0 or not out.is_file():
+                continue
+
+            out.chmod(_NATIVE_PRE_TOOL_USE_COMMAND_MODE)
+            shutil.copy2(out, target)
+            target.chmod(_NATIVE_PRE_TOOL_USE_COMMAND_MODE)
             return target
 
     return None
