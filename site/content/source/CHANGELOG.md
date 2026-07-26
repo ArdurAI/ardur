@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "9d869cff7386a857d3144e93b9f649543cb8802d5119cbb10af47ad46b606708"
+source_sha256: "5a8a68965b28549688461160d9064944c47c9085051d5eb90fa3fd42035fa3ee"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -26,12 +26,23 @@ All notable changes to Ardur will be documented in this file.
   leaked private-key material is flagged alongside existing PEM detection
 - Cover hook-lifecycle runtime artifacts in `.gitignore` (receipt chains,
   governance log, state directory, daemon socket, seccomp markers)
+- Harden daemon filesystem paths with `O_NOFOLLOW`, restrictive umask, and
+  tighter socket directories so symlink-based attacks and world-readable
+  artifacts are blocked before the daemon accepts connections
+- Platform-abstract the daemon umask setter for Windows portability so the
+  security-hardened path builds across OS targets
 
 ### Added
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
   cannot accidentally absorb worktree-local build state
+- Add a Python minimum-version check to `conductor-bootstrap.sh`,
+  `check-local.sh`, and `setup-dev.sh` so fresh macOS users with system
+  Python 3.9 get a clear error message before confusing tracebacks
+- Make the Claude Code latency benchmark CI-environment-aware so shared
+  GitHub Actions runners do not report false failures for thresholds that
+  assume Apple Silicon local performance
 
 ### Fixed
 - Reject empty or whitespace-only `type=Path` arguments in sibling CLI
@@ -73,6 +84,34 @@ All notable changes to Ardur will be documented in this file.
   class-wide setup is preserved after pytest 10 removes instance-method
   fixture support.
 - Normalize Ollama tool-call transcript formats in the test harness.
+- Preserve `errno` across cleanup in the compiled Claude Code native client
+  binary so receive timeouts, EINTR, connection resets, and I/O failures
+  are distinguishable via sanitized stderr diagnostics (exit codes 11 and
+  21 now emit `stage`/`errno`/symbolic name/`strerror`; EINTR is retried
+  with a bounded deadline; `setsockopt` return is checked).
+- Reject empty or whitespace-only `type=Path` arguments in
+  `claude-code-daemon` and `claude-code-hook` so they fail closed before
+  file IO.
+- Guard the `python/pyproject.toml` grep in `conductor-bootstrap.sh` and
+  `check-local.sh` with a `-f` existence check so fixture-repo contract
+  tests that run in temp directories without `pyproject.toml` do not fail
+  under `set -e`.
+- Validate `--webhook-port` range (1–65535) before server start.
+- Reject empty or whitespace-only path arguments in `proxy` startup
+  (`--keys-dir`, `--state-dir`, `--log-path`) before key/state/log
+  materialization.
+- Reject non-positive `--max-requests` before daemon startup.
+- Reject out-of-range `--port` with a structured error before bind.
+- Validate empty or whitespace-only `nargs` list elements on
+  `ardur issue --allowed-tools`, `--forbidden-tools`, and
+  `--resource-scope` so blank entries cannot silently widen scope.
+- Reject whitespace-only `flag.String` values in remaining Go daemon and
+  command binaries (`ardur-agent-recognition-benchmark`,
+  `ardur-agent-recognition-eval`, `ardur-exec-shim`,
+  `auditbench-oracle`, `auditbench-label`, `ardur-seccomp-smoke`).
+- Reject whitespace-only `--budget` in
+  `ardur-agent-recognition-benchmark`.
+- Reject whitespace-only `--signing-key` in the operator reconciler.
 
 ## [0.2.0] — 2026-07-22
 
