@@ -14,6 +14,11 @@ All notable changes to Ardur will be documented in this file.
   artifacts are blocked before the daemon accepts connections
 - Platform-abstract the daemon umask setter for Windows portability so the
   security-hardened path builds across OS targets
+- Use validated (trimmed) socket and seccomp-socket paths consistently in
+  `ardur-kernelcaptured` and `ardur-exec-shim` and guard non-positive
+  `--prune-interval` / negative `--guard-ready-timeout` before daemon
+  startup so raw flag pointers cannot bypass validation at bind/log/mkdir
+  sites
 
 ### Added
 
@@ -95,6 +100,18 @@ All notable changes to Ardur will be documented in this file.
 - Reject whitespace-only `--budget` in
   `ardur-agent-recognition-benchmark`.
 - Reject whitespace-only `--signing-key` in the operator reconciler.
+- Trust the Personal Hub's pinned self-signed TLS certificate in
+  `status`/`doctor` clients so HTTPS loopback works without manual
+  `--hub-url` overrides or certificate warnings.
+- Resolve `hub_url` from the Personal Hub config (mirroring `hub_token`
+  resolution) so `status` and `doctor` connect over HTTPS when the Hub
+  serves TLS, without requiring an explicit `--hub-url` flag.
+- Display the resolved `hub_url` in `doctor` hub check detail instead of
+  the argparse default, so diagnostic output reflects the actual endpoint
+  being queried.
+- Reject whitespace-only `--api-token` on `kill-switch` before the network
+  call, mirroring the existing `start --api-token` and
+  `status`/`doctor`/`desktop-observe --hub-token` whitespace guards.
 
 ## [0.2.0] — 2026-07-22
 
