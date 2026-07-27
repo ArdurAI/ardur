@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -92,26 +93,32 @@ def test_anchor_rejects_empty_or_whitespace_path_args(
 
 def test_anchor_valid_paths_get_past_path_validation(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     """A structurally-valid invocation must NOT produce ``path_arg_invalid``.
 
     This is the negative control: it proves the fix does not over-reject valid
-    input. The command may still fail downstream (e.g. the local-log private
-    key file does not exist at the stand-in path), but it must get PAST the
-    centralized path-validation guard.
+    input. The receipt-log file must exist as a regular file to pass the
+    ``receipt_log_not_file`` check; we create a minimal receipt journal in
+    ``tmp_path``. The command may still fail downstream (e.g. the local-log
+    private key file does not exist at the stand-in path), but it must get PAST
+    both the centralized path-validation guard and the receipt-log file check.
     """
+
+    receipt_log = tmp_path / "receipts.jsonl"
+    receipt_log.write_text('{"jwt": "placeholder"}\n', encoding="utf-8")
 
     rc = main(
         [
             "anchor",
             "--receipt-log",
-            "/tmp/ardur-anchor-receipt.jsonl",
+            str(receipt_log),
             "--backend",
             "c2sp-local-v1",
             "--local-log",
-            "/tmp/ardur-anchor-local-log.jsonl",
+            str(tmp_path / "local-log.jsonl"),
             "--log-private-key",
-            "/tmp/ardur-anchor-local-log.key",
+            str(tmp_path / "local-log.key"),
             "--origin",
             "example-origin.example.com",
         ]
@@ -123,5 +130,76 @@ def test_anchor_valid_paths_get_past_path_validation(
     # Must NOT be path_arg_invalid — that would mean we over-rejected valid input.
     assert payload["error"] != "path_arg_invalid"
     assert payload.get("condition") != "path_arg_invalid"
+    # Must NOT be receipt_log_not_file — the file exists.
+    assert payload["error"] != "receipt_log_not_file"
     # The expected downstream failure is anchor_submission_failed.
     assert payload["error"] == "anchor_submission_failed"
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["directory", "nonexistent_file", "dangling_symlink"],
+)
+def test_anchor_rejects_receipt_log_not_a_file(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    label: str,
+) -> None:
+    """``--receipt-log`` must be a regular file, not a directory or missing path.
+
+    Previously ``anchor`` silently returned ``ok: true, processed: 0`` when the
+    receipt-log path was a directory (common mistake: passing the Ardur home
+    directory instead of the ``receipts.jsonl`` file) or a nonexistent file
+    (typo). The user believed anchoring succeeded but nothing was anchored.
+
+    The fix adds a ``receipt_log_not_file`` structured error before the anchor
+    store is computed, covering directories, nonexistent files, and dangling
+    symlinks.
+    """
+
+    if label == "directory":
+        bad_receipt_log = tmp_path / "chain_dir"
+        bad_receipt_log.mkdir()
+    elif label == "nonexistent_file":
+        bad_receipt_log = tmp_path / "does_not_exist.jsonl"
+    elif label == "dangling_symlink":
+        bad_receipt_log = tmp_path / "dangling.jsonl"
+        bad_receipt_log.symlink_to(tmp_path / "missing_target")
+    else:
+        pytest.fail(f"unknown label: {label}")
+
+    rc = main(
+        [
+            "anchor",
+            "--receipt-log",
+            str(bad_receipt_log),
+            "--backend",
+            "c2sp-local-v1",
+            "--local-log",
+            str(tmp_path / "local-log.jsonl"),
+            "--log-private-key",
+            str(tmp_path / "local-log.key"),
+            "--origin",
+            "example-origin.example.com",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    rendered = json.dumps(payload, sort_keys=True)
+    assert payload["ok"] is False
+    assert payload["error"] == "receipt_log_not_file"
+    assert payload["error_code"] == "receipt_log_not_file"
+    assert payload["condition"] == "receipt_log_not_file"
+    assert "receipt-log" in payload["message"]
+    # No traceback, no raw local path leak.
+    assert "Traceback" not in rendered
+    # next_steps use placeholder commands.
+    assert all(
+        "<" in step["command"] and ">" in step["command"]
+        for step in payload["next_steps"]
+    )
+    # Crucially, the misleading ok:true / processed:0 must NOT appear.
+    assert "anchor_submission_failed" not in rendered

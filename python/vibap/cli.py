@@ -2318,6 +2318,33 @@ def cmd_anchor(args: argparse.Namespace) -> int:
     if path_failure is not None:
         _print_json(path_failure)
         return 1
+    receipt_log_path = Path(args.receipt_log).expanduser()
+    if not receipt_log_path.is_file():
+        _print_json(
+            {
+                "ok": False,
+                "error": "receipt_log_not_file",
+                "error_code": "receipt_log_not_file",
+                "condition": "receipt_log_not_file",
+                "message": "ardur --receipt-log must point to an existing receipts JSONL file.",
+                "detail": "The --receipt-log path does not exist or is not a regular file. Directories, dangling symlinks, and device paths are rejected before anchoring.",
+                "next_steps": [
+                    {
+                        "condition": "receipt_log_not_file",
+                        "action": "pass_receipt_jsonl_file",
+                        "command": "ardur anchor --receipt-log <receipts.jsonl> --backend <backend> ...",
+                        "detail": "Pass the path to your signed receipt JSONL file (typically named receipts.jsonl in the Ardur home or claude-code-hook chain directory), not the parent directory.",
+                    },
+                    {
+                        "condition": "receipt_log_not_file",
+                        "action": "find_receipts_file",
+                        "command": "find <ardur-home> -name 'receipts.jsonl' -type f",
+                        "detail": "Locate the receipt journal file produced by ardur run, ardur hub, or the claude-code-hook before anchoring.",
+                    },
+                ],
+            }
+        )
+        return 1
     store = anchor_store_for_receipt_log(args.receipt_log)
     try:
         receipt_private_key = None
