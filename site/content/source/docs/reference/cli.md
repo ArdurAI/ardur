@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "3b25c1d64e0c285a89bf11e042e3c1b661e3134065de641c7c53866b2341d155"
+source_sha256: "f3794297c8e03cb1d4223a2c938a2368c7f507625d3efe14286d22015d723c71"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -174,6 +174,24 @@ Activate or deactivate the emergency kill switch on a running governance proxy.
 ```text
 ardur kill-switch [--deactivate] [--proxy-url URL] [--api-token TOKEN]
 ```
+
+A whitespace-only `--api-token` fails closed after `--proxy-url` validation
+but before any network call. The token is sent verbatim as the bearer token
+for the loopback governance proxy admin endpoint; a whitespace-only value is
+truthy in the `args.api_token or os.environ.get("ARDUR_API_TOKEN", "")` chain
+and therefore shadows any configured `ARDUR_API_TOKEN`, but it resolves to an
+empty bearer after the proxy strips whitespace, yielding a confusing
+401/`Connection refused` instead of a clear rejection. It is therefore
+rejected explicitly before the network call. The failure exits non-zero and
+writes parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `kill_switch_api_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>` (supply an
+explicit token) and `ARDUR_API_TOKEN=<api-token> ardur kill-switch` (omit
+`--api-token` so Ardur reads the environment). The failure path keeps stderr
+empty, emits no traceback, and does not echo raw tokens or local paths. An
+unset `--api-token` (omitted) and an empty-string `--api-token ""` remain
+valid: in both cases Ardur falls through to `ARDUR_API_TOKEN`.
 
 If the local proxy cannot be reached, TLS/scheme setup looks wrong, or the
 proxy rejects the bearer token, the JSON output preserves `ok: false` and adds
