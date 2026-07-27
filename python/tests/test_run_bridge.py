@@ -2458,6 +2458,90 @@ def test_run_governed_cli_omitted_home_passes_through(
 
 
 # ---------------------------------------------------------------------------
+# --home empty / whitespace validation (CWD pollution prevention)
+#
+# ``Path("").resolve()`` resolves to CWD and ``Path("   ").resolve()``
+# resolves to a literal-whitespace-named directory. Both silently pollute
+# the wrong location with signing keys, governance logs, and state.
+# The guard rejects empty/whitespace values before any ``Path()`` conversion.
+# ---------------------------------------------------------------------------
+
+
+def test_run_governed_home_empty_next_steps_are_deterministic() -> None:
+    """The ``next_steps`` list for ``run_home_empty`` must be deterministic
+    and contain the expected ``condition`` field."""
+    steps = run_bridge.run_governed_home_empty_next_steps()
+    assert len(steps) == 2
+    for step in steps:
+        assert step["condition"] == "run_home_empty"
+        assert "command" in step
+        assert "detail" in step
+        assert "action" in step
+
+
+@pytest.mark.parametrize(
+    "home_value",
+    [
+        "",
+        "   ",
+        "\t",
+        "\n",
+        "  \t\n ",
+    ],
+    ids=["empty", "spaces", "tab", "newline", "mixed_whitespace"],
+)
+def test_run_governed_cli_empty_or_whitespace_home_is_rejected_before_artifacts(
+    home_value: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--home ""`` and ``--home "   "`` must be rejected with exit 2,
+    empty stdout, deterministic stderr + Next steps, no traceback, and NO
+    artifacts created in CWD or a literal-whitespace-named directory.
+
+    This closes the CWD-pollution-with-signing-keys defect class for
+    ``ardur run --home``, matching the closed proxy.py path-arg sweep.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        raise AssertionError(
+            "empty/whitespace home must be rejected before governed launch"
+        )
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home_value,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert "must be a non-empty path" in captured.err
+    assert "Next steps:" in captured.err
+    # No keys/state/jwt created in tmp_path (which is the CWD via monkeypatch).
+    assert not (tmp_path / "keys").exists()
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+    # No literal-whitespace-named directory created.
+    assert not (tmp_path / "   ").exists()
+
+
+# ---------------------------------------------------------------------------
 # Centralized next-steps rendering helper
 #
 # ``_print_next_steps`` mirrors the proven-safe ``_print_report_next_steps``

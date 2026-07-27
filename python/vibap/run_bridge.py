@@ -1552,6 +1552,44 @@ def _print_run_governed_home_dangling_symlink_next_steps() -> None:
     _print_next_steps(run_governed_home_dangling_symlink_next_steps())
 
 
+def run_governed_home_empty_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    that is empty or whitespace-only.
+
+    ``Path("").resolve()`` resolves to CWD and ``Path("   ").resolve()``
+    resolves to a literal-whitespace-named directory, both of which silently
+    pollute the wrong location with signing keys, governance logs, and state.
+    The guard rejects empty/whitespace values before any ``Path()`` conversion.
+    """
+    return [
+        {
+            "condition": "run_home_empty",
+            "action": "provide_non_empty_home_path",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "Pass a non-empty directory path after --home. Empty or "
+                "whitespace-only values silently resolve to the current "
+                "working directory (or a literal whitespace-named directory), "
+                "which would place signing keys, governance logs, and state "
+                "in the wrong location."
+            ),
+        },
+        {
+            "condition": "run_home_empty",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_empty_next_steps() -> None:
+    _print_next_steps(run_governed_home_empty_next_steps())
+
+
 def run_governed_command_not_found_next_steps(cmd_repr: str) -> list[dict[str, str]]:
     """Return deterministic stderr remediation hints when the governed command
     could not be found (``FileNotFoundError`` from ``subprocess.Popen``).
@@ -1697,6 +1735,17 @@ def run_governed_cli(args: Any) -> int:
     # and a symlink-to-existing-directory proceeds normally.
     home_arg = getattr(args, "home", None)
     if home_arg is not None:
+        if not str(home_arg).strip():
+            print(
+                "ardur run --home must be a non-empty path.",
+                file=sys.stderr,
+            )
+            print(
+                'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                file=sys.stderr,
+            )
+            _print_run_governed_home_empty_next_steps()
+            return 2
         try:
             expanded_home = Path(home_arg).expanduser()
         except (OSError, ValueError) as exc:
