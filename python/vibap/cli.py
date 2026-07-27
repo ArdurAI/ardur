@@ -3553,6 +3553,79 @@ def _kill_switch_invalid_proxy_url_response() -> dict:
     }
 
 
+def _kill_switch_api_token_invalid_response() -> dict:
+    """Failure response for a whitespace-only --api-token on kill-switch.
+
+    ``--api-token`` is sent verbatim as the bearer token for the loopback
+    governance proxy admin endpoint. A whitespace-only argument is truthy
+    in the ``args.api_token or os.environ.get(...)`` chain and therefore
+    shadows any configured ``ARDUR_API_TOKEN``, but it resolves to an empty
+    bearer token after the proxy strips whitespace, yielding a confusing
+    401/``Connection refused`` instead of a clear CLI-layer rejection.
+
+    Reject it here, before any network call, with the same structured shape
+    the sibling ``start --api-token`` and ``status/doctor/desktop-observe
+    --hub-token`` guards use. An unset ``--api-token`` (None) and an empty
+    string ``""`` (falsy, falls through to ``ARDUR_API_TOKEN``) remain
+    valid: only whitespace-only strings are rejected, matching the
+    silent-empty-token bug class already closed for ``start --api-token``
+    and ``kill-switch --proxy-url``.
+    """
+    return {
+        "ok": False,
+        "error": "kill_switch_api_token_invalid",
+        "error_code": "kill_switch_api_token_invalid",
+        "condition": "kill_switch_api_token_invalid",
+        "message": (
+            "ardur kill-switch --api-token must be a non-empty token after "
+            "trimming whitespace."
+        ),
+        "detail": (
+            "An empty or whitespace-only --api-token was provided on kill-switch. "
+            "Pass an explicit bearer token with --api-token, set ARDUR_API_TOKEN, "
+            "or omit --api-token to fall through to ARDUR_API_TOKEN."
+        ),
+        "next_steps": [
+            {
+                "condition": "kill_switch_api_token_invalid",
+                "action": "supply_proxy_api_token",
+                "command": (
+                    "ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>"
+                ),
+                "detail": (
+                    "Pass the configured proxy API token with "
+                    "--api-token <api-token>. Do not paste the raw token into "
+                    "shared logs."
+                ),
+            },
+            {
+                "condition": "kill_switch_api_token_invalid",
+                "action": "set_api_token_env_or_omit_flag",
+                "command": "ARDUR_API_TOKEN=<api-token> ardur kill-switch",
+                "detail": (
+                    "Omit --api-token so ardur reads ARDUR_API_TOKEN, or export "
+                    "ARDUR_API_TOKEN explicitly. An unset or empty --api-token "
+                    "intentionally falls through to the environment."
+                ),
+            },
+        ],
+    }
+
+
+def _kill_switch_api_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict | None:
+    """Return the api-token-invalid response when --api-token is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to ``ARDUR_API_TOKEN``), or a real token.
+    """
+    value = getattr(args, "api_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _kill_switch_api_token_invalid_response()
+    return None
+
+
 def _validated_kill_switch_proxy_base_url(proxy_url: str) -> str | None:
     """Return a request base URL only for complete HTTP(S) kill-switch endpoints."""
     from urllib.parse import urlsplit
@@ -3618,6 +3691,10 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
     proxy_base_url = _validated_kill_switch_proxy_base_url(proxy_url)
     if proxy_base_url is None:
         _print_json(_kill_switch_invalid_proxy_url_response())
+        return 1
+    api_token_failure = _kill_switch_api_token_invalid_failure(args)
+    if api_token_failure is not None:
+        _print_json(api_token_failure)
         return 1
     api_token = args.api_token or os.environ.get("ARDUR_API_TOKEN", "")
     payload = json.dumps({"deactivate": args.deactivate}).encode("utf-8")
