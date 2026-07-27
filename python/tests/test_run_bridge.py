@@ -46,6 +46,8 @@ from vibap.run_bridge import (
     _wrap_command_with_seccomp_shim,
     run_governed,
     run_governed_cli,
+    run_governed_command_not_executable_next_steps,
+    run_governed_command_not_found_next_steps,
     run_governed_mission_invalid_next_steps,
     select_adapter,
 )
@@ -1650,6 +1652,114 @@ def test_run_governed_cli_empty_or_whitespace_mission_is_rejected(
         assert bad_mission not in remediation
     assert str(home) not in remediation
     assert "Traceback" not in remediation
+
+
+def test_run_governed_cli_nonexistent_command_emits_structured_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A governed command that cannot be found (FileNotFoundError from Popen)
+    must emit a clean, actionable error with next_steps and exit code 2 —
+    not a raw Python traceback."""
+    home = tmp_path / "ardur-home"
+    bad_cmd = "/nonexistent/binary-from-test"
+
+    def raise_file_not_found(**_kwargs: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory", bad_cmd)
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", raise_file_not_found)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=[bad_cmd],
+            mission="nonexistent command smoke",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+            enforce=False,
+            resource_scope=None,
+            no_resource_scope=False,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "Traceback" not in captured.err
+    assert "governed command not found" in captured.err
+    assert bad_cmd in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "verify_command_name_and_path" not in remediation  # action key not in prose
+    assert "PATH" in remediation or "path exists" in remediation
+    assert "ardur run --via env" in remediation
+
+
+def test_run_governed_cli_non_executable_command_emits_structured_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A governed command that exists but is not executable (PermissionError
+    from Popen) must emit a clean, actionable error with next_steps and exit
+    code 2 — not a raw Python traceback."""
+    home = tmp_path / "ardur-home"
+    script = tmp_path / "not-executable.sh"
+    script.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")  # no +x bit
+
+    def raise_permission(**_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", str(script))
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", raise_permission)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=[str(script)],
+            mission="non-executable command smoke",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+            enforce=False,
+            resource_scope=None,
+            no_resource_scope=False,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "Traceback" not in captured.err
+    assert "governed command not executable" in captured.err
+    assert str(script) in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "chmod +x" in remediation
+    assert "interpreter" in remediation
+
+
+def test_run_governed_command_not_found_next_steps_are_deterministic() -> None:
+    steps = run_governed_command_not_found_next_steps("/some/missing/cmd")
+    assert len(steps) == 2
+    assert all(s["condition"] == "run_command_not_found" for s in steps)
+    for step in steps:
+        assert step["command"]
+        assert step["detail"]
+
+
+def test_run_governed_command_not_executable_next_steps_are_deterministic() -> None:
+    steps = run_governed_command_not_executable_next_steps("/some/script.sh")
+    assert len(steps) == 2
+    assert all(s["condition"] == "run_command_not_executable" for s in steps)
+    for step in steps:
+        assert step["command"]
+        assert step["detail"]
 
 
 def test_run_governed_mission_invalid_next_steps_are_deterministic() -> None:

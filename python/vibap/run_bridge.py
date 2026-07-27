@@ -1552,6 +1552,70 @@ def _print_run_governed_home_dangling_symlink_next_steps() -> None:
     _print_next_steps(run_governed_home_dangling_symlink_next_steps())
 
 
+def run_governed_command_not_found_next_steps(cmd_repr: str) -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints when the governed command
+    could not be found (``FileNotFoundError`` from ``subprocess.Popen``).
+
+    ``cmd_repr`` is the executable name/path that Popen tried to launch; it is
+    a local filesystem reference supplied by the operator, never a credential,
+    token, or secret.
+    """
+    safe = cmd_repr if cmd_repr and all(c not in cmd_repr for c in ("\n", "\r")) else "<command>"
+    return [
+        {
+            "condition": "run_command_not_found",
+            "action": "verify_command_name_and_path",
+            "command": f"ardur run --mission <mission> -- {safe} <args...>",
+            "detail": (
+                "The command could not be found. Check the spelling, confirm it is "
+                "installed, and verify it is on your PATH (for a bare name) or that "
+                "the full path exists (for an absolute path)."
+            ),
+        },
+        {
+            "condition": "run_command_not_found",
+            "action": "use_env_via_for_cooperating_agents",
+            "command": "ardur run --via env --mission <mission> -- <command>",
+            "detail": (
+                "If the agent is not Claude Code, --via env routes governance through "
+                "environment variables to the embedded proxy without depending on a "
+                "host-specific hook."
+            ),
+        },
+    ]
+
+
+def run_governed_command_not_executable_next_steps(cmd_repr: str) -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints when the governed command
+    exists but is not executable (``PermissionError`` from ``subprocess.Popen``).
+
+    ``cmd_repr`` is the executable name/path that Popen tried to launch; it is
+    a local filesystem reference supplied by the operator, never a credential,
+    token, or secret.
+    """
+    safe = cmd_repr if cmd_repr and all(c not in cmd_repr for c in ("\n", "\r")) else "<command>"
+    return [
+        {
+            "condition": "run_command_not_executable",
+            "action": "set_executable_bit",
+            "command": f"chmod +x {safe}",
+            "detail": (
+                "The file exists but does not have the executable bit set. Add the "
+                "executable permission (e.g. chmod +x) and retry."
+            ),
+        },
+        {
+            "condition": "run_command_not_executable",
+            "action": "invoke_via_interpreter",
+            "command": f"ardur run --mission <mission> -- python {safe} <args...>",
+            "detail": (
+                "If the file is a script, invoke it through its interpreter "
+                "(e.g. python, bash) so the interpreter is the governed process."
+            ),
+        },
+    ]
+
+
 def _run_governed_budget_failure(
     condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
 ) -> int:
@@ -1742,6 +1806,30 @@ def run_governed_cli(args: Any) -> int:
         return 3
     except ValueError as exc:
         print(f"ardur run: {exc}", file=sys.stderr)
+        return 2
+    except FileNotFoundError as exc:
+        # subprocess.Popen raises FileNotFoundError (Errno 2) when the
+        # governed executable does not exist on PATH or at the given path.
+        # Surface a clean, actionable error instead of a raw traceback.
+        cmd_repr = exc.filename or (command[0] if command else "<command>")
+        print(
+            f"ardur run: governed command not found: {cmd_repr}", file=sys.stderr
+        )
+        _print_next_steps(
+            run_governed_command_not_found_next_steps(cmd_repr)
+        )
+        return 2
+    except PermissionError as exc:
+        # subprocess.Popen raises PermissionError (Errno 13) when the target
+        # path exists but is not executable. Surface a clean, actionable error.
+        cmd_repr = exc.filename or (command[0] if command else "<command>")
+        print(
+            f"ardur run: governed command not executable: {cmd_repr}",
+            file=sys.stderr,
+        )
+        _print_next_steps(
+            run_governed_command_not_executable_next_steps(cmd_repr)
+        )
         return 2
 
     print(format_summary(result), file=sys.stderr)
