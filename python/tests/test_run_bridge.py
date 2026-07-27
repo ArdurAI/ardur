@@ -329,6 +329,39 @@ def test_ardur_run_governs_launched_agent_zero_setup(
     assert "governing via env/hook" in result.correlation["reason"]
 
 
+def test_ardur_run_receipts_path_uses_canonical_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path
+) -> None:
+    """``ardur run`` must write receipts to ``<home>/receipts.jsonl`` (the
+    canonical filename used by Personal Hub and every hook adapter), not the
+    ``receipts_log.jsonl`` default that ``GovernanceProxy`` falls back to when
+    ``receipts_log_path`` is omitted.
+
+    Regression guard for the run-bridge → GovernanceProxy wiring: a fresh user
+    following the governance summary's printed receipts path must find a real
+    file, not a missing outlier filename.
+    """
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    home = tmp_path / "ardur-home"
+
+    result = run_governed(
+        command=[sys.executable, str(standin_agent)],
+        mission="Regression: receipts path must be canonical receipts.jsonl.",
+        allowed_tools=["Read", "Glob", "Grep"],
+        forbidden_tools=["Bash"],
+        max_tool_calls=10,
+        home=home,
+        via="env",
+    )
+
+    # The summary-printed path must end with the canonical filename so that a
+    # fresh user reading ``<home>/receipts.jsonl`` finds the real chain.
+    assert result.receipts_path.endswith("receipts.jsonl")
+    assert not result.receipts_path.endswith("receipts_log.jsonl")
+    # The outlier filename must not also exist alongside the canonical one.
+    assert not (home / "receipts_log.jsonl").exists()
+
+
 def test_ardur_run_denies_when_no_tools_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path
 ) -> None:

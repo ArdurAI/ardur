@@ -1048,6 +1048,7 @@ def run_governed(
 
     proxy = GovernanceProxy(
         log_path=home / "governance_log.jsonl",
+        receipts_log_path=home / "receipts.jsonl",
         state_dir=state_dir,
         keys_dir=keys_dir,
     )
