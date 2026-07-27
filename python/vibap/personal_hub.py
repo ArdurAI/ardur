@@ -2369,14 +2369,11 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     # the detail below so resolution here is purely for the success display.
     display_hub_url = str(args.hub_url)
     if display_hub_url.strip() == DEFAULT_HUB_URL:
-        try:
+        # Best-effort display resolution: if config resolution fails, keep the
+        # pre-try default. This only affects the doctor detail string; the
+        # hub_request call above already ran with the resolved or default URL.
+        with suppress(HubError):
             display_hub_url = resolve_hub_url(home=args.home)
-        except HubError:
-            # Intentional no-op: keep the pre-try default so the doctor detail
-            # shows the plain-HTTP argparse default when config resolution
-            # fails. Explicit logging here avoids the bare empty-except
-            # pattern while preserving the display-only fallback behaviour.
-            display_hub_url = display_hub_url
     checks = [
         {"name": "home", "ok": home_ok, "detail": "<ardur-home>"},
         {"name": "config", "ok": config_ok, "detail": "<ardur-config>"},
