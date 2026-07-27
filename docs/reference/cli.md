@@ -478,6 +478,13 @@ the sibling `anchored/` directory. Backend failures leave the source bundle in
 `pending/`, return a non-zero exit code, and report a bounded error string for
 retry. They never alter the already-recorded PERMIT/DENY receipt.
 
+If `--receipt-log` points to a directory, a dangling symlink, or a nonexistent
+path, the command returns `ok: false` with stable
+`condition`/`error`/`error_code` values of `receipt_log_not_file`, a message, a
+detail, and placeholder-only `next_steps`, keep exit code non-zero, and leave
+stderr free of tracebacks. This check fires before the anchor store is computed
+so invalid paths never produce a misleading `processed: 0` success.
+
 The self-hosted backend requires a separately administered Ed25519 log key and
 emits C2SP signed checkpoints. The Rekor backend submits only the receipt digest,
 a detached digest signature, and the receipt issuer public key as
