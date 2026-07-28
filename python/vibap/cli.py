@@ -5402,6 +5402,23 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
             return _protect_claude_code_keys_dir_invalid_response()
         if keys_dir_path.exists() and keys_dir_path.is_file():
             return _protect_claude_code_keys_dir_invalid_response()
+        # Reject --keys-dir whose parent chain crosses a dangling symlink or
+        # an existing non-directory, before any key generation or mkdir.
+        # Mirrors the ``--home`` parent-component walk from ad96e40.  A
+        # dangling parent symlink (e.g. ``--keys-dir <dangling>/keys``) is
+        # invisible to the leaf-only checks above: ``Path(<dangling>/keys)``
+        # is not itself a symlink, and ``Path.resolve()`` follows the symlink
+        # chain to the missing target before the check can see it.  Without
+        # this walk Ardur silently materialises the missing target via
+        # ``mkdir(parents=True)`` inside ``resolve_keys_dir()`` and writes the
+        # Ed25519 private key (``passport_private.pem``) at a location the
+        # user did not type.  Non-symlink nonexistent parents and real
+        # directory parents pass through.
+        for parent in keys_dir_path.parents:
+            if parent.is_symlink() and not parent.exists():
+                return _protect_claude_code_keys_dir_invalid_response()
+            if parent.exists() and not parent.is_dir():
+                return _protect_claude_code_keys_dir_invalid_response()
     # Reject negative --max-tool-calls before any key generation or directory
     # creation. ``--max-tool-calls`` is ``type=int`` with a default of 250,
     # so only an explicitly-passed negative value reaches here. A negative
