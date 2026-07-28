@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "c05cc901f440963817670d488847bce29c8e19a9980480a5246e7b7bed07e752"
+source_sha256: "7c3d4dabd7cf1f1e43ecb867cd1d3dbee016f712101e38c1d7ac131f90cdf612"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1563,6 +1563,20 @@ failed. Validation runs before any fixture file is written, so a rejected input
 leaves no fixture artifacts behind. Valid directory inputs are created or reused
 as-is.
 
+Additionally, `--home` and `--chain-dir` are validated for dangling-symlink or
+non-directory parent components before `Path.resolve()` follows the link. A
+`--home` or `--chain-dir` value whose parent chain crosses a dangling symlink
+(a symlink whose target does not exist) returns
+`gemini_cli_fixture_home_dangling_symlink_parent` or
+`gemini_cli_fixture_chain_dir_dangling_symlink_parent` respectively. A
+`--home` or `--chain-dir` value whose parent chain crosses an existing
+non-directory returns `gemini_cli_fixture_home_parent_not_directory` or
+`gemini_cli_fixture_chain_dir_parent_not_directory` respectively. The check
+walks each parent of the un-resolved expanded path before `resolve()` or
+`mkdir(parents=True)` can silently materialise the missing target. A valid
+nonexistent path whose parents are all directories or symlinks to existing
+directories is still accepted.
+
 ### `ardur gemini-cli-hook`
 
 Run the local-only Gemini CLI pre-tool-call hook adapter. The hook reads one
@@ -1677,6 +1691,21 @@ and `condition` fields, a concise `message`, a `detail`, and placeholder-only
 failed. Validation runs before any fixture file is written, so a rejected input
 leaves no fixture artifacts behind. Valid directory inputs are created or reused
 as-is.
+
+Additionally, `--home` and `--chain-dir` are validated for dangling-symlink or
+non-directory parent components before `Path.resolve()` follows the link. A
+`--home` or `--chain-dir` value whose parent chain crosses a dangling symlink
+(a symlink whose target does not exist) returns
+`codex_app_server_fixture_home_dangling_symlink_parent` or
+`codex_app_server_fixture_chain_dir_dangling_symlink_parent` respectively. A
+`--home` or `--chain-dir` value whose parent chain crosses an existing
+non-directory returns
+`codex_app_server_fixture_home_parent_not_directory` or
+`codex_app_server_fixture_chain_dir_parent_not_directory` respectively. The
+check walks each parent of the un-resolved expanded path before `resolve()` or
+`mkdir(parents=True)` can silently materialise the missing target. A valid
+nonexistent path whose parents are all directories or symlinks to existing
+directories is still accepted.
 
 ### `ardur codex-app-server-event`
 
