@@ -625,3 +625,209 @@ def test_gemini_fixture_rejects_project_dir_omitted(tmp_path: Path) -> None:
     assert not fixture_home.exists()
     assert not chain_dir.exists()
     assert not keys_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Dangling-parent-symlink regression (same defect class as protect/run home).
+# `--home <dangling>/child` and `--chain-dir <dangling>/child` previously
+# dereferenced the parent symlink via resolve()/mkdir(parents=True) and wrote
+# fixture artifacts at the resolved target with rc=0. The parent-component
+# walk must reject them before any resolve()/mkdir.
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402  (local import keeps the header block unchanged)
+
+
+def _gemini_dangling_parent_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    repo_root = Path(__file__).resolve().parents[2]
+    caller_home = tmp_path / "caller-home"
+    ardur_home = tmp_path / "ardur-home"
+    caller_home.mkdir()
+    env = {
+        **os.environ,
+        "HOME": str(caller_home),
+        "VIBAP_HOME": str(ardur_home),
+        "PYTHONPATH": str(repo_root / "python"),
+    }
+    return env, repo_root
+
+
+@pytest.mark.parametrize(
+    "arg_flag, condition",
+    [
+        ("--home", "gemini_cli_fixture_home_dangling_symlink_parent"),
+        ("--chain-dir", "gemini_cli_fixture_chain_dir_dangling_symlink_parent"),
+    ],
+)
+def test_gemini_fixture_rejects_dangling_parent_symlink(
+    tmp_path: Path, arg_flag: str, condition: str
+) -> None:
+    """--home/--chain-dir whose parent is a dangling symlink must fail closed."""
+    env, repo_root = _gemini_dangling_parent_env(tmp_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    # dangling -> /nonexistent_target ; user passes dangling/child
+    dangling_target = tmp_path / "no-such-target"
+    dangling_link = tmp_path / "dangling-parent"
+    dangling_link.symlink_to(dangling_target)
+    bad_path = dangling_link / "child"
+
+    if arg_flag == "--home":
+        argv = [
+            "--home", str(bad_path),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(chain_dir),
+            "--keys-dir", str(keys_dir),
+        ]
+        no_artifacts = [chain_dir, keys_dir, dangling_target]
+    else:
+        argv = [
+            "--home", str(fixture_home),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(bad_path),
+            "--keys-dir", str(keys_dir),
+        ]
+        no_artifacts = [fixture_home, keys_dir, dangling_target]
+
+    completed = _run_fixture(*argv, env=env, repo_root=repo_root)
+
+    _assert_structured_failure(
+        completed,
+        condition,
+        tmp_path=tmp_path,
+        no_artifacts=no_artifacts,
+    )
+    # The dangling target must NOT have been materialised.
+    assert not dangling_target.exists()
+    assert dangling_link.is_symlink()
+
+
+@pytest.mark.parametrize(
+    "arg_flag, condition",
+    [
+        ("--home", "gemini_cli_fixture_home_parent_not_directory"),
+        ("--chain-dir", "gemini_cli_fixture_chain_dir_parent_not_directory"),
+    ],
+)
+def test_gemini_fixture_rejects_non_directory_parent(
+    tmp_path: Path, arg_flag: str, condition: str
+) -> None:
+    """--home/--chain-dir whose parent is an existing regular file must fail closed."""
+    env, repo_root = _gemini_dangling_parent_env(tmp_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    # parent_file is a regular file; user passes parent_file/child
+    parent_file = tmp_path / "parent-file"
+    parent_file.write_text("not a directory\n", encoding="utf-8")
+    bad_path = parent_file / "child"
+
+    if arg_flag == "--home":
+        argv = [
+            "--home", str(bad_path),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(chain_dir),
+            "--keys-dir", str(keys_dir),
+        ]
+        no_artifacts = [chain_dir, keys_dir]
+    else:
+        argv = [
+            "--home", str(fixture_home),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(bad_path),
+            "--keys-dir", str(keys_dir),
+        ]
+        no_artifacts = [fixture_home, keys_dir]
+
+    completed = _run_fixture(*argv, env=env, repo_root=repo_root)
+
+    _assert_structured_failure(
+        completed,
+        condition,
+        tmp_path=tmp_path,
+        no_artifacts=no_artifacts,
+    )
+    assert parent_file.is_file()
+
+
+@pytest.mark.parametrize("arg_flag", ["--home", "--chain-dir"])
+def test_gemini_fixture_accepts_symlink_to_existing_dir_parent(
+    tmp_path: Path, arg_flag: str
+) -> None:
+    """A parent that is a symlink to an existing directory must still pass."""
+    env, repo_root = _gemini_dangling_parent_env(tmp_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    # real_dir exists; good_link -> real_dir ; user passes good_link/child
+    real_dir = tmp_path / "real-dir"
+    real_dir.mkdir()
+    good_link = tmp_path / "good-link"
+    good_link.symlink_to(real_dir)
+    good_path = good_link / "child"
+
+    if arg_flag == "--home":
+        argv = [
+            "--home", str(good_path),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(chain_dir),
+            "--keys-dir", str(keys_dir),
+        ]
+    else:
+        argv = [
+            "--home", str(fixture_home),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(good_path),
+            "--keys-dir", str(keys_dir),
+        ]
+
+    completed = _run_fixture(*argv, env=env, repo_root=repo_root)
+
+    assert completed.returncode == 0, f"expected exit 0, got {completed.returncode}: {completed.stdout!r} {completed.stderr!r}"
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    assert output.get("schema_version") == "ardur.gemini_cli.local_context.v0.1"
+
+
+@pytest.mark.parametrize("arg_flag", ["--home", "--chain-dir"])
+def test_gemini_fixture_accepts_plain_nonexistent_parent(
+    tmp_path: Path, arg_flag: str
+) -> None:
+    """A plain nonexistent path (no symlink in the parent chain) must still pass."""
+    env, repo_root = _gemini_dangling_parent_env(tmp_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    fixture_home = tmp_path / "fixture-home"
+    chain_dir = tmp_path / "chain"
+    keys_dir = tmp_path / "keys"
+    # plain nonexistent nested path
+    plain_path = tmp_path / "nested" / "deep" / "fixture-home"
+
+    if arg_flag == "--home":
+        argv = [
+            "--home", str(plain_path),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(chain_dir),
+            "--keys-dir", str(keys_dir),
+        ]
+    else:
+        argv = [
+            "--home", str(fixture_home),
+            "--project-dir", str(project_dir),
+            "--chain-dir", str(plain_path),
+            "--keys-dir", str(keys_dir),
+        ]
+
+    completed = _run_fixture(*argv, env=env, repo_root=repo_root)
+
+    assert completed.returncode == 0, f"expected exit 0, got {completed.returncode}: {completed.stdout!r} {completed.stderr!r}"
+    assert completed.stderr == ""
+    output = json.loads(completed.stdout)
+    assert output.get("schema_version") == "ardur.gemini_cli.local_context.v0.1"

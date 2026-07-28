@@ -2922,6 +2922,52 @@ def cmd_gemini_cli_hook(args: argparse.Namespace) -> int:
     return gemini_cli_hook_main(argv)
 
 
+def _gemini_fixture_path_error_label_arg(condition: str) -> tuple[str, str]:
+    """Resolve (label, arg_name) for a Gemini fixture path-error condition.
+
+    An earlier implementation derived both from the condition string via
+    suffix stripping (``.replace("_not_directory", "")`` etc.), which broke
+    for the ``_dangling_symlink_parent`` / ``_parent_not_directory`` suffixes
+    (they contain underscores that produced wrong arg names like
+    ``--home-dangling-symlink-parent``). An explicit table is robust to new
+    parent-component conditions while preserving the existing leaf responses.
+    """
+    table = {
+        "gemini_cli_fixture_home_empty": ("home", "--home"),
+        "gemini_cli_fixture_home_not_directory": ("home", "--home"),
+        "gemini_cli_fixture_home_dangling_symlink_parent": ("home", "--home"),
+        "gemini_cli_fixture_home_parent_not_directory": ("home", "--home"),
+        "gemini_cli_fixture_chain_dir_empty": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_not_directory": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_dangling_symlink_parent": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_parent_not_directory": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_keys_dir_empty": ("keys dir", "--keys-dir"),
+        "gemini_cli_fixture_keys_dir_not_directory": ("keys dir", "--keys-dir"),
+    }
+    return table.get(condition, ("path", "--path"))
+
+
+def _codex_fixture_path_error_label_arg(condition: str) -> tuple[str, str]:
+    """Resolve (label, arg_name) for a Codex app-server fixture path-error condition.
+
+    See ``_gemini_fixture_path_error_label_arg`` for why an explicit table is
+    used instead of condition-string suffix stripping.
+    """
+    table = {
+        "codex_app_server_fixture_home_empty": ("home", "--home"),
+        "codex_app_server_fixture_home_not_directory": ("home", "--home"),
+        "codex_app_server_fixture_home_dangling_symlink_parent": ("home", "--home"),
+        "codex_app_server_fixture_home_parent_not_directory": ("home", "--home"),
+        "codex_app_server_fixture_chain_dir_empty": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_not_directory": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_dangling_symlink_parent": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_parent_not_directory": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_keys_dir_empty": ("keys dir", "--keys-dir"),
+        "codex_app_server_fixture_keys_dir_not_directory": ("keys dir", "--keys-dir"),
+    }
+    return table.get(condition, ("path", "--path"))
+
+
 def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
     try:
         fixture = build_gemini_local_fixture(
@@ -2934,15 +2980,12 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
         _print_json(gemini_fixture_project_dir_failure_response(exc.condition))
         return 1
     except GeminiFixturePathError as exc:
+        label, arg_name = _gemini_fixture_path_error_label_arg(exc.condition)
         _print_json(
             gemini_fixture_path_failure_response(
                 condition=exc.condition,
-                label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
-                arg_name="--"
-                + exc.condition.replace("gemini_cli_fixture_", "")
-                .replace("_not_directory", "")
-                .replace("_empty", "")
-                .replace("_", "-"),
+                label=label,
+                arg_name=arg_name,
             )
         )
         return 1
@@ -3166,15 +3209,12 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
         _print_json(codex_fixture_project_dir_failure_response(exc.condition))
         return 1
     except CodexFixturePathError as exc:
+        label, arg_name = _codex_fixture_path_error_label_arg(exc.condition)
         _print_json(
             codex_fixture_path_failure_response(
                 condition=exc.condition,
-                label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
-                arg_name="--"
-                + exc.condition.replace("codex_app_server_fixture_", "")
-                .replace("_not_directory", "")
-                .replace("_empty", "")
-                .replace("_", "-"),
+                label=label,
+                arg_name=arg_name,
             )
         )
         return 1
