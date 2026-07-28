@@ -6117,6 +6117,17 @@ def serve_proxy(
         # from a YAML ``command:`` block) would create the same
         # operator-confusion failure mode R9-1 closed for env vars.
         api_token = api_token.strip()
+        if not api_token:
+            # Defense-in-depth: a whitespace-only token is truthy before
+            # stripping but resolves to an empty string after. Without this
+            # guard the proxy starts with an effectively empty auth token
+            # that any client can match with ``Authorization: Bearer `` (an
+            # empty bearer). ``cmd_start`` and ``proxy.main()`` reject this
+            # at their CLI layers, but ``serve_proxy`` is also a library
+            # entry point — close the bypass at the security boundary.
+            raise ValueError(
+                "api_token must be a non-empty token after trimming whitespace"
+            )
         token_source = "argument"
     else:
         api_token = _generate_api_token()
@@ -6939,6 +6950,69 @@ def _proxy_path_arg_invalid_failure(
     return None
 
 
+def _proxy_api_token_invalid_response() -> dict[str, object]:
+    """Failure response for a whitespace-only ``--api-token`` on the proxy.
+
+    ``serve_proxy`` strips the CLI-supplied token. A whitespace-only argument
+    is truthy before stripping but resolves to an empty string after, starting
+    the proxy with an effectively empty auth token that any client can match
+    with ``Authorization: Bearer `` (empty bearer). Reject it before key
+    generation, mirroring the ``ardur start --api-token`` guard.
+    """
+    return {
+        "ok": False,
+        "error": "proxy_api_token_invalid",
+        "error_code": "proxy_api_token_invalid",
+        "condition": "proxy_api_token_invalid",
+        "message": (
+            "python -m vibap.proxy --api-token must be a non-empty token "
+            "after trimming whitespace."
+        ),
+        "detail": (
+            "A whitespace-only --api-token is truthy before stripping but "
+            "resolves to an empty string after, starting the proxy with an "
+            "effectively empty auth token. Pass a real token or omit "
+            "--api-token to let the proxy generate one."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_real_token",
+                "command": (
+                    "python -m vibap.proxy --api-token <your-secret-token>"
+                ),
+                "detail": "Provide a non-empty API token.",
+            },
+            {
+                "action": "use_env",
+                "command": (
+                    "export VIBAP_API_TOKEN=<your-secret-token> && "
+                    "python -m vibap.proxy"
+                ),
+                "detail": "Set the token via the VIBAP_API_TOKEN environment variable.",
+            },
+            {
+                "action": "autogenerate",
+                "command": "python -m vibap.proxy",
+                "detail": "Omit --api-token to let the proxy generate a random token.",
+            },
+        ],
+    }
+
+
+def _proxy_api_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
+    """Return the api-token-invalid response when --api-token is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to autogeneration), or a real token.
+    """
+    value = getattr(args, "api_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _proxy_api_token_invalid_response()
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the Ardur governance proxy")
     parser.add_argument("--host", default="127.0.0.1")
@@ -6964,6 +7038,12 @@ def main(argv: list[str] | None = None) -> int:
     path_failure = _proxy_path_arg_invalid_failure(args)
     if path_failure is not None:
         json.dump(path_failure, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    api_token_failure = _proxy_api_token_invalid_failure(args)
+    if api_token_failure is not None:
+        json.dump(api_token_failure, sys.stdout, indent=2)
         sys.stdout.write("\n")
         return 1
 
