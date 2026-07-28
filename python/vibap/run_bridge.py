@@ -1552,6 +1552,85 @@ def _print_run_governed_home_dangling_symlink_next_steps() -> None:
     _print_next_steps(run_governed_home_dangling_symlink_next_steps())
 
 
+def run_governed_home_dangling_symlink_parent_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    whose PARENT chain crosses a dangling symlink.
+
+    Distinct from ``run_home_dangling_symlink`` (which covers the LEAF) so
+    operators grepping logs for parent-path-confusion can find the specific
+    condition. Fires for inputs like ``--home <dangling-symlink>/child``:
+    the leaf ``child`` is a plain nonexistent path, so the direct-symlink
+    check passes; ``Path(...).resolve()`` then follows the symlink and
+    ``home.mkdir(parents=True)`` silently materialises the missing target.
+    """
+    return [
+        {
+            "condition": "run_home_dangling_symlink_parent",
+            "action": "remove_or_fix_dangling_symlink_parent",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "A parent directory in the supplied --home path is a dangling "
+                "symlink (a symlink whose target does not exist). Ardur "
+                "resolves the symlink chain and would silently write signing "
+                "keys, active_mission.jwt, state, and governance logs at the "
+                "resolved target rather than the path you typed. Remove the "
+                "dangling symlink or point it at a real directory before "
+                "retrying."
+            ),
+        },
+        {
+            "condition": "run_home_dangling_symlink_parent",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_dangling_symlink_parent_next_steps() -> None:
+    _print_next_steps(run_governed_home_dangling_symlink_parent_next_steps())
+
+
+def run_governed_home_parent_not_directory_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    whose PARENT chain crosses an existing non-directory.
+
+    Fires for inputs like ``--home <regular-file>/child``: the leaf
+    ``child`` is a plain nonexistent path, so the leaf checks pass, but
+    ``home.mkdir(parents=True)`` would raise ``FileNotFoundError`` /
+    ``NotADirectoryError``.
+    """
+    return [
+        {
+            "condition": "run_home_parent_not_directory",
+            "action": "move_aside_or_choose_directory_parent",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "A parent directory in the supplied --home path exists as a "
+                "regular file or other non-directory. Ardur cannot create "
+                "the home tree inside a file. Move the file aside or choose "
+                "a different parent directory before retrying."
+            ),
+        },
+        {
+            "condition": "run_home_parent_not_directory",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_parent_not_directory_next_steps() -> None:
+    _print_next_steps(run_governed_home_parent_not_directory_next_steps())
+
+
 def run_governed_home_empty_next_steps() -> list[dict[str, str]]:
     """Return deterministic stderr remediation hints for a ``--home`` value
     that is empty or whitespace-only.
@@ -1762,6 +1841,52 @@ def run_governed_cli(args: Any) -> int:
             )
             _print_run_governed_home_dangling_symlink_next_steps()
             return 2
+        # Walk every PARENT component of the un-resolved --home path and reject
+        # if any parent is a dangling symlink or an existing non-directory.
+        # Without this, ``--home <dangling-symlink>/child`` passes the leaf
+        # check above (``child`` is neither a symlink nor a file),
+        # ``Path(...).resolve()`` follows the symlink, and
+        # ``home.mkdir(parents=True)`` silently materialises the missing
+        # target — writing the Ed25519 private key, active_mission.jwt,
+        # state, and governance log at a location the operator did not type.
+        # The shared validator in ``personal_hub`` raises a HubError; we
+        # translate it into the ``run`` stderr + exit-2 contract so every
+        # fail-closed branch on this command shares one shape.
+        from .personal_hub import (
+            HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+            HOME_PARENT_NOT_DIRECTORY_CONDITION,
+            HubError,
+            validate_personal_home_path_components,
+        )
+
+        try:
+            validate_personal_home_path_components(home_arg)
+        except HubError as exc:
+            if exc.code == HOME_DANGLING_SYMLINK_PARENT_CONDITION:
+                print(
+                    "ardur run --home path has a parent component that is a "
+                    "dangling symlink.",
+                    file=sys.stderr,
+                )
+                print(
+                    'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                    file=sys.stderr,
+                )
+                _print_run_governed_home_dangling_symlink_parent_next_steps()
+                return 2
+            if exc.code == HOME_PARENT_NOT_DIRECTORY_CONDITION:
+                print(
+                    "ardur run --home path has a parent component that is an "
+                    "existing non-directory.",
+                    file=sys.stderr,
+                )
+                print(
+                    'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                    file=sys.stderr,
+                )
+                _print_run_governed_home_parent_not_directory_next_steps()
+                return 2
+            raise
         try:
             resolved_home = expanded_home.resolve()
         except (OSError, ValueError) as exc:

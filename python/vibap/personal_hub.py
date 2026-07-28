@@ -71,6 +71,8 @@ HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
 PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
+HOME_DANGLING_SYMLINK_PARENT_CONDITION = "home_dangling_symlink_parent"
+HOME_PARENT_NOT_DIRECTORY_CONDITION = "home_parent_not_directory"
 SETUP_HOME_INVALID_CONDITION = "setup_home_invalid"
 SETUP_HOST_INVALID_CONDITION = "setup_host_invalid"
 SETUP_PORT_INVALID_CONDITION = "setup_port_invalid"
@@ -185,8 +187,107 @@ def validate_personal_home_directory(paths: HubPaths) -> None:
         raise _personal_home_not_directory_error()
 
 
+def _home_dangling_symlink_parent_error() -> HubError:
+    return HubError(
+        "Ardur home path has a parent component that is a dangling symlink.",
+        status=400,
+        code=HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+    )
+
+
+def _home_parent_not_directory_error() -> HubError:
+    return HubError(
+        "Ardur home path has a parent component that is an existing non-directory.",
+        status=400,
+        code=HOME_PARENT_NOT_DIRECTORY_CONDITION,
+    )
+
+
+def validate_personal_home_path_components(home: str | Path) -> None:
+    """Reject a Personal ``--home`` path whose parent chain crosses a dangling
+    symlink or an existing non-directory, BEFORE any ``Path.resolve()`` /
+    ``mkdir(parents=True)`` follows the link or materialises the target.
+
+    Why this exists
+    ---------------
+    Three Ardur commands (``run``, ``setup``, ``protect claude-code``) accept
+    ``--home <dangling-symlink>/child``. The previous leaf-only validation
+    inspected just the final path component:
+
+    * ``Path(dangling/child).is_symlink()`` returns False (``child`` is the
+      leaf, not the symlink).
+    * ``Path(dangling/child).resolve()`` follows the symlink and returns the
+      missing-target path ``/missing/child``.
+    * ``missing.exists()`` returns False, so the resolved-path guard also
+      short-circuits.
+    * ``home.mkdir(parents=True, exist_ok=True)`` then silently materialises
+      the missing target and Ardur writes the Ed25519 private key,
+      ``active_mission.jwt``, state, and the governance log there.
+
+    The fix mirrors the 2026-06-28 ``ardur start --state-dir``/``--log-path``
+    precedent: walk each *parent* component of the **un-resolved** expanded
+    path and reject when any parent is a dangling symlink or an existing
+    non-directory. Operating on the un-resolved path is essential because
+    ``.resolve()`` collapses the symlink chain before the check can see it.
+
+    What is rejected
+    ----------------
+    * Any parent component that is a dangling symlink
+      (``parent.is_symlink() and not parent.exists()``).
+    * Any parent component that exists and is not a directory
+      (regular file, socket, block device, etc.).
+
+    What is preserved
+    -----------------
+    * A direct dangling symlink leaf (``home`` itself) is rejected by the
+      existing ``validate_personal_home_directory`` /
+      ``protect_claude_code`` leaf checks; this helper deliberately does not
+      duplicate that so callers keep firing their own leaf-specific
+      structured responses.
+    * A symlink whose target is an existing directory proceeds normally —
+      ``is_symlink() and not exists()`` is False, and the resolved path is a
+      real directory.
+    * A plain nonexistent non-symlink path proceeds normally — Ardur creates
+      it later with ``mkdir(parents=True, exist_ok=True)``.
+
+    Parameters
+    ----------
+    home:
+        The raw ``--home`` value as supplied by the caller. It is
+        ``expanduser()``-ed internally. Empty/whitespace values must already
+        have been rejected by ``_resolve_personal_home`` so this helper
+        intentionally does not re-check them.
+
+    Raises
+    ------
+    HubError(HOME_DANGLING_SYMLINK_PARENT_CONDITION)
+        If any parent component is a dangling symlink.
+    HubError(HOME_PARENT_NOT_DIRECTORY_CONDITION)
+        If any parent component exists and is not a directory.
+    """
+
+    expanded = Path(home).expanduser()
+    # Walk parent components from the immediate parent up to the filesystem
+    # root. ``Path.parents`` yields absolute ancestors for an absolute input
+    # and CWD-relative ancestors for a relative input; both are correct here
+    # because ``mkdir(parents=True)`` operates on the same chain.
+    for parent in expanded.parents:
+        is_symlink = parent.is_symlink()
+        exists = parent.exists()
+        if is_symlink and not exists:
+            raise _home_dangling_symlink_parent_error()
+        if exists and not parent.is_dir():
+            raise _home_parent_not_directory_error()
+
+
 def _ensure_personal_home_directory(paths: HubPaths) -> None:
     validate_personal_home_directory(paths)
+    # Reject parent-component dangling symlinks or non-directory parents BEFORE
+    # mkdir(parents=True) follows the symlink chain and materialises the missing
+    # target. ``paths.home`` is already the expanded path from HubPaths.from_home
+    # but it is un-resolved, which is exactly what the parent walk needs: walking
+    # parents of the resolved path would already have collapsed the symlink.
+    validate_personal_home_path_components(paths.home)
     # When the personal home is under DEFAULT_HOME, materialise the home
     # with 0o700 first so the mkdir(parents=True) doesn't create it with
     # the process umask.
@@ -247,6 +348,106 @@ def personal_home_failure_response() -> dict[str, Any]:
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
         "next_steps": personal_home_failure_next_steps(),
+    }
+
+
+def home_dangling_symlink_parent_next_steps() -> list[dict[str, str]]:
+    condition = HOME_DANGLING_SYMLINK_PARENT_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "remove_or_fix_dangling_symlink_parent",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "A parent directory in the supplied --home path is a dangling "
+                "symlink (a symlink whose target does not exist). Ardur resolves "
+                "the symlink chain and would silently write signing keys, "
+                "active_mission.jwt, state, and governance logs at the resolved "
+                "target rather than the path you typed. Remove the dangling "
+                "symlink or point it at a real directory before retrying."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "After choosing a valid Ardur Personal home directory whose parent "
+                "chain contains no dangling symlinks, start the loopback Hub. "
+                "Keep raw local paths and Hub tokens out of shared logs."
+            ),
+        },
+    ]
+
+
+def home_dangling_symlink_parent_failure_response() -> dict[str, Any]:
+    condition = HOME_DANGLING_SYMLINK_PARENT_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": (
+            "Ardur home path has a parent component that is a dangling symlink."
+        ),
+        "detail": (
+            "The supplied --home path passes through a dangling symlink in one of "
+            "its parent directories. Without this check Ardur follows the symlink, "
+            "materialises the missing target, and writes the Ed25519 private key, "
+            "active_mission.jwt, state, and governance log at a location you did "
+            "not type. Remove the dangling symlink or repoint it at a real "
+            "directory before retrying."
+        ),
+        "next_steps": home_dangling_symlink_parent_next_steps(),
+    }
+
+
+def home_parent_not_directory_next_steps() -> list[dict[str, str]]:
+    condition = HOME_PARENT_NOT_DIRECTORY_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "move_aside_or_choose_directory_parent",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "A parent directory in the supplied --home path exists as a "
+                "regular file or other non-directory. Ardur cannot create the "
+                "home tree inside a file. Move the file aside or choose a "
+                "different parent directory before retrying."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "After choosing a valid Ardur Personal home directory whose parent "
+                "chain contains no regular files, start the loopback Hub. "
+                "Keep raw local paths and Hub tokens out of shared logs."
+            ),
+        },
+    ]
+
+
+def home_parent_not_directory_failure_response() -> dict[str, Any]:
+    condition = HOME_PARENT_NOT_DIRECTORY_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": (
+            "Ardur home path has a parent component that is an existing "
+            "non-directory."
+        ),
+        "detail": (
+            "A parent directory in the supplied --home path already exists as a "
+            "regular file or other non-directory. Ardur cannot create the home "
+            "tree (keys, active_mission.jwt, state, governance log) inside a file. "
+            "Move the file aside or choose a different parent directory before "
+            "retrying."
+        ),
+        "next_steps": home_parent_not_directory_next_steps(),
     }
 
 

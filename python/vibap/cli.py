@@ -52,12 +52,16 @@ from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
+    HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+    HOME_PARENT_NOT_DIRECTORY_CONDITION,
     HUB_TLS_MATERIAL_INVALID_CONDITION,
     HubError,
     HubTLSConfigurationError,
     SETUP_HOME_INVALID_CONDITION,
     desktop_observe,
     doctor_personal,
+    home_dangling_symlink_parent_failure_response,
+    home_parent_not_directory_failure_response,
     hub_request,
     run_under_hub,
     serve_hub,
@@ -65,6 +69,7 @@ from .personal_hub import (
     setup_personal,
     status_response_with_next_steps,
     uninstall_personal,
+    validate_personal_home_path_components,
 )
 from .personal_firewall import (
     MAX_DEMO_SECONDS as PERSONAL_FIREWALL_MAX_DEMO_SECONDS,
@@ -201,6 +206,12 @@ def _path_not_directory_response() -> dict:
 def _path_failure_exit_code(exc: HubError) -> int:
     if exc.code == SETUP_HOME_INVALID_CONDITION:
         _print_json(setup_home_invalid_failure_response())
+        return 1
+    if exc.code == HOME_DANGLING_SYMLINK_PARENT_CONDITION:
+        _print_json(home_dangling_symlink_parent_failure_response())
+        return 1
+    if exc.code == HOME_PARENT_NOT_DIRECTORY_CONDITION:
+        _print_json(home_parent_not_directory_failure_response())
         return 1
     if exc.code != _hub_path_error_code():
         raise exc
@@ -4915,6 +4926,107 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_home_parent_dangling_symlink_response() -> dict[str, object]:
+    """Structured response when a PARENT component of ``--home`` is a dangling
+    symlink.
+
+    Distinct from ``protect_home_invalid`` (which covers the LEAF) so that
+    operators searching logs for parent-path-confusion can grep for the
+    specific ``home_dangling_symlink_parent`` condition. Fires for inputs
+    like ``--home <dangling-symlink>/child`` where the leaf ``child`` is a
+    plain nonexistent path: the existing leaf checks pass, but
+    ``Path(...).resolve()`` would follow the symlink and
+    ``home.mkdir(parents=True)`` would silently materialise the missing
+    target. ``next_steps`` use placeholder-only commands and details with no
+    local paths or tokens. Placed before any ``home.mkdir`` /
+    ``generate_keypair`` / ``issue_passport`` / artifact write so no Ardur
+    state is created for an invalid home value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+        "error_code": HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+        "condition": HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+        "message": (
+            "ardur protect claude-code --home path has a parent component "
+            "that is a dangling symlink."
+        ),
+        "detail": (
+            "A parent directory in the supplied --home path is a dangling "
+            "symlink (a symlink whose target does not exist). Without this "
+            "check Ardur resolves the symlink chain, materialises the missing "
+            "target, and writes the Ed25519 private key, active_mission.jwt, "
+            "state, governance log, and plugin config at a location you did "
+            "not type. Remove the dangling symlink or repoint it at a real "
+            "directory before retrying."
+        ),
+        "next_steps": [
+            {
+                "action": "remove_or_fix_dangling_symlink_parent",
+                "command": "ardur protect claude-code --home <ardur-home> --scope <your-project>",
+                "detail": (
+                    "Remove the dangling symlink in the parent chain or point "
+                    "it at a real directory, then retry."
+                ),
+            },
+            {
+                "action": "omit_home",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --home to use the default Ardur home directory.",
+            },
+        ],
+    }
+
+
+def _protect_claude_code_home_parent_not_directory_response() -> dict[str, object]:
+    """Structured response when a PARENT component of ``--home`` is an existing
+    non-directory (regular file, socket, etc.).
+
+    Distinct from ``protect_home_invalid`` (which covers the LEAF) so that
+    operators searching logs for parent-path-confusion can grep for the
+    specific ``home_parent_not_directory`` condition. Fires for inputs like
+    ``--home <regular-file>/child``: the existing leaf checks pass because
+    ``child`` is a plain nonexistent path, but ``home.mkdir(parents=True)``
+    would raise ``FileNotFoundError`` / ``NotADirectoryError``. Placed before
+    any ``home.mkdir`` / ``generate_keypair`` / ``issue_passport`` /
+    artifact write so no Ardur state is created for an invalid home value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": HOME_PARENT_NOT_DIRECTORY_CONDITION,
+        "error_code": HOME_PARENT_NOT_DIRECTORY_CONDITION,
+        "condition": HOME_PARENT_NOT_DIRECTORY_CONDITION,
+        "message": (
+            "ardur protect claude-code --home path has a parent component "
+            "that is an existing non-directory."
+        ),
+        "detail": (
+            "A parent directory in the supplied --home path already exists "
+            "as a regular file or other non-directory. Ardur cannot create "
+            "the home tree (keys, active_mission.jwt, state, governance log, "
+            "plugin config) inside a file. Move the file aside or choose a "
+            "different parent directory before retrying."
+        ),
+        "next_steps": [
+            {
+                "action": "move_aside_or_choose_directory_parent",
+                "command": "ardur protect claude-code --home <ardur-home> --scope <your-project>",
+                "detail": (
+                    "Move the existing file in the parent chain aside or "
+                    "choose a different parent directory, then retry."
+                ),
+            },
+            {
+                "action": "omit_home",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --home to use the default Ardur home directory.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
     """Structured response for empty/whitespace-only, dangling-symlink, or regular-file ``--keys-dir``.
 
@@ -5244,6 +5356,26 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
             return _protect_claude_code_home_invalid_response()
         if home_path.exists() and home_path.is_file():
             return _protect_claude_code_home_invalid_response()
+        # Walk every PARENT component of the un-resolved --home path and
+        # reject if any parent is a dangling symlink or an existing
+        # non-directory. Without this, ``--home <dangling-symlink>/child``
+        # passes the leaf checks above (``child`` is neither a symlink nor a
+        # file), ``Path(...).resolve()`` follows the symlink, and
+        # ``home.mkdir(parents=True, exist_ok=True)`` silently materialises
+        # the missing target — writing the Ed25519 private key,
+        # active_mission.jwt, and plugin config at a location the operator
+        # did not type. The shared validator raises a HubError carrying the
+        # structured-response condition; we translate it into the
+        # ``protect claude-code`` envelope so every fail-closed branch on
+        # this command shares one response shape.
+        try:
+            validate_personal_home_path_components(args.home)
+        except HubError as exc:
+            if exc.code == HOME_DANGLING_SYMLINK_PARENT_CONDITION:
+                return _protect_claude_code_home_parent_dangling_symlink_response()
+            if exc.code == HOME_PARENT_NOT_DIRECTORY_CONDITION:
+                return _protect_claude_code_home_parent_not_directory_response()
+            raise
     # Reject empty/whitespace-only --keys-dir before any directory creation or
     # key generation. ``--keys-dir`` is ``type=str`` so an empty or
     # whitespace-only value survives here as-is (previously ``type=Path``
