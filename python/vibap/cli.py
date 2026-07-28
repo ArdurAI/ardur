@@ -5315,6 +5315,23 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         return _protect_claude_code_scope_invalid_response()
     if scope_path.exists() and scope_path.is_file():
         return _protect_claude_code_scope_invalid_response()
+    # Reject --scope whose parent chain crosses a dangling symlink or an
+    # existing non-directory, before any key generation, JWT issuance, or
+    # plugin/hook artifact creation.  Mirrors the ``--home`` and
+    # ``--keys-dir`` parent-component walks from ad96e40 and f167304.  A
+    # dangling parent symlink is invisible to the leaf-only checks above:
+    # ``Path(<dangling>/scope)`` is not itself a symlink, and
+    # ``Path.resolve()`` follows the symlink chain to the missing target
+    # before the check can see it.  Without this walk Ardur silently
+    # resolves the scope through the dangling parent, bakes the resolved
+    # path into the JWT ``resource_scope``, and configures protection for
+    # a directory that does not exist.  Non-symlink nonexistent parents
+    # and real directory parents pass through.
+    for parent in scope_path.parents:
+        if parent.is_symlink() and not parent.exists():
+            return _protect_claude_code_scope_invalid_response()
+        if parent.exists() and not parent.is_dir():
+            return _protect_claude_code_scope_invalid_response()
     # Reject empty/whitespace-only --agent-id and explicitly-provided
     # empty/whitespace-only --mission before any key generation, Mission
     # Passport JWT issuance, or plugin/hook artifact creation. ``--agent-id``
