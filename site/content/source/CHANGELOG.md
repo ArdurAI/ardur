@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "876395a615cdbe8e3305361c750281e1ecceb48d6ffe52d831f4d8c6f15e67a5"
+source_sha256: "b95622d7d0e5f95fdbf3835732273adf6bb15579d30a416e5aba0fbad2e351b3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -36,6 +36,15 @@ All notable changes to Ardur will be documented in this file.
   `--prune-interval` / negative `--guard-ready-timeout` before daemon
   startup so raw flag pointers cannot bypass validation at bind/log/mkdir
   sites
+- Reject whitespace-only `--api-token` on `proxy start` before the auth
+  header is constructed, mirroring the existing `start --api-token` and
+  `kill-switch --api-token` whitespace guards
+- Bump `google.golang.org/grpc` v1.82.0 → v1.82.1 for GO-2026-6061 (xDS
+  RBAC and HTTP/2 transport server vulnerabilities)
+- Reject dangling-parent-symlink path confusion on `run`, `setup`, and
+  `protect claude-code --home` so a symlinked parent cannot silently
+  materialize Ed25519 keys, mission JWTs, state, and the governance log
+  at an unintended resolved target
 
 ### Added
 
@@ -129,6 +138,30 @@ All notable changes to Ardur will be documented in this file.
 - Reject whitespace-only `--api-token` on `kill-switch` before the network
   call, mirroring the existing `start --api-token` and
   `status`/`doctor`/`desktop-observe --hub-token` whitespace guards.
+- Reject empty or whitespace-only `--home` on `ardur run` before the
+  working directory is polluted with signing keys, governance log, and
+  state files.
+- Reject `--receipt-log` pointing to a directory or nonexistent file on
+  `ardur anchor` before transparency-log processing.
+- Document the `receipt_log_not_file` error code in the `ardur anchor`
+  CLI reference.
+- Align `ardur run` receipts path with the canonical `receipts.jsonl`
+  filename so the governance summary no longer prints a `receipts_log.jsonl`
+  path that never exists.
+- Emit a structured error when a governed command cannot launch on
+  `ardur run` instead of a bare traceback.
+- Use `contextlib.suppress` for the `doctor` hub-URL display fallback so
+  a transient display-resolution failure does not trigger a CodeQL
+  `py/empty-except` alert.
+- Reject `--home` and `--chain-dir` dangling-parent-symlink on
+  `gemini-cli-fixture` and `codex-app-server-fixture` before fixture
+  artifacts are written at a symlink-resolved target.
+- Reject `--keys-dir` dangling-parent-symlink on `protect claude-code`
+  before Ed25519 key generation.
+- Reject `--scope` dangling-parent-symlink on `protect claude-code`
+  before JWT issuance.
+- Document `--home` and `--chain-dir` dangling-parent-symlink conditions
+  in the fixture CLI reference.
 
 ## [0.2.0] — 2026-07-22
 
