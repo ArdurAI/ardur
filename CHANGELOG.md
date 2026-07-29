@@ -42,6 +42,10 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Remove unused imports and dead monkey-patch scaffolding flagged by
+  CodeQL (`py/unused-import`, `py/unused-local-variable`) in
+  `test_protect_scope_parent_symlink.py` and `test_proxy_api_token_ws.py`
+  so the static-analysis surface stays clean
 - Reject empty or whitespace-only `type=Path` arguments in sibling CLI
   entry-point modules (`receiver_attestation_fixture`,
   `provider_adapter_fixture`, `drp_conformance`, `policy_conformance`)

@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "b95622d7d0e5f95fdbf3835732273adf6bb15579d30a416e5aba0fbad2e351b3"
+source_sha256: "c77c371a86a1eee00fdfea91a1e6b1d7a25baa40d141ec76c18f7533e865a628"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -59,6 +59,10 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Remove unused imports and dead monkey-patch scaffolding flagged by
+  CodeQL (`py/unused-import`, `py/unused-local-variable`) in
+  `test_protect_scope_parent_symlink.py` and `test_proxy_api_token_ws.py`
+  so the static-analysis surface stays clean
 - Reject empty or whitespace-only `type=Path` arguments in sibling CLI
   entry-point modules (`receiver_attestation_fixture`,
   `provider_adapter_fixture`, `drp_conformance`, `policy_conformance`)
