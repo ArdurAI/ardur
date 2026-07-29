@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 
 import pytest
 
@@ -133,21 +132,7 @@ def test_serve_proxy_unset_api_token_falls_through_to_generated():
 
     This avoids starting the real HTTP server. The critical regression guard
     is the whitespace-only test above which confirms the ValueError fires when
-    it should, and this test confirms None does not accidentally enter that
     branch."""
-    from vibap import proxy
-
-    # Trace the branch selection by monkey-patching _generate_api_token.
-    # If api_token=None reaches the else branch, _generate_api_token is called.
-    # We intercept before HTTP bind by mocking everything downstream.
-    import vibap.proxy as p
-
-    original_gen = p._generate_api_token
-    generated = {"called": False}
-
-    def fake_generate():
-        generated["called"] = True
-        return original_gen()
 
     # We can't call serve_proxy without it starting the server, so verify the
     # branch logic directly by simulating the if/elif/else chain.
