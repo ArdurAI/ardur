@@ -92,6 +92,15 @@ key, state, log, or session artifacts behind. Valid `--port 0` remains the
 ephemeral-port path, where the operating system chooses an available local port;
 it is not a standalone server-readiness claim.
 
+If the configured `--port` is valid but already occupied by another process at
+bind time, the command exits non-zero and writes parseable stdout JSON with
+`ok: false`, stable `condition`/`error`/`error_code` values of
+`start_port_in_use`, a message, a detail, and placeholder-only `next_steps`.
+The failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, and leaves no key, state, log, or session artifacts behind. Valid
+`--port 0` avoids this condition by letting the operating system choose an
+available local port.
+
 Invalid `--host` values fail closed after port range validation and before TLS,
 key, state, audit log, session, or proxy startup work begins. Host values must
 be plain bindable host names or IP addresses; empty or whitespace-only values,
@@ -640,6 +649,13 @@ parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
 values, a message, a detail, and placeholder-only `next_steps`; stderr stays
 empty, no traceback is emitted, no raw local paths or malformed hosts are echoed,
 and no Personal Hub state or service artifacts are created.
+
+If the configured Hub `--port` is valid but already occupied by another process
+at bind time, the command exits non-zero and writes parseable stdout JSON with
+`ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_port_in_use`, a message, a detail, and placeholder-only `next_steps`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, and leaves no Personal Hub state or service artifacts behind.
 
 The Hub serves HTTPS by default. Without explicit TLS paths, it resolves or
 creates its managed local certificate and private key. `--tls-cert` and
