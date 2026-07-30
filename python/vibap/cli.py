@@ -3585,17 +3585,24 @@ def _kill_switch_invalid_proxy_url_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _kill_switch_next_steps_for_failure(
+def _kill_switch_error_flags(
     error: str,
     *,
     status: int | None = None,
-) -> list[dict[str, str]]:
-    """Return placeholder-only remediation hints for kill-switch setup failures."""
+) -> dict[str, bool]:
+    """Classify a raw kill-switch error string into boolean failure flags.
+
+    Shared by ``_kill_switch_next_steps_for_failure`` (remediation hints) and
+    ``_kill_switch_classify_error`` (structured ``error_code``/``message``).
+    Centralizing the classification here prevents the raw Python exception
+    string (e.g. ``<urlopen error [Errno 61] Connection refused>``) from
+    leaking into the ``error`` field of the JSON response.
+    """
     normalized_error = error.strip().lower().replace("_", " ")
     status_text = str(status or "").strip()
 
     if normalized_error == "proxy url invalid":
-        return _kill_switch_invalid_proxy_url_next_steps()
+        return {"proxy_url_invalid": True}
 
     proxy_unavailable = any(
         marker in normalized_error
@@ -3630,6 +3637,30 @@ def _kill_switch_next_steps_for_failure(
         or "api token" in normalized_error
     )
     endpoint_problem = status_text in {"404", "405"} or "not found" in normalized_error
+
+    return {
+        "proxy_unavailable": proxy_unavailable,
+        "tls_problem": tls_problem,
+        "token_problem": token_problem,
+        "endpoint_problem": endpoint_problem,
+    }
+
+
+def _kill_switch_next_steps_for_failure(
+    error: str,
+    *,
+    status: int | None = None,
+) -> list[dict[str, str]]:
+    """Return placeholder-only remediation hints for kill-switch setup failures."""
+    flags = _kill_switch_error_flags(error, status=status)
+
+    if flags.get("proxy_url_invalid"):
+        return _kill_switch_invalid_proxy_url_next_steps()
+
+    proxy_unavailable = flags["proxy_unavailable"]
+    tls_problem = flags["tls_problem"]
+    token_problem = flags["token_problem"]
+    endpoint_problem = flags["endpoint_problem"]
 
     if (
         not proxy_unavailable
@@ -3694,8 +3725,72 @@ def _kill_switch_next_steps_for_failure(
     return steps
 
 
+def _kill_switch_classify_error(
+    error: str,
+    *,
+    status: int | None = None,
+) -> tuple[str, str, str]:
+    """Map a raw kill-switch error string to (error_code, message, detail).
+
+    Returns a structured triple so the JSON response never leaks raw Python
+    internals (e.g. ``<urlopen error [Errno 61] Connection refused>``) into the
+    ``error`` field. Falls back to a generic ``kill_switch_request_failed``
+    code when no known failure class is recognised.
+    """
+    flags = _kill_switch_error_flags(error, status=status)
+
+    if flags.get("proxy_url_invalid"):
+        return (
+            "proxy_url_invalid",
+            "Ardur governance proxy URL is invalid.",
+            "The proxy URL could not be parsed as a complete HTTP or HTTPS endpoint.",
+        )
+
+    if flags["proxy_unavailable"]:
+        return (
+            "proxy_unavailable",
+            "Ardur governance proxy is unreachable.",
+            "The governance proxy did not respond. Ensure it is running on the configured loopback endpoint.",
+        )
+
+    if flags["tls_problem"]:
+        return (
+            "proxy_tls_error",
+            "Ardur governance proxy TLS handshake failed.",
+            "The proxy endpoint rejected the TLS connection. Check certificate validity or use matching --tls-cert/--tls-key options.",
+        )
+
+    if flags["token_problem"]:
+        return (
+            "proxy_auth_error",
+            "Ardur governance proxy rejected the API token.",
+            "The proxy returned an authentication error. Supply a valid --api-token or ARDUR_API_TOKEN.",
+        )
+
+    if flags["endpoint_problem"]:
+        return (
+            "proxy_endpoint_error",
+            "Ardur governance proxy kill-switch endpoint was not found.",
+            "The proxy responded, but the kill-switch admin endpoint returned an error status.",
+        )
+
+    return (
+        "kill_switch_request_failed",
+        "Ardur kill-switch request failed.",
+        "The kill-switch request could not be completed. Check local proxy setup and retry.",
+    )
+
+
 def _kill_switch_failure_response(error: str, *, status: int | None = None) -> dict:
-    response: dict = {"ok": False, "error": error}
+    error_code, message, detail = _kill_switch_classify_error(error, status=status)
+    response: dict = {
+        "ok": False,
+        "error": error_code,
+        "error_code": error_code,
+        "condition": error_code,
+        "message": message,
+        "detail": detail,
+    }
     if status is not None:
         response["status"] = status
     steps = _kill_switch_next_steps_for_failure(error, status=status)
