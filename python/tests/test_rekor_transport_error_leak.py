@@ -154,17 +154,6 @@ class TestDefaultRekorTransportIntegration:
     def test_transport_http_error_raises_clean_error(self) -> None:
         """HTTP 404 from a mock server must produce a clean TransparencyError."""
 
-        def mock_transport(
-            url: str, payload: bytes, timeout: float, max_bytes: int
-        ) -> bytes:
-            raise urllib.error.HTTPError(
-                url=url,
-                code=404,
-                msg="Not Found",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=io.BytesIO(b"{}"),
-            )
-
         # _classify_rekor_transport_error is called from inside the
         # transport's except block, so we just verify the classifier
         # directly for the HTTP path.
