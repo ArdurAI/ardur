@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "f49fa11886f76e7f7f5274c71f0555e596b1dcd7c6823e4c73b5d2afcefc5277"
+source_sha256: "98f41f6fb5077a29140ad5fa5456052205cfcd376b8c3f019b7407ec38c9add5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -204,7 +204,20 @@ valid: in both cases Ardur falls through to `ARDUR_API_TOKEN`.
 
 If the local proxy cannot be reached, TLS/scheme setup looks wrong, or the
 proxy rejects the bearer token, the JSON output preserves `ok: false` and adds
-deterministic `next_steps`. The hints are local/no-key recovery guidance only:
+deterministic `next_steps`. The failure responses use structured
+`error_code`/`message`/`detail` fields — never raw Python exception strings.
+The possible `error`/`error_code`/`condition` values are:
+
+| Error code | Meaning |
+|---|---|
+| `proxy_url_invalid` | Proxy URL could not be parsed as a complete HTTP(S) endpoint. |
+| `proxy_unavailable` | Governance proxy did not respond. Ensure it is running on the configured loopback endpoint. |
+| `proxy_tls_error` | TLS handshake failed. Check certificate validity or use matching `--tls-cert`/`--tls-key` options. |
+| `proxy_auth_error` | Proxy rejected the API token. Supply a valid `--api-token` or `ARDUR_API_TOKEN`. |
+| `proxy_endpoint_error` | Proxy responded, but the kill-switch admin endpoint returned an error status. |
+| `kill_switch_request_failed` | Generic fallback for unrecognised request failures. |
+
+The hints are local/no-key recovery guidance only:
 start the loopback governance proxy, match the `<proxy-url>` scheme/host/port,
 supply or rotate `<api-token>`, then rerun `ardur kill-switch`. They use
 placeholders such as `<proxy-url>`, `<proxy-port>`, and `<api-token>` rather
