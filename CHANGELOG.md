@@ -149,6 +149,15 @@ All notable changes to Ardur will be documented in this file.
   before JWT issuance.
 - Document `--home` and `--chain-dir` dangling-parent-symlink conditions
   in the fixture CLI reference.
+- Emit a structured `start_port_in_use` / `hub_port_in_use` JSON error when
+  `ardur start` or `ardur hub` cannot bind the configured port instead of
+  leaking a raw `OSError: [Errno 48] Address already in use` traceback.
+- Emit a structured JSON error with `error_code` / `message` / `detail`
+  when `ardur kill-switch` cannot reach the proxy instead of leaking raw
+  urllib internals (`<urlopen error [Errno 61] Connection refused>`).
+- Classify Rekor transparency-log transport errors into structured
+  `error_code` / `message` / `detail` triples instead of leaking raw
+  urllib exception strings from `ardur anchor`.
 
 ## [0.2.0] — 2026-07-22
 
