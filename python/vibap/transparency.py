@@ -659,6 +659,40 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _classify_rekor_transport_error(
+    exc: BaseException,
+) -> TransparencyError:
+    """Map raw urllib/socket errors to clean structured TransparencyError.
+
+    Same defect class as ``cli._kill_switch_classify_error``: the default
+    ``str(exc)`` for ``URLError`` includes ``<urlopen error [Errno 61]
+    Connection refused>`` (raw CPython urllib internals).  Consumers of
+    ``cmd_anchor`` and ``drain_anchor_store`` surface ``str(exc)`` directly
+    in JSON ``message`` / ``error`` fields, so we must replace the raw
+    representation with a stable, human-readable classification that does not
+    leak errno strings, socket paths, or internal exception class names.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return TransparencyError(
+            f"Rekor submission failed: HTTP {exc.code} {exc.reason}"
+        )
+    if isinstance(exc, TimeoutError):
+        return TransparencyError("Rekor submission timed out")
+    # urllib.error.URLError wraps the real socket error in ``.reason``.
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, OSError):
+        if reason.errno is not None:
+            return TransparencyError(
+                f"Rekor submission failed: network error ({reason.errno})"
+            )
+        return TransparencyError("Rekor submission failed: network error")
+    if isinstance(reason, str) and reason.strip():
+        return TransparencyError(
+            f"Rekor submission failed: {reason.strip()}"
+        )
+    return TransparencyError("Rekor submission failed: network error")
+
+
 def _default_rekor_transport(
     url: str, payload: bytes, timeout: float, max_bytes: int
 ) -> bytes:
@@ -673,7 +707,7 @@ def _default_rekor_transport(
         with opener.open(request, timeout=timeout) as response:
             data = response.read(max_bytes + 1)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-        raise TransparencyError(f"Rekor submission failed: {exc}") from exc
+        raise _classify_rekor_transport_error(exc) from exc
     if len(data) > max_bytes:
         raise TransparencyError("Rekor response exceeds the size limit")
     return data
