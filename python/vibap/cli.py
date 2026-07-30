@@ -573,6 +573,45 @@ def _start_port_failure_exit_code(port: int) -> int | None:
     return 1
 
 
+def _start_port_in_use_condition() -> str:
+    return "start_port_in_use"
+
+
+def _start_port_in_use_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_available_start_port",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <available-port>"
+            ),
+            "detail": (
+                "The configured port is already in use by another process. "
+                "Choose a different port or pass --port 0 to let the operating "
+                "system choose an available local port."
+            ),
+        },
+    ]
+
+
+def _start_port_in_use_response() -> dict:
+    condition = _start_port_in_use_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start port is already in use by another process.",
+        "detail": (
+            "Stop the process occupying the port or choose a different --port. "
+            "Use --port 0 for an ephemeral port."
+        ),
+        "next_steps": _start_port_in_use_next_steps(condition),
+    }
+
+
 def _start_host_failure_condition() -> str:
     return "start_host_invalid"
 
@@ -719,6 +758,41 @@ def _hub_port_failure_exit_code(port: int) -> int | None:
         return None
     _print_json(_hub_port_failure_response())
     return 1
+
+
+def _hub_port_in_use_condition() -> str:
+    return "hub_port_in_use"
+
+
+def _hub_port_in_use_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_available_hub_port",
+            "command": "ardur hub --host <loopback-host> --port <available-port> --home <ardur-home>",
+            "detail": (
+                "The configured port is already in use by another process. "
+                "Choose a different port or pass --port 0 to let the operating "
+                "system choose an available local port."
+            ),
+        },
+    ]
+
+
+def _hub_port_in_use_response() -> dict:
+    condition = _hub_port_in_use_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur hub port is already in use by another process.",
+        "detail": (
+            "Stop the process occupying the port or choose a different --port. "
+            "Use --port 0 for an ephemeral port."
+        ),
+        "next_steps": _hub_port_in_use_next_steps(condition),
+    }
 
 
 def _hub_host_failure_condition() -> str:
@@ -1305,6 +1379,13 @@ def cmd_start(args: argparse.Namespace) -> int:
     except TLSConfigurationError:
         _print_json(_start_tls_material_failure_response())
         return 1
+    except OSError as exc:
+        import errno
+
+        if exc.errno == errno.EADDRINUSE:
+            _print_json(_start_port_in_use_response())
+            return 1
+        raise
     return 0
 
 
@@ -3470,6 +3551,13 @@ def cmd_hub(args: argparse.Namespace) -> int:
         return 1
     except HubError as exc:
         return _path_failure_exit_code(exc)
+    except OSError as exc:
+        import errno
+
+        if exc.errno == errno.EADDRINUSE:
+            _print_json(_hub_port_in_use_response())
+            return 1
+        raise
     return 0
 
 
