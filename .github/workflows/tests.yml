@@ -315,6 +315,15 @@ jobs:
           ARDUR_RUN_LATENCY_BENCH: "1"
         run: python -m pytest tests/test_claude_code_hook_latency.py -v -s
 
+      - name: Upload latency benchmark reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: latency-benchmark-reports
+          path: ${{ runner.temp }}/ardur-latency-reports/
+          if-no-files-found: error
+          retention-days: 14
+
   e2e-showcase:
     name: "E2E Showcase (real Ollama)"
     runs-on: ubuntu-latest
