@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "9817d7d0541a88e6968d83b22d84fd32e98d961b2225f625df290c8c076f822e"
+source_sha256: "ec41824839150b46af68ab6921be4e1becf5178a53c9dc2ef91f2e5cce45e773"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -47,6 +47,12 @@ All notable changes to Ardur will be documented in this file.
   at an unintended resolved target
 
 ### Added
+- Emit machine-readable JSON latency reports with raw sample distributions,
+  recomputable percentiles (median/p95/p99), functional outcome classification
+  (stage + native exit/errno), separate functional-failure and threshold-
+  violation fields, and runner metadata from an explicit allowlist only.
+  Reports are written as atomic 0600 files and uploaded as CI artifacts with
+  `if: always()` and bounded retention.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

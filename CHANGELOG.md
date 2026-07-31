@@ -30,6 +30,12 @@ All notable changes to Ardur will be documented in this file.
   at an unintended resolved target
 
 ### Added
+- Emit machine-readable JSON latency reports with raw sample distributions,
+  recomputable percentiles (median/p95/p99), functional outcome classification
+  (stage + native exit/errno), separate functional-failure and threshold-
+  violation fields, and runner metadata from an explicit allowlist only.
+  Reports are written as atomic 0600 files and uploaded as CI artifacts with
+  `if: always()` and bounded retention.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
