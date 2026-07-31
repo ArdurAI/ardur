@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "ec41824839150b46af68ab6921be4e1becf5178a53c9dc2ef91f2e5cce45e773"
+source_sha256: "50d038f75d689d720fef57db7921eba4f2229be73f5f494157b94fe218bf5bb7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -181,6 +181,13 @@ All notable changes to Ardur will be documented in this file.
 - Classify Rekor transparency-log transport errors into structured
   `error_code` / `message` / `detail` triples instead of leaking raw
   urllib exception strings from `ardur anchor`.
+- Sanitize `str(exc)` interpolation in conformance, daemon, run-bridge,
+  transparency, and CLI output paths so raw exception messages
+  (including filesystem paths) cannot leak into JSON error responses.
+- Sanitize `str(exc)` in `receiver_attestation` envelope and MCP document
+  loaders (`load_receiver_envelope`, `load_json_document`) so
+  `FileNotFoundError` paths and parser internals are replaced with the
+  exception class name in structured error output.
 
 ## [0.2.0] — 2026-07-22
 
