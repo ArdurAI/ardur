@@ -163,10 +163,8 @@ class TestSourceNoStrExcInOutputPaths:
         source = inspect.getsource(cmd_verify)
         # The old pattern: "message": str(exc) in the anchor verification
         # error response.
-        # There may be multiple "message" fields; verify the one paired with
-        # "anchor_verification_failed" doesn't use str(exc).
         assert '"message": str(exc)' not in source, (
-            "cmd_verify still leaks str(exc) in message field"
+            "cmd_verify still leaks raw str(exc) in message field"
         )
 
     def test_cmd_anchor_no_str_exc_in_message(self) -> None:
@@ -174,7 +172,7 @@ class TestSourceNoStrExcInOutputPaths:
 
         source = inspect.getsource(cmd_anchor)
         assert '"message": str(exc)' not in source, (
-            "cmd_anchor still leaks str(exc) in message field"
+            "cmd_anchor still leaks raw str(exc) in message field"
         )
 
     def test_transparency_no_raw_exc_in_error_messages(self) -> None:

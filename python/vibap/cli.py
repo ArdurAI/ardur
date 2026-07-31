@@ -1942,7 +1942,7 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
             {
                 "valid": False,
                 "error": "anchor_verification_failed",
-                "message": type(exc).__name__,
+                "message": _safe_exception_message(exc),
             }
         )
         return 1
@@ -2085,7 +2085,7 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
         response: dict[str, object] = {
             "valid": False,
             "error": getattr(exc, "code", "offline_verification_failed"),
-            "message": type(exc).__name__,
+            "message": _safe_exception_message(exc),
         }
         index = getattr(exc, "index", None)
         if index is not None:
@@ -2481,7 +2481,7 @@ def cmd_anchor(args: argparse.Namespace) -> int:
             {
                 "ok": False,
                 "error": "anchor_submission_failed",
-                "message": type(exc).__name__,
+                "message": _safe_exception_message(exc),
             }
         )
         return 1
@@ -2931,6 +2931,46 @@ def _classify_fixture_error(
     if isinstance(exc, OSError):
         return error_code, "Filesystem error writing fixture output."
     return error_code, "Invalid input type or value for fixture generation."
+
+
+def _safe_exception_message(exc: BaseException) -> str:
+    """Return a user-safe representation of ``exc`` for JSON output.
+
+    Domain exception types (``TransparencyError``, ``AnchorVerificationError``,
+    ``KeyDirectoryError``, etc.) carry intentionally-safe, user-facing
+    messages and are preserved verbatim. ``FileNotFoundError`` /
+    ``PermissionError`` from the passport module are re-raised with safe
+    messages and also preserved. Generic Python built-ins
+    (``OSError``, bare ``TypeError``/``ValueError``) can carry filesystem
+    paths, errno details, or Python internals in ``str(exc)``, so only the
+    class name is returned.
+
+    Heuristic: if the exception text contains ``[Errno`` (the raw OSError
+    format), it is treated as unsafe regardless of type.
+    """
+    text = str(exc)
+    # Raw OSError errno pattern: always sanitize.
+    if "[Errno" in text:
+        return type(exc).__name__
+    # Domain exception types with safe, intentional messages.
+    from vibap.transparency import TransparencyError
+
+    if isinstance(exc, TransparencyError):
+        return text
+    try:
+        from vibap.passport import KeyDirectoryError
+
+        if isinstance(exc, KeyDirectoryError):
+            return text
+    except ImportError:
+        pass
+    # FileNotFoundError / PermissionError re-raised by the passport module
+    # carry intentional messages (no errno pattern). Other OSError subclasses
+    # are sanitized to class name.
+    if isinstance(exc, (FileNotFoundError, PermissionError)):
+        return text
+    # Everything else: use class name only to avoid leaking internals.
+    return type(exc).__name__
 
 
 def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
