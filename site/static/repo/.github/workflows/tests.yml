@@ -321,6 +321,17 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    # Decision (issue #375): this job stays informational and is NOT added to
+    # the blocking ``tests`` aggregate below. It requires live cloud
+    # credentials (ARDUR_OLLAMA_API_KEY secret + ARDUR_OLLAMA_CLOUD_MODEL var)
+    # that are not available on every PR, so making it required would gate
+    # unrelated contributions on a credentialled showcase. Instead, the
+    # fail-closed logic below makes the job honest about its own skip state:
+    # when the showcase job DOES have credentials configured, it must either
+    # run the model-gated tests or fail loudly -- it may not silently skip
+    # them and report green. ``continue-on-error`` is retained so an
+    # informational red on a credentialled run does not block the release
+    # train, but the signal is now trustworthy rather than a false green.
     continue-on-error: true
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     steps:
@@ -330,15 +341,55 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install ardur with dev extras
+      - name: Install ardur with dev + ollama extras
         working-directory: python
-        run: python -m pip install -e '.[dev]'
+        run: python -m pip install -e '.[dev,ollama]'
+
+      # Preflight (issue #375): verify the ollama client imports and that the
+      # API key + cloud model are present BEFORE running pytest. The check
+      # prints only booleans / redacted presence indicators -- never the API
+      # key value. Exits non-zero on any missing prerequisite so the job fails
+      # loudly at this step rather than skipping silently inside pytest.
+      - name: Ollama showcase preflight
+        working-directory: python
+        env:
+          ARDUR_OLLAMA_API_KEY: ${{ secrets.ARDUR_OLLAMA_API_KEY }}
+          ARDUR_OLLAMA_CLOUD_MODEL: ${{ vars.ARDUR_OLLAMA_CLOUD_MODEL }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          api_key = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
+          cloud_model = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+          print(f"ARDUR_OLLAMA_API_KEY present: {bool(api_key)}")
+          print(f"ARDUR_OLLAMA_CLOUD_MODEL present: {bool(cloud_model)}")
+          try:
+              import ollama  # noqa: F401
+              print("ollama client import: ok")
+              client_ok = True
+          except ImportError as exc:
+              print(f"ollama client import: FAILED ({type(exc).__name__})")
+              client_ok = False
+          missing = []
+          if not api_key:
+              missing.append("ARDUR_OLLAMA_API_KEY")
+          if not cloud_model:
+              missing.append("ARDUR_OLLAMA_CLOUD_MODEL")
+          if not client_ok:
+              missing.append("ollama client import")
+          if missing:
+              print(f"::error::Ollama showcase preflight missing: {', '.join(missing)}")
+              sys.exit(1)
+          PY
 
       - name: Run E2E showcase
         working-directory: python
         env:
           ARDUR_OLLAMA_API_KEY: ${{ secrets.ARDUR_OLLAMA_API_KEY }}
           ARDUR_OLLAMA_CLOUD_MODEL: ${{ vars.ARDUR_OLLAMA_CLOUD_MODEL }}
+          # Fail closed: if preflight passed but pytest still skips an
+          # ollama_required test, convert that skip into a collection error.
+          ARDUR_OLLAMA_FAIL_CLOSED: "1"
         run: python -m pytest tests/test_e2e_showcase.py -v -s --tb=short
 
   tests:
