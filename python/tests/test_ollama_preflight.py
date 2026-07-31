@@ -49,6 +49,7 @@ def showcase_module(monkeypatch):
         module = importlib.import_module("test_e2e_showcase")
     except Exception:
         pytest.skip("test_e2e_showcase import requires vibap test deps")
+        return  # defensive: pytest.skip raises, but satisfy static analyzers
     yield module
     sys.modules.pop("test_e2e_showcase", None)
 
