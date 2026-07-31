@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -77,6 +78,16 @@ from .personal_firewall import (
     run_personal_firewall_demo,
 )
 from .claude_code_report import build_claude_code_report
+from .latency_gate import (
+    LatencyGateError,
+    GateProtocol,
+)
+from .latency_gate_cli import (
+    LatencyGateCliError,
+    format_gate_output,
+    load_reports_from_directory,
+    run_gate,
+)
 from .claude_code_hook import main as claude_code_hook_main
 from .gemini_cli_hook import (
     FixtureProjectDirError as GeminiFixtureProjectDirError,
@@ -6045,6 +6056,194 @@ def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
     return 0 if response.get("ok") else 1
 
 
+def _latency_gate_value_failure(
+    *,
+    condition: str,
+    message: str,
+    detail: str,
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_latency_gate_evaluate",
+                "command": (
+                    "ardur latency-gate evaluate --reports <reports-dir> "
+                    "[--threshold-ms N] [--min-runs N] [--percentile 95] "
+                    "[--output-format json|text]"
+                ),
+                "detail": (
+                    "Provide a directory of latency report JSON files and "
+                    "valid positive numeric thresholds. Keep raw local paths "
+                    "and tokens out of shared logs."
+                ),
+            }
+        ],
+    }
+
+
+def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
+    """Load latency reports, run the gate, and print the decision."""
+
+    # ``--reports`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
+    # only values survive parsing and can be rejected explicitly below.
+    # ``type=Path`` normalizes ``""`` to ``PosixPath('.')`` (the CWD) which
+    # silently masks the empty-argument defect. Same pitfall pattern as
+    # --home/--plugin-dir/--keys-dir in other commands.
+    reports_value = getattr(args, "reports", None)
+    if not isinstance(reports_value, str) or not reports_value.strip():
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_reports_empty",
+            message="latency-gate evaluate --reports must be a non-empty path after trimming whitespace.",
+            detail=(
+                "The --reports argument is empty or whitespace-only. "
+                "Pass an explicit directory of latency report JSON files."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    threshold_ms = float(args.threshold_ms)
+    if not math.isfinite(threshold_ms) or threshold_ms <= 0:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_threshold_ms_invalid",
+            message="latency-gate evaluate --threshold-ms must be finite and > 0.",
+            detail=(
+                f"--threshold-ms must be a positive finite number; got {args.threshold_ms!r}."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    min_runs = int(args.min_runs)
+    if min_runs < 1:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_min_runs_invalid",
+            message="latency-gate evaluate --min-runs must be >= 1.",
+            detail=(
+                f"--min-runs must be a positive integer; got {args.min_runs!r}."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    percentile = int(args.percentile)
+    if not (1 <= percentile <= 100):
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_percentile_invalid",
+            message="latency-gate evaluate --percentile must be in 1..100 inclusive.",
+            detail=(
+                f"--percentile must be an integer from 1 to 100; got {args.percentile!r}."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    report_dir = Path(reports_value)
+    if not report_dir.exists():
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_reports_dir_not_found",
+            message="latency-gate evaluate --reports directory does not exist.",
+            detail=(
+                "The --reports path does not exist on disk. "
+                "Point --reports at a directory of latency report JSON files."
+            ),
+        )
+        _print_json(failure)
+        return 1
+    if not report_dir.is_dir():
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_reports_not_directory",
+            message="latency-gate evaluate --reports path is not a directory.",
+            detail=(
+                "The --reports path exists but is not a directory. "
+                "Point --reports at a directory of latency report JSON files."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    try:
+        valid_reports, invalid_reports = load_reports_from_directory(report_dir)
+    except LatencyGateCliError as exc:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_load_failed",
+            message=str(exc),
+            detail="Report loading failed before the evaluator could run.",
+        )
+        _print_json(failure)
+        return 1
+
+    try:
+        protocol = GateProtocol(
+            min_independent_runs=min_runs,
+            threshold_ms=threshold_ms,
+            percentile=percentile,
+        )
+        decision = run_gate(valid_reports, protocol)
+    except (LatencyGateError, LatencyGateCliError) as exc:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_protocol_invalid",
+            message=str(exc),
+            detail="Gate protocol construction or evaluation failed.",
+        )
+        _print_json(failure)
+        return 1
+
+    output_format = args.output_format
+    try:
+        rendered = format_gate_output(decision, output_format)
+    except LatencyGateCliError as exc:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_output_format_invalid",
+            message=str(exc),
+            detail="Output formatting failed.",
+        )
+        _print_json(failure)
+        return 1
+
+    # Emit a structured top-level envelope so CI can branch on ``ok`` and
+    # ``verdict`` without parsing the decision body. The ``decision`` body
+    # is the canonical gate output; ``invalid_files`` surfaces loader-level
+    # rejections separately so reviewers can see why individual files were
+    # dropped without re-scanning the directory.
+    if output_format == "json":
+        import json as _json
+
+        body = _json.loads(rendered)
+        envelope = {
+            "ok": True,
+            "verdict": decision.verdict,
+            "decision": body,
+            "invalid_files": invalid_reports,
+        }
+        _print_json(envelope)
+    else:
+        sys.stdout.write(rendered)
+        if invalid_reports:
+            sys.stdout.write("\nInvalid report files (not evaluated):\n")
+            for entry in invalid_reports:
+                sys.stdout.write(
+                    f"  {entry['filename']}: {entry['reason']}\n"
+                )
+
+    # Exit code: 0 for PASS, 1 for FAIL, 2 for INCONCLUSIVE. This lets CI
+    # distinguish "passed the gate" from "failed the gate" from "could not
+    # decide" without parsing JSON. All three are successful tool runs (the
+    # gate ran correctly); only the verdict differs.
+    if decision.verdict == "pass":
+        return 0
+    if decision.verdict == "fail":
+        return 1
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ardur",
@@ -7054,6 +7253,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cedar entities JSON file (used with --cedar-policy)",
     )
     protect_cc.set_defaults(func=cmd_protect_claude_code)
+
+    latency_gate = subparsers.add_parser(
+        "latency-gate",
+        help="evaluate a directory of latency reports against the deterministic gate",
+    )
+    latency_gate_subparsers = latency_gate.add_subparsers(
+        dest="latency_gate_command", required=True
+    )
+    latency_gate_evaluate = latency_gate_subparsers.add_parser(
+        "evaluate",
+        help="load latency reports from a directory and emit a gate decision",
+    )
+    # ``--reports`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
+    # only values survive parsing and can be rejected explicitly in the
+    # handler. ``type=Path`` normalizes ``""`` to ``PosixPath('.')`` (the CWD)
+    # which silently masks the empty-argument defect.
+    latency_gate_evaluate.add_argument(
+        "--reports",
+        type=str,
+        required=True,
+        help="directory of latency report JSON files to evaluate",
+    )
+    latency_gate_evaluate.add_argument(
+        "--threshold-ms",
+        type=float,
+        default=10.0,
+        help="maximum allowed aggregate p95 latency in ms (default: 10.0)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--min-runs",
+        type=int,
+        default=3,
+        help="minimum number of valid reports for a non-INCONCLUSIVE verdict (default: 3)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--percentile",
+        type=int,
+        default=95,
+        help="percentile rank for the statistical rule, 1..100 (default: 95)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--output-format",
+        choices=("json", "text"),
+        default="json",
+        help="output format (default: json)",
+    )
+    latency_gate_evaluate.set_defaults(func=cmd_latency_gate_evaluate)
 
     return parser
 
