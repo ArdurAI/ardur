@@ -1942,7 +1942,7 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
             {
                 "valid": False,
                 "error": "anchor_verification_failed",
-                "message": str(exc),
+                "message": type(exc).__name__,
             }
         )
         return 1
@@ -2085,7 +2085,7 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
         response: dict[str, object] = {
             "valid": False,
             "error": getattr(exc, "code", "offline_verification_failed"),
-            "message": str(exc),
+            "message": type(exc).__name__,
         }
         index = getattr(exc, "index", None)
         if index is not None:
@@ -2481,7 +2481,7 @@ def cmd_anchor(args: argparse.Namespace) -> int:
             {
                 "ok": False,
                 "error": "anchor_submission_failed",
-                "message": str(exc),
+                "message": type(exc).__name__,
             }
         )
         return 1

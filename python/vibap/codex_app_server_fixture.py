@@ -1302,7 +1302,7 @@ def build_shareable_report(
                     "chain": str(path),
                     "valid": False,
                     "error": type(exc).__name__,
-                    "message": str(exc),
+                    "message": type(exc).__name__,
                     "receipt_count": 0,
                     "token_count": len(tokens),
                 }

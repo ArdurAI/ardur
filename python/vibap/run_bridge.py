@@ -414,10 +414,16 @@ def _build_embedded_server(
                     self._send(200, {"token": token, "claims": claims})
                     return
             except (ValueError, KeyError, PermissionError) as exc:
-                self._send(400, {"error": str(exc)})
+                # Never leak raw ``str(exc)``: these exceptions can carry
+                # internal field names, Python internals, or filesystem paths.
+                if isinstance(exc, PermissionError):
+                    safe = "permission denied"
+                else:
+                    safe = type(exc).__name__
+                self._send(400, {"error": safe})
                 return
-            except Exception as exc:  # noqa: BLE001 — embedded server must not crash the run
-                self._send(500, {"error": f"internal error: {exc}"})
+            except Exception:  # noqa: BLE001 — embedded server must not crash the run
+                self._send(500, {"error": "internal error"})
                 return
             self._send(404, {"error": "not found"})
 
