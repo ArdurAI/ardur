@@ -2918,6 +2918,21 @@ def _offline_verification_fixture_output_invalid_response(condition: str) -> dic
     }
 
 
+def _classify_fixture_error(
+    exc: BaseException, error_code: str
+) -> tuple[str, str]:
+    """Map a raw ``OSError``/``TypeError``/``ValueError`` to a safe message.
+
+    Returns ``(error_code, safe_message)`` so the JSON response never leaks
+    raw Python internals (e.g. ``[Errno 13] Permission denied:
+    '/var/folders/...'``) or local filesystem paths into the ``message``
+    field. ``error_code`` is kept command-specific by the caller.
+    """
+    if isinstance(exc, OSError):
+        return error_code, "Filesystem error writing fixture output."
+    return error_code, "Invalid input type or value for fixture generation."
+
+
 def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
     from .receiver_attestation_fixture import (
         ReceiverAttestationFixtureOutputError,
@@ -2932,11 +2947,14 @@ def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
         )
         return 1
     except (OSError, TypeError, ValueError) as exc:
+        error_code, safe_message = _classify_fixture_error(
+            exc, "receiver_attestation_fixture_failed"
+        )
         _print_json(
             {
                 "ok": False,
-                "error": "receiver_attestation_fixture_failed",
-                "message": str(exc),
+                "error": error_code,
+                "message": safe_message,
             }
         )
         return 1
@@ -2953,11 +2971,14 @@ def cmd_drp_profile_fixture(args: argparse.Namespace) -> int:
         _print_json(_drp_profile_fixture_output_invalid_response(exc.condition))
         return 1
     except (OSError, TypeError, ValueError) as exc:
+        error_code, safe_message = _classify_fixture_error(
+            exc, "drp_profile_fixture_failed"
+        )
         _print_json(
             {
                 "ok": False,
-                "error": "drp_profile_fixture_failed",
-                "message": str(exc),
+                "error": error_code,
+                "message": safe_message,
             }
         )
         return 1
@@ -2979,11 +3000,14 @@ def cmd_offline_verification_fixture(args: argparse.Namespace) -> int:
         )
         return 1
     except (OSError, TypeError, ValueError) as exc:
+        error_code, safe_message = _classify_fixture_error(
+            exc, "offline_verification_fixture_failed"
+        )
         _print_json(
             {
                 "ok": False,
-                "error": "offline_verification_fixture_failed",
-                "message": str(exc),
+                "error": error_code,
+                "message": safe_message,
             }
         )
         return 1
