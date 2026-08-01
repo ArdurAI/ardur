@@ -2,7 +2,7 @@
 title: "ADR-027: Latency benchmark gate evaluator"
 description: "**Status:** Accepted"
 source_path: "docs/decisions/ADR-027-latency-benchmark-gate-evaluator.md"
-source_sha256: "e1756814c646d153b1a5f11ff20078c834aeae05e04eddd842b2e4ad139a77c8"
+source_sha256: "823e56de41d1049ec01d7799a0e5c3f8c8c1514e673edca155a9f7817f20dcbb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -219,6 +219,60 @@ decision.
 - The evaluator trusts its input list (it does not verify first-attempt
   selection). The CI workflow is responsible for feeding it only first
   attempts; this keeps the evaluator simple and the trust boundary explicit.
+
+### Event policy and evidence collection (scope items 7–8)
+
+Issue #380 items 7–8 require documenting how the benchmark behaves across
+GitHub Actions event types and how evidence deduplication works. This section
+specifies the CI workflow's responsibilities without changing the evaluator's
+interface.
+
+**Event types and trigger behaviour.**
+
+| Event                 | Benchmark runs? | Gate evaluated? | Reports uploaded? | Notes                                                                 |
+| --------------------- | --------------- | --------------- | ----------------- | --------------------------------------------------------------------- |
+| `push` to `dev`       | Yes             | Yes             | Yes               | Primary evidence source. Every push produces one independent report set. |
+| `pull_request`        | Yes             | Yes             | Yes               | Produces a PR-scoped report set. Not mixed into `dev` baseline.       |
+| `workflow_dispatch`   | Yes             | Yes             | Yes               | Manual re-runs are labelled as non-first-attempt (see below).         |
+| Scheduled/cron        | No              | No              | No                | The benchmark is event-driven, not a scheduled health check.          |
+
+**First-attempt policy.** Only the first attempt of each event's benchmark
+run is eligible as gate input. The evaluator trusts its input list and does
+not verify first-attempt selection itself (ADR-027, Decision §2). The CI
+workflow is responsible for ensuring the evaluator sees first-attempt reports
+only. Concretely:
+
+- When GitHub Actions automatically re-runs a failed `latency-bench` job,
+  the artifact upload uses `if: always()` so the report set from the failed
+  run is still persisted for audit. However, the gate evaluator's report
+  directory is populated only from the current run's `default_report_dir()`,
+  not from previously-uploaded artifacts. This means a re-run produces a
+  fresh report set that the evaluator processes independently.
+- `workflow_dispatch` re-runs are labelled in the gate's metadata as
+  manual rather than push/PR-triggered, so they are never silently mixed
+  into the pre-registered push/PR evidence pool.
+
+**Deduplication policy.** The evaluator does not deduplicate across events.
+Each event produces its own report set, and each report set is evaluated
+independently. This is the correct behaviour for a first-attempt-only model:
+mixing push and PR evidence would violate independence, and deduplicating
+across re-runs would require source-tree identity checking that is outside
+the evaluator's scope.
+
+Deduplication within a single event's report set is handled by the
+evaluator's `nearest_rank` aggregation: each report is one independent run's
+p95, and the aggregate is computed over all valid reports without weighting,
+filtering, or selecting. There is no mechanism to drop a report from the
+valid set except through the invalid/missing classification rules (§Missing /
+invalid report treatment), which are deterministic and pre-registered.
+
+**Branch-protection recommendation (scope item 9).** The gate is
+informational (`continue-on-error: true`) at this stage. Making it a required
+pre-promotion context is a branch-protection change that must follow a
+stability observation period: at least `min_independent_runs` clean
+first-attempt report sets on `dev` pushes, with zero functional-failure
+vetoes and zero INCONCLUSIVE verdicts from missing artifacts. The
+recommendation is human-gated and outside the evaluator's scope.
 
 ## Alternatives considered
 
