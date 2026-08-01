@@ -33,6 +33,10 @@ All notable changes to Ardur will be documented in this file.
   messages that reach 403 bodies use fixed codes
   (`peer_jwt_svid_verification_failed`, `parent_token_aat_validation_failed`,
   `aat_mission_resolution_failed`) instead of leaking library stack text
+- Sanitize cryptography library internals (e.g. `Could not deserialize
+  key data`, `asn1` errors) from proxy HTTP 400 error responses so
+  `holder_public_key_pem` validation failures use the fixed code
+  `holder_public_key_pem_invalid` instead of leaking PEM-decoder text
 
 ### Added
 - Emit machine-readable JSON latency reports with raw sample distributions,

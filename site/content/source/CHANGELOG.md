@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "feba6dadf2f260c7785043c5f0b70739b24a2d8f9761f698ff6a240ff4e2f779"
+source_sha256: "a442ffe93735aeb7bd12dc30bcac3d45711a8137c791721e64dc6a5dc0500cf9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -50,6 +50,10 @@ All notable changes to Ardur will be documented in this file.
   messages that reach 403 bodies use fixed codes
   (`peer_jwt_svid_verification_failed`, `parent_token_aat_validation_failed`,
   `aat_mission_resolution_failed`) instead of leaking library stack text
+- Sanitize cryptography library internals (e.g. `Could not deserialize
+  key data`, `asn1` errors) from proxy HTTP 400 error responses so
+  `holder_public_key_pem` validation failures use the fixed code
+  `holder_public_key_pem_invalid` instead of leaking PEM-decoder text
 
 ### Added
 - Emit machine-readable JSON latency reports with raw sample distributions,
