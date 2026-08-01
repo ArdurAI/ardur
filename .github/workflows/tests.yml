@@ -315,6 +315,25 @@ jobs:
           ARDUR_RUN_LATENCY_BENCH: "1"
         run: python -m pytest tests/test_claude_code_hook_latency.py -v -s
 
+      # Deterministic latency gate (ADR-027, issue #380). Surfaces a
+      # ``pass`` / ``fail`` / ``inconclusive`` verdict over the reports the
+      # benchmark just wrote. ``if: always()`` so the signal is produced
+      # even when the benchmark step partially fails, and
+      # ``continue-on-error: true`` so a gate FAIL or INCONCLUSIVE never
+      # blocks the build (the ``latency-bench`` job is informational at
+      # this stage). The evaluator is read-only over the report directory;
+      # exit codes are 0=PASS, 1=FAIL, 2=INCONCLUSIVE. Reports live under
+      # ``$RUNNER_TEMP/ardur-latency-reports`` (``default_report_dir`` on
+      # GitHub Actions), the same directory uploaded as an artifact below.
+      - name: Evaluate latency gate
+        if: always()
+        working-directory: python
+        continue-on-error: true
+        run: |
+          python -m vibap.cli latency-gate evaluate \
+            --reports ${{ runner.temp }}/ardur-latency-reports/ \
+            --output-format json
+
       - name: Upload latency benchmark reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
