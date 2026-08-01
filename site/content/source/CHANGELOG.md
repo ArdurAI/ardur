@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "975ff8df3dfe6c235ca5aec7d7bd6cf7a0aec698adf0ba135b52dd2202a129a0"
+source_sha256: "cce568727ce91b26415212e162bcda3a1ca5da25b617aa646a1ad4307ec20e3e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -97,6 +97,11 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Fix `ardur run --json` pre-execution error output streams: budget
+  validation errors (`--max-tool-calls`/`--max-duration-s`) now emit
+  structured JSON to **stderr** (not stdout) and command-not-found /
+  command-not-executable errors emit structured JSON when `--json` is set,
+  keeping stdout reserved for child process output as documented
 - Remove unused imports and dead monkey-patch scaffolding flagged by
   CodeQL (`py/unused-import`, `py/unused-local-variable`) in
   `test_protect_scope_parent_symlink.py` and `test_proxy_api_token_ws.py`
