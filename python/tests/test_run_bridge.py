@@ -1939,8 +1939,10 @@ def test_run_governed_cli_negative_max_duration_returns_structured_json_without_
     assert not sentinel.exists()
     assert not home.exists()
 
-    # stdout must be structured JSON
-    response = json.loads(captured.out)
+    # Budget validation JSON now goes to stderr (not stdout) so stdout
+    # stays clean for child process output even on pre-execution errors.
+    # See _run_governed_budget_failure in run_bridge.py.
+    response = json.loads(captured.err)
     assert response["ok"] is False
     assert response["condition"] == "run_max_duration_invalid"
     assert response["error"] == "run_max_duration_invalid"
@@ -1949,8 +1951,8 @@ def test_run_governed_cli_negative_max_duration_returns_structured_json_without_
     for step in response["next_steps"]:
         assert "<" in step["command"]  # placeholder-only
 
-    # stderr must be empty
-    assert captured.err == ""
+    # stdout must be empty
+    assert captured.out == ""
 
     # No traceback or raw ValueError in either stream
     assert "Traceback" not in captured.out
@@ -1997,7 +1999,7 @@ def test_run_governed_cli_negative_max_tool_calls_returns_structured_json_withou
     assert not sentinel.exists()
     assert not home.exists()
 
-    response = json.loads(captured.out)
+    response = json.loads(captured.err)
     assert response["ok"] is False
     assert response["condition"] == "run_max_tool_calls_invalid"
     assert response["error"] == "run_max_tool_calls_invalid"
@@ -2006,7 +2008,7 @@ def test_run_governed_cli_negative_max_tool_calls_returns_structured_json_withou
     for step in response["next_steps"]:
         assert "<" in step["command"]
 
-    assert captured.err == ""
+    assert captured.out == ""
     assert "Traceback" not in captured.out
     assert "Traceback" not in captured.err
     assert "/Users/" not in captured.out
@@ -2077,7 +2079,8 @@ def test_run_governed_cli_negative_max_duration_no_stderr_traceback(
 
     captured = capsys.readouterr()
     assert exit_code == 2
-    assert captured.err == ""
+    # Budget validation JSON now goes to stderr; stdout must be empty.
+    assert captured.out == ""
     assert "Traceback" not in captured.out
     assert "Traceback" not in captured.err
     assert "ttl_s must be positive" not in captured.out

@@ -1785,9 +1785,34 @@ def _run_governed_budget_failure(
         "detail": detail,
         "next_steps": next_steps,
     }
-    json.dump(response, sys.stdout, indent=2)
-    sys.stdout.write("\n")
+    # Budget validation failures go to stderr so stdout stays clean for
+    # child process output even on pre-execution errors.  This matches the
+    # ``ardur run --json`` contract: stdout = child, stderr = governance.
+    json.dump(response, sys.stderr, indent=2)
+    sys.stderr.write("\n")
     return 2
+
+
+def _run_governed_preexec_json_error(
+    condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
+) -> None:
+    """Emit a structured JSON pre-execution error to stderr.
+
+    Used when ``--json`` is set and the governed command cannot be launched
+    (not found, not executable).  Output goes to stderr to keep the stdout =
+    child-process-output contract intact even on launch failures.
+    """
+    response: dict[str, object] = {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": next_steps,
+    }
+    json.dump(response, sys.stderr, indent=2)
+    sys.stderr.write("\n")
 
 
 def _run_max_duration_invalid_next_steps(condition: str) -> list[dict[str, str]]:
@@ -2022,24 +2047,40 @@ def run_governed_cli(args: Any) -> int:
         # governed executable does not exist on PATH or at the given path.
         # Surface a clean, actionable error instead of a raw traceback.
         cmd_repr = exc.filename or (command[0] if command else "<command>")
-        print(
-            f"ardur run: governed command not found: {cmd_repr}", file=sys.stderr
-        )
-        _print_next_steps(
-            run_governed_command_not_found_next_steps(cmd_repr)
-        )
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_command_not_found",
+                "Run governance command not found.",
+                f"The governed command '{cmd_repr}' could not be found. Check the spelling, confirm it is installed, and verify it is on your PATH or the full path exists.",
+                run_governed_command_not_found_next_steps(cmd_repr),
+            )
+        else:
+            print(
+                f"ardur run: governed command not found: {cmd_repr}", file=sys.stderr
+            )
+            _print_next_steps(
+                run_governed_command_not_found_next_steps(cmd_repr)
+            )
         return 2
     except PermissionError as exc:
         # subprocess.Popen raises PermissionError (Errno 13) when the target
         # path exists but is not executable. Surface a clean, actionable error.
         cmd_repr = exc.filename or (command[0] if command else "<command>")
-        print(
-            f"ardur run: governed command not executable: {cmd_repr}",
-            file=sys.stderr,
-        )
-        _print_next_steps(
-            run_governed_command_not_executable_next_steps(cmd_repr)
-        )
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_command_not_executable",
+                "Run governance command not executable.",
+                f"The governed command '{cmd_repr}' exists but is not executable.",
+                run_governed_command_not_executable_next_steps(cmd_repr),
+            )
+        else:
+            print(
+                f"ardur run: governed command not executable: {cmd_repr}",
+                file=sys.stderr,
+            )
+            _print_next_steps(
+                run_governed_command_not_executable_next_steps(cmd_repr)
+            )
         return 2
 
     if getattr(args, "json", False):
