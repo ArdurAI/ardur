@@ -457,6 +457,36 @@ class GovernanceRunResult:
     kernel_policy: dict[str, Any]
     notes: list[str] = field(default_factory=list)
 
+    def to_result_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable summary of the governance run.
+
+        Used by ``ardur run --json`` so CI pipelines and programmatic
+        consumers can consume the governance result without parsing
+        human-readable summary text. The ``attestation_token`` is omitted
+        because it is a JWT-like bearer credential; consumers should use
+        ``attestation_digest`` to verify the attestation identity.
+        """
+        return {
+            "ok": self.exit_code == 0,
+            "exit_code": self.exit_code,
+            "session_id": self.session_id,
+            "mission_id": self.mission_id,
+            "agent_id": self.agent_id,
+            "adapter": self.adapter,
+            "via": self.via,
+            "total_events": self.total_events,
+            "permits": self.permits,
+            "denials": self.denials,
+            "receipt_count": self.receipt_count,
+            "receipts_path": self.receipts_path,
+            "attestation_digest": self.attestation_digest,
+            "home": self.home,
+            "passport_path": self.passport_path,
+            "correlation": self.correlation,
+            "kernel_policy": self.kernel_policy,
+            "notes": list(self.notes),
+        }
+
 
 def _count_lines(path: Path) -> int:
     try:
@@ -2012,7 +2042,12 @@ def run_governed_cli(args: Any) -> int:
         )
         return 2
 
-    print(format_summary(result), file=sys.stderr)
+    if getattr(args, "json", False):
+        # JSON goes to stderr so the child process's stdout stays transparent.
+        # This lets consumers do: ardur run --json -- pytest  2>governance.json
+        print(json.dumps(result.to_result_dict(), indent=2, sort_keys=True), file=sys.stderr)
+    else:
+        print(format_summary(result), file=sys.stderr)
     return result.exit_code
 
 

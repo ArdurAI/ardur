@@ -7073,6 +7073,12 @@ def build_parser() -> argparse.ArgumentParser:
         "enforceable on that tier",
     )
     run.add_argument(
+        "--json",
+        action="store_true",
+        help="emit governance run result as JSON to stdout instead of human-readable "
+        "summary to stderr (governance path only)",
+    )
+    run.add_argument(
         "command", nargs=argparse.REMAINDER, help="command to run after --"
     )
     run.set_defaults(func=cmd_run)
