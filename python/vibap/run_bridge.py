@@ -29,6 +29,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -434,6 +435,34 @@ def _build_embedded_server(
 # ── result type ────────────────────────────────────────────────────────────────
 
 
+def _redact_local_path(path_str: str | None) -> str | None:
+    """Replace local absolute path roots with stable placeholders.
+
+    Shares the same redaction philosophy as the proof-bundle path-leak
+    scanner: absolute paths under the temp directory, the user's home,
+    or well-known system paths are replaced with descriptive placeholders
+    so the JSON output is safe to share in CI artifacts or bug reports.
+    """
+    if path_str is None:
+        return None
+    result = str(path_str)
+    temp_root = tempfile.gettempdir()
+    if result.startswith(temp_root):
+        return result.replace(temp_root, "<tmp>", 1)
+    home = os.path.expanduser("~")
+    if result.startswith(home + "/"):
+        return result.replace(home, "<home>", 1)
+    # macOS resolves /tmp → /private/tmp; redact both forms.
+    result = re.sub(r"^/private/tmp/", "<tmp>/", result)
+    result = re.sub(r"^/tmp/", "<tmp>/", result)
+    # Common macOS/var roots.
+    result = re.sub(r"^/private/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"^/run/ardur/", "<run-ardur>/", result)
+    # Linux system paths that reveal local cgroup or runtime layout.
+    result = re.sub(r"^/sys/fs/cgroup/", "<cgroup>/", result)
+    return result
+
+
 @dataclass
 class GovernanceRunResult:
     exit_code: int
@@ -457,7 +486,7 @@ class GovernanceRunResult:
     kernel_policy: dict[str, Any]
     notes: list[str] = field(default_factory=list)
 
-    def to_result_dict(self) -> dict[str, Any]:
+    def to_result_dict(self, *, redact_paths: bool = False) -> dict[str, Any]:
         """Return a JSON-serialisable summary of the governance run.
 
         Used by ``ardur run --json`` so CI pipelines and programmatic
@@ -465,7 +494,28 @@ class GovernanceRunResult:
         human-readable summary text. The ``attestation_token`` is omitted
         because it is a JWT-like bearer credential; consumers should use
         ``attestation_digest`` to verify the attestation identity.
+
+        When *redact_paths* is ``True``, local absolute paths are replaced
+        with stable placeholders so the output is safe to share in CI
+        artifacts or bug reports without leaking the user's filesystem
+        layout.
         """
+        receipts_path = self.receipts_path
+        home = self.home
+        passport_path = self.passport_path
+        correlation = dict(self.correlation) if self.correlation else {}
+        if redact_paths:
+            receipts_path = _redact_local_path(receipts_path)
+            home = _redact_local_path(home)
+            passport_path = _redact_local_path(passport_path)
+            if correlation.get("daemon_socket"):
+                correlation["daemon_socket"] = _redact_local_path(
+                    correlation["daemon_socket"]
+                )
+            if correlation.get("cgroup_path"):
+                correlation["cgroup_path"] = _redact_local_path(
+                    correlation["cgroup_path"]
+                )
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
@@ -478,11 +528,11 @@ class GovernanceRunResult:
             "permits": self.permits,
             "denials": self.denials,
             "receipt_count": self.receipt_count,
-            "receipts_path": self.receipts_path,
+            "receipts_path": receipts_path,
             "attestation_digest": self.attestation_digest,
-            "home": self.home,
-            "passport_path": self.passport_path,
-            "correlation": self.correlation,
+            "home": home,
+            "passport_path": passport_path,
+            "correlation": correlation,
             "kernel_policy": self.kernel_policy,
             "notes": list(self.notes),
         }
@@ -2086,7 +2136,15 @@ def run_governed_cli(args: Any) -> int:
     if getattr(args, "json", False):
         # JSON goes to stderr so the child process's stdout stays transparent.
         # This lets consumers do: ardur run --json -- pytest  2>governance.json
-        print(json.dumps(result.to_result_dict(), indent=2, sort_keys=True), file=sys.stderr)
+        redact = getattr(args, "redact_paths", False)
+        print(
+            json.dumps(
+                result.to_result_dict(redact_paths=redact),
+                indent=2,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
     else:
         print(format_summary(result), file=sys.stderr)
     return result.exit_code

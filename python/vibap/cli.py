@@ -7080,6 +7080,13 @@ def build_parser() -> argparse.ArgumentParser:
         "(governance path only)",
     )
     run.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in --json output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports "
+        "(governance path only; requires --json)",
+    )
+    run.add_argument(
         "command", nargs=argparse.REMAINDER, help="command to run after --"
     )
     run.set_defaults(func=cmd_run)
