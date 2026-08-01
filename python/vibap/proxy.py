@@ -3064,9 +3064,12 @@ class GovernanceProxy:
                         options={"verify_aud": False, "verify_iat": False},
                     )
                 except _jwt.PyJWTError as exc:
-                    raise PermissionError(
-                        f"KB-JWT decode failed during nonce extraction: {exc}"
-                    ) from exc
+                    # Sanitize at the source: PyJWT error strings can carry
+                    # library internals (algorithm mismatch, key shape, claim
+                    # names). Surface a fixed code externally; the full
+                    # traceback is preserved via the `from exc` chain and the
+                    # HTTP handler's logger.exception() path.
+                    raise PermissionError("kb_jwt_decode_failed") from exc
                 # FIX-R6-9 (round-6, 2026-04-29): defense-in-depth iat bound
                 # on this second KB-JWT decode. verify_pop above already
                 # bounds the same JWT, but a future refactor that splits
@@ -3083,7 +3086,9 @@ class GovernanceProxy:
                         field_name="KB-JWT iat",
                     )
                 except _jwt.InvalidTokenError as exc:
-                    raise PermissionError(str(exc)) from exc
+                    # Same class as the PyJWTError branch above: PyJWT message
+                    # text is library-internal and must not reach API callers.
+                    raise PermissionError("kb_jwt_iat_invalid") from exc
                 nonce = kb_claims.get("nonce", "")
                 if not isinstance(nonce, str) or not nonce:
                     raise PermissionError("KB-JWT nonce must be a non-empty string")
@@ -3311,12 +3316,16 @@ class GovernanceProxy:
                     self._biscuit_svid_audience,
                 )
             except Exception as exc:
-                raise PermissionError(
-                    f"peer JWT-SVID verification failed: {exc}"
-                ) from exc
+                logger.debug(
+                    "peer JWT-SVID verification failed",
+                    exc_info=exc,
+                )
+                raise PermissionError("peer_jwt_svid_verification_failed") from exc
 
             verified_trust_domain = SpiffeId(svid_claims.spiffe_id).trust_domain.name
             if verified_trust_domain != peer_trust_bundle.trust_domain:
+                # Intentional caller-identifier reflection: this is parsed
+                # from the caller-presented SVID, not library exception text.
                 raise PermissionError(
                     f"SVID trust domain {verified_trust_domain!r} does not match "
                     "the server-configured Biscuit peer trust domain"
@@ -3328,6 +3337,8 @@ class GovernanceProxy:
                     "was requested — cannot bind"
                 )
             if svid_claims.spiffe_id != context.spiffe_id:
+                # Intentional caller-identifier reflection: both identifiers
+                # are caller-presented credential fields, not library internals.
                 raise PermissionError(
                     f"SVID SPIFFE ID {svid_claims.spiffe_id!r} does not "
                     f"match passport's holder_spiffe_id "
@@ -5359,13 +5370,14 @@ class GovernanceProxy:
                 # the outer HTTP handler responds 401 (not 403).
                 raise
             except PermissionError as aat_err:
-                # Token parses as AAT but fails shape validation. Include the
-                # original passport error in the message so responders see both
-                # decode attempts, not just the AAT-specific failure.
-                raise PermissionError(
-                    f"parent token failed passport decode ({passport_err}) "
-                    f"and AAT validation ({aat_err})"
-                ) from aat_err
+                # Token parses as AAT but fails shape validation. Keep both
+                # details in the chained traceback (aat_err was raised while
+                # handling passport_err) and expose only a fixed external code.
+                logger.debug(
+                    "parent token failed passport decode and AAT validation",
+                    exc_info=aat_err,
+                )
+                raise PermissionError("parent_token_aat_validation_failed") from aat_err
             session = self.get_session(str(aat_claims["jti"]))
             if (
                 session.passport_claims.get("credential_format")
@@ -6747,6 +6759,13 @@ def serve_proxy(
                             )
                         )
                     except LineageBudgetConflictError as exc:
+                        # Controlled string (not a path/secret leak), but log
+                        # full detail for operator triage parity with the
+                        # catch-all. See L6800 for the reference pattern.
+                        logger.debug(
+                            "LineageBudgetConflictError in /delegate",
+                            exc_info=exc,
+                        )
                         self._send_json(409, {"error": str(exc)})
                     except ValueError:
                         parent_jti = str(
@@ -6763,6 +6782,17 @@ def serve_proxy(
                             },
                         )
                     except PermissionError as exc:
+                        # PermissionError messages here come from
+                        # delegate_passport and are controlled API-contract
+                        # strings (scope escalation, MIC conformance, budget
+                        # exhausted, depth exceeded, AAT parent-session). The
+                        # PyJWT/AAT-internal leak vectors that previously
+                        # reached this site are sanitized at their sources, so
+                        # str(exc) is safe to surface. Log full detail for
+                        # operator triage.
+                        logger.debug(
+                            "PermissionError in /delegate", exc_info=exc
+                        )
                         self._send_json(403, {"error": str(exc)})
                     else:
                         self._send_json(
@@ -6789,9 +6819,40 @@ def serve_proxy(
             except PassportStateUnavailableError as exc:
                 self._send_json(503, {"error": exc.error_code})
             except PermissionError as exc:
+                # Controlled API-contract messages (PoP, session ended,
+                # passport_revoked, SVID binding). The PyJWT/SVID-internal leak
+                # vectors are sanitized at source. Log full detail for operator
+                # triage; str(exc) is safe to surface.
+                logger.debug(
+                    "PermissionError in VIBAP proxy HTTP handler",
+                    exc_info=exc,
+                )
                 self._send_json(403, {"error": str(exc)})
-            except (TypeError, AttributeError, ValueError, KeyError) as exc:
+            except (ValueError, KeyError) as exc:
+                # ValueError and KeyError are the handler's controlled
+                # 400-response channels for input validation (mission shape,
+                # token_type, risk fields, MAX_KB_JWT_BYTES, missing-field
+                # KeyErrors from MissionPassport.from_dict, etc.). Messages
+                # are authored field names / validation strings, not leaks.
+                # Preserve the message so the API contract and existing
+                # clients/tests keep working; log full detail for triage.
+                logger.debug(
+                    "ValueError/KeyError in VIBAP proxy HTTP handler",
+                    exc_info=exc,
+                )
                 self._send_json(400, {"error": str(exc)})
+            except (TypeError, AttributeError) as exc:
+                # Genuine uncontrolled-leak bucket: arbitrary Python internals,
+                # attribute names, type info from deep library code. Sanitize
+                # to the exception class name only; log the full
+                # message/traceback so operators can triage without exposing
+                # internals to callers.
+                logger.debug(
+                    "Unhandled %s in VIBAP proxy HTTP handler",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+                self._send_json(400, {"error": type(exc).__name__})
             except Exception:  # noqa: BLE001
                 # Catch-all: log with full traceback so operators can triage.
                 # Without this, cryptography faults / invariant trips / disk I/O

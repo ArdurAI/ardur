@@ -183,7 +183,7 @@ def material_from_aat_grant(
         if mission_is_revoked(declaration, public_key):
             raise PermissionError("AAT mission_ref points to a revoked mission")
     except (MissionBindingError, MissionStatusUnavailableError) as exc:
-        raise PermissionError(str(exc)) from exc
+        raise PermissionError("aat_mission_resolution_failed") from exc
 
     granted_tools = _extract_tools(claims)
     mission_tools = set(declaration.passport.allowed_tools)
