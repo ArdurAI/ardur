@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "d5f882ca88c8406f21be74bd3d87510cafb2eacbe1cf3c41dfbfdb2d2d78cb58"
+source_sha256: "975ff8df3dfe6c235ca5aec7d7bd6cf7a0aec698adf0ba135b52dd2202a129a0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -69,6 +69,11 @@ All notable changes to Ardur will be documented in this file.
   `holder_public_key_pem_invalid` instead of leaking PEM-decoder text
 
 ### Added
+- Add `--json` flag to `ardur run` governance path that emits the result as
+  machine-readable JSON to stderr (session id, permits/denials, attestation
+  digest, receipt paths). stdout is reserved for the child process output so
+  pipe chains like `ardur run --json -- pytest 2>governance.json` work cleanly.
+  The JWT-like attestation token is omitted; use `attestation_digest` instead
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-

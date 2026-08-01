@@ -893,6 +893,7 @@ ardur run [--home DIR]
           [--no-kernel-correlation]
           [--enforce]
           [--resource-scope PATH ... | --no-resource-scope]
+          [--json]
           -- <command>
 ```
 
@@ -909,7 +910,13 @@ a scaffolded transparent-intercept path today; it fails closed rather than
 claiming universal CLI capture. `--no-kernel-correlation` disables the
 best-effort kernel/cgroup correlation attempt that may be available on suitable
 Linux hosts. `--enforce` aborts instead of degrading when kernel policy cannot
-be installed.
+be installed. `--json` emits the governance result as machine-readable JSON to
+stderr (session id, permits/denials, attestation digest, receipt paths) so
+programmatic consumers can parse governance outcomes without scraping the
+human-readable summary. stdout is reserved for the child process output so pipe
+chains like `ardur run --json -- pytest 2>governance.json` work cleanly. The
+JWT-like attestation token is omitted from JSON output; use `attestation_digest`
+instead.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or
