@@ -28,6 +28,11 @@ All notable changes to Ardur will be documented in this file.
   `protect claude-code --home` so a symlinked parent cannot silently
   materialize Ed25519 keys, mission JWTs, state, and the governance log
   at an unintended resolved target
+- Sanitize SPIFFE library internals (e.g. segment-parse errors) and AAT
+  decoder text from proxy HTTP error responses so `PermissionError`
+  messages that reach 403 bodies use fixed codes
+  (`peer_jwt_svid_verification_failed`, `parent_token_aat_validation_failed`,
+  `aat_mission_resolution_failed`) instead of leaking library stack text
 
 ### Added
 - Emit machine-readable JSON latency reports with raw sample distributions,
