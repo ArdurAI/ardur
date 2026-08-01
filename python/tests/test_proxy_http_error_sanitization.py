@@ -308,13 +308,11 @@ class TestPythonInternalLeakSanitization:
         base, _ = http_proxy
         leak_sentinel = "INTERNAL_TYPE_MISMATCH_DETAIL"
 
-        import vibap.proxy as proxy_mod
-
         def _raising_evaluate(self, *args, **kwargs):
             raise TypeError(leak_sentinel)
 
         monkeypatch.setattr(
-            proxy_mod.GovernanceProxy, "evaluate_tool_call", _raising_evaluate
+            GovernanceProxy, "evaluate_tool_call", _raising_evaluate
         )
 
         status, body = _post(
@@ -335,13 +333,11 @@ class TestPythonInternalLeakSanitization:
         base, _ = http_proxy
         leak_sentinel = "internal_attribute_path_detail"
 
-        import vibap.proxy as proxy_mod
-
         def _raising_evaluate(self, *args, **kwargs):
             raise AttributeError(leak_sentinel)
 
         monkeypatch.setattr(
-            proxy_mod.GovernanceProxy, "evaluate_tool_call", _raising_evaluate
+            GovernanceProxy, "evaluate_tool_call", _raising_evaluate
         )
 
         status, body = _post(
@@ -372,7 +368,6 @@ class TestControlledErrorMessagePreservation:
     def test_permission_error_controlled_message_preserved(self, http_proxy):
         """passport_revoked is a controlled API-contract code surfaced via the
         PermissionError catch; it must remain unchanged."""
-        from vibap.passport import issue_passport
 
         base, proxy = http_proxy
         # Issue a session, then revoke it, then evaluate to trigger the
@@ -433,10 +428,9 @@ class TestStatusCodeUnchanged:
 
     def test_typeerror_still_returns_400(self, http_proxy, monkeypatch):
         base, _ = http_proxy
-        import vibap.proxy as proxy_mod
 
         monkeypatch.setattr(
-            proxy_mod.GovernanceProxy,
+            GovernanceProxy,
             "evaluate_tool_call",
             lambda self, *a, **k: (_ for _ in ()).throw(TypeError("x")),
         )

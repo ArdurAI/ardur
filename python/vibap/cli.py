@@ -2973,7 +2973,7 @@ def _safe_exception_message(exc: BaseException) -> str:
 
         if isinstance(exc, KeyDirectoryError):
             return text
-    except ImportError:
+    except ImportError:  # noqa: BLE001 - passport optional in minimal installs
         pass
     # FileNotFoundError / PermissionError re-raised by the passport module
     # carry intentional messages (no errno pattern). Other OSError subclasses

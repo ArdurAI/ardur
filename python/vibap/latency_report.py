@@ -33,7 +33,6 @@ import os
 import platform
 import re
 import statistics
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -482,7 +481,7 @@ def write_report_atomic(
         target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             os.chmod(target_dir, 0o700)
-        except OSError:
+        except OSError:  # noqa: BLE001 - best-effort chmod; dir may be on FS that doesn't support mode bits
             pass
 
     safe_name = _safe_filename_component(report.benchmark_name)

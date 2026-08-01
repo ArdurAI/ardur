@@ -39,7 +39,6 @@ from typing import Any
 from .latency_gate import (
     GateDecision,
     GateProtocol,
-    LatencyGateError,
     evaluate_reports,
 )
 

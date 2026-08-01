@@ -26,7 +26,7 @@ from typing import Any
 import jwt
 import pytest
 
-from vibap.passport import ALGORITHM, MissionPassport, issue_passport
+from vibap.passport import ALGORITHM
 from vibap.proxy import GovernanceProxy, serve_proxy
 
 

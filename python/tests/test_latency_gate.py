@@ -16,8 +16,6 @@ the emitter cannot produce (e.g. malformed schema, missing p95).
 from __future__ import annotations
 
 import copy
-import math
-from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -26,14 +24,12 @@ from vibap.latency_gate import (
     VERDICT_FAIL,
     VERDICT_INCONCLUSIVE,
     VERDICT_PASS,
-    GateDecision,
     GateProtocol,
     LatencyGateError,
     PerReportResult,
     evaluate_reports,
 )
 from vibap.latency_report import (
-    REPORT_SCHEMA_VERSION,
     FunctionalFailure,
     build_report,
     report_to_dict,

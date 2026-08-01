@@ -19,7 +19,6 @@ import pytest
 from vibap.cli import main
 from vibap.latency_gate import (
     VERDICT_FAIL,
-    VERDICT_INCONCLUSIVE,
     VERDICT_PASS,
     GateProtocol,
 )
@@ -30,7 +29,6 @@ from vibap.latency_gate_cli import (
     run_gate,
 )
 from vibap.latency_report import (
-    REPORT_SCHEMA_VERSION,
     build_report,
     report_to_dict,
 )

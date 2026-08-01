@@ -12,11 +12,8 @@ and bounded retention.
 from __future__ import annotations
 
 import json
-import math
-import os
 import re
 import statistics
-import time
 from pathlib import Path
 
 import pytest
@@ -34,9 +31,7 @@ from vibap.latency_report import (
     validate_samples,
     write_report_atomic,
     FunctionalFailure,
-    LatencyReport,
     LatencyReportError,
-    ValidatedSamples,
 )
 
 
@@ -496,6 +491,7 @@ def test_sanitize_message_redacts_paths_tokens_jwts() -> None:
     # The dataclass keeps the raw message; the sanitizer is applied when the
     # message originates from stderr via functional_failure_from_subprocess.
     # Confirm the helper directly:
+    assert failure.message == leaky  # verify raw message is retained
     sanitized = lr._sanitize_message(leaky)
     assert "/Users" not in sanitized
     assert "eyJhbGci" not in sanitized
