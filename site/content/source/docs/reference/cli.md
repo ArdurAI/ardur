@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "98f41f6fb5077a29140ad5fa5456052205cfcd376b8c3f019b7407ec38c9add5"
+source_sha256: "983f3f786d963bebe935a4d80fc9b479dc069552153a0f8a9c6090756084d5f1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1961,6 +1961,54 @@ the report path does not print local absolute paths, raw tokens, private keys, o
 provider credentials, and the hints do not call live providers, create missing
 evidence, reconstruct private keys, prove provider-hidden behavior, or claim
 kernel/process capture.
+
+### `ardur latency-gate evaluate`
+
+Load latency report JSON files from a directory, evaluate them against the
+deterministic multi-report gate (ADR-027), and emit a structured verdict.
+
+```text
+ardur latency-gate evaluate --reports <reports-dir>
+    [--threshold-ms 10.0] [--min-runs 3] [--percentile 95]
+    [--output-format json|text]
+```
+
+The command reads every `*.json` file in `--reports`, parses each as a
+machine-readable latency report (produced by the benchmark harness), and runs
+the `GateProtocol` evaluator. The verdict is one of `pass`, `fail`, or
+`inconclusive`. A `fail` is always emitted when any report has a functional
+failure (the hook command exited non-zero or timed out), regardless of
+latency. An `inconclusive` verdict is returned when fewer than `--min-runs`
+valid reports are available.
+
+**JSON output** (`--output-format json`, default) prints a top-level envelope
+with `ok`, `verdict`, `decision` (the canonical gate output including
+per-report results and aggregate p95), and `invalid_files` (files the loader
+rejected, with reasons). Exit code is `0` on pass, `1` on fail, and `2` on
+inconclusive.
+
+**Text output** (`--output-format text`) prints a human-readable summary with
+the verdict, aggregate p95, per-report one-liners, and the rationale.
+
+If `--reports` is empty or whitespace-only, `--threshold-ms` is not a positive
+finite number, `--min-runs` is less than 1, or `--percentile` is outside
+1..100, the command fails closed with exit code `1` and prints a JSON response
+with `ok: false`, `error_code`, `condition`, `message`, `detail`, and
+placeholder-only `next_steps` (`latency_gate_reports_empty`,
+`latency_gate_threshold_ms_invalid`, `latency_gate_min_runs_invalid`,
+`latency_gate_percentile_invalid`).
+
+If `--reports` does not exist, is not a directory, or report loading fails,
+the command fails closed with exit code `1`
+(`latency_gate_reports_dir_not_found`,
+`latency_gate_reports_not_directory`, `latency_gate_load_failed`).
+
+If gate evaluation or output formatting fails, the command fails closed with
+exit code `1` (`latency_gate_protocol_invalid`,
+`latency_gate_output_format_invalid`).
+
+The `next_steps` hints are placeholder-only — they do not print local
+absolute paths, raw tokens, private keys, or provider credentials.
 
 ## Where to look next
 

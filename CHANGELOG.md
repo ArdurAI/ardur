@@ -36,6 +36,11 @@ All notable changes to Ardur will be documented in this file.
   violation fields, and runner metadata from an explicit allowlist only.
   Reports are written as atomic 0600 files and uploaded as CI artifacts with
   `if: always()` and bounded retention.
+- Add `ardur latency-gate evaluate` CLI command that loads latency report
+  JSON files from a directory, runs the deterministic multi-report gate
+  evaluator (ADR-027), and emits a structured pass/fail/inconclusive verdict
+  with per-report detail. Supports `--threshold-ms`, `--min-runs`,
+  `--percentile`, and `--output-format json|text` for CI integration.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

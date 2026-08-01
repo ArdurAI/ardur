@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "50d038f75d689d720fef57db7921eba4f2229be73f5f494157b94fe218bf5bb7"
+source_sha256: "7db6c465a954ffb69206fb425473e253d98da342523582adcfd5fce4b985550e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -53,6 +53,11 @@ All notable changes to Ardur will be documented in this file.
   violation fields, and runner metadata from an explicit allowlist only.
   Reports are written as atomic 0600 files and uploaded as CI artifacts with
   `if: always()` and bounded retention.
+- Add `ardur latency-gate evaluate` CLI command that loads latency report
+  JSON files from a directory, runs the deterministic multi-report gate
+  evaluator (ADR-027), and emits a structured pass/fail/inconclusive verdict
+  with per-report detail. Supports `--threshold-ms`, `--min-runs`,
+  `--percentile`, and `--output-format json|text` for CI integration.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
