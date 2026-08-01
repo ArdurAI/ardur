@@ -7075,8 +7075,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--json",
         action="store_true",
-        help="emit governance run result as JSON to stdout instead of human-readable "
-        "summary to stderr (governance path only)",
+        help="emit governance run result as JSON to stderr instead of human-readable "
+        "summary; stdout stays reserved for the child process output "
+        "(governance path only)",
     )
     run.add_argument(
         "command", nargs=argparse.REMAINDER, help="command to run after --"
