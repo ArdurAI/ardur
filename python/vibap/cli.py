@@ -1686,7 +1686,7 @@ def _verify_failure_next_steps() -> list[dict[str, str]]:
 
 
 def _verify_failure_response(exc: Exception) -> dict:
-    detail = str(exc).strip() or exc.__class__.__name__
+    detail = _safe_exception_message(exc)
     return {
         "ok": False,
         "valid": False,
@@ -2190,8 +2190,6 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
         RuntimeEvidenceError,
         OfflineVerificationError,
         KeyDirectoryError,
-        TypeError,
-        ValueError,
     ) as exc:
         response: dict[str, object] = {
             "ok": False,
@@ -2205,6 +2203,15 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
         index = getattr(exc, "index", None)
         if index is not None:
             response["receipt_index"] = index
+        _print_json(response)
+        return 1
+    except (TypeError, ValueError) as exc:
+        response: dict[str, object] = {
+            "ok": False,
+            "valid": False,
+            "error": "runtime_evidence_correlation_failed",
+            "message": _safe_exception_message(exc),
+        }
         _print_json(response)
         return 1
     except OSError:
@@ -2286,16 +2293,30 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
         ReceiverAttestationError,
         ReceiverAttestationVerificationError,
         KeyDirectoryError,
-        FileNotFoundError,
-        PermissionError,
-        OSError,
-        ValueError,
     ) as exc:
         _print_json(
             {
                 "valid": False,
                 "error": "receiver_attestation_verification_failed",
                 "message": str(exc),
+            }
+        )
+        return 1
+    except (FileNotFoundError, PermissionError) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_verification_failed",
+                "message": _safe_exception_message(exc),
+            }
+        )
+        return 1
+    except (OSError, ValueError) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_verification_failed",
+                "message": _safe_exception_message(exc),
             }
         )
         return 1
@@ -2371,7 +2392,7 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             else []
         )
     except TelemetryExportError as exc:
-        _print_json({"ok": False, "error": exc.code, "message": str(exc)})
+        _print_json({"ok": False, "error": exc.code, "message": _safe_exception_message(exc)})
         return 1
 
     if args.telemetry_output is None and args.otlp_endpoint is None:

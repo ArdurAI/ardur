@@ -14,6 +14,7 @@ from contextlib import suppress
 import hashlib
 import html
 import json
+import logging
 import os
 import plistlib
 import re
@@ -55,6 +56,8 @@ EVENT_SCHEMA_VERSION = "ardur.personal.event.v0.1"
 SESSION_REVIEW_SCHEMA_VERSION = "ardur.personal.session_review.v0.1"
 DEFAULT_HUB_HOST = "127.0.0.1"
 DEFAULT_HUB_PORT = 8765
+
+logger = logging.getLogger(__name__)
 DEFAULT_HUB_HOME = Path(
     os.environ.get("ARDUR_PERSONAL_HOME", DEFAULT_HOME / "personal")
 ).expanduser()
@@ -1611,9 +1614,13 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
                 {"ok": False, "error": str(exc), "error_code": exc.code},
                 status=exc.status,
             )
-        except Exception as exc:  # pragma: no cover - defensive server boundary
+        except Exception:  # pragma: no cover - defensive server boundary
+            logger.exception(
+                "Unhandled exception in Personal Hub HTTP handler",
+                extra={"path": "<request-path-redacted>"},
+            )
             self._send_json(
-                {"ok": False, "error": str(exc), "error_code": "internal_error"},
+                {"ok": False, "error": "internal server error", "error_code": "internal_error"},
                 status=500,
             )
 
@@ -2029,7 +2036,7 @@ def hub_request(
         try:
             return json.loads(exc.read().decode("utf-8"))
         except Exception:
-            return {"ok": False, "error": str(exc), "status": exc.code}
+            return {"ok": False, "error": "hub_error", "error_code": "hub_error", "status": exc.code}
     except OSError:
         return {
             "ok": False,

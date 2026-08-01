@@ -6372,8 +6372,48 @@ def serve_proxy(
         def do_GET(self) -> None:  # noqa: N802
             self._request_start_time = time.time()
             path = self._request_path()
-            # Public endpoints respond without auth.
-            if path in {"/health", "/healthz"}:
+            try:
+                # Public endpoints respond without auth.
+                if path in {"/health", "/healthz"}:
+                    self._send_json(
+                        200,
+                        {
+                            "status": "ok",
+                            "version": API_VERSION,
+                            "sessions": active_session_count(),
+                        },
+                    )
+                    return
+                if path == "/.well-known/jwks.json":
+                    self._send_json(200, {"keys": [_public_key_to_jwk(proxy.public_key)]})
+                    return
+                if not self._check_rate_limit():
+                    return
+                if not self._check_auth():
+                    return
+                if path == "/metrics":
+                    body = ardur_metrics.render().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("X-Frame-Options", "DENY")
+                    self.send_header("Content-Security-Policy", "default-src 'none'")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.send_header("Cache-Control", "no-store")
+                    if tls_active:
+                        self.send_header("Strict-Transport-Security", "max-age=31536000")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    ardur_metrics.requests_total.inc(
+                        method=getattr(self, "command", "?"),
+                        path=path,
+                        status="200",
+                    )
+                    return
+                if path != "/":
+                    self._send_json(404, {"error": "not found"})
+                    return
                 self._send_json(
                     200,
                     {
@@ -6382,45 +6422,15 @@ def serve_proxy(
                         "sessions": active_session_count(),
                     },
                 )
-                return
-            if path == "/.well-known/jwks.json":
-                self._send_json(200, {"keys": [_public_key_to_jwk(proxy.public_key)]})
-                return
-            if not self._check_rate_limit():
-                return
-            if not self._check_auth():
-                return
-            if path == "/metrics":
-                body = ardur_metrics.render().encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("X-Frame-Options", "DENY")
-                self.send_header("Content-Security-Policy", "default-src 'none'")
-                self.send_header("Referrer-Policy", "no-referrer")
-                self.send_header("Cache-Control", "no-store")
-                if tls_active:
-                    self.send_header("Strict-Transport-Security", "max-age=31536000")
-                self.end_headers()
-                self.wfile.write(body)
-                ardur_metrics.requests_total.inc(
-                    method=getattr(self, "command", "?"),
-                    path=path,
-                    status="200",
+            except Exception:  # noqa: BLE001 - defensive server boundary
+                logger.exception(
+                    "Unhandled exception in VIBAP proxy HTTP GET handler",
+                    extra={
+                        "method": "GET",
+                        "path": "<request-path-redacted>",
+                    },
                 )
-                return
-            if path != "/":
-                self._send_json(404, {"error": "not found"})
-                return
-            self._send_json(
-                200,
-                {
-                    "status": "ok",
-                    "version": API_VERSION,
-                    "sessions": active_session_count(),
-                },
-            )
+                self._send_json(500, {"error": "internal server error"})
 
         def do_POST(self) -> None:  # noqa: N802
             self._request_start_time = time.time()
