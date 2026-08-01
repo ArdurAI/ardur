@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "4e2fb2296eb5f95fc56a761cab07e7360a5d72b9073a358c4b4439332fd6ccab"
+source_sha256: "5f423559993d273b19f41bac1fb832081028fd057ffc86fa050a8defd825e431"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -910,7 +910,7 @@ ardur run [--home DIR]
           [--no-kernel-correlation]
           [--enforce]
           [--resource-scope PATH ... | --no-resource-scope]
-          [--json]
+          [--json] [--redact-paths]
           -- <command>
 ```
 
@@ -933,7 +933,12 @@ programmatic consumers can parse governance outcomes without scraping the
 human-readable summary. stdout is reserved for the child process output so pipe
 chains like `ardur run --json -- pytest 2>governance.json` work cleanly. The
 JWT-like attestation token is omitted from JSON output; use `attestation_digest`
-instead.
+instead. `--redact-paths` replaces local absolute paths in the JSON output
+(`home`, `passport_path`, `receipts_path`, `correlation.daemon_socket`,
+`correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
+`<var-folders>`, `<run-ardur>`, `<cgroup>`) so the result is safe to share in
+CI artifacts or bug reports without leaking the filesystem layout. It has no
+effect without `--json`.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or

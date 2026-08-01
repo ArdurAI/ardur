@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "cce568727ce91b26415212e162bcda3a1ca5da25b617aa646a1ad4307ec20e3e"
+source_sha256: "efb5fd9f8eb39db82aac489a6d2c53bf68df095121520f56bd67f18713b460d6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -74,6 +74,11 @@ All notable changes to Ardur will be documented in this file.
   digest, receipt paths). stdout is reserved for the child process output so
   pipe chains like `ardur run --json -- pytest 2>governance.json` work cleanly.
   The JWT-like attestation token is omitted; use `attestation_digest` instead
+- Add `--redact-paths` flag to `ardur run --json` that replaces local absolute
+  paths (`home`, `passport_path`, `receipts_path`, `correlation.daemon_socket`,
+  `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
+  `<var-folders>`, `<run-ardur>`, `<cgroup>`) so JSON output is safe to share
+  in CI artifacts or bug reports without leaking the filesystem layout
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-

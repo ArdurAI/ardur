@@ -57,6 +57,11 @@ All notable changes to Ardur will be documented in this file.
   digest, receipt paths). stdout is reserved for the child process output so
   pipe chains like `ardur run --json -- pytest 2>governance.json` work cleanly.
   The JWT-like attestation token is omitted; use `attestation_digest` instead
+- Add `--redact-paths` flag to `ardur run --json` that replaces local absolute
+  paths (`home`, `passport_path`, `receipts_path`, `correlation.daemon_socket`,
+  `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
+  `<var-folders>`, `<run-ardur>`, `<cgroup>`) so JSON output is safe to share
+  in CI artifacts or bug reports without leaking the filesystem layout
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-
