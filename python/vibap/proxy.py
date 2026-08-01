@@ -6533,8 +6533,12 @@ def serve_proxy(
                             try:
                                 loaded = load_pem_public_key(holder_pem.encode("utf-8"))
                             except Exception as exc:  # noqa: BLE001
+                                logger.debug(
+                                    "cryptography error loading holder_public_key_pem",
+                                    exc_info=exc,
+                                )
                                 raise ValueError(
-                                    f"invalid holder_public_key_pem: {exc}"
+                                    "holder_public_key_pem_invalid"
                                 ) from exc
                             if not isinstance(loaded, ec.EllipticCurvePublicKey):
                                 raise ValueError(
