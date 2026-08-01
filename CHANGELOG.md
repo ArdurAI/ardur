@@ -5,6 +5,19 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Close catch-all `str(exc)` leak paths in the Personal Hub HTTP handler,
+  the VIBAP proxy GET handler (which had no exception guard at all), the
+  native messaging host, and `hub_request()` so unhandled exceptions
+  return generic safe messages (`internal server error`, `hub_error`)
+  instead of leaking raw Python internals, filesystem paths, or crypto
+  library details to API consumers. Full exceptions are now logged for
+  operator triage via `logger.exception()`.
+- Route CLI error paths (`_verify_failure_response`,
+  `cmd_evidence_correlate`, `_cmd_verify_receiver_attestation`,
+  `cmd_telemetry_export`) through `_safe_exception_message()` so generic
+  built-in exceptions (`OSError`, `TypeError`, `ValueError`) are
+  sanitized to class name only while domain exceptions with safe
+  messages are preserved.
 - Detect PKCS#8 private keys in the root-level protect artifact scanner so
   leaked private-key material is flagged alongside existing PEM detection
 - Cover hook-lifecycle runtime artifacts in `.gitignore` (receipt chains,
