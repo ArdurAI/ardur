@@ -217,6 +217,10 @@ All notable changes to Ardur will be documented in this file.
   instead of silently ignoring it, so users do not believe local paths
   were redacted from the human-readable summary (they are not — path
   redaction applies only to the `--json` governance output).
+- Catch `OSError` (e.g. read-only filesystem, permission denied) during
+  key-directory creation in `ardur issue --keys-dir` so it returns a
+  structured JSON error (`keys_dir_unreachable`) instead of leaking a
+  raw Python traceback with filesystem paths.
 
 ## [0.2.0] — 2026-07-22
 

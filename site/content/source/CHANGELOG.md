@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "20e13c3e57d13bdfa9e70228cf7c3d1568c5e87ce46fae6d15b4dca1710dd152"
+source_sha256: "5fe2d781e76497bd857b9aabbfd5fd6544ada1d695656157479a6b3fbc43aae7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -234,6 +234,10 @@ All notable changes to Ardur will be documented in this file.
   instead of silently ignoring it, so users do not believe local paths
   were redacted from the human-readable summary (they are not — path
   redaction applies only to the `--json` governance output).
+- Catch `OSError` (e.g. read-only filesystem, permission denied) during
+  key-directory creation in `ardur issue --keys-dir` so it returns a
+  structured JSON error (`keys_dir_unreachable`) instead of leaking a
+  raw Python traceback with filesystem paths.
 
 ## [0.2.0] — 2026-07-22
 
