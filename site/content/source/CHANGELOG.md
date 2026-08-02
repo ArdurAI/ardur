@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "cff9d23a9c905be631657aff4321c9e28599c09168bfd1126b0845b0fac74649"
+source_sha256: "db1e6d82d139dc494fcc1a310bab3e45f09771c10f6614bd0eea992ab9ff24b3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -84,6 +84,8 @@ All notable changes to Ardur will be documented in this file.
   `uninstall`) so users who expect `--json` (present on `run` and `verify`)
   do not get `unrecognized arguments: --json`. Output is identical with
   and without the flag.
+- Accept `--json` as a no-op flag on always-JSON protocol-path commands
+  (`issue`, `attest`, `anchor`) for the same CLI consistency reason.
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-

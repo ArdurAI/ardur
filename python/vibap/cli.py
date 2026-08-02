@@ -6342,6 +6342,12 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument(
         "--keys-dir", type=str, help="directory containing VIBAP signing keys"
     )
+    issue.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     issue.set_defaults(func=cmd_issue)
 
     verify = subparsers.add_parser(
@@ -6607,6 +6613,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    anchor.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     anchor.set_defaults(func=cmd_anchor)
 
     receiver_fixture = subparsers.add_parser(
@@ -6658,6 +6670,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--state-dir", type=str, help="directory containing persisted sessions"
     )
     attest.add_argument("--log-path", type=str, help="JSONL audit log path")
+    attest.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     attest.set_defaults(func=cmd_attest)
 
     cc_hook = subparsers.add_parser(

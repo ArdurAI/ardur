@@ -67,6 +67,8 @@ All notable changes to Ardur will be documented in this file.
   `uninstall`) so users who expect `--json` (present on `run` and `verify`)
   do not get `unrecognized arguments: --json`. Output is identical with
   and without the flag.
+- Accept `--json` as a no-op flag on always-JSON protocol-path commands
+  (`issue`, `attest`, `anchor`) for the same CLI consistency reason.
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-
