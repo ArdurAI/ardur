@@ -62,6 +62,11 @@ All notable changes to Ardur will be documented in this file.
   `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
   `<var-folders>`, `<run-ardur>`, `<cgroup>`) so JSON output is safe to share
   in CI artifacts or bug reports without leaking the filesystem layout
+- Accept `--json` as a no-op flag on always-JSON personal-path commands
+  (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
+  `uninstall`) so users who expect `--json` (present on `run` and `verify`)
+  do not get `unrecognized arguments: --json`. Output is identical with
+  and without the flag.
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-

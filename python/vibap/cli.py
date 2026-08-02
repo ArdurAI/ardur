@@ -6926,6 +6926,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(Path("examples/ardur-personal-extension")),
         help="browser extension directory to show in setup output",
     )
+    setup.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     setup.set_defaults(func=cmd_setup)
 
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
@@ -6934,6 +6940,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
     )
     status.add_argument("--home", type=str, help="Ardur Personal home directory")
+    status.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
@@ -6941,6 +6953,12 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     doctor.add_argument(
         "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
+    doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     doctor.set_defaults(func=cmd_doctor)
 
@@ -6955,6 +6973,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=str(_default_claude_plugin_dir()),
         help="Claude Code plugin directory",
+    )
+    doctor_cc.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
 
@@ -6974,6 +6998,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="proxy bearer token (defaults to ARDUR_API_TOKEN env)",
     )
+    kill_switch.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     kill_switch.set_defaults(func=cmd_kill_switch)
 
     uninstall = subparsers.add_parser(
@@ -6989,6 +7019,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="preview uninstall removals without deleting launch files or local data",
+    )
+    uninstall.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     uninstall.set_defaults(func=cmd_uninstall)
 

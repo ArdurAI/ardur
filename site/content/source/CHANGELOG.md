@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "fa4a8f8b4772b79b3f4f879d1e8fd73c4ad758b547e55b85fd0446fe8aeeed9b"
+source_sha256: "cff9d23a9c905be631657aff4321c9e28599c09168bfd1126b0845b0fac74649"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -79,6 +79,11 @@ All notable changes to Ardur will be documented in this file.
   `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
   `<var-folders>`, `<run-ardur>`, `<cgroup>`) so JSON output is safe to share
   in CI artifacts or bug reports without leaking the filesystem layout
+- Accept `--json` as a no-op flag on always-JSON personal-path commands
+  (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
+  `uninstall`) so users who expect `--json` (present on `run` and `verify`)
+  do not get `unrecognized arguments: --json`. Output is identical with
+  and without the flag.
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-
