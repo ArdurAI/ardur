@@ -62,6 +62,10 @@ All notable changes to Ardur will be documented in this file.
   `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
   `<var-folders>`, `<run-ardur>`, `<cgroup>`) so JSON output is safe to share
   in CI artifacts or bug reports without leaking the filesystem layout
+- Add `--redact-paths` flag to `ardur status`, `ardur doctor`, and
+  `ardur doctor-claude-code` so the hub status `home` field and any local
+  paths in the JSON output are replaced with stable placeholders before
+  sharing in CI artifacts or bug reports
 - Accept `--json` as a no-op flag on always-JSON personal-path commands
   (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
   `uninstall`) so users who expect `--json` (present on `run` and `verify`)

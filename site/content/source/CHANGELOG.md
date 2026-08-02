@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "37d98783968bbeb492730671be2290cea6608fe76649d1551448cb8c25d7175d"
+source_sha256: "6dee6f21ccc62a8d409e100b0225e210c424a6106b332e138db9e70ca19175d4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -79,6 +79,10 @@ All notable changes to Ardur will be documented in this file.
   `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
   `<var-folders>`, `<run-ardur>`, `<cgroup>`) so JSON output is safe to share
   in CI artifacts or bug reports without leaking the filesystem layout
+- Add `--redact-paths` flag to `ardur status`, `ardur doctor`, and
+  `ardur doctor-claude-code` so the hub status `home` field and any local
+  paths in the JSON output are replaced with stable placeholders before
+  sharing in CI artifacts or bug reports
 - Accept `--json` as a no-op flag on always-JSON personal-path commands
   (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
   `uninstall`) so users who expect `--json` (present on `run` and `verify`)

@@ -128,7 +128,7 @@ from .proxy import (
     TLSConfigurationError,
     serve_proxy,
 )
-from .run_bridge import VALID_VIA_MODES, run_governed_cli
+from .run_bridge import VALID_VIA_MODES, _redact_local_path, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
 from .tool_preflight import (
     FAIL_ON_CHOICES,
@@ -4096,6 +4096,30 @@ def cmd_setup(args: argparse.Namespace) -> int:
     return 0 if response.get("ok") else 1
 
 
+def _redact_paths_in_response(response: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of *response* with local absolute paths replaced.
+
+    Used by ``status``, ``doctor``, and ``doctor-claude-code`` when
+    ``--redact-paths`` is set so the JSON output is safe to share in CI
+    artifacts or bug reports without leaking the filesystem layout.
+
+    Redacts standalone path-valued fields (``home``, ``hub_url``, ``detail``)
+    using the same ``_redact_local_path()`` helper proven on
+    ``ardur run --json --redact-paths``. The ``doctor`` and
+    ``doctor-claude-code`` commands already use ``<ardur-home>`` /
+    ``<ardur-config>`` / ``<claude-code-plugin>`` placeholders in their
+    ``checks[].detail`` and ``next_steps`` fields, so the primary leak this
+    closes is the hub ``/v1/status`` success response which returns the raw
+    local home path in its ``home`` field.
+    """
+    redacted = dict(response)
+    for key in ("home", "hub_url", "detail"):
+        val = redacted.get(key)
+        if isinstance(val, str):
+            redacted[key] = _redact_local_path(val)
+    return redacted
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     hub_token_failure = _hub_token_invalid_failure(args)
     if hub_token_failure is not None:
@@ -4109,6 +4133,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         home=args.home,
     )
     response = status_response_with_next_steps(response)
+    if getattr(args, "redact_paths", False):
+        response = _redact_paths_in_response(response)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
@@ -4122,6 +4148,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         response = doctor_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
+    if getattr(args, "redact_paths", False):
+        response = _redact_paths_in_response(response)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
@@ -6073,6 +6101,8 @@ def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
         _print_json(path_failure)
         return 1
     response = claude_code_doctor(plugin_dir=args.plugin_dir, home=args.home)
+    if getattr(args, "redact_paths", False):
+        response = _redact_paths_in_response(response)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
@@ -7004,6 +7034,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
     )
+    status.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
+    )
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
@@ -7017,6 +7053,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
+    )
+    doctor.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
     )
     doctor.set_defaults(func=cmd_doctor)
 
@@ -7037,6 +7079,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
+    )
+    doctor_cc.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
     )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
 

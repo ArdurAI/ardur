@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "c264a6b82d4e25568886d33de40cd100873a5e1c68a0dfed5b7919fa7b96d03c"
+source_sha256: "045b694492635753e6aa90dd49b3b2ecdc6ff2293b842265dadf7ebcd25bbb1a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -772,7 +772,7 @@ token, LaunchAgent, key, session, log, state, or service artifacts are created.
 Show Hub status — current sessions, latest receipt, adapter availability.
 
 ```text
-ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR]
+ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR] [--redact-paths]
 ```
 
 When the local Hub cannot be reached, returns a local token/auth setup error, or
@@ -785,6 +785,11 @@ placeholders such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` and do not
 copy raw invalid file URLs, local paths, tokens, or provider data into shared
 logs. Healthy Hub responses preserve the existing response shape and omit
 actionable remediation.
+
+`--redact-paths` replaces local absolute paths in the JSON output (notably the
+`home` field returned by a healthy Hub) with stable placeholders (`<tmp>`,
+`<home>`, `<var-folders>`) so the output is safe to share in CI artifacts or
+bug reports without leaking the filesystem layout.
 
 A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
 before any network call. The token is trimmed internally; a whitespace-only
@@ -806,7 +811,7 @@ Health-check the local Ardur Personal setup: config presence, Hub
 reachability, key material, write permissions.
 
 ```text
-ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
+ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN] [--redact-paths]
 ```
 
 The JSON output preserves the `ok` and `checks` fields and includes a
@@ -817,6 +822,9 @@ checking the loopback Hub, and re-running `ardur doctor`; they use placeholders
 such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw
 local paths, invalid file URLs, or tokens. When the core setup is healthy,
 `next_steps` is an empty array.
+
+`--redact-paths` replaces local absolute paths in the JSON output with stable
+placeholders so the output is safe to share in CI artifacts or bug reports.
 
 A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
 before any network call. The token is trimmed internally; a whitespace-only
@@ -839,13 +847,16 @@ plugin files, missing `claude` binary, missing or stale `active_mission.jwt`,
 and machine-readable `next_steps` remediation hints when a check fails.
 
 ```text
-ardur doctor-claude-code [--home DIR] [--plugin-dir DIR]
+ardur doctor-claude-code [--home DIR] [--plugin-dir DIR] [--redact-paths]
 ```
 
 The command is local-only: it inspects files, PATH, and Claude Code plugin
 validation state, but does not run a live Claude prompt or call a provider API.
 Use failed `next_steps` entries to recover the setup, then re-run the doctor
 before claiming the local Claude Code path is ready.
+
+`--redact-paths` replaces local absolute paths in the JSON output with stable
+placeholders so the output is safe to share in CI artifacts or bug reports.
 
 If `--home` or `--plugin-dir` is supplied as an empty or whitespace-only string,
 `ardur doctor-claude-code` exits `1` before running any diagnostic check. The
