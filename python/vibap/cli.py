@@ -6265,8 +6265,48 @@ def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
     return 2
 
 
+class _JsonAwareArgumentParser(argparse.ArgumentParser):
+    """Argparse parser that honours the ``--json`` contract on argparse errors.
+
+    When ``--json`` is present anywhere in the raw argv, argparse-level
+    errors (missing required arguments, ambiguous options, etc.) emit a
+    structured JSON payload to stderr instead of the human-readable usage
+    block, so JSON consumers always receive machine-readable output.
+
+    Non-JSON behaviour is byte-identical to ``argparse.ArgumentParser``:
+    usage text to stderr and ``SystemExit(2)``.
+
+    The ``--json`` flag is detected from the argv passed to ``parse_args``
+    (or ``sys.argv`` when none is supplied). Subparsers inherit this class
+    automatically via argparse's ``parser_class`` default of ``type(self)``,
+    so a missing required argument on any subcommand (for example
+    ``ardur evidence correlate --json`` without ``--source-format``) is
+    routed through the same JSON path.
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        # argparse routes every parse error through ``error()``. Reconstruct
+        # the argv actually being parsed (argv passed to ``parse_args`` when
+        # provided, otherwise the live ``sys.argv``), so the detection works
+        # under both interactive invocation and programmatic ``main(argv)``.
+        raw_argv = getattr(self, "_raw_argv", None)
+        if raw_argv is None:
+            raw_argv = sys.argv[1:]
+        if "--json" in raw_argv:
+            payload = {
+                "ok": False,
+                "error": "argument_error",
+                "error_code": "argument_error",
+                "condition": "argument_error",
+                "message": message,
+            }
+            sys.stderr.write(json.dumps(payload, indent=2) + "\n")
+            raise SystemExit(0)
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _JsonAwareArgumentParser(
         prog="ardur",
         description="Ardur governance proxy and mission-passport tooling",
     )
@@ -7401,7 +7441,21 @@ def verify_main(argv: Sequence[str] | None = None) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    # ``_JsonAwareArgumentParser.error()`` detects ``--json`` from
+    # ``_raw_argv`` when set, falling back to ``sys.argv[1:]``. Subparsers do
+    # not share the top-level parser's ``_raw_argv``, so for programmatic
+    # ``main(argv)`` calls we temporarily mirror ``argv`` into ``sys.argv``.
+    # This lets a subparser's ``error()`` (fired by a missing required
+    # subcommand argument) honour the ``--json`` contract identically to
+    # interactive invocation.
+    parser._raw_argv = raw_argv  # type: ignore[attr-defined]
+    saved_argv = sys.argv
+    sys.argv = ["ardur", *raw_argv]
+    try:
+        args = parser.parse_args(raw_argv)
+    finally:
+        sys.argv = saved_argv
     if getattr(args, "command", None) and args.command[0] == "--":
         args.command = args.command[1:]
     return args.func(args)
