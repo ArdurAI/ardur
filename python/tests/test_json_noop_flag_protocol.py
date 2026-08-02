@@ -21,33 +21,30 @@ PROTOCOL_COMMANDS = ["issue", "attest", "anchor"]
 class TestJsonNoOpFlagAccepted:
     """Verify --json is accepted by all 3 protocol-path commands."""
 
+    @staticmethod
+    def _minimal_args(cmd, json_flag=False):
+        """Build minimal valid CLI args for each command."""
+        extra = ["--json"] if json_flag else []
+        if cmd == "issue":
+            return [cmd, "--agent-id", "test", "--mission", "test"] + extra
+        if cmd == "attest":
+            return [cmd, "--session", "test"] + extra
+        if cmd == "anchor":
+            return [cmd, "--receipt-log", "/tmp/test.log", "--backend", "c2sp-local-v1"] + extra
+        raise ValueError(f"unknown command: {cmd}")
+
     @pytest.mark.parametrize("cmd", PROTOCOL_COMMANDS)
     def test_json_flag_accepted_by_parser(self, cmd):
         """The parser should accept --json without error on all 3 commands."""
         parser = build_parser()
-        # Build minimal valid args for each command + --json
-        if cmd == "issue":
-            args = parser.parse_args([cmd, "--agent-id", "test", "--mission", "test", "--json"])
-        elif cmd == "attest":
-            args = parser.parse_args([cmd, "--session", "test", "--json"])
-        elif cmd == "anchor":
-            args = parser.parse_args(
-                [cmd, "--receipt-log", "/tmp/test.log", "--backend", "c2sp-local-v1", "--json"]
-            )
+        args = parser.parse_args(self._minimal_args(cmd, json_flag=True))
         assert getattr(args, "json") is True
 
     @pytest.mark.parametrize("cmd", PROTOCOL_COMMANDS)
     def test_json_flag_defaults_false(self, cmd):
         """Without --json, args.json should be False (store_true default)."""
         parser = build_parser()
-        if cmd == "issue":
-            args = parser.parse_args([cmd, "--agent-id", "test", "--mission", "test"])
-        elif cmd == "attest":
-            args = parser.parse_args([cmd, "--session", "test"])
-        elif cmd == "anchor":
-            args = parser.parse_args(
-                [cmd, "--receipt-log", "/tmp/test.log", "--backend", "c2sp-local-v1"]
-            )
+        args = parser.parse_args(self._minimal_args(cmd, json_flag=False))
         assert getattr(args, "json") is False
 
     @pytest.mark.parametrize("cmd", PROTOCOL_COMMANDS)
@@ -146,26 +143,16 @@ class TestFullCliConsistency:
     def test_json_accepted_everywhere(self, cmd):
         """Every major Ardur command should accept --json without 'unrecognized arguments'."""
         parser = build_parser()
-        # We need to find the subparser and check it has --json
+        # Capture both stdout and stderr since argparse --help exits and may
+        # write to either stream depending on the Python version / context.
         import io
-        from contextlib import redirect_stderr
+        from contextlib import redirect_stdout
 
+        help_text = ""
         f = io.StringIO()
         try:
-            with redirect_stderr(f):
+            with redirect_stdout(f):
                 parser.parse_args([cmd, "--help"])
         except SystemExit:
-            pass
-        help_text = f.getvalue()
-        # Some commands output help to stdout
-        if "--json" not in help_text:
-            f2 = io.StringIO()
-            from contextlib import redirect_stdout
-
-            try:
-                with redirect_stdout(f2):
-                    parser.parse_args([cmd, "--help"])
-            except SystemExit:
-                pass
-            help_text = f2.getvalue()
+            help_text = f.getvalue()
         assert "--json" in help_text, f"Command '{cmd}' does not accept --json"
