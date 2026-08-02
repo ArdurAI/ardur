@@ -63,7 +63,7 @@ def _run_main_capture_stderr(argv: list[str]) -> tuple[int, str, str]:
 def test_json_mode_emits_structured_json_error(argv: list[str], missing_arg: str):
     """In ``--json`` mode, argparse missing-required errors emit JSON."""
     exit_code, stderr, _stdout = _run_main_capture_stderr(argv)
-    assert exit_code == 0, f"expected exit 0 in --json mode, got {exit_code}"
+    assert exit_code == 1, f"expected exit 1 in --json mode, got {exit_code}"
     payload = json.loads(stderr)
     assert payload["ok"] is False
     assert payload["error"] == "argument_error"
@@ -99,7 +99,7 @@ def test_json_mode_does_not_swallow_unrelated_argparse_errors():
     exit_code, stderr, _stdout = _run_main_capture_stderr(
         ["__not_a_real_command__", "--json"]
     )
-    assert exit_code == 0
+    assert exit_code == 1
     payload = json.loads(stderr)
     assert payload["ok"] is False
     assert payload["error"] == "argument_error"
@@ -124,7 +124,7 @@ def test_top_level_missing_command_json_mode():
     """``ardur --json`` with no subcommand: argparse fires
     "the following arguments are required: command" and must emit JSON."""
     exit_code, stderr, _stdout = _run_main_capture_stderr(["--json"])
-    assert exit_code == 0
+    assert exit_code == 1
     payload = json.loads(stderr)
     assert payload["ok"] is False
     assert payload["error"] == "argument_error"
@@ -135,7 +135,7 @@ def test_error_payload_is_valid_json_document():
     """The stderr payload must be a single valid JSON document (no trailing
     usage text after the closing brace)."""
     exit_code, stderr, _stdout = _run_main_capture_stderr(["issue", "--json"])
-    assert exit_code == 0
+    assert exit_code == 1
     # json.loads rejects trailing data, so this proves the payload is clean.
     parsed = json.loads(stderr)
     assert parsed["ok"] is False

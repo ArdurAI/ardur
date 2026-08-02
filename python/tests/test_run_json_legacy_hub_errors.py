@@ -53,7 +53,7 @@ class TestMissingCommandJsonError:
     def test_json_mode_emits_json_error(self, monkeypatch):
         args = _make_args(json_mode=True, command=[])
         exit_code, stderr = _capture_stderr(args, monkeypatch)
-        assert exit_code == 2
+        assert exit_code == 1
         payload = json.loads(stderr)
         assert payload["ok"] is False
         assert payload["error"] == "missing_run_command"
@@ -82,7 +82,7 @@ class TestEmptyHomeJsonError:
             home="   ",
         )
         exit_code, stderr = _capture_stderr(args, monkeypatch)
-        assert exit_code == 2
+        assert exit_code == 1
         payload = json.loads(stderr)
         assert payload["ok"] is False
         assert payload["error"] == "home_arg_invalid"
@@ -117,7 +117,7 @@ class TestSessionStartFailureJsonError:
                 "vibap.personal_hub.hub_request", return_value=mock_response
             ):
                 exit_code, stderr = _capture_stderr(args, monkeypatch)
-        assert exit_code == 127
+        assert exit_code == 1
         payload = json.loads(stderr)
         assert payload["ok"] is False
         assert "error" in payload
@@ -160,7 +160,7 @@ class TestPolicyCheckFailureJsonError:
                 "vibap.personal_hub.hub_request", side_effect=lambda *a, **kw: next(responses)
             ):
                 exit_code, stderr = _capture_stderr(args, monkeypatch)
-        assert exit_code == 127
+        assert exit_code == 1
         payload = json.loads(stderr)
         assert payload["ok"] is False
         assert "error" in payload
@@ -190,7 +190,7 @@ class TestPolicyBlockedJsonError:
                 "vibap.personal_hub.hub_request", side_effect=lambda *a, **kw: next(responses)
             ):
                 exit_code, stderr = _capture_stderr(args, monkeypatch)
-        assert exit_code == 126
+        assert exit_code == 1
         payload = json.loads(stderr)
         assert payload["ok"] is False
         assert payload["error"] == "policy_blocked"

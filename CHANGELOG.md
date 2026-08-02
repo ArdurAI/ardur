@@ -92,12 +92,17 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Standardise JSON-mode exit codes: all `--json` error paths now exit 1
+  (argparse errors, `ardur run` legacy hub errors, handler validation
+  errors). Previously argparse errors exited 0 and `run` legacy hub errors
+  exited 2/126/127 depending on the failure class. Non-JSON exit codes are
+  unchanged. A JSON consumer can now reliably check `$?` for success/failure.
 - Fix argparse missing-required-argument errors so they honour the `--json`
   contract. When `--json` is set, `attest`, `anchor`, `issue`,
   `evidence correlate`, `telemetry export`, `preflight tool-server`,
   `posture scan`, and the top-level command selector now emit a structured
   JSON error (`{"ok": false, "error": "argument_error", ...}`) to stderr
-  with exit code 0 instead of the raw argparse usage block with exit code 2.
+  instead of the raw argparse usage block with exit code 2.
   Non-JSON behaviour is byte-identical (usage text + exit 2).
 - Fix `ardur run --json` legacy hub-streaming error paths: when `--json` is
   set without `--mission` (the legacy hub path), structured JSON errors

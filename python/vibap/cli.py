@@ -6301,7 +6301,7 @@ class _JsonAwareArgumentParser(argparse.ArgumentParser):
                 "message": message,
             }
             sys.stderr.write(json.dumps(payload, indent=2) + "\n")
-            raise SystemExit(0)
+            raise SystemExit(1)
         super().error(message)
 
 

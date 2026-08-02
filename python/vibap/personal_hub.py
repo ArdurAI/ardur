@@ -2739,7 +2739,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
                     "next_steps": run_missing_command_next_steps(),
                 }
             )
-            return 2
+            return 1
         print("ardur run requires a command after --", file=sys.stderr)
         _print_run_missing_command_next_steps()
         return 2
@@ -2771,7 +2771,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
                     ],
                 }
             )
-            return 2
+            return 1
         print(
             "ardur run --home must be a non-empty path after trimming whitespace.",
             file=sys.stderr,
@@ -2820,7 +2820,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
                     ),
                 }
             )
-            return 127
+            return 1
         print(_run_failure_summary_line(start, phase="session_start"), file=sys.stderr)
         _print_run_recovery_next_steps(start, phase="session_start")
         return 127
@@ -2857,7 +2857,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
                     ),
                 }
             )
-            return 127
+            return 1
         print(_run_failure_summary_line(check, phase="policy_check"), file=sys.stderr)
         _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
@@ -2882,7 +2882,7 @@ def run_under_hub(args: argparse.Namespace) -> int:
                     "receipt": _dict(observe.get("receipt")),
                 }
             )
-            return 126
+            return 1
         print(_blocked_command_summary_line(policy), file=sys.stderr)
         _emit_run_audit_reference_for_user_output(observe)
         return 126
