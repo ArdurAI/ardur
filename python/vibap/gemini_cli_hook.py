@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .claude_code_hook import MissionLoadError, load_active_passport
+from .claude_code_hook import HOOK_INPUT_MAX_CHARS, MissionLoadError, load_active_passport
 from .denial import DenialReason
 from .passport import DEFAULT_HOME, _ensure_default_home_dir, load_private_key, load_public_key, resolve_keys_dir
 from .receipt import build_receipt, sign_receipt, verify_chain
@@ -1176,6 +1176,7 @@ def _gemini_cli_hook_input_next_steps(condition: str) -> list[dict[str, str]]:
 
 
 def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
+    msg = str(exc)
     if isinstance(exc, json.JSONDecodeError):
         condition = "gemini_cli_hook_input_malformed"
         message = "Gemini CLI hook input is not valid JSON."
@@ -1183,6 +1184,10 @@ def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
             "Input must be a valid JSON object; "
             f"parsing failed at line {exc.lineno}, column {exc.colno}."
         )
+    elif "exceeds" in msg and "character limit" in msg:
+        condition = "gemini_cli_hook_input_oversize"
+        message = "Gemini CLI hook input exceeds the size limit."
+        detail = msg
     else:
         condition = "gemini_cli_hook_input_not_object"
         message = "Gemini CLI hook input must be a JSON object."
@@ -1201,13 +1206,33 @@ def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
 
 
 def _load_json_stdin() -> dict[str, Any]:
-    raw = sys.stdin.read()
+    raw = sys.stdin.read(HOOK_INPUT_MAX_CHARS + 1)
+    if len(raw) > HOOK_INPUT_MAX_CHARS:
+        raise ValueError(
+            f"Gemini hook input exceeds {HOOK_INPUT_MAX_CHARS} character limit"
+        )
     if not raw.strip():
         return {}
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):
         raise ValueError("Gemini hook payload must be a JSON object")
     return parsed
+
+
+def _gemini_fail_safe_block() -> dict[str, Any]:
+    """Return a protocol-valid block response when the hook cannot process input.
+
+    Gemini CLI hooks cannot block the host the way Claude Code PreToolUse can,
+    but emitting a ``block: True`` response with valid JSON (instead of a raw
+    traceback / non-JSON crash) keeps downstream consumers parseable and fails
+    closed for local wrappers that honour the ``block`` field.
+    """
+    return {
+        "status": "deny",
+        "block": True,
+        "message": "ardur: blocked - hook input could not be processed safely",
+        "claim_boundary": "visible Gemini CLI hook/tool-boundary evidence only",
+    }
 
 
 def _print_json(payload: Mapping[str, Any]) -> None:
@@ -1232,7 +1257,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (json.JSONDecodeError, ValueError) as exc:
             _print_json(_gemini_cli_hook_input_failure_response(exc))
             return 1
-        output = handle_pre_tool_call(hook_input, keys_dir=args.keys_dir)
+        try:
+            output = handle_pre_tool_call(hook_input, keys_dir=args.keys_dir)
+        except Exception as exc:  # noqa: BLE001 - fail safe without leaking stack
+            sys.stderr.write(f"ardur: gemini hook handler crashed: {exc}\n")
+            output = _gemini_fail_safe_block()
         _print_json(output)
         return 2 if output.get("block") else 0
     if phase == "fixture":

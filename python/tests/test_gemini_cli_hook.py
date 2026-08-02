@@ -625,3 +625,56 @@ def test_gemini_hook_cli_uses_exit_code_two_for_blocking_unknown(tmp_path):
     assert output["status"] == "unknown"
     assert output["block"] is True
     assert "insufficient evidence" in output["message"].lower()
+
+
+def test_gemini_hook_rejects_oversize_stdin(monkeypatch, capsys):
+    """Oversize stdin must be rejected with a structured error, not crash.
+
+    Mirrors the Claude Code hook's HOOK_INPUT_MAX_CHARS guard so a malicious
+    or buggy host cannot exhaust memory with unbounded stdin.
+    """
+    import io
+
+    from vibap import gemini_cli_hook as hook_module
+    from vibap.claude_code_hook import HOOK_INPUT_MAX_CHARS
+
+    payload = '{"x":"' + ("a" * (HOOK_INPUT_MAX_CHARS + 1)) + '"}'
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    output = json.loads(captured.out)
+    assert output["ok"] is False
+    assert output["condition"] == "gemini_cli_hook_input_oversize"
+    assert "exceeds" in output["detail"]
+    assert "character limit" in output["detail"]
+
+
+def test_gemini_hook_pre_crash_emits_fail_safe_block(monkeypatch, capsys):
+    """A handler crash must emit a protocol-valid block, not a raw traceback.
+
+    Without the crash guard, an uncaught exception in handle_pre_tool_call
+    would produce a traceback on stderr and non-JSON (or no) stdout, breaking
+    downstream consumers that parse the hook output.
+    """
+    import io
+
+    from vibap import gemini_cli_hook as hook_module
+
+    def _crashing_handler(_hook_input, *, keys_dir=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(hook_module, "handle_pre_tool_call", _crashing_handler)
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"tool_name": "test"}'))
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 2  # block=True → exit 2
+    assert "hook handler crashed" in captured.err
+    output = json.loads(captured.out)
+    assert output["status"] == "deny"
+    assert output["block"] is True
+    assert "could not be processed safely" in output["message"]
