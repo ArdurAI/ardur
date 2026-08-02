@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "5fe2d781e76497bd857b9aabbfd5fd6544ada1d695656157479a6b3fbc43aae7"
+source_sha256: "fa4a8f8b4772b79b3f4f879d1e8fd73c4ad758b547e55b85fd0446fe8aeeed9b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -102,6 +102,12 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Fix `ardur run --json` legacy hub-streaming error paths: when `--json` is
+  set without `--mission` (the legacy hub path), structured JSON errors
+  are now emitted to **stderr** instead of human-readable text, keeping the
+  stdout=child / stderr=governance JSON contract consistent across both
+  paths (missing command, empty `--home`, session-start failure,
+  policy-check failure, and policy-blocked)
 - Fix `ardur run --json` pre-execution error output streams: budget
   validation errors (`--max-tool-calls`/`--max-duration-s`) now emit
   structured JSON to **stderr** (not stdout) and command-not-found /

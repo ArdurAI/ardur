@@ -678,6 +678,20 @@ def _print_json_response(payload: dict[str, Any]) -> None:
     sys.stdout.write("\n")
 
 
+def _emit_json_error_to_stderr(payload: dict[str, Any]) -> None:
+    """Emit a structured JSON error to stderr.
+
+    The legacy ``run_under_hub`` path previously emitted human-readable
+    summary lines to stderr, which violated the ``--json`` contract
+    (stdout = child output, stderr = governance JSON).  This helper
+    writes the same error/condition/next_steps structure that the
+    governance path uses, but to stderr so JSON consumers can parse
+    it without polluting the child's stdout.
+    """
+    json.dump(payload, sys.stderr, indent=2)
+    sys.stderr.write("\n")
+
+
 _RUN_SUPPORT_CONDITIONS = {
     "hub_auth_required",
     "hub_token_missing",
@@ -2711,8 +2725,21 @@ def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_under_hub(args: argparse.Namespace) -> int:
+    json_mode = bool(getattr(args, "json", False))
     command = list(args.command or [])
     if not command:
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "missing_run_command",
+                    "error_code": "missing_run_command",
+                    "condition": "missing_run_command",
+                    "message": "ardur run requires a command after --",
+                    "next_steps": run_missing_command_next_steps(),
+                }
+            )
+            return 2
         print("ardur run requires a command after --", file=sys.stderr)
         _print_run_missing_command_next_steps()
         return 2
@@ -2723,6 +2750,28 @@ def run_under_hub(args: argparse.Namespace) -> int:
     # ``None`` means the flag was omitted and the default home should be used.
     home_arg = getattr(args, "home", None)
     if home_arg is not None and not str(home_arg).strip():
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "home_arg_invalid",
+                    "error_code": "home_arg_invalid",
+                    "condition": "home_arg_invalid",
+                    "message": "ardur run --home must be a non-empty path after trimming whitespace.",
+                    "next_steps": [
+                        {
+                            "condition": "home_arg_invalid",
+                            "action": "pass_a_directory_or_nonexistent_path",
+                            "command": 'ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                            "detail": (
+                                "Pass a path that is either nonexistent (it will be created) or "
+                                "an existing directory. Empty or whitespace-only values are rejected."
+                            ),
+                        }
+                    ],
+                }
+            )
+            return 2
         print(
             "ardur run --home must be a non-empty path after trimming whitespace.",
             file=sys.stderr,
@@ -2757,6 +2806,21 @@ def run_under_hub(args: argparse.Namespace) -> int:
         home=getattr(args, "home", None),
     )
     if not start.get("ok"):
+        if json_mode:
+            condition = _run_failure_support_condition(start, phase="session_start")
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": condition,
+                    "error_code": condition,
+                    "condition": condition,
+                    "message": _run_failure_summary_line(start, phase="session_start"),
+                    "next_steps": run_recovery_next_steps_for_response(
+                        start, phase="session_start"
+                    ),
+                }
+            )
+            return 127
         print(_run_failure_summary_line(start, phase="session_start"), file=sys.stderr)
         _print_run_recovery_next_steps(start, phase="session_start")
         return 127
@@ -2779,6 +2843,21 @@ def run_under_hub(args: argparse.Namespace) -> int:
         home=getattr(args, "home", None),
     )
     if not check.get("ok"):
+        if json_mode:
+            condition = _run_failure_support_condition(check, phase="policy_check")
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": condition,
+                    "error_code": condition,
+                    "condition": condition,
+                    "message": _run_failure_summary_line(check, phase="policy_check"),
+                    "next_steps": run_recovery_next_steps_for_response(
+                        check, phase="policy_check"
+                    ),
+                }
+            )
+            return 127
         print(_run_failure_summary_line(check, phase="policy_check"), file=sys.stderr)
         _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
@@ -2792,6 +2871,18 @@ def run_under_hub(args: argparse.Namespace) -> int:
             hub_token=token,
             home=getattr(args, "home", None),
         )
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "policy_blocked",
+                    "error_code": "policy_blocked",
+                    "condition": "policy_blocked",
+                    "message": _blocked_command_summary_line(policy),
+                    "receipt": _dict(observe.get("receipt")),
+                }
+            )
+            return 126
         print(_blocked_command_summary_line(policy), file=sys.stderr)
         _emit_run_audit_reference_for_user_output(observe)
         return 126
