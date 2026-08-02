@@ -921,7 +921,7 @@ instead. `--redact-paths` replaces local absolute paths in the JSON output
 `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
 `<var-folders>`, `<run-ardur>`, `<cgroup>`) so the result is safe to share in
 CI artifacts or bug reports without leaking the filesystem layout. It has no
-effect without `--json`.
+effect without `--json`; a warning is printed to stderr in that case.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or

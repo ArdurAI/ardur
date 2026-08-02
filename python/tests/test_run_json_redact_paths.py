@@ -11,8 +11,14 @@ from __future__ import annotations
 
 import os
 import tempfile
+from argparse import Namespace
 
-from vibap.run_bridge import GovernanceRunResult, _redact_local_path
+import pytest
+from vibap.run_bridge import (
+    GovernanceRunResult,
+    _redact_local_path,
+    run_governed_cli,
+)
 
 
 def _make_result(**overrides) -> GovernanceRunResult:
@@ -240,3 +246,95 @@ class TestToResultDictRedaction:
         assert tmp not in raw
         assert home not in raw
         assert "/private/var/folders/" not in raw
+
+
+# ── run_governed_cli --redact-paths without --json warning tests ──────────────
+
+
+def _base_args(**overrides: object) -> Namespace:
+    """Build a minimal Namespace accepted by run_governed_cli."""
+    defaults: dict[str, object] = {
+        "command": ["echo", "hello"],
+        "mission": "test mission",
+        "allowed_tools": None,
+        "forbidden_tools": None,
+        "max_tool_calls": None,
+        "max_duration_s": 10,
+        "home": None,
+        "via": "auto",
+        "no_kernel_correlation": False,
+        "enforce": False,
+        "resource_scope": None,
+        "no_resource_scope": False,
+        "json": False,
+        "redact_paths": False,
+    }
+    defaults.update(overrides)
+    return Namespace(**defaults)
+
+
+class TestRedactPathsWithoutJsonWarning:
+    """``--redact-paths`` without ``--json`` must warn on stderr."""
+
+    def test_warning_fires_when_redact_paths_without_json(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Passing --redact-paths without --json emits the warning on stderr."""
+        fake_result = _make_result()
+
+        def fake_run_governed(**kwargs: object) -> GovernanceRunResult:
+            return fake_result
+
+        monkeypatch.setattr("vibap.run_bridge.run_governed", fake_run_governed)
+
+        args = _base_args(redact_paths=True, json=False)
+        exit_code = run_governed_cli(args)
+        assert exit_code == 0
+
+        captured = capsys.readouterr()
+        # Warning must appear on stderr, not stdout.
+        assert "--redact-paths has no effect without --json" in captured.err
+        assert captured.out == ""
+
+    def test_no_warning_when_both_redact_paths_and_json(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--json --redact-paths must NOT emit the no-effect warning."""
+        fake_result = _make_result()
+
+        def fake_run_governed(**kwargs: object) -> GovernanceRunResult:
+            return fake_result
+
+        monkeypatch.setattr("vibap.run_bridge.run_governed", fake_run_governed)
+
+        args = _base_args(redact_paths=True, json=True)
+        exit_code = run_governed_cli(args)
+        assert exit_code == 0
+
+        captured = capsys.readouterr()
+        assert "--redact-paths has no effect without --json" not in captured.err
+        assert captured.out == ""
+
+    def test_no_warning_when_neither_flag(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Plain ``ardur run`` (no --redact-paths) must NOT emit the warning."""
+        fake_result = _make_result()
+
+        def fake_run_governed(**kwargs: object) -> GovernanceRunResult:
+            return fake_result
+
+        monkeypatch.setattr("vibap.run_bridge.run_governed", fake_run_governed)
+
+        args = _base_args(redact_paths=False, json=False)
+        exit_code = run_governed_cli(args)
+        assert exit_code == 0
+
+        captured = capsys.readouterr()
+        assert "--redact-paths has no effect without --json" not in captured.err

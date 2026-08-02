@@ -2133,6 +2133,16 @@ def run_governed_cli(args: Any) -> int:
             )
         return 2
 
+    # --redact-paths only affects the JSON output path.  When it is set
+    # without --json, surface the relationship to stderr so users do not
+    # believe local paths were redacted from the human-readable summary
+    # (they are not — the summary is not path-redacted).
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False):
+        print(
+            "ardur: warning: --redact-paths has no effect without --json",
+            file=sys.stderr,
+        )
+
     if getattr(args, "json", False):
         # JSON goes to stderr so the child process's stdout stays transparent.
         # This lets consumers do: ardur run --json -- pytest  2>governance.json

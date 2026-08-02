@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "efb5fd9f8eb39db82aac489a6d2c53bf68df095121520f56bd67f18713b460d6"
+source_sha256: "20e13c3e57d13bdfa9e70228cf7c3d1568c5e87ce46fae6d15b4dca1710dd152"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -230,6 +230,10 @@ All notable changes to Ardur will be documented in this file.
   loaders (`load_receiver_envelope`, `load_json_document`) so
   `FileNotFoundError` paths and parser internals are replaced with the
   exception class name in structured error output.
+- Warn when `--redact-paths` is passed to `ardur run` without `--json`
+  instead of silently ignoring it, so users do not believe local paths
+  were redacted from the human-readable summary (they are not — path
+  redaction applies only to the `--json` governance output).
 
 ## [0.2.0] — 2026-07-22
 

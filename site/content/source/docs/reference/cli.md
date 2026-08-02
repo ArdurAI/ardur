@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "5f423559993d273b19f41bac1fb832081028fd057ffc86fa050a8defd825e431"
+source_sha256: "c264a6b82d4e25568886d33de40cd100873a5e1c68a0dfed5b7919fa7b96d03c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -938,7 +938,7 @@ instead. `--redact-paths` replaces local absolute paths in the JSON output
 `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
 `<var-folders>`, `<run-ardur>`, `<cgroup>`) so the result is safe to share in
 CI artifacts or bug reports without leaking the filesystem layout. It has no
-effect without `--json`.
+effect without `--json`; a warning is printed to stderr in that case.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or

@@ -213,6 +213,10 @@ All notable changes to Ardur will be documented in this file.
   loaders (`load_receiver_envelope`, `load_json_document`) so
   `FileNotFoundError` paths and parser internals are replaced with the
   exception class name in structured error output.
+- Warn when `--redact-paths` is passed to `ardur run` without `--json`
+  instead of silently ignoring it, so users do not believe local paths
+  were redacted from the human-readable summary (they are not — path
+  redaction applies only to the `--json` governance output).
 
 ## [0.2.0] — 2026-07-22
 
