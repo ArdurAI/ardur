@@ -11,9 +11,6 @@ After the fix, it returns a structured JSON error with condition
 from __future__ import annotations
 
 import json
-import os
-import stat
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 

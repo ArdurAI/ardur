@@ -12,8 +12,6 @@ import json
 import subprocess
 import sys
 
-from vibap import cli
-
 
 def _run_ardur(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run the ardur CLI with the given args and capture output."""

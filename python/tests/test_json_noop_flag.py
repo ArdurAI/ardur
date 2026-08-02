@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
 
 def _run_cli(args: list[str], *, home: str | None = None) -> tuple[int, str, str]:
