@@ -137,7 +137,8 @@ def _request_with_retry(
             last_exc = exc
             time.sleep(0.1)
     # All retries exhausted — re-raise the last transient error.
-    raise last_exc  # type: ignore[misc]
+    assert last_exc is not None  # at least one attempt ran
+    raise last_exc
 
 
 def _post(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
