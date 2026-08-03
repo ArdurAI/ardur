@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "20ec5099bc94ffc6ec2dca4d93b748b1bacde41e29c60cef3c374f0adcc273db"
+source_sha256: "58473d8431c360641be289865721feae0c3db44262c5a11653bb18ee97208a17"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -135,6 +135,11 @@ All notable changes to Ardur will be documented in this file.
   ``TimeoutError`` from the local proxy thread under CI parallel-matrix
   load does not cause spurious test failures. Timeout increased from
   5s to 10s with up to 3 retries on transient connection errors.
+- Add `--output` flag to `posture scan` and `posture report` for
+  consistency with `evidence correlate`, `telemetry export`, and
+  `preflight tool-server`, which all support atomic file output via
+  the shared `write_report()` helper (rejects symlinks, directories,
+  and nonexistent parent directories).
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

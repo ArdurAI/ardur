@@ -3472,10 +3472,49 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
     except PostureInputError as exc:
         _print_json(posture_input_failure_response(exc.condition))
         return 1
-    if args.format == "json" or getattr(args, "json", False):
-        _print_json(posture)
-        return 0
-    print(format_posture_report(posture))
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    payload = (
+        (json.dumps(posture, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if args.format == "json" or getattr(args, "json", False)
+        else format_posture_report(posture).encode("utf-8")
+    )
+    if args.posture_scan_output is not None:
+        if not str(args.posture_scan_output).strip():
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "path_arg_invalid",
+                    "condition": "path_arg_invalid",
+                    "message": "ardur --output must be a non-empty path after trimming whitespace.",
+                }
+            )
+            return 1
+        try:
+            write_report(args.posture_scan_output, payload)
+        except RuntimeEvidenceError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": exc.code,
+                    "condition": exc.code,
+                    "message": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "posture_scan_report_written",
+                "format": args.format,
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    elif args.format == "json" or getattr(args, "json", False):
+        sys.stdout.buffer.write(payload)
+    else:
+        sys.stdout.write(payload.decode("utf-8"))
     return 0
 
 
@@ -3615,10 +3654,49 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
             print(f"Detail: {response['detail']}")
             _print_report_next_steps(response)
         return 1
-    if args.format == "json" or getattr(args, "json", False):
-        _print_json(posture)
-        return 0
-    print(format_posture_report(posture))
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    payload = (
+        (json.dumps(posture, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if args.format == "json" or getattr(args, "json", False)
+        else format_posture_report(posture).encode("utf-8")
+    )
+    if args.posture_report_output is not None:
+        if not str(args.posture_report_output).strip():
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "path_arg_invalid",
+                    "condition": "path_arg_invalid",
+                    "message": "ardur --output must be a non-empty path after trimming whitespace.",
+                }
+            )
+            return 1
+        try:
+            write_report(args.posture_report_output, payload)
+        except RuntimeEvidenceError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": exc.code,
+                    "condition": exc.code,
+                    "message": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "posture_report_written",
+                "format": args.format,
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    elif args.format == "json" or getattr(args, "json", False):
+        sys.stdout.buffer.write(payload)
+    else:
+        sys.stdout.write(payload.decode("utf-8"))
     return 0
 
 
@@ -6998,6 +7076,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="output format (default: json)",
     )
     posture_scan.add_argument(
+        "--output",
+        dest="posture_scan_output",
+        type=str,
+        help="atomically write an owner-only report instead of printing it",
+    )
+    posture_scan.add_argument(
         "--json",
         action="store_true",
         help="explicitly request JSON output (output defaults to JSON; "
@@ -7020,6 +7104,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["markdown", "json"],
         default="markdown",
         help="output format (default: markdown)",
+    )
+    posture_report.add_argument(
+        "--output",
+        dest="posture_report_output",
+        type=str,
+        help="atomically write an owner-only report instead of printing it",
     )
     posture_report.add_argument(
         "--json",
