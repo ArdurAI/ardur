@@ -66,6 +66,11 @@ All notable changes to Ardur will be documented in this file.
   `ardur doctor-claude-code` so the hub status `home` field and any local
   paths in the JSON output are replaced with stable placeholders before
   sharing in CI artifacts or bug reports
+- Add `--redact-paths` flag to `ardur protect claude-code --json` so the
+  10+ path-bearing fields in the success response (`home`,
+  `active_passport`, `plugin_dir`, `run_command`, `claims.resource_scope`,
+  `claims.cwd`, etc.) are replaced with stable placeholders before
+  sharing in CI artifacts or bug reports
 - Accept `--json` as a no-op flag on always-JSON personal-path commands
   (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
   `uninstall`) so users who expect `--json` (present on `run` and `verify`)

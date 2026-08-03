@@ -4120,6 +4120,65 @@ def _redact_paths_in_response(response: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
+def _redact_paths_deep(obj: Any) -> Any:
+    """Recursively redact local absolute paths in *obj*.
+
+    Walks dicts, lists, and strings.  Every string value is passed through
+    :func:`_redact_local_path` for prefix-based root replacement, and any
+    remaining local-path roots that appear *inside* the string (e.g. in
+    ``run_command`` fields like ``VIBAP_HOME=/private/tmp/...``) are replaced
+    by a follow-up regex pass.
+
+    Used by ``protect claude-code --json --redact-paths`` because the success
+    response contains 10+ path-bearing fields across nested structures
+    (``home``, ``active_passport``, ``plugin_dir``, ``run_command``,
+    ``claims.resource_scope[]``, ``claims.cwd``, etc.) that the shallow
+    :func:`_redact_paths_in_response` does not reach.
+    """
+    if isinstance(obj, str):
+        return _redact_local_path_string(obj)
+    if isinstance(obj, dict):
+        return {key: _redact_paths_deep(val) for key, val in obj.items()}
+    if isinstance(obj, list):
+        return [_redact_paths_deep(item) for item in obj]
+    return obj
+
+
+def _redact_local_path_string(value: str) -> str:
+    """Redact all local path roots from *value*, including embedded ones.
+
+    First applies the prefix-based :func:`_redact_local_path`, then replaces
+    any remaining local-path roots that appear after non-path characters
+    (``=``, spaces, etc.) so that command strings like
+    ``VIBAP_HOME=/private/tmp/...`` are fully redacted.
+    """
+    import os
+    import re
+    import tempfile
+
+    result = _redact_local_path(value)
+    if result is None:
+        return value
+    # Replace any remaining local-path roots that appear inside the string
+    # (not just at the start).  Ordered from most-specific to least-specific.
+    temp_root = tempfile.gettempdir()
+    home = os.path.expanduser("~")
+    # Escape roots for regex use.
+    roots = [
+        (re.escape("/private/var/folders/"), "<var-folders>/"),
+        (re.escape("/var/folders/"), "<var-folders>/"),
+        (re.escape("/private/tmp/"), "<tmp>/"),
+        (re.escape("/tmp/"), "<tmp>/"),
+        (re.escape(home + "/"), "<home>/"),
+        (re.escape(temp_root + "/") if temp_root.endswith("/") else re.escape(temp_root), "<tmp>"),
+        (re.escape("/run/ardur/"), "<run-ardur>/"),
+        (re.escape("/sys/fs/cgroup/"), "<cgroup>/"),
+    ]
+    for pattern, replacement in roots:
+        result = re.sub(pattern, replacement, result)
+    return result
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     hub_token_failure = _hub_token_invalid_failure(args)
     if hub_token_failure is not None:
@@ -5922,6 +5981,8 @@ def cmd_protect_claude_code(args: argparse.Namespace) -> int:
     result = protect_claude_code(args)
     ok = bool(result.get("ok"))
     if args.json:
+        if getattr(args, "redact_paths", False):
+            result = _redact_paths_deep(result)
         _print_json(result)
         return 0 if ok else 1
     if not ok:
@@ -7390,6 +7451,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     protect_cc.add_argument(
         "--json", action="store_true", help="print machine-readable setup details"
+    )
+    protect_cc.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in --json output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports "
+        "(requires --json)",
     )
     # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
     # values survive to the handler instead of being normalized to

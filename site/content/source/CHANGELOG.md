@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "1bc16d7052256c90d5fd4a8603a37f9e9464da70441faa875b3a6d543e9d17a9"
+source_sha256: "00c53d0892c4cd956f0175e893bbab6caa37a8de0cd496ee7e585d46766df4e1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -82,6 +82,11 @@ All notable changes to Ardur will be documented in this file.
 - Add `--redact-paths` flag to `ardur status`, `ardur doctor`, and
   `ardur doctor-claude-code` so the hub status `home` field and any local
   paths in the JSON output are replaced with stable placeholders before
+  sharing in CI artifacts or bug reports
+- Add `--redact-paths` flag to `ardur protect claude-code --json` so the
+  10+ path-bearing fields in the success response (`home`,
+  `active_passport`, `plugin_dir`, `run_command`, `claims.resource_scope`,
+  `claims.cwd`, etc.) are replaced with stable placeholders before
   sharing in CI artifacts or bug reports
 - Accept `--json` as a no-op flag on always-JSON personal-path commands
   (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
