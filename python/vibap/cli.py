@@ -4092,6 +4092,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
         response = setup_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
+    if getattr(args, "redact_paths", False):
+        response = _redact_paths_deep(response)
     _print_json(response)
     return 0 if response.get("ok") else 1
 
@@ -4218,6 +4220,8 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         response = uninstall_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
+    if getattr(args, "redact_paths", False):
+        response = _redact_paths_deep(response)
     _print_json(response)
     return 0
 
@@ -7105,6 +7109,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
     )
+    setup.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
+    )
     setup.set_defaults(func=cmd_setup)
 
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
@@ -7216,6 +7226,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
+    )
+    uninstall.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
     )
     uninstall.set_defaults(func=cmd_uninstall)
 

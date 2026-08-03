@@ -71,6 +71,10 @@ All notable changes to Ardur will be documented in this file.
   `active_passport`, `plugin_dir`, `run_command`, `claims.resource_scope`,
   `claims.cwd`, etc.) are replaced with stable placeholders before
   sharing in CI artifacts or bug reports
+- Add `--redact-paths` flag to `ardur setup` and `ardur uninstall` so
+  local paths (`home`, `config`, `launch_agent`, `would_remove`,
+  `removed`) are replaced with stable placeholders before sharing in
+  CI artifacts or bug reports
 - Accept `--json` as a no-op flag on always-JSON personal-path commands
   (`status`, `doctor`, `doctor-claude-code`, `setup`, `kill-switch`,
   `uninstall`) so users who expect `--json` (present on `run` and `verify`)
