@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "58473d8431c360641be289865721feae0c3db44262c5a11653bb18ee97208a17"
+source_sha256: "ae62ff062e6403341125fe614a0b4df0ce3902b60d389c3efcde57f44f4e577e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -140,6 +140,11 @@ All notable changes to Ardur will be documented in this file.
   `preflight tool-server`, which all support atomic file output via
   the shared `write_report()` helper (rejects symlinks, directories,
   and nonexistent parent directories).
+- Extend `preflight tool-server --fail-on` exit-2 semantics to cover
+  config parse errors (malformed JSON, empty server collections), so
+  CI pipelines using `--fail-on` catch broken configs at the same
+  threshold as security findings. When `--fail-on` is `none` (default),
+  config errors preserve the exit-1 behavior.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

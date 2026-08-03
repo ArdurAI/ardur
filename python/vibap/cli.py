@@ -3569,7 +3569,9 @@ def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
     else:
         print(f"Error: {response['message']}")
         print(f"Condition: {response['condition']}")
-    return 1
+    # When --fail-on is set, config parse errors are also failures that should
+    # trigger the exit-2 threshold so CI pipelines don't miss broken configs.
+    return 2 if args.fail_on != "none" else 1
 
 
 def _posture_report_input_next_steps(condition: str) -> list[dict[str, str]]:
@@ -7151,7 +7153,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on",
         choices=FAIL_ON_CHOICES,
         default="none",
-        help="return exit 2 when this severity or higher is present (default: none)",
+        help=(
+            "return exit 2 when this severity or higher is present "
+            "(default: none); also applies to config parse errors, so "
+            "CI pipelines catch broken configs at the same threshold"
+        ),
     )
     tool_server_preflight.add_argument(
         "--json",

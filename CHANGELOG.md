@@ -123,6 +123,11 @@ All notable changes to Ardur will be documented in this file.
   `preflight tool-server`, which all support atomic file output via
   the shared `write_report()` helper (rejects symlinks, directories,
   and nonexistent parent directories).
+- Extend `preflight tool-server --fail-on` exit-2 semantics to cover
+  config parse errors (malformed JSON, empty server collections), so
+  CI pipelines using `--fail-on` catch broken configs at the same
+  threshold as security findings. When `--fail-on` is `none` (default),
+  config errors preserve the exit-1 behavior.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
