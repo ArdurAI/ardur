@@ -114,6 +114,10 @@ All notable changes to Ardur will be documented in this file.
   link-check CI workflow so transient network timeouts and rate-limit
   responses do not produce spurious exit-2 failures on otherwise
   clean link-check runs.
+- Add retry logic to the ``test_http.py`` HTTP test helpers so
+  ``TimeoutError`` from the local proxy thread under CI parallel-matrix
+  load does not cause spurious test failures. Timeout increased from
+  5s to 10s with up to 3 retries on transient connection errors.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

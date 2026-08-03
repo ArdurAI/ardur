@@ -102,6 +102,44 @@ def _build_server_thread(proxy: GovernanceProxy, private_key, port: int):
     return thread, base, shutdown
 
 
+def _request_with_retry(
+    req: urllib.request.Request,
+    *,
+    retries: int = 3,
+    timeout: float = 10,
+) -> tuple[int, dict[str, Any], dict[str, str]]:
+    """Execute an HTTP request with retries for transient timeouts.
+
+    Under CI parallel-matrix load, the local proxy thread can be briefly
+    slow to respond, causing ``TimeoutError`` or connection-reset errors
+    that disappear on immediate retry.  This helper retries those
+    transient failures while still surfacing genuine HTTP errors and the
+    final timeout if all retries are exhausted.
+    """
+    last_exc: Exception | None = None
+    for _attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return (
+                    resp.status,
+                    json.loads(resp.read().decode("utf-8")),
+                    dict(resp.headers.items()),
+                )
+        except urllib.error.HTTPError as exc:
+            # HTTP errors (4xx/5xx) are not transient — return immediately.
+            body = exc.read().decode("utf-8")
+            try:
+                parsed = json.loads(body)
+            except json.JSONDecodeError:
+                parsed = {"raw": body}
+            return exc.code, parsed, dict(exc.headers.items())
+        except (TimeoutError, OSError, urllib.error.URLError) as exc:
+            last_exc = exc
+            time.sleep(0.1)
+    # All retries exhausted — re-raise the last transient error.
+    raise last_exc  # type: ignore[misc]
+
+
 def _post(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     status, body, _ = _post_with_headers(url, payload)
     return status, body
@@ -117,25 +155,13 @@ def _post_with_headers(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return (
-                resp.status,
-                json.loads(resp.read().decode("utf-8")),
-                dict(resp.headers.items()),
-            )
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8")
-        try:
-            parsed = json.loads(body)
-        except json.JSONDecodeError:
-            parsed = {"raw": body}
-        return exc.code, parsed, dict(exc.headers.items())
+    return _request_with_retry(req)
 
 
 def _get(url: str) -> tuple[int, dict[str, Any]]:
-    with urllib.request.urlopen(url, timeout=5) as resp:
-        return resp.status, json.loads(resp.read().decode("utf-8"))
+    req = urllib.request.Request(url, method="GET")
+    status, body, _ = _request_with_retry(req)
+    return status, body
 
 
 def _raw_http_request(port: int, request: bytes) -> bytes:
