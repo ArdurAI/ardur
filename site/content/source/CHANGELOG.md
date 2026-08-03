@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4fca03c380411ca0b9deae5bb56c126ed974cdfad6e41b57b5b19a9e09270de8"
+source_sha256: "6d7c6117d8ab65aaf4b72a02b908fa7ee7f276c708ccb13e9a392c46ce886cd6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -115,6 +115,13 @@ All notable changes to Ardur will be documented in this file.
   evaluator (ADR-027), and emits a structured pass/fail/inconclusive verdict
   with per-report detail. Supports `--threshold-ms`, `--min-runs`,
   `--percentile`, and `--output-format json|text` for CI integration.
+- Accept the `--json` flag on `ardur evidence correlate` and
+  `ardur latency-gate evaluate` for consistency with all other
+  JSON-emitting commands. These commands already emit JSON by default;
+  the flag is a no-op accepted for DX consistency so users are not
+  surprised by argparse rejections.
+- Add help text to `personal-firewall demo --json` so the flag is
+  documented in `--help` output like all other `--json` flags.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

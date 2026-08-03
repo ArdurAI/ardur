@@ -98,6 +98,13 @@ All notable changes to Ardur will be documented in this file.
   evaluator (ADR-027), and emits a structured pass/fail/inconclusive verdict
   with per-report detail. Supports `--threshold-ms`, `--min-runs`,
   `--percentile`, and `--output-format json|text` for CI integration.
+- Accept the `--json` flag on `ardur evidence correlate` and
+  `ardur latency-gate evaluate` for consistency with all other
+  JSON-emitting commands. These commands already emit JSON by default;
+  the flag is a no-op accepted for DX consistency so users are not
+  surprised by argparse rejections.
+- Add help text to `personal-firewall demo --json` so the flag is
+  documented in `--help` output like all other `--json` flags.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

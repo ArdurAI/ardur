@@ -6651,6 +6651,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="atomically write an owner-only report instead of printing it",
     )
+    evidence_correlate.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     evidence_correlate.set_defaults(func=cmd_evidence_correlate)
 
     telemetry = subparsers.add_parser(
@@ -7411,7 +7417,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="existing directory that receives temporary demo state",
     )
-    personal_firewall_demo.add_argument("--json", action="store_true")
+    personal_firewall_demo.add_argument(
+        "--json",
+        action="store_true",
+        help="print machine-readable demo details",
+    )
     personal_firewall_demo.set_defaults(func=cmd_personal_firewall_demo)
 
     profile = subparsers.add_parser(
@@ -7582,6 +7592,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("json", "text"),
         default="json",
         help="output format (default: json)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     latency_gate_evaluate.set_defaults(func=cmd_latency_gate_evaluate)
 
