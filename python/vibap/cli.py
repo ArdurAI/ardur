@@ -4105,21 +4105,11 @@ def _redact_paths_in_response(response: dict[str, Any]) -> dict[str, Any]:
     ``--redact-paths`` is set so the JSON output is safe to share in CI
     artifacts or bug reports without leaking the filesystem layout.
 
-    Redacts standalone path-valued fields (``home``, ``hub_url``, ``detail``)
-    using the same ``_redact_local_path()`` helper proven on
-    ``ardur run --json --redact-paths``. The ``doctor`` and
-    ``doctor-claude-code`` commands already use ``<ardur-home>`` /
-    ``<ardur-config>`` / ``<claude-code-plugin>`` placeholders in their
-    ``checks[].detail`` and ``next_steps`` fields, so the primary leak this
-    closes is the hub ``/v1/status`` success response which returns the raw
-    local home path in its ``home`` field.
+    Recurses into nested dicts and lists via :func:`_redact_paths_deep`
+    so that paths inside ``checks[].detail``, ``next_steps[].command``,
+    and other nested fields are caught — not just top-level ``home``.
     """
-    redacted = dict(response)
-    for key in ("home", "hub_url", "detail"):
-        val = redacted.get(key)
-        if isinstance(val, str):
-            redacted[key] = _redact_local_path(val)
-    return redacted
+    return _redact_paths_deep(response)
 
 
 def _redact_paths_deep(obj: Any) -> Any:
@@ -4154,8 +4144,6 @@ def _redact_local_path_string(value: str) -> str:
     (``=``, spaces, etc.) so that command strings like
     ``VIBAP_HOME=/private/tmp/...`` are fully redacted.
     """
-    import os
-    import re
     import tempfile
 
     result = _redact_local_path(value)

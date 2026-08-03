@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
 from vibap.cli import _redact_paths_in_response

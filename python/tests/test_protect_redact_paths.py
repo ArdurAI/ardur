@@ -15,13 +15,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from pathlib import Path
 from unittest import mock
 
-import pytest
+import pytest  # noqa: F401 — required by pytest collection
 
-from vibap.cli import _redact_paths_deep
-from vibap.run_bridge import _redact_local_path
+from vibap.cli import _redact_paths_deep, build_parser
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +140,7 @@ class TestProtectRedactPathsFlag:
 
     def test_flag_accepted_by_argparse(self):
         """The ``--redact-paths`` flag should be accepted without error."""
-        import vibap.cli as cli
-        import argparse
-
-        parser = cli.build_parser()
+        parser = build_parser()
         args = parser.parse_args([
             "protect", "claude-code",
             "--scope", "/tmp/test-scope",
@@ -156,9 +151,7 @@ class TestProtectRedactPathsFlag:
 
     def test_flag_defaults_false(self):
         """Without ``--redact-paths``, the attribute should be False."""
-        import vibap.cli as cli
-
-        parser = cli.build_parser()
+        parser = build_parser()
         args = parser.parse_args([
             "protect", "claude-code",
             "--scope", "/tmp/test-scope",
@@ -169,9 +162,7 @@ class TestProtectRedactPathsFlag:
     def test_flag_available_without_json(self):
         """``--redact-paths`` can be passed even without ``--json`` (it
         just has no effect on human-readable output)."""
-        import vibap.cli as cli
-
-        parser = cli.build_parser()
+        parser = build_parser()
         args = parser.parse_args([
             "protect", "claude-code",
             "--scope", "/tmp/test-scope",

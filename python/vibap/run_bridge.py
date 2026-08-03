@@ -447,19 +447,53 @@ def _redact_local_path(path_str: str | None) -> str | None:
         return None
     result = str(path_str)
     temp_root = tempfile.gettempdir()
-    if result.startswith(temp_root):
-        return result.replace(temp_root, "<tmp>", 1)
+    # Guard against substring false-positives: ensure temp_root is matched
+    # as a directory boundary, not just a string prefix (e.g. "/tmp" must
+    # not match "/tmp2/foo").
+    temp_prefix = temp_root if temp_root.endswith("/") else temp_root + "/"
+    if result.startswith(temp_prefix):
+        return "<tmp>/" + result[len(temp_prefix):]
     home = os.path.expanduser("~")
     if result.startswith(home + "/"):
         return result.replace(home, "<home>", 1)
     # macOS resolves /tmp → /private/tmp; redact both forms.
     result = re.sub(r"^/private/tmp/", "<tmp>/", result)
     result = re.sub(r"^/tmp/", "<tmp>/", result)
-    # Common macOS/var roots.
+    # Common macOS/var roots — handle both /private/var/folders (resolved)
+    # and bare /var/folders (as returned by some macOS APIs).
     result = re.sub(r"^/private/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"^/var/folders/", "<var-folders>/", result)
     result = re.sub(r"^/run/ardur/", "<run-ardur>/", result)
     # Linux system paths that reveal local cgroup or runtime layout.
     result = re.sub(r"^/sys/fs/cgroup/", "<cgroup>/", result)
+    return result
+
+
+def _redact_local_path_embedded(value: str) -> str:
+    """Redact local path roots anywhere in *value*, not just at the start.
+
+    Used for free-form strings like ``notes`` where a path may appear
+    mid-sentence (e.g. ``"launched via --plugin-dir /tmp/foo/..."``).
+    Also replaces the current user's home directory if it appears
+    embedded in the string.
+    """
+    if not value:
+        return value
+    result = _redact_local_path(value)
+    if result is None:
+        return value
+    # Replace embedded path roots (same patterns as _redact_local_path but
+    # without the ^ anchor so they match anywhere in the string).
+    result = re.sub(r"/private/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"/private/tmp/", "<tmp>/", result)
+    result = re.sub(r"/tmp/", "<tmp>/", result)
+    result = re.sub(r"/sys/fs/cgroup/", "<cgroup>/", result)
+    result = re.sub(r"/run/ardur/", "<run-ardur>/", result)
+    # Also redact embedded home dir.
+    home = os.path.expanduser("~")
+    if home and home in result:
+        result = result.replace(home, "<home>")
     return result
 
 
@@ -516,6 +550,7 @@ class GovernanceRunResult:
                 correlation["cgroup_path"] = _redact_local_path(
                     correlation["cgroup_path"]
                 )
+        notes_out = [_redact_local_path_embedded(n) for n in self.notes] if redact_paths else list(self.notes)
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
@@ -534,7 +569,7 @@ class GovernanceRunResult:
             "passport_path": passport_path,
             "correlation": correlation,
             "kernel_policy": self.kernel_policy,
-            "notes": list(self.notes),
+            "notes": notes_out,
         }
 
 

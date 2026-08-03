@@ -28,10 +28,8 @@ sys.path.insert(0, str(ROOT))
 
 from vibap.cli import (  # noqa: E402
     _redact_paths_deep,
-    cmd_setup,
     cmd_uninstall,
 )
-from vibap.personal_hub import setup_personal, uninstall_personal  # noqa: E402
 
 _HOME = os.path.expanduser("~")
 _TEMP = tempfile.gettempdir()
@@ -234,7 +232,6 @@ class TestSetupUninstallRedactE2E:
         )
         rc = cmd_uninstall(args)
         captured = capsys.readouterr()
-        output = json.loads(captured.out)
         assert rc == 0
         # The tmp_path is under the temp root, so with redaction it must not appear
         assert str(tmp_path) not in captured.out, (
