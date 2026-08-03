@@ -1908,6 +1908,7 @@ ardur posture scan --receipts DIR_OR_JSONL
                     [--evidence-bundle bundle.redacted.json]
                     [--verify-expiry]
                     [--format json|markdown]
+                    [--output FILE] [--json]
 ```
 
 The JSON output uses `positioning=derived_local_evidence`. This is an honest
@@ -1948,6 +1949,12 @@ reruns; they do not call live providers, prove provider-hidden actions, repair o
 reconstruct missing evidence, perform asset inventory, or claim kernel/process
 capture.
 
+When `--output FILE` is given, the scan result is written atomically to the
+file instead of stdout. Empty or whitespace-only output paths fail closed with
+`path_arg_invalid`, and directory paths are rejected before writing. The JSON
+status summary includes `report_sha256` for integrity verification. The `--json`
+flag is accepted as a no-op for CLI consistency.
+
 ### `ardur posture report`
 
 Render a posture JSON document from `ardur posture scan --format json` as a
@@ -1955,6 +1962,7 @@ concise Markdown report, or re-emit it as formatted JSON.
 
 ```text
 ardur posture report --input posture.json [--format markdown|json]
+                     [--output FILE] [--json]
 ```
 
 If `--input` is empty or whitespace-only, the command fails closed before path
@@ -1979,6 +1987,12 @@ the report path does not print local absolute paths, raw tokens, private keys, o
 provider credentials, and the hints do not call live providers, create missing
 evidence, reconstruct private keys, prove provider-hidden behavior, or claim
 kernel/process capture.
+
+When `--output FILE` is given, the report is written atomically to the file
+instead of stdout. Empty or whitespace-only output paths fail closed with
+`path_arg_invalid`, and directory paths are rejected before writing. The JSON
+status summary includes `report_sha256` for integrity verification. The `--json`
+flag is accepted as a no-op for CLI consistency.
 
 ### `ardur latency-gate evaluate`
 
