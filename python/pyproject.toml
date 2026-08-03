@@ -56,7 +56,7 @@ dev = [
     # spiffe's ASN.1 dependency must stay above the three network-DoS fixes in
     # pyasn1 0.6.4 (CVE-2026-59884, CVE-2026-59885, CVE-2026-59886).
     "pyasn1>=0.6.4,<0.7",
-    "mcp>=1.23.0,<2",
+    "mcp>=1.23.0,<3",
     "python-multipart>=0.0.26,<1",
 ]
 langgraph = [
