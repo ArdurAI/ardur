@@ -17,8 +17,6 @@ import os
 import tempfile
 from unittest import mock
 
-import pytest  # noqa: F401 — required by pytest collection
-
 from vibap.cli import _redact_paths_deep, build_parser
 
 
