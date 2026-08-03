@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "12beec09f3288feee95787f9454a6d086caab8df5a65e6a30a31699d92fece36"
+source_sha256: "3b0160aae0bc2706f8fa0b0a8be5e702a2e3a3a8df360521770e2af3f5aad514"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -127,6 +127,10 @@ All notable changes to Ardur will be documented in this file.
   (`evidence correlate`, `telemetry export`, `posture scan/report`,
   `preflight tool-server`). `--output-format` is retained as a
   backward-compatible alias.
+- Add `--max-retries 3` and `--retry-wait-time 5` to the lychee
+  link-check CI workflow so transient network timeouts and rate-limit
+  responses do not produce spurious exit-2 failures on otherwise
+  clean link-check runs.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

@@ -110,6 +110,10 @@ All notable changes to Ardur will be documented in this file.
   (`evidence correlate`, `telemetry export`, `posture scan/report`,
   `preflight tool-server`). `--output-format` is retained as a
   backward-compatible alias.
+- Add `--max-retries 3` and `--retry-wait-time 5` to the lychee
+  link-check CI workflow so transient network timeouts and rate-limit
+  responses do not produce spurious exit-2 failures on otherwise
+  clean link-check runs.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
