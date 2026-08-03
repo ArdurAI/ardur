@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "045b694492635753e6aa90dd49b3b2ecdc6ff2293b842265dadf7ebcd25bbb1a"
+source_sha256: "3b39ea8e111518fb5c6d64d0b7143f9208aa4ac93958c18b20601281d6486318"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -721,11 +721,17 @@ the plist.
 ```text
 ardur setup [--host HOST] [--port PORT] [--home DIR]
             [--rotate-token] [--extension-path DIR]
+            [--json] [--redact-paths]
 ```
 
 `--rotate-token` forces a new token even if one already exists.
 `--extension-path` selects which browser-extension directory the setup output
 points users to (default: `examples/ardur-personal-extension`).
+
+`--redact-paths` replaces local absolute paths in the JSON output (notably the
+`home`, `config`, and `launch_agent` fields) with stable placeholders (`<home>`,
+`<config>`, `<launch-agent>`) so the result is safe to share in CI artifacts or
+bug reports.
 
 If `--home` points to an existing file instead of a directory, `ardur setup`
 fails closed before writing setup state, generating or printing a token, or
@@ -876,6 +882,7 @@ Remove Ardur Personal launch files (the macOS LaunchAgent plist installed by
 
 ```text
 ardur uninstall [--home DIR] [--remove-data] [--dry-run]
+                [--json] [--redact-paths]
 ```
 
 `--remove-data` also deletes the local Ardur Personal evidence and key
@@ -884,6 +891,11 @@ material under the home directory.
 Use `--dry-run` to print deterministic JSON showing the local LaunchAgent and,
 when `--remove-data` is also set, the Ardur Personal home directory that would
 be removed. Dry-run mode does not delete launch files or data.
+
+`--redact-paths` replaces local absolute paths in the JSON output (notably the
+`would_remove` and `removed` path lists) with stable placeholders (`<home>`,
+`<launch-agent>`, `<ardur-home>`) so the result is safe to share in CI
+artifacts or bug reports.
 
 Dry-run JSON also includes a placeholder-safe `next_steps` array so users can
 interpret the preview before running a destructive command. The hints point to
