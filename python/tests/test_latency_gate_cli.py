@@ -353,7 +353,35 @@ def test_cli_evaluate_inconclusive_exit_code_2(
 def test_cli_evaluate_text_output(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    """--output-format text produces a human-readable summary, not JSON."""
+    """--format text produces a human-readable summary, not JSON."""
+
+    reports = [
+        _valid_report_dict([1.0, 2.0], p95_override=v)
+        for v in (3.0, 4.0, 5.0)
+    ]
+    _write_reports(tmp_path, reports)
+    rc = main(
+        [
+            "latency-gate",
+            "evaluate",
+            "--reports",
+            str(tmp_path),
+            "--format",
+            "text",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "PASS" in captured.out
+    # Text output is not valid JSON (it's multi-line human text)
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(captured.out)
+
+
+def test_cli_evaluate_output_format_alias(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """--output-format is accepted as a backward-compatible alias for --format."""
 
     reports = [
         _valid_report_dict([1.0, 2.0], p95_override=v)
@@ -373,9 +401,6 @@ def test_cli_evaluate_text_output(
     captured = capsys.readouterr()
     assert rc == 0
     assert "PASS" in captured.out
-    # Text output is not valid JSON (it's multi-line human text)
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(captured.out)
 
 
 # ---------------------------------------------------------------------------

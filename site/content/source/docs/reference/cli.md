@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "3b39ea8e111518fb5c6d64d0b7143f9208aa4ac93958c18b20601281d6486318"
+source_sha256: "e1bce90d21544a4e2c395ebf6a9782a9b3dabe2b12c8707fc05862799eaea4ec"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -2005,8 +2005,11 @@ deterministic multi-report gate (ADR-027), and emit a structured verdict.
 ```text
 ardur latency-gate evaluate --reports <reports-dir>
     [--threshold-ms 10.0] [--min-runs 3] [--percentile 95]
-    [--output-format json|text]
+    [--format json|text]
 ```
+
+The `--format` flag controls output format. `--output-format` is accepted as a
+backward-compatible alias for `--format`.
 
 The command reads every `*.json` file in `--reports`, parses each as a
 machine-readable latency report (produced by the benchmark harness), and runs
@@ -2016,13 +2019,13 @@ failure (the hook command exited non-zero or timed out), regardless of
 latency. An `inconclusive` verdict is returned when fewer than `--min-runs`
 valid reports are available.
 
-**JSON output** (`--output-format json`, default) prints a top-level envelope
+**JSON output** (`--format json`, default) prints a top-level envelope
 with `ok`, `verdict`, `decision` (the canonical gate output including
 per-report results and aggregate p95), and `invalid_files` (files the loader
 rejected, with reasons). Exit code is `0` on pass, `1` on fail, and `2` on
 inconclusive.
 
-**Text output** (`--output-format text`) prints a human-readable summary with
+**Text output** (`--format text`) prints a human-readable summary with
 the verdict, aggregate p95, per-report one-liners, and the rationale.
 
 If `--reports` is empty or whitespace-only, `--threshold-ms` is not a positive

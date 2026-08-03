@@ -1988,8 +1988,11 @@ deterministic multi-report gate (ADR-027), and emit a structured verdict.
 ```text
 ardur latency-gate evaluate --reports <reports-dir>
     [--threshold-ms 10.0] [--min-runs 3] [--percentile 95]
-    [--output-format json|text]
+    [--format json|text]
 ```
+
+The `--format` flag controls output format. `--output-format` is accepted as a
+backward-compatible alias for `--format`.
 
 The command reads every `*.json` file in `--reports`, parses each as a
 machine-readable latency report (produced by the benchmark harness), and runs
@@ -1999,13 +2002,13 @@ failure (the hook command exited non-zero or timed out), regardless of
 latency. An `inconclusive` verdict is returned when fewer than `--min-runs`
 valid reports are available.
 
-**JSON output** (`--output-format json`, default) prints a top-level envelope
+**JSON output** (`--format json`, default) prints a top-level envelope
 with `ok`, `verdict`, `decision` (the canonical gate output including
 per-report results and aggregate p95), and `invalid_files` (files the loader
 rejected, with reasons). Exit code is `0` on pass, `1` on fail, and `2` on
 inconclusive.
 
-**Text output** (`--output-format text`) prints a human-readable summary with
+**Text output** (`--format text`) prints a human-readable summary with
 the verdict, aggregate p95, per-report one-liners, and the rationale.
 
 If `--reports` is empty or whitespace-only, `--threshold-ms` is not a positive

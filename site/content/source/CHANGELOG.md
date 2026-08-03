@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "6d7c6117d8ab65aaf4b72a02b908fa7ee7f276c708ccb13e9a392c46ce886cd6"
+source_sha256: "12beec09f3288feee95787f9454a6d086caab8df5a65e6a30a31699d92fece36"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -122,6 +122,11 @@ All notable changes to Ardur will be documented in this file.
   surprised by argparse rejections.
 - Add help text to `personal-firewall demo --json` so the flag is
   documented in `--help` output like all other `--json` flags.
+- Rename `latency-gate evaluate --output-format` to `--format` for
+  consistency with every other `--format`-bearing command
+  (`evidence correlate`, `telemetry export`, `posture scan/report`,
+  `preflight tool-server`). `--output-format` is retained as a
+  backward-compatible alias.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

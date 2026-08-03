@@ -105,6 +105,11 @@ All notable changes to Ardur will be documented in this file.
   surprised by argparse rejections.
 - Add help text to `personal-firewall demo --json` so the flag is
   documented in `--help` output like all other `--json` flags.
+- Rename `latency-gate evaluate --output-format` to `--format` for
+  consistency with every other `--format`-bearing command
+  (`evidence correlate`, `telemetry export`, `posture scan/report`,
+  `preflight tool-server`). `--output-format` is retained as a
+  backward-compatible alias.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

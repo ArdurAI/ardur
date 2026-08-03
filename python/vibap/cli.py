@@ -6180,7 +6180,7 @@ def _latency_gate_value_failure(
                 "command": (
                     "ardur latency-gate evaluate --reports <reports-dir> "
                     "[--threshold-ms N] [--min-runs N] [--percentile 95] "
-                    "[--output-format json|text]"
+                    "[--format json|text]"
                 ),
                 "detail": (
                     "Provide a directory of latency report JSON files and "
@@ -6300,7 +6300,7 @@ def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
         _print_json(failure)
         return 1
 
-    output_format = args.output_format
+    output_format = args.format
     try:
         rendered = format_gate_output(decision, output_format)
     except LatencyGateCliError as exc:
@@ -7576,7 +7576,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="percentile rank for the statistical rule, 1..100 (default: 95)",
     )
     latency_gate_evaluate.add_argument(
+        "--format",
         "--output-format",
+        dest="format",
         choices=("json", "text"),
         default="json",
         help="output format (default: json)",

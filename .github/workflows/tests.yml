@@ -332,7 +332,7 @@ jobs:
         run: |
           python -m vibap.cli latency-gate evaluate \
             --reports ${{ runner.temp }}/ardur-latency-reports/ \
-            --output-format json
+            --format json
 
       - name: Upload latency benchmark reports
         if: always()
