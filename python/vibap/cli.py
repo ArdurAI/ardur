@@ -157,6 +157,28 @@ def _print_json(payload: dict) -> None:
     sys.stdout.write("\n")
 
 
+def _write_json_report_to_file(path: str | Path, report: object) -> bytes:
+    """Serialize *report* to canonical JSON and atomically write it to *path*.
+
+    Reuses the no-follow atomic writer from ``runtime_evidence`` so that the
+    same safe-replace semantics (owner-only regular file, directory-handle
+    rename, no symlink follow) apply to every report-producing command.
+    Returns the serialized bytes so callers can compute a digest.
+
+    Raises ``ValueError`` with a safe message (no local path) when the atomic
+    writer rejects the target shape.
+    """
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    payload = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
+    try:
+        write_report(path, payload)
+    except RuntimeEvidenceError as exc:
+        raise ValueError(exc.code) from exc
+    return payload
+
+
 def _hub_path_error_code() -> str:
     return "_".join(("personal", "home", "not", "directory"))
 
@@ -1877,7 +1899,29 @@ def cmd_verify(args: argparse.Namespace) -> int:
     except (jwt.PyJWTError, PermissionError, ValueError) as exc:
         _print_json(_verify_failure_response(exc))
         return 1
-    _print_json({"valid": True, "claims": claims})
+    token_report = {"valid": True, "claims": claims}
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, token_report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    "error": "verify_output_write_failed",
+                    "detail": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
+    _print_json(token_report)
     return 0
 
 
@@ -1957,6 +2001,27 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
             }
         )
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    "error": "verify_output_write_failed",
+                    "detail": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     _print_json(report)
     return 0
 
@@ -2103,6 +2168,27 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             response["receipt_index"] = index
         _print_json(response)
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    "error": "verify_output_write_failed",
+                    "detail": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
     else:
@@ -2320,6 +2406,27 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
             }
         )
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    "error": "verify_output_write_failed",
+                    "detail": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     _print_json(report)
     return 0
 
@@ -6648,6 +6755,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--html-report",
         type=str,
         help="write a private static HTML explorer report",
+    )
+    verify.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON explorer report to an owner-only file",
     )
     verify.add_argument(
         "--unsafe-show-sensitive",

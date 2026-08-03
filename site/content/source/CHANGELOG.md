@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "ae62ff062e6403341125fe614a0b4df0ce3902b60d389c3efcde57f44f4e577e"
+source_sha256: "97a8b899714409c8966248ae1e2b063b270a223b30de215e127c5df5f85d5dc0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -69,6 +69,12 @@ All notable changes to Ardur will be documented in this file.
   `holder_public_key_pem_invalid` instead of leaking PEM-decoder text
 
 ### Added
+- Add `--output` flag to `ardur verify` so the JSON explorer report can be
+  atomically written to an owner-only file instead of printing to stdout,
+  matching the `--output` contract on `evidence correlate`, `posture scan`/
+  `report`, `preflight tool-server`, and `telemetry export`. Works on all
+  verify sub-paths (token, offline journal, anchor bundle, receiver
+  attestation). Prints a confirmation JSON with `report_sha256` to stdout.
 - Add `--json` flag to `ardur run` governance path that emits the result as
   machine-readable JSON to stderr (session id, permits/denials, attestation
   digest, receipt paths). stdout is reserved for the child process output so

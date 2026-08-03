@@ -266,7 +266,7 @@ ardur verify EVIDENCE.json
              --receiver-public-key FILE
              [--max-bundle-age-s SECONDS]
              [--freshness-clock-skew-s SECONDS]
-             [--html-report FILE] [--json]
+             [--html-report FILE] [--output FILE] [--json]
              [--unsafe-show-sensitive]
 
 ardur verify RECEIPTS.jsonl --receipt-public-key FILE --chain-only
@@ -311,9 +311,13 @@ windows during archival review.
 
 Reports are redacted by default. `--unsafe-show-sensitive` is an explicit
 local-only opt-in. `--html-report` writes an atomic mode-`0600`, no-JavaScript
-static report whose evidence-derived values are HTML-escaped. The dedicated
-`ardur-verify` console entry point is an alias for `ardur verify` and ships in
-the same wheel/sdist without requiring a running Ardur service.
+static report whose evidence-derived values are HTML-escaped. `--output`
+atomically writes the JSON explorer report to an owner-only file and prints a
+confirmation JSON with `report_sha256` to stdout, matching the `--output`
+contract on `evidence correlate`, `posture scan`/`report`, `preflight
+tool-server`, and `telemetry export`. The dedicated `ardur-verify` console
+entry point is an alias for `ardur verify` and ships in the same wheel/sdist
+without requiring a running Ardur service.
 
 Anchor mode performs no network request. It verifies the receipt JWS, exact
 receipt-digest binding, RFC 6962 inclusion path, signed checkpoint, and any
