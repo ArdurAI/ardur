@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "6dee6f21ccc62a8d409e100b0225e210c424a6106b332e138db9e70ca19175d4"
+source_sha256: "1bc16d7052256c90d5fd4a8603a37f9e9464da70441faa875b3a6d543e9d17a9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -90,6 +90,11 @@ All notable changes to Ardur will be documented in this file.
   and without the flag.
 - Accept `--json` as a no-op flag on always-JSON protocol-path commands
   (`issue`, `attest`, `anchor`) for the same CLI consistency reason.
+- Accept `--json` as a no-op/override flag on the remaining JSON-emitting
+  commands (`telemetry export`, `preflight tool-server`, `posture scan`,
+  `posture report`) so the full CLI accepts `--json` uniformly. For
+  `posture scan` and `posture report`, `--json` is equivalent to
+  `--format json`.
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-

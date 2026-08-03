@@ -73,6 +73,11 @@ All notable changes to Ardur will be documented in this file.
   and without the flag.
 - Accept `--json` as a no-op flag on always-JSON protocol-path commands
   (`issue`, `attest`, `anchor`) for the same CLI consistency reason.
+- Accept `--json` as a no-op/override flag on the remaining JSON-emitting
+  commands (`telemetry export`, `preflight tool-server`, `posture scan`,
+  `posture report`) so the full CLI accepts `--json` uniformly. For
+  `posture scan` and `posture report`, `--json` is equivalent to
+  `--format json`.
 - Emit machine-readable JSON latency reports with raw sample distributions,
   recomputable percentiles (median/p95/p99), functional outcome classification
   (stage + native exit/errno), separate functional-failure and threshold-

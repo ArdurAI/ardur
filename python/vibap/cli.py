@@ -3472,7 +3472,7 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
     except PostureInputError as exc:
         _print_json(posture_input_failure_response(exc.condition))
         return 1
-    if args.format == "json":
+    if args.format == "json" or getattr(args, "json", False):
         _print_json(posture)
         return 0
     print(format_posture_report(posture))
@@ -3608,14 +3608,14 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
         ValueError,
     ) as exc:
         response = _posture_report_input_failure_response(exc)
-        if args.format == "json":
+        if args.format == "json" or getattr(args, "json", False):
             _print_json(response)
         else:
             print(f"Error: {response['message']}")
             print(f"Detail: {response['detail']}")
             _print_report_next_steps(response)
         return 1
-    if args.format == "json":
+    if args.format == "json" or getattr(args, "json", False):
         _print_json(posture)
         return 0
     print(format_posture_report(posture))
@@ -6643,6 +6643,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also enforce short receipt expiry windows during export",
     )
+    telemetry_export.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     telemetry_export.set_defaults(func=cmd_telemetry_export)
 
     anchor = subparsers.add_parser(
@@ -6932,6 +6938,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="json",
         help="output format (default: json)",
     )
+    posture_scan.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     posture_scan.set_defaults(func=cmd_posture_scan)
 
     posture_report = posture_subparsers.add_parser(
@@ -6949,6 +6961,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["markdown", "json"],
         default="markdown",
         help="output format (default: markdown)",
+    )
+    posture_report.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output; equivalent to --format json "
+        "(accepted for consistency with other commands)",
     )
     posture_report.set_defaults(func=cmd_posture_report)
 
@@ -6985,6 +7003,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=FAIL_ON_CHOICES,
         default="none",
         help="return exit 2 when this severity or higher is present (default: none)",
+    )
+    tool_server_preflight.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     tool_server_preflight.set_defaults(func=cmd_tool_server_preflight)
 
