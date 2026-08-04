@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "bba8714e2df84db26915c65d2b7ab707a8ebf5627312c406bdb0c7b5151ae6ca"
+source_sha256: "4fb0987c85737bef820bf556afc6e1c2bb2454aed7447737a3b96bb1c509c263"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -171,6 +171,13 @@ All notable changes to Ardur will be documented in this file.
   Distinct from `insufficient_evidence` (verifier tried but couldn't evaluate)
   — `unknown` means the verifier observed the call but cannot determine
   compliance because evidence is structurally outside the capture boundary.
+
+### Docs
+- Add Decision taxonomy section to `docs/security-model.md` documenting the
+  five-state governance decision model (`PERMIT`, `DENY`, `VIOLATION`,
+  `INSUFFICIENT_EVIDENCE`, `UNKNOWN`) and the distinction between
+  `INSUFFICIENT_EVIDENCE` (transient operational failure, retryable) and
+  `UNKNOWN` (structural observation gap, not retryable). Both fail-closed.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

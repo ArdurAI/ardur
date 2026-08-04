@@ -155,6 +155,13 @@ All notable changes to Ardur will be documented in this file.
   — `unknown` means the verifier observed the call but cannot determine
   compliance because evidence is structurally outside the capture boundary.
 
+### Docs
+- Add Decision taxonomy section to `docs/security-model.md` documenting the
+  five-state governance decision model (`PERMIT`, `DENY`, `VIOLATION`,
+  `INSUFFICIENT_EVIDENCE`, `UNKNOWN`) and the distinction between
+  `INSUFFICIENT_EVIDENCE` (transient operational failure, retryable) and
+  `UNKNOWN` (structural observation gap, not retryable). Both fail-closed.
+
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation
   cannot accidentally absorb worktree-local build state
