@@ -84,7 +84,8 @@
     "decision_projection": {
       "compliant": "PERMIT",
       "violation": "DENY",
-      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence"
+      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence",
+      "unknown": "DENY with metadata.x-ardur.verdict=unknown"
     }
   },
   "security_requirements": {
