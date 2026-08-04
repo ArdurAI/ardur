@@ -11,8 +11,6 @@ import hashlib
 import json
 from pathlib import Path
 
-import pytest
-
 from vibap.cli import main
 from vibap.passport import MissionPassport, generate_keypair, issue_passport
 

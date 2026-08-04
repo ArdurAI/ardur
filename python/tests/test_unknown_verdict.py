@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import jsonschema
-import pytest
 
 from vibap.proxy import PolicyEvent
 from vibap.receipt import (
