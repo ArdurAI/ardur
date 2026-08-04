@@ -33,7 +33,7 @@ Last updated: 2026-07-09. Current shipping version: v0.1 (tool-call boundary). C
 | **Subprocess trees spawned by `Bash`** — `Bash("./run.sh")` is one receipt; everything inside `run.sh` is invisible. | Same reason. | v0.5 / v1.0 |
 | **Network connections** initiated by tool-spawned processes (DNS, TCP, HTTP) | Hooks see `WebFetch`/`WebSearch`; they do not see network calls made by, say, `Bash("curl …")` | v0.5 / v1.0 |
 | **Filesystem deltas outside the typed file tools** — files changed by a Bash command, by an MCP server, or by a subagent's subprocess | Same boundary | v0.2 (snapshots) partial; v0.5 / v1.0 full |
-| **Provider-side reasoning, hidden state, server-side tool calls** | The LLM runs on Anthropic/OpenAI/etc. infrastructure. No local tool can see what happens inside the model or on the provider's servers. | **Out of scope by definition.** Labeled `insufficient_evidence` on receipts when relevant. |
+| **Provider-side reasoning, hidden state, server-side tool calls** | The LLM runs on Anthropic/OpenAI/etc. infrastructure. No local tool can see what happens inside the model or on the provider's servers. | **Out of scope by definition.** Labeled `unknown` on receipts when the verifier observed the call but cannot know what happened inside the provider. |
 | **Anything outside the active session** — actions in another terminal, after `claude` exits, or before `ardur start` runs | We instrument a specific process tree. | Cross-session correlation is a separate research question. |
 | **Out-of-scope filesystem** — paths outside the Mission Passport's `resource_scope` | Intentional — scope is the user's protected boundary | A user can widen scope in `instructions.md`; not captured by default |
 | **Posture index as asset inventory** — `ardur posture scan` does not discover unmanaged apps, credentials, cloud assets, or provider-side state. | It is a report over local Ardur evidence artifacts, not a scanner with new sensors. | Future adapters can feed more evidence; the posture index must continue to label unsupported boundaries as gaps. |
@@ -133,9 +133,10 @@ Each receipt carries an `evidence_level` field. The values:
 | `attested` | Ardur signed an observation; the action's intent is captured |
 | `observed` | A local adapter saw browser/desktop/CLI state |
 | `self_signed` | Ardur signed its own observation (default for tool calls) |
-| `insufficient_evidence` | The relevant provider-side or kernel-level activity was not locally visible — labeled explicitly rather than implied |
+| `insufficient_evidence` | The verifier could not make a confident decision due to a transient operational failure (approval operator unavailable, state file corrupted, network error). Might be retried. |
+| `unknown` | The verifier observed the call but the evidence is structurally outside the capture boundary — the honest "I cannot know what happened" outcome, distinct from a retryable transient failure |
 
-The `insufficient_evidence` label is how we keep claims precise at the receipt level. If something happened that Ardur couldn't verify, the receipt says so.
+Both labels keep claims precise at the receipt level. `insufficient_evidence` records a retryable operational failure; `unknown` records a genuine observation gap where the activity is structurally outside Ardur's capture boundary. Both fail-closed as `DENY`. See [Security Model](security-model.md) for the full five-state Decision taxonomy.
 
 ## What v0.5 / v1.0 will add
 
