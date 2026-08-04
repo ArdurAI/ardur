@@ -515,7 +515,7 @@ class TestHTTPDelegate:
                 "arguments": telemetry,
             },
         )
-        assert evidence_evaluation["decision"] == "INSUFFICIENT_EVIDENCE"
+        assert evidence_evaluation["decision"] == "UNKNOWN"
         assert evidence_evaluation["reason"] == "visibility_insufficient:partial"
 
     def test_profile_present_partial_bundle_rejected_without_child_reservation(

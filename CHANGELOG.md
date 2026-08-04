@@ -56,6 +56,17 @@ All notable changes to Ardur will be documented in this file.
   `holder_public_key_pem_invalid` instead of leaking PEM-decoder text
 
 ### Added
+- Add `UNKNOWN` as a first-class `Decision` enum value in the governance
+  proxy, representing a genuine observation gap where the verifier
+  observed the call but the evidence is structurally outside the capture
+  boundary (e.g., visibility is not "full"). Unlike
+  `INSUFFICIENT_EVIDENCE` (transient operational failure), `UNKNOWN`
+  records the honest "I cannot know what happened." Both fail-closed as
+  DENY. Wires the visibility-insufficient path in MIC-State/MIC-Evidence
+  checks to emit `UNKNOWN` with `DenialReason.OBSERVATION_GAP`. Updates
+  fixture-module `_status_from_verdict` to map `unknown` verdicts to
+  `"unknown"` status, and updates receipt v0.2 schema description from
+  "Tri-state" to "Four-state verifier result."
 - Add `--output` flag to `ardur verify` so the JSON explorer report can be
   atomically written to an owner-only file instead of printing to stdout,
   matching the `--output` contract on `evidence correlate`, `posture scan`/

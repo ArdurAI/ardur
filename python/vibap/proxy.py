@@ -1332,7 +1332,7 @@ def _check_resource_scope(
 
 
 class Decision(str, Enum):
-    """Tri-state governance decision for tool-call evaluation (B.2).
+    """Four-state governance decision for tool-call evaluation (B.2).
 
     The verifier MUST return exactly one of these for every evaluation.
     Callers MUST treat only PERMIT as allowing execution; all other
@@ -1366,12 +1366,27 @@ class Decision(str, Enum):
         Callers MUST treat this as DENY (fail-closed). The distinction
         exists so audit trails can separate "known bad" (DENY) from
         "uncertain" (INSUFFICIENT_EVIDENCE) for post-hoc analysis.
+
+    UNKNOWN
+        The verifier observed the call but the evidence is structurally
+        outside the capture boundary. Unlike INSUFFICIENT_EVIDENCE (the
+        verifier tried but could not evaluate), UNKNOWN means the
+        information needed to make a decision was never visible at all:
+        - Visibility is not "full" (the adapter cannot see the complete
+          tool-call envelope)
+        - The tool-call descriptor is incomplete in a way that prevents
+          evaluation rather than failing a declared policy check
+        Callers MUST treat UNKNOWN as DENY (fail-closed). The distinction
+        from INSUFFICIENT_EVIDENCE is that UNKNOWN records a genuine
+        observation gap — the honest "I cannot know what happened" —
+        rather than a transient operational failure that might be retried.
     """
 
     PERMIT = "PERMIT"
     DENY = "DENY"
     VIOLATION = "VIOLATION"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    UNKNOWN = "UNKNOWN"
 
 
 def _coerce_denial_reason(value: Any) -> DenialReason | None:
@@ -1416,6 +1431,8 @@ def _legacy_denial_reason(decision: Decision, reason: str) -> DenialReason | Non
         return DenialReason.BUDGET_EXHAUSTED
     if decision == Decision.INSUFFICIENT_EVIDENCE:
         return DenialReason.TELEMETRY_MISSING
+    if decision == Decision.UNKNOWN:
+        return DenialReason.OBSERVATION_GAP
     return DenialReason.POLICY_DENIED
 
 
@@ -2860,9 +2877,9 @@ class GovernanceProxy:
                 visibility if isinstance(visibility, str) else type(visibility).__name__
             )
             return (
-                Decision.INSUFFICIENT_EVIDENCE,
+                Decision.UNKNOWN,
                 f"visibility_insufficient:{label}",
-                DenialReason.TELEMETRY_MISSING,
+                DenialReason.OBSERVATION_GAP,
             )
 
         if profile != "MIC-Evidence":

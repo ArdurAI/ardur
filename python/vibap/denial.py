@@ -25,3 +25,4 @@ class DenialReason(str, Enum):
     RISK_REQUEST_ID_INVALID = "risk_request_id_invalid"
     RISK_REPLAY = "risk_replay"
     RISK_STATE_UNAVAILABLE = "risk_state_unavailable"
+    OBSERVATION_GAP = "observation_gap"

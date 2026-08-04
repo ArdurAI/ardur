@@ -149,6 +149,7 @@ _DENIAL_REASONS = {
     "revoked",
     "chain_invalid",
     "unknown",
+    "observation_gap",
 }
 _SENSITIVITY_LEVELS = {
     "public",

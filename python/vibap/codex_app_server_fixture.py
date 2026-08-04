@@ -1153,6 +1153,8 @@ def _status_from_verdict(verdict: str) -> str:
         return "allow"
     if verdict == "insufficient_evidence":
         return "unknown"
+    if verdict == "unknown":
+        return "unknown"
     return "deny"
 
 

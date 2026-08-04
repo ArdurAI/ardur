@@ -159,7 +159,7 @@
         "insufficient_evidence",
         "unknown"
       ],
-      "description": "Tri-state verifier result."
+      "description": "Four-state verifier result."
     },
     "evidence_level": {
       "type": "string",

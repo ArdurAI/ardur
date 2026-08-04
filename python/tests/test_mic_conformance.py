@@ -257,7 +257,7 @@ class TestVisibilityCheck:
         )
         session = proxy.start_session(token)
         decision, reason = _call(proxy, session, visibility="partial")
-        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert decision == Decision.UNKNOWN
 
     def test_hidden_denied(self, proxy, private_key):
         token = _issue_passport(
@@ -267,7 +267,7 @@ class TestVisibilityCheck:
         )
         session = proxy.start_session(token)
         decision, reason = _call(proxy, session, visibility="hidden")
-        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert decision == Decision.UNKNOWN
 
     def test_missing_denied(self, proxy, private_key):
         token = _issue_passport(
@@ -279,7 +279,7 @@ class TestVisibilityCheck:
         args = _base_telemetry()
         del args["visibility"]
         decision, reason = proxy.evaluate_tool_call(session, "read_file", args)
-        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert decision == Decision.UNKNOWN
 
     def test_delegation_core_skips(self, proxy, private_key):
         token = _issue_passport(
