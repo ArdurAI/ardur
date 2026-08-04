@@ -156,7 +156,8 @@
       "enum": [
         "compliant",
         "violation",
-        "insufficient_evidence"
+        "insufficient_evidence",
+        "unknown"
       ],
       "description": "Tri-state verifier result."
     },
@@ -259,7 +260,8 @@
         "budget_exhausted",
         "insufficient_evidence",
         "revoked",
-        "chain_invalid"
+        "chain_invalid",
+        "unknown"
       ],
       "description": "Coarse user-facing denial reason vocabulary. This MUST be absent for compliant receipts."
     },
@@ -616,7 +618,8 @@
           "verdict": {
             "enum": [
               "violation",
-              "insufficient_evidence"
+              "insufficient_evidence",
+              "unknown"
             ]
           }
         },

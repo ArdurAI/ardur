@@ -137,7 +137,7 @@ _SIDE_EFFECT_CLASSES = {
     "network_read",  # WebFetch/WebSearch makes an outbound read request
     "subagent_launch",  # Task spawns a sub-agent
 }
-_VERDICTS = {"compliant", "violation", "insufficient_evidence"}
+_VERDICTS = {"compliant", "violation", "insufficient_evidence", "unknown"}
 _EVIDENCE_LEVELS = {"self_signed", "counter_signed", "transparency_logged"}
 _DIGEST_ALGS = {"sha-256", "sha-384", "sha-512"}
 _DIGEST_CANONICALIZATIONS = {"jcs-rfc8785", "none"}
@@ -148,6 +148,7 @@ _DENIAL_REASONS = {
     "insufficient_evidence",
     "revoked",
     "chain_invalid",
+    "unknown",
 }
 _SENSITIVITY_LEVELS = {
     "public",
@@ -455,6 +456,8 @@ def _verdict_from_decision(decision: Any) -> str:
         return "compliant"
     if name == "INSUFFICIENT_EVIDENCE":
         return "insufficient_evidence"
+    if name == "UNKNOWN":
+        return "unknown"
     if name in {"DENY", "VIOLATION", "INSPECT"}:
         return "violation"
     return "violation"
@@ -472,6 +475,8 @@ def _public_denial_reason(verdict: str, internal_denial_code: str | None) -> str
         return None
     if verdict == "insufficient_evidence":
         return "insufficient_evidence"
+    if verdict == "unknown":
+        return "unknown"
     if internal_denial_code in {"budget_exhausted", "risk_budget_exhausted"}:
         return "budget_exhausted"
     if internal_denial_code in {"revoked", "mission_revoked"}:

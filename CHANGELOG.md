@@ -134,6 +134,11 @@ All notable changes to Ardur will be documented in this file.
   CI pipelines using `--fail-on` catch broken configs at the same
   threshold as security findings. When `--fail-on` is `none` (default),
   config errors preserve the exit-1 behavior.
+- Add `unknown` as a first-class receipt verdict for honest abstention when
+  evidence is structurally absent (observation gaps, unobserved side effects).
+  Distinct from `insufficient_evidence` (verifier tried but couldn't evaluate)
+  — `unknown` means the verifier observed the call but cannot determine
+  compliance because evidence is structurally outside the capture boundary.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

@@ -70,7 +70,8 @@
       "enum": [
         "compliant",
         "violation",
-        "insufficient_evidence"
+        "insufficient_evidence",
+        "unknown"
       ]
     },
     "reason_code": {
