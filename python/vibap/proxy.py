@@ -1332,7 +1332,7 @@ def _check_resource_scope(
 
 
 class Decision(str, Enum):
-    """Four-state governance decision for tool-call evaluation (B.2).
+    """Five-state governance decision for tool-call evaluation (B.2).
 
     The verifier MUST return exactly one of these for every evaluation.
     Callers MUST treat only PERMIT as allowing execution; all other
