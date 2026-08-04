@@ -5,6 +5,10 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Bump `cryptography` upper bound from `<50` to `<51` to pull in
+  `50.0.0`, which fixes CVE-2026-69247 (PKCS#7 EnvelopedData
+  decryption Bleichenbacher oracle via distinguishable errors). The
+  previous `<50` cap pinned Ardur to the vulnerable `49.0.0` release.
 - Close catch-all `str(exc)` leak paths in the Personal Hub HTTP handler,
   the VIBAP proxy GET handler (which had no exception guard at all), the
   native messaging host, and `hub_request()` so unhandled exceptions

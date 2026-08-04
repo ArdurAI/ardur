@@ -28,7 +28,7 @@ classifiers = [
 ]
 dependencies = [
     "PyJWT>=2.12.0,<3",
-    "cryptography>=41.0,<50",
+    "cryptography>=41.0,<51",
     # Receipt ids, digests, and v0.2 JWS payloads claim RFC 8785 JCS. A real
     # implementation is required because sorted stdlib JSON does not implement
     # ECMAScript number formatting or UTF-16 property ordering.

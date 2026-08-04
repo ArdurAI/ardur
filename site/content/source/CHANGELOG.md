@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "60315a3247d833589c0cd0d19b078874d519e54246c0032d0df99f0cd28944e3"
+source_sha256: "534aabe5e113012635c857726a5cf4a414f5e36c5ee762e6d6aee4b4ccb0c61d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,10 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Bump `cryptography` upper bound from `<50` to `<51` to pull in
+  `50.0.0`, which fixes CVE-2026-69247 (PKCS#7 EnvelopedData
+  decryption Bleichenbacher oracle via distinguishable errors). The
+  previous `<50` cap pinned Ardur to the vulnerable `49.0.0` release.
 - Close catch-all `str(exc)` leak paths in the Personal Hub HTTP handler,
   the VIBAP proxy GET handler (which had no exception guard at all), the
   native messaging host, and `hub_request()` so unhandled exceptions
