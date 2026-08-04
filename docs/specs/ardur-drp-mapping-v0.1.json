@@ -710,7 +710,7 @@
       "source_path": "verdict",
       "classification": "mapped",
       "drp_path": "actionLog.decision",
-      "rationale": "Map compliant to PERMIT and violation or insufficient_evidence to DENY; retain tri-state detail in the extension."
+      "rationale": "Map compliant to PERMIT and violation, insufficient_evidence, or unknown to DENY; retain verdict detail in the extension."
     },
     {
       "source_surface": "execution_receipt_v0.2",
