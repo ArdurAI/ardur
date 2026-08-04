@@ -139,6 +139,17 @@ func (c *Correlator) Correlate(evt ProcessEvent, ctx EventContext) SyntheticKern
 			} else {
 				code = "kernel.coverage_unknown"
 			}
+			// Structural observation gap → verdict="unknown", NOT
+			// insufficient_evidence. The daemon observed the event but
+			// evidence is genuinely unknowable (restart gap, coverage
+			// unknown). This mirrors the Python receipt's first-class
+			// "unknown" verdict for honest abstention. The structural gap
+			// code takes precedence over any prior correlation-ambiguous
+			// denial code, matching the original insufficient_evidence
+			// behavior where the restart-gap code overwrote
+			// correlation_ambiguous.
+			markUnknown(&receipt, code)
+			return receipt
 		case "degraded":
 			if ctx.CaptureLoss.RingbufDropped > 0 || ctx.CaptureLoss.DaemonQueueDropped > 0 || ctx.ConsumerLag {
 				code = "kernel.capture_loss"
@@ -285,6 +296,18 @@ func (c *Correlator) sessionReceiptsSnapshot(sessionID string) []ToolReceipt {
 func markInsufficientEvidence(receipt *SyntheticKernelReceipt, code string) {
 	receipt.Verdict = "insufficient_evidence"
 	receipt.PublicDenialReason = "insufficient_evidence"
+	receipt.InternalDenialCode = code
+}
+
+// markUnknown records a structural observation-gap verdict: the daemon
+// observed the event but evidence is genuinely unknowable (restart gap,
+// coverage unknown). This is semantically distinct from
+// insufficient_evidence (transient operational failure) and mirrors the
+// Python receipt's first-class "unknown" verdict for honest abstention.
+// Callers MUST treat unknown as DENY (fail-closed).
+func markUnknown(receipt *SyntheticKernelReceipt, code string) {
+	receipt.Verdict = "unknown"
+	receipt.PublicDenialReason = "unknown"
 	receipt.InternalDenialCode = code
 }
 

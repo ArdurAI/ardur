@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4fb0987c85737bef820bf556afc6e1c2bb2454aed7447737a3b96bb1c509c263"
+source_sha256: "b116a392236106f53f4878b16c73e841d5b54037f1e7048c5165aea0dfc14b10"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -84,6 +84,15 @@ All notable changes to Ardur will be documented in this file.
   fixture-module `_status_from_verdict` to map `unknown` verdicts to
   `"unknown"` status, and updates receipt v0.2 schema description from
   "Tri-state" to "Four-state verifier result."
+- Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
+  kernelcapture correlator and wire daemon-restart-gap and
+  coverage-unknown events to emit verdict `"unknown"` instead of
+  `"insufficient_evidence"`. This mirrors the Python receipt's
+  first-class `"unknown"` verdict for honest observation-gap
+  abstention, completing the cross-language consistency of the
+  five-state Decision taxonomy (compliant, denied, blocked,
+  insufficient_evidence, unknown) across both Python and Go receipt
+  surfaces.
 - Add `--output` flag to `ardur verify` so the JSON explorer report can be
   atomically written to an owner-only file instead of printing to stdout,
   matching the `--output` contract on `evidence correlate`, `posture scan`/

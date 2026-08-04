@@ -20,7 +20,7 @@ type EnforceEventSummary struct {
 	// scope's summary).
 	TotalEvents uint64 `json:"total_events"`
 	// VerdictCounts keys are SyntheticKernelReceipt-style verdict strings
-	// ("denied", "blocked", "compliant", "insufficient_evidence").
+	// ("denied", "blocked", "compliant", "insufficient_evidence", "unknown").
 	VerdictCounts map[string]uint64 `json:"verdict_counts,omitempty"`
 	// TierCoverage keys identify the enforcement tier + mode that produced an
 	// event, e.g. "bpf_lsm:enforce" or "bpf_lsm:permissive". Forward-compatible
