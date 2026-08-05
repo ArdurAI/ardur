@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "b116a392236106f53f4878b16c73e841d5b54037f1e7048c5165aea0dfc14b10"
+source_sha256: "910fa81a62df4f634ed5bab96a22054083dd8450cf4a574c6f9d6d694c9cef62"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -93,6 +93,18 @@ All notable changes to Ardur will be documented in this file.
   five-state Decision taxonomy (compliant, denied, blocked,
   insufficient_evidence, unknown) across both Python and Go receipt
   surfaces.
+- Update v0.1 protocol specifications (verifier-contract,
+  execution-receipt, conformance-profiles, EAT-profile,
+  governance-telemetry, idm-extension, offline-verification-bundle,
+  auditbench-evaluation-protocol) to include `unknown` in the verifier
+  codomain alongside `compliant`, `violation`, and
+  `insufficient_evidence`. Updates the DRP decision-projection mapping
+  to include `unknown → DENY with metadata.x-ardur.verdict=unknown`.
+  Historical "tri-state" references are preserved in the v0.2 extension
+  note and precursor citation. This completes end-to-end alignment of
+  the honest-abstention `unknown` verdict across the receipt schema,
+  governance enforcement, security model, Go correlator, coverage map,
+  and protocol specifications.
 - Add `--output` flag to `ardur verify` so the JSON explorer report can be
   atomically written to an owner-only file instead of printing to stdout,
   matching the `--output` contract on `evidence correlate`, `posture scan`/

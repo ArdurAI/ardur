@@ -76,6 +76,18 @@ All notable changes to Ardur will be documented in this file.
   five-state Decision taxonomy (compliant, denied, blocked,
   insufficient_evidence, unknown) across both Python and Go receipt
   surfaces.
+- Update v0.1 protocol specifications (verifier-contract,
+  execution-receipt, conformance-profiles, EAT-profile,
+  governance-telemetry, idm-extension, offline-verification-bundle,
+  auditbench-evaluation-protocol) to include `unknown` in the verifier
+  codomain alongside `compliant`, `violation`, and
+  `insufficient_evidence`. Updates the DRP decision-projection mapping
+  to include `unknown → DENY with metadata.x-ardur.verdict=unknown`.
+  Historical "tri-state" references are preserved in the v0.2 extension
+  note and precursor citation. This completes end-to-end alignment of
+  the honest-abstention `unknown` verdict across the receipt schema,
+  governance enforcement, security model, Go correlator, coverage map,
+  and protocol specifications.
 - Add `--output` flag to `ardur verify` so the JSON explorer report can be
   atomically written to an owner-only file instead of printing to stdout,
   matching the `--output` contract on `evidence correlate`, `posture scan`/
