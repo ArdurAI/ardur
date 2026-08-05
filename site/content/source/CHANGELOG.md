@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "910fa81a62df4f634ed5bab96a22054083dd8450cf4a574c6f9d6d694c9cef62"
+source_sha256: "b02f1a8d25fc2426012d2ba66c4832536f7e53e84c4fd9af0b15de0f626ddb9d"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -199,6 +199,12 @@ All notable changes to Ardur will be documented in this file.
   `INSUFFICIENT_EVIDENCE`, `UNKNOWN`) and the distinction between
   `INSUFFICIENT_EVIDENCE` (transient operational failure, retryable) and
   `UNKNOWN` (structural observation gap, not retryable). Both fail-closed.
+- Add five-state Decision taxonomy summary to `STATUS.md` so the top-level
+  status document reflects the `unknown` verdict alongside
+  `insufficient_evidence` as first-class receipt outcomes.
+- Update `README.md` AuditBench scoring description from "tri-state" to
+  "four-state" (`compliant`, `violation`, `insufficient_evidence`,
+  `unknown`) to match the updated v0.1 protocol spec codomain.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

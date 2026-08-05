@@ -2,7 +2,7 @@
 title: "Ardur"
 description: "Ardur governs AI-agent tool calls that pass through a configured adapter or"
 source_path: "README.md"
-source_sha256: "2d31a901e2384072ce88ca40b379f88793e76b800f5213e53b877f101c3980f8"
+source_sha256: "14bd18d4b839f22dbe1c96fced3394b4970afd6c649339b0bfbff8507b6c90d0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["orientation", "runtime-boundary"]
@@ -122,7 +122,7 @@ proof.
 
 The [AuditBench evaluation protocol](/__ardur_internal__/source/docs/specs/auditbench-evaluation-protocol-v0.1/)
 adds strict raw-capture replay, blind two-view annotations, a local
-content-integrity seal, and held-out tri-state scoring. The pipeline is
+content-integrity seal, and held-out four-state scoring (`compliant`, `violation`, `insufficient_evidence`, `unknown`). The pipeline is
 implemented, but it does not authenticate annotators or demonstrate evaluator
 independence. No real annotation study, headline corpus, or comparative result
 is claimed.

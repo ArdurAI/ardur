@@ -105,7 +105,7 @@ proof.
 
 The [AuditBench evaluation protocol](docs/specs/auditbench-evaluation-protocol-v0.1.md)
 adds strict raw-capture replay, blind two-view annotations, a local
-content-integrity seal, and held-out tri-state scoring. The pipeline is
+content-integrity seal, and held-out four-state scoring (`compliant`, `violation`, `insufficient_evidence`, `unknown`). The pipeline is
 implemented, but it does not authenticate annotators or demonstrate evaluator
 independence. No real annotation study, headline corpus, or comparative result
 is claimed.

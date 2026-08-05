@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "af9b9b934aa2a12bef4c6c4e22b380cbeed6e2b82a91b0c3253418b6569fa9ac"
+source_sha256: "05c93fd17cec1adb6a3a64a176796d870d3fe5382ae1fc1a245e7c88fbec9eb5"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -42,6 +42,16 @@ adds Linux eBPF kernel-level capture; v1.0 adds macOS Endpoint Security
 Framework. See [`docs/coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the full
 audit, [`docs/known-limitations.md`](/__ardur_internal__/source/docs/known-limitations/) for the
 caveat list, and [`ROADMAP.md`](/__ardur_internal__/source/roadmap/) for the phase plan.
+
+Each observed tool call results in a five-state Decision: `PERMIT`,
+`DENY`, `VIOLATION`, `INSUFFICIENT_EVIDENCE`, or `UNKNOWN`. Only `PERMIT`
+allows execution; all others block the call (fail-closed discipline).
+`INSUFFICIENT_EVIDENCE` records a transient operational failure (state file
+corrupted, approval operator unreachable) — might be retried. `UNKNOWN`
+records a structural observation gap where the activity is outside Ardur's
+capture boundary — the honest "I cannot know what happened" outcome. Both
+fail-closed as `DENY` on the receipt. See [`docs/security-model.md`](/__ardur_internal__/source/docs/security-model/) for the
+full taxonomy.
 
 An opt-in Linux `ardur-kernelcaptured --agent-recognition` preview now admits
 exec events whose exact 15-byte-or-shorter Linux `comm` or bounded

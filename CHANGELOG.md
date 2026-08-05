@@ -182,6 +182,12 @@ All notable changes to Ardur will be documented in this file.
   `INSUFFICIENT_EVIDENCE`, `UNKNOWN`) and the distinction between
   `INSUFFICIENT_EVIDENCE` (transient operational failure, retryable) and
   `UNKNOWN` (structural observation gap, not retryable). Both fail-closed.
+- Add five-state Decision taxonomy summary to `STATUS.md` so the top-level
+  status document reflects the `unknown` verdict alongside
+  `insufficient_evidence` as first-class receipt outcomes.
+- Update `README.md` AuditBench scoring description from "tri-state" to
+  "four-state" (`compliant`, `violation`, `insufficient_evidence`,
+  `unknown`) to match the updated v0.1 protocol spec codomain.
 
 ### Changed
 - Exclude `worktrees/` from Hugo source-mirror sync so generated documentation

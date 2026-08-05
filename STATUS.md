@@ -26,6 +26,16 @@ Framework. See [`docs/coverage-map.md`](docs/coverage-map.md) for the full
 audit, [`docs/known-limitations.md`](docs/known-limitations.md) for the
 caveat list, and [`ROADMAP.md`](ROADMAP.md) for the phase plan.
 
+Each observed tool call results in a five-state Decision: `PERMIT`,
+`DENY`, `VIOLATION`, `INSUFFICIENT_EVIDENCE`, or `UNKNOWN`. Only `PERMIT`
+allows execution; all others block the call (fail-closed discipline).
+`INSUFFICIENT_EVIDENCE` records a transient operational failure (state file
+corrupted, approval operator unreachable) — might be retried. `UNKNOWN`
+records a structural observation gap where the activity is outside Ardur's
+capture boundary — the honest "I cannot know what happened" outcome. Both
+fail-closed as `DENY` on the receipt. See [`docs/security-model.md`](docs/security-model.md) for the
+full taxonomy.
+
 An opt-in Linux `ardur-kernelcaptured --agent-recognition` preview now admits
 exec events whose exact 15-byte-or-shorter Linux `comm` or bounded
 successful-exec basename matches the embedded `claude`, `codex`, `gemini`, or
