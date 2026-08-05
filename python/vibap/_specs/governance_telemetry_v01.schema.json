@@ -62,7 +62,8 @@
       "enum": [
         "PERMIT",
         "DENY",
-        "ERROR"
+        "ERROR",
+        "UNKNOWN"
       ]
     },
     "verdict": {

@@ -264,6 +264,7 @@ def _verdict_label(verdict: str) -> str:
         "compliant": "PERMIT",
         "violation": "DENY",
         "insufficient_evidence": "ERROR",
+        "unknown": "UNKNOWN",
     }[verdict]
 
 
