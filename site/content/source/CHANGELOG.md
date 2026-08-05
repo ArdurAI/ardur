@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "b02f1a8d25fc2426012d2ba66c4832536f7e53e84c4fd9af0b15de0f626ddb9d"
+source_sha256: "84918dcc1f43a776adc9c867eb80b0c2de809e6b98a8f18a6861640daa83e3c4"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -217,6 +217,13 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Fix `_build_summary` in the governance proxy to count `Decision.UNKNOWN`
+  as a denial. When the `UNKNOWN` verdict was added to the five-state
+  Decision taxonomy, the summary's denials tuple was not updated — an
+  `UNKNOWN` event would silently pass uncounted, understating the aggregate
+  denial count and incorrectly reporting `scope_compliance: full`. The
+  summary now also breaks out `unknowns` and `insufficient_evidence` as
+  separate count fields for audit clarity.
 - Standardise JSON-mode exit codes: all `--json` error paths now exit 1
   (argparse errors, `ardur run` legacy hub errors, handler validation
   errors). Previously argparse errors exited 0 and `run` legacy hub errors

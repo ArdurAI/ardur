@@ -4478,11 +4478,24 @@ class GovernanceProxy:
             event for event in session.events if not self._is_internal_risk_event(event)
         ]
         permits = sum(1 for e in events if e.decision == Decision.PERMIT)
+        # Every non-PERMIT decision is a denial (fail-closed).  UNKNOWN and
+        # INSUFFICIENT_EVIDENCE are counted here so the aggregate denial count
+        # is never understated, but they are also broken out separately for
+        # audit clarity (see ``unknowns`` / ``insufficient_evidence`` below).
         denials = sum(
             1
             for e in events
             if e.decision
-            in (Decision.DENY, Decision.INSUFFICIENT_EVIDENCE, Decision.VIOLATION)
+            in (
+                Decision.DENY,
+                Decision.INSUFFICIENT_EVIDENCE,
+                Decision.VIOLATION,
+                Decision.UNKNOWN,
+            )
+        )
+        unknowns = sum(1 for e in events if e.decision == Decision.UNKNOWN)
+        insufficient = sum(
+            1 for e in events if e.decision == Decision.INSUFFICIENT_EVIDENCE
         )
         return {
             "type": "session_end",
@@ -4492,6 +4505,8 @@ class GovernanceProxy:
             "total_events": len(events),
             "permits": permits,
             "denials": denials,
+            "unknowns": unknowns,
+            "insufficient_evidence": insufficient,
             "elapsed_s": round(session.elapsed_s, 3),
             "scope_compliance": "full" if denials == 0 else "violated",
             "delegation_count": len(session.delegated_children),

@@ -200,6 +200,13 @@ All notable changes to Ardur will be documented in this file.
   assume Apple Silicon local performance
 
 ### Fixed
+- Fix `_build_summary` in the governance proxy to count `Decision.UNKNOWN`
+  as a denial. When the `UNKNOWN` verdict was added to the five-state
+  Decision taxonomy, the summary's denials tuple was not updated — an
+  `UNKNOWN` event would silently pass uncounted, understating the aggregate
+  denial count and incorrectly reporting `scope_compliance: full`. The
+  summary now also breaks out `unknowns` and `insufficient_evidence` as
+  separate count fields for audit clarity.
 - Standardise JSON-mode exit codes: all `--json` error paths now exit 1
   (argparse errors, `ardur run` legacy hub errors, handler validation
   errors). Previously argparse errors exited 0 and `run` legacy hub errors
