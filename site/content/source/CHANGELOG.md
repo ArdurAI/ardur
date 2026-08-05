@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "724f856deffc6ee32dba5911fd3dedb4a89d5c9d1d418aa76b6e50ddac73f9f1"
+source_sha256: "6cd2488a557dba5610d31a49a0cda27319ef4f43737a4eb6cb0c5c5a64dc3508"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -102,6 +102,14 @@ All notable changes to Ardur will be documented in this file.
   consumers never mistake it for full process-tree capture (which
   requires eBPF daemon correlation). This works with any CLI on
   macOS/Linux without any host plugin API dependency.
+- When adapter wrapping transforms the argv before launch (Claude Code
+  `--plugin-dir` injection, seccomp shim, launch-gate wrapping), the
+  actual argv is now captured in the lifecycle evidence's `run_command`
+  field alongside the original `command` field. This lets consumers
+  distinguish "what the user asked to run" from "what the OS was told
+  to execute." `run_command` is omitted when identical to `command`
+  (the common `via=env` case). Both fields are redacted under
+  `--redact-paths`.
 - Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
   kernelcapture correlator and wire daemon-restart-gap and
   coverage-unknown events to emit verdict `"unknown"` instead of

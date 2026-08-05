@@ -85,6 +85,14 @@ All notable changes to Ardur will be documented in this file.
   consumers never mistake it for full process-tree capture (which
   requires eBPF daemon correlation). This works with any CLI on
   macOS/Linux without any host plugin API dependency.
+- When adapter wrapping transforms the argv before launch (Claude Code
+  `--plugin-dir` injection, seccomp shim, launch-gate wrapping), the
+  actual argv is now captured in the lifecycle evidence's `run_command`
+  field alongside the original `command` field. This lets consumers
+  distinguish "what the user asked to run" from "what the OS was told
+  to execute." `run_command` is omitted when identical to `command`
+  (the common `via=env` case). Both fields are redacted under
+  `--redact-paths`.
 - Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
   kernelcapture correlator and wire daemon-restart-gap and
   coverage-unknown events to emit verdict `"unknown"` instead of

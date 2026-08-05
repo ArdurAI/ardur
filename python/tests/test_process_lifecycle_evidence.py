@@ -363,6 +363,133 @@ class TestResultDictLifecycle:
         assert cmd[1] == f"{home}/script.js"
 
 
+class TestRunCommandEvidence:
+    """Tests for the run_command field (adapter-wrapped argv)."""
+
+    def test_run_command_absent_when_identical_to_command(self) -> None:
+        """When run_command is the same as command, it is not included."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+            run_command=["echo", "hi"],
+        )
+        assert "run_command" not in result
+
+    def test_run_command_absent_when_omitted(self) -> None:
+        """Backward compat: run_command defaults to None and is not included."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+        )
+        assert "run_command" not in result
+
+    def test_run_command_present_when_differs(self) -> None:
+        """When run_command differs from command, it is included."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["claude"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+            run_command=["claude", "--plugin-dir", "/tmp/plugin"],
+        )
+        assert result["run_command"] == ["claude", "--plugin-dir", "/tmp/plugin"]
+        assert result["command"] == ["claude"]
+
+    def test_run_command_redacted_in_result_dict(self) -> None:
+        """run_command with local paths is redacted when redact_paths=True."""
+        import os
+
+        home = os.path.expanduser("~")
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="claude-code",
+            via="claude-code",
+            proxy_url="http://127.0.0.1:1",
+            home=home,
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["claude"],
+                "run_command": [
+                    "claude",
+                    "--plugin-dir",
+                    f"{home}/.local/share/ardur/plugin",
+                ],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        rc = d["process_lifecycle"]["run_command"]
+        assert home not in rc[2], f"Home path leaked in run_command: {rc[2]}"
+        assert "<home>" in rc[2], f"Expected <home> placeholder, got {rc[2]}"
+
+    def test_run_command_preserved_when_redact_off(self) -> None:
+        """run_command is returned verbatim when redact_paths=False."""
+        import os
+
+        home = os.path.expanduser("~")
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="claude-code",
+            via="claude-code",
+            proxy_url="http://127.0.0.1:1",
+            home=home,
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["claude"],
+                "run_command": ["claude", "--plugin-dir", f"{home}/plugin"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+            },
+        )
+        d = result.to_result_dict(redact_paths=False)
+        rc = d["process_lifecycle"]["run_command"]
+        assert rc[2] == f"{home}/plugin"
+
+
 # ── format_summary tests ──────────────────────────────────────────────────────
 
 
@@ -509,4 +636,23 @@ class TestRunGovernedLifecycleIntegration:
         assert year >= 2024, (
             f"Integration started_at year={year} is implausible; got {ts}. "
             "Monotonic clock may have been used instead of wall clock."
+        )
+
+    def test_run_command_absent_for_env_adapter(self) -> None:
+        """via=env: command == run_command, so run_command is not included."""
+        from vibap.run_bridge import run_governed
+
+        result = run_governed(
+            command=["echo", "env-check"],
+            mission="test",
+            allowed_tools=[],
+            forbidden_tools=[],
+            via="env",
+            max_duration_s=10,
+        )
+        pl = result.process_lifecycle
+        assert pl["command"] == ["echo", "env-check"]
+        assert "run_command" not in pl, (
+            "run_command should not appear when identical to command "
+            f"(via=env), got keys: {sorted(pl)}"
         )

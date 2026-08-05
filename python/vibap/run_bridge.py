@@ -558,6 +558,10 @@ class GovernanceRunResult:
             process_lifecycle_out["command"] = [
                 _redact_local_path_embedded(c) for c in process_lifecycle_out["command"]
             ]
+        if redact_paths and process_lifecycle_out.get("run_command"):
+            process_lifecycle_out["run_command"] = [
+                _redact_local_path_embedded(c) for c in process_lifecycle_out["run_command"]
+            ]
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
@@ -1080,6 +1084,7 @@ def _build_process_lifecycle_evidence(
     launch_monotonic: float,
     launch_wall_clock: float,
     exit_code: int,
+    run_command: list[str] | None = None,
 ) -> dict[str, Any]:
     """Capture zero-privilege process-lifecycle evidence for the launched root.
 
@@ -1088,7 +1093,13 @@ def _build_process_lifecycle_evidence(
     about the launched process without any plugin API dependency:
 
     * ``root_pid`` — the launched process's PID (host-assigned identity).
-    * ``command`` — the exact argv[0] and arguments (what was asked to run).
+    * ``command`` — the argv the user asked to run (before adapter/wrap
+      transforms).
+    * ``run_command`` — the actual argv passed to ``subprocess.Popen`` after
+      adapter wrapping (Claude Code ``--plugin-dir`` injection, seccomp shim,
+      launch-gate wrapping). May differ from ``command``; both are captured so
+      consumers can distinguish "what was asked" from "what the OS ran".
+      ``None`` when identical to ``command`` (backward-compatible default).
     * ``started_at`` — wall-clock timestamp when the process was launched.
     * ``wall_clock_s`` — measured wall-clock duration from launch to exit.
     * ``exit_code`` — the integer exit status (host-reported).
@@ -1114,7 +1125,7 @@ def _build_process_lifecycle_evidence(
         root_pid = proc.pid
     if exit_code is not None and exit_code < 0:
         exit_signal = _signal_name(exit_code)
-    return {
+    result = {
         "root_pid": root_pid,
         "command": list(command),
         "started_at": started_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
@@ -1127,6 +1138,12 @@ def _build_process_lifecycle_evidence(
             "captured without eBPF daemon correlation"
         ),
     }
+    # Only include run_command when it differs from command. This keeps
+    # the no-wrapping case (via=env, most agents) clean while making
+    # adapter/seccomp/gate wrapping auditable in the evidence.
+    if run_command is not None and list(run_command) != list(command):
+        result["run_command"] = list(run_command)
+    return result
 
 
 def _signal_name(signum: int) -> str:
@@ -1528,6 +1545,7 @@ def run_governed(
         launch_monotonic=_launch_monotonic,
         launch_wall_clock=_launch_wall_clock,
         exit_code=exit_code if proc is not None else 127,
+        run_command=run_command,
     )
     result = GovernanceRunResult(
         exit_code=exit_code if proc is not None else 127,
