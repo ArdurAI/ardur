@@ -54,6 +54,14 @@ All notable changes to Ardur will be documented in this file.
   key data`, `asn1` errors) from proxy HTTP 400 error responses so
   `holder_public_key_pem` validation failures use the fixed code
   `holder_public_key_pem_invalid` instead of leaking PEM-decoder text
+- Fix KeyError crash in offline verification (`_verdict_label`) and
+  telemetry export severity map when a receipt chain contains an
+  `unknown` verdict. The `unknown` verdict was added as a first-class
+  outcome for honest observation-gap abstention, but the verdict label
+  dict and OTel severity map were not updated, causing crashes that
+  broke post-hoc verification and telemetry export. This was a
+  denial-of-audit vector: an attacker who could trigger `unknown`
+  verdicts could crash post-hoc verification paths.
 
 ### Added
 - Add `UNKNOWN` as a first-class `Decision` enum value in the governance
