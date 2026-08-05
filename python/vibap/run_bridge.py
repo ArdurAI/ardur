@@ -39,6 +39,7 @@ import urllib.error
 import urllib.request
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -518,6 +519,7 @@ class GovernanceRunResult:
     receipt_count: int
     correlation: dict[str, Any]
     kernel_policy: dict[str, Any]
+    process_lifecycle: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     def to_result_dict(self, *, redact_paths: bool = False) -> dict[str, Any]:
@@ -551,6 +553,11 @@ class GovernanceRunResult:
                     correlation["cgroup_path"]
                 )
         notes_out = [_redact_local_path_embedded(n) for n in self.notes] if redact_paths else list(self.notes)
+        process_lifecycle_out = dict(self.process_lifecycle) if self.process_lifecycle else {}
+        if redact_paths and process_lifecycle_out.get("command"):
+            process_lifecycle_out["command"] = [
+                _redact_local_path_embedded(c) for c in process_lifecycle_out["command"]
+            ]
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
@@ -569,6 +576,7 @@ class GovernanceRunResult:
             "passport_path": passport_path,
             "correlation": correlation,
             "kernel_policy": self.kernel_policy,
+            "process_lifecycle": process_lifecycle_out,
             "notes": notes_out,
         }
 
@@ -1065,6 +1073,72 @@ def _resolve_run_resource_scope(
     return patterns
 
 
+def _build_process_lifecycle_evidence(
+    *,
+    proc: subprocess.Popen[bytes] | None,
+    command: list[str],
+    launch_monotonic: float,
+    launch_wall_clock: float,
+    exit_code: int,
+) -> dict[str, Any]:
+    """Capture zero-privilege process-lifecycle evidence for the launched root.
+
+    This is the host-observer capture boundary that works with *any* CLI —
+    not just hook-supporting agents. It records what the host OS can observe
+    about the launched process without any plugin API dependency:
+
+    * ``root_pid`` — the launched process's PID (host-assigned identity).
+    * ``command`` — the exact argv[0] and arguments (what was asked to run).
+    * ``started_at`` — wall-clock timestamp when the process was launched.
+    * ``wall_clock_s`` — measured wall-clock duration from launch to exit.
+    * ``exit_code`` — the integer exit status (host-reported).
+    * ``exit_signal`` — POSIX signal name if terminated by signal, else ``null``.
+    * ``capture_tier`` — ``"host-observer"`` (zero-privilege, no kernel daemon).
+
+    This evidence is structurally weaker than eBPF daemon correlation
+    (``correlation.available == True``) which captures process-tree *interior*
+    exec/fork events. The host-observer tier captures only the root process's
+    own lifecycle. The honest boundary is encoded in ``capture_tier`` so
+    consumers never mistake root-only lifecycle for full process-tree capture.
+
+    ``launch_wall_clock`` must be an epoch timestamp from ``time.time()``;
+    ``launch_monotonic`` must be from ``time.monotonic()``.  The two clocks
+    measure different things — wall-clock date vs. elapsed duration — and
+    must not be mixed.
+    """
+    started_at = datetime.fromtimestamp(launch_wall_clock, tz=timezone.utc)
+    wall_clock_s = round(time.monotonic() - launch_monotonic, 6)
+    root_pid: int | None = None
+    exit_signal: str | None = None
+    if proc is not None:
+        root_pid = proc.pid
+    if exit_code is not None and exit_code < 0:
+        exit_signal = _signal_name(exit_code)
+    return {
+        "root_pid": root_pid,
+        "command": list(command),
+        "started_at": started_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "wall_clock_s": wall_clock_s,
+        "exit_code": exit_code,
+        "exit_signal": exit_signal,
+        "capture_tier": "host-observer",
+        "capture_boundary": (
+            "root-process lifecycle only; subprocess tree interior is not "
+            "captured without eBPF daemon correlation"
+        ),
+    }
+
+
+def _signal_name(signum: int) -> str:
+    """Map a negative exit code to its POSIX signal name."""
+    import signal as _signal
+
+    try:
+        return _signal.Signals(-signum).name
+    except (ValueError, AttributeError):
+        return f"signal {-signum}"
+
+
 def run_governed(
     *,
     command: list[str],
@@ -1282,6 +1356,8 @@ def run_governed(
             popen_extra["pass_fds"] = (launch_gate_read_fd,)
 
         # 5. Launch the agent.
+        _launch_monotonic = time.monotonic()
+        _launch_wall_clock = time.time()
         try:
             proc = subprocess.Popen(
                 run_command,
@@ -1446,6 +1522,13 @@ def run_governed(
         server.server_close()
 
     receipts_path = proxy.receipts_log_path
+    _process_lifecycle = _build_process_lifecycle_evidence(
+        proc=proc,
+        command=command,
+        launch_monotonic=_launch_monotonic,
+        launch_wall_clock=_launch_wall_clock,
+        exit_code=exit_code if proc is not None else 127,
+    )
     result = GovernanceRunResult(
         exit_code=exit_code if proc is not None else 127,
         session_id=session_id,
@@ -1466,6 +1549,7 @@ def run_governed(
         receipt_count=_count_lines(receipts_path),
         correlation=correlation.to_dict(),
         kernel_policy=dict(kernel_policy),
+        process_lifecycle=_process_lifecycle,
         notes=notes,
     )
     return result
@@ -1511,6 +1595,18 @@ def format_summary(result: GovernanceRunResult) -> str:
         f"  kernel policy {result.kernel_policy.get('reason')}",
         f"  agent exit    {result.exit_code}",
     ]
+    pl = result.process_lifecycle
+    if pl:
+        pid_text = str(pl.get("root_pid") or "unknown")
+        dur_text = f"{pl.get('wall_clock_s', 0):.3f}s"
+        tier_text = str(pl.get("capture_tier", "host-observer"))
+        signal_text = pl.get("exit_signal")
+        exit_line = f"exit={pl.get('exit_code')}"
+        if signal_text:
+            exit_line += f" ({signal_text})"
+        lines.append(
+            f"  process       pid={pid_text} {dur_text} {exit_line} [{tier_text}]"
+        )
     for note in result.notes:
         lines.append(f"  note          {note}")
     lines.append("─────────────────────────────────────────────────────────")

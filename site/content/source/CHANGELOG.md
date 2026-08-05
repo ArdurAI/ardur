@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "b88ad9fabe8e0dc9aec90b88d2d5541dfe12256521ff23ae03d515ead9575f5e"
+source_sha256: "724f856deffc6ee32dba5911fd3dedb4a89d5c9d1d418aa76b6e50ddac73f9f1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -84,14 +84,24 @@ All notable changes to Ardur will be documented in this file.
 - Add `UNKNOWN` as a first-class `Decision` enum value in the governance
   proxy, representing a genuine observation gap where the verifier
   observed the call but the evidence is structurally outside the capture
-  boundary (e.g., visibility is not "full"). Unlike
-  `INSUFFICIENT_EVIDENCE` (transient operational failure), `UNKNOWN`
-  records the honest "I cannot know what happened." Both fail-closed as
-  DENY. Wires the visibility-insufficient path in MIC-State/MIC-Evidence
-  checks to emit `UNKNOWN` with `DenialReason.OBSERVATION_GAP`. Updates
+  boundary. This is the honest-abstention outcome — distinct from
+  `INSUFFICIENT_EVIDENCE` (transient operational failure). Unknown
+  decisions are fail-closed DENY with
+  `metadata.x-ardur.verdict=unknown` and counted as denials in the
+  session summary.
   fixture-module `_status_from_verdict` to map `unknown` verdicts to
   `"unknown"` status, and updates receipt v0.2 schema description from
   "Tri-state" to "Four-state verifier result."
+- Capture zero-privilege host-observer process-lifecycle evidence for
+  every `ardur run -- <cli>` launch. The launched root process's PID,
+  command, started-at timestamp, wall-clock duration, exit code, and
+  exit signal are now recorded in the governance result's
+  `process_lifecycle` field and surfaced in both `--json` output and
+  the human-readable summary. The `capture_tier` field honestly marks
+  this as `"host-observer"` — root-process lifecycle only — so
+  consumers never mistake it for full process-tree capture (which
+  requires eBPF daemon correlation). This works with any CLI on
+  macOS/Linux without any host plugin API dependency.
 - Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
   kernelcapture correlator and wire daemon-restart-gap and
   coverage-unknown events to emit verdict `"unknown"` instead of

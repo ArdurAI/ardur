@@ -83,6 +83,7 @@ class TestToResultDict:
             "passport_path",
             "correlation",
             "kernel_policy",
+            "process_lifecycle",
             "notes",
         }
         assert set(d.keys()) == expected_keys
