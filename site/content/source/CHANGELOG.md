@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "6cd2488a557dba5610d31a49a0cda27319ef4f43737a4eb6cb0c5c5a64dc3508"
+source_sha256: "4704b3f0a2901b4b519721f25c099dc78f07063fb808260b9042871a5bffa07a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -110,6 +110,10 @@ All notable changes to Ardur will be documented in this file.
   to execute." `run_command` is omitted when identical to `command`
   (the common `via=env` case). Both fields are redacted under
   `--redact-paths`.
+- Capture the absolute working directory (`cwd`) the launched process
+  was started in as part of the host-observer lifecycle evidence. This
+  lets consumers reproduce the filesystem context of the run. The `cwd`
+  field is redacted under `--redact-paths`.
 - Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
   kernelcapture correlator and wire daemon-restart-gap and
   coverage-unknown events to emit verdict `"unknown"` instead of

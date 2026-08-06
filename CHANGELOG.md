@@ -93,6 +93,10 @@ All notable changes to Ardur will be documented in this file.
   to execute." `run_command` is omitted when identical to `command`
   (the common `via=env` case). Both fields are redacted under
   `--redact-paths`.
+- Capture the absolute working directory (`cwd`) the launched process
+  was started in as part of the host-observer lifecycle evidence. This
+  lets consumers reproduce the filesystem context of the run. The `cwd`
+  field is redacted under `--redact-paths`.
 - Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
   kernelcapture correlator and wire daemon-restart-gap and
   coverage-unknown events to emit verdict `"unknown"` instead of
