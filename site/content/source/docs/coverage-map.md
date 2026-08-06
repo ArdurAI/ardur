@@ -2,7 +2,7 @@
 title: "Ardur Coverage Map"
 description: "**The single source of truth for what Ardur captures and what it does not.**"
 source_path: "docs/coverage-map.md"
-source_sha256: "f98591f42e5a95dfc96d6360cda7a41fa8e52fe26d60dbce2b0f923b90995465"
+source_sha256: "d2d674c0e635ad77a4ab392dc03b95c5300454d8676b9bb0d00a361889815498"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -23,7 +23,7 @@ This page is the canonical reference linked from the README, `STATUS.md`,
 plugin documentation, and every example. When the capture surface changes,
 this page changes; everywhere else just links to it.
 
-Last updated: 2026-08-05. Current shipping version: v0.1 (tool-call boundary). The `ardur run -- <cli>` host-observer lifecycle tier is now also shipping: root-process PID, command, `run_command` (actual argv when adapter wrapping differs), started-at, wall-clock duration, exit code, and exit signal are captured for any CLI launch on macOS/Linux without any host plugin API dependency (`capture_tier=host-observer` — root-process lifecycle only, not subprocess-tree interior). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
+Last updated: 2026-08-06. Current shipping version: v0.1 (tool-call boundary). The `ardur run -- <cli>` host-observer lifecycle tier is now also shipping: root-process PID, command, `run_command` (actual argv when adapter wrapping differs), `cwd` (absolute working directory), started-at, wall-clock duration, exit code, and exit signal are captured for any CLI launch on macOS/Linux without any host plugin API dependency (`capture_tier=host-observer` — root-process lifecycle only, not subprocess-tree interior). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
  - The handler also automatically removes in-memory evidence-log append state when sessions end or expire; it does not delete, rotate, archive, or rename evidence-log files.
 
 ## What Ardur captures today (v0.1)
@@ -41,7 +41,7 @@ Last updated: 2026-08-05. Current shipping version: v0.1 (tool-call boundary). T
 | Mission Passport | Full — issued JWT with allowed/forbidden tools, resource scope, budgets, biscuit attenuation chain | Signed by issuer; verified at session start |
 | Receipt chain integrity | Full — every receipt's `parent_receipt_hash` is SHA-256 of prior receipt's full JWT; ES256-signed | `receipt_id`, `parent_receipt_hash`, `parent_receipt_id`, `trace_id` |
 | Posture index | Derived local evidence only — summarizes local receipts/profile/redacted bundle without mutating them | `schema_version=ardur.posture_index.v0`, `positioning=derived_local_evidence`, chain status, verdict/boundary counts, coverage gaps |
-| `ardur run -- <cli>` host-observer lifecycle | **Root-process lifecycle only** — root PID, command, `run_command` (actual argv when adapter wrapping differs), started-at, wall-clock duration, exit code, exit signal. Zero-privilege, no kernel daemon, works on macOS/Linux with any CLI. `capture_tier=host-observer`. | `process_lifecycle` object in governance result: `root_pid`, `command`, `run_command` (when differing), `started_at`, `wall_clock_s`, `exit_code`, `exit_signal`, `capture_tier` |
+| `ardur run -- <cli>` host-observer lifecycle | **Root-process lifecycle only** — root PID, command, `run_command` (actual argv when adapter wrapping differs), `cwd` (absolute working directory), started-at, wall-clock duration, exit code, exit signal. Zero-privilege, no kernel daemon, works on macOS/Linux with any CLI. `capture_tier=host-observer`. | `process_lifecycle` object in governance result: `root_pid`, `command`, `run_command` (when differing), `cwd` (when captured), `started_at`, `wall_clock_s`, `exit_code`, `exit_signal`, `capture_tier` |
 
 ## What is *not automatically captured* today (v0.1)
 
@@ -118,7 +118,7 @@ by the daemon.
 │   Other syscalls/network/macOS ESF     ← roadmap     │
 ├─────────────────────────────────────────────────────┤
 │ Layer 1.5 — Host-observer lifecycle                 │
-│   ardur run -- <cli> root process PID/command/exit  │
+│   ardur run -- <cli> root process PID/cmd/cwd/exit  │
 │   ↳ zero-privilege, no daemon — shipping            │
 ├─────────────────────────────────────────────────────┤
 │ Layer 1 — Tool-call boundary           ← shipping   │
@@ -128,11 +128,12 @@ by the daemon.
 
 Layer 1.5 (host-observer) captures the root process launched by
 `ardur run -- <cli>`: its PID, command, `run_command` (the actual argv when
-adapter wrapping transforms it), started-at timestamp, wall-clock duration,
-exit code, and exit signal. This works on macOS and Linux without any host
-plugin API dependency or kernel daemon. It is `capture_tier=host-observer` and
-records only the root process — not the subprocess tree, syscalls, file/network
-effects, or provider-side actions. Those remain layer 2 / layer 3 gaps.
+adapter wrapping transforms it), `cwd` (absolute working directory), started-at
+timestamp, wall-clock duration, exit code, and exit signal. This works on macOS
+and Linux without any host plugin API dependency or kernel daemon. It is
+`capture_tier=host-observer` and records only the root process — not the
+subprocess tree, syscalls, file/network effects, or provider-side actions.
+Those remain layer 2 / layer 3 gaps.
 
 ## What "cryptographic provenance" precisely claims
 

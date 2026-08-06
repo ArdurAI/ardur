@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "514378e23a340fed087b3ce16c1d120b90270d8ab009247eba3152da4e49249f"
+source_sha256: "bb49324a4f0869efc33a2004d8ebeee1aaf8b758d10a7d6db199b0256c9d9b71"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -29,12 +29,13 @@ hook or provider-hidden actions.
 `ardur run -- <cli>` additionally captures zero-privilege host-observer
 process-lifecycle evidence for any CLI launch: the root process's PID, command,
 `run_command` (the actual argv when adapter wrapping transforms it before
-launch, omitted when identical), started-at timestamp, wall-clock duration, exit
-code, and exit signal. This is recorded as `capture_tier=host-observer` and
-works on macOS and Linux without any host plugin API dependency or kernel
-daemon. It captures the root process only — not the subprocess tree, syscalls,
-file/network effects, or provider-side actions — so consumers never mistake it
-for full process-tree capture (which requires eBPF daemon correlation).
+launch, omitted when identical), `cwd` (absolute working directory), started-at
+timestamp, wall-clock duration, exit code, and exit signal. This is recorded as
+`capture_tier=host-observer` and works on macOS and Linux without any host
+plugin API dependency or kernel daemon. It captures the root process only —
+not the subprocess tree, syscalls, file/network effects, or provider-side
+actions — so consumers never mistake it for full process-tree capture (which
+requires eBPF daemon correlation).
 
 What we do **not** yet capture:
 
