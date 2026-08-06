@@ -14,12 +14,15 @@ process-lifecycle evidence for any CLI launch: the root process's PID, command,
 `run_command` (the actual argv when adapter wrapping transforms it before
 launch, omitted when identical), `cwd` (absolute working directory),
 `duration_budget_s` (the caller-set time budget, omitted when not set),
-started-at timestamp, wall-clock duration, exit code, and exit signal. This is recorded as
+started-at timestamp, wall-clock duration, exit code, and exit signal. It also
+enumerates direct child processes (PID, command, started-at, wall-clock
+duration; child exit codes are best-effort and may be null when a child exits
+between snapshot and inspection). This is recorded as
 `capture_tier=host-observer` and works on macOS and Linux without any host
-plugin API dependency or kernel daemon. It captures the root process only —
-not the subprocess tree, syscalls, file/network effects, or provider-side
-actions — so consumers never mistake it for full process-tree capture (which
-requires eBPF daemon correlation).
+plugin API dependency or kernel daemon. It captures the root process and its
+direct children only — not the full recursive process tree, syscalls,
+file/network effects, or provider-side actions — so consumers never mistake it
+for full process-tree capture (which requires eBPF daemon correlation).
 
 What we do **not** yet capture:
 

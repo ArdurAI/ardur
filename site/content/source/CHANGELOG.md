@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "50e9fa7c3a85a7a8807f6b8f9a91ee86c5ebcc3b3fb8254553b545a7632ae6a5"
+source_sha256: "2905fc44feb2a001727fc041ee685362d89dd56f0765c8f69a5a8d516142beaf"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -231,6 +231,10 @@ All notable changes to Ardur will be documented in this file.
   compliance because evidence is structurally outside the capture boundary.
 
 ### Docs
+- Update `STATUS.md` and `docs/coverage-map.md` to document the direct-child
+  process enumeration added to the host-observer lifecycle tier. The capture
+  boundary is now accurately described as "root-process + direct children only
+  — not the full recursive process tree."
 - Add Decision taxonomy section to `docs/security-model.md` documenting the
   five-state governance decision model (`PERMIT`, `DENY`, `VIOLATION`,
   `INSUFFICIENT_EVIDENCE`, `UNKNOWN`) and the distinction between

@@ -214,6 +214,10 @@ All notable changes to Ardur will be documented in this file.
   compliance because evidence is structurally outside the capture boundary.
 
 ### Docs
+- Update `STATUS.md` and `docs/coverage-map.md` to document the direct-child
+  process enumeration added to the host-observer lifecycle tier. The capture
+  boundary is now accurately described as "root-process + direct children only
+  — not the full recursive process tree."
 - Add Decision taxonomy section to `docs/security-model.md` documenting the
   five-state governance decision model (`PERMIT`, `DENY`, `VIOLATION`,
   `INSUFFICIENT_EVIDENCE`, `UNKNOWN`) and the distinction between
