@@ -1090,6 +1090,7 @@ def _build_process_lifecycle_evidence(
     exit_code: int,
     run_command: list[str] | None = None,
     cwd: str | None = None,
+    duration_budget_s: int | None = None,
 ) -> dict[str, Any]:
     """Capture zero-privilege process-lifecycle evidence for the launched root.
 
@@ -1108,6 +1109,11 @@ def _build_process_lifecycle_evidence(
     * ``cwd`` — the absolute working directory the launched process was
       started in (resolved via ``Path.resolve()`` before launch). Captured
       so consumers can reproduce the filesystem context of the run.
+      ``None`` omits the field (backward-compatible default).
+    * ``duration_budget_s`` — the time budget (in seconds) the caller set
+      for the process, if any. This is the ``max_duration_s`` value from
+      ``run_governed``, recorded so consumers can compare the budget against
+      ``wall_clock_s`` to detect budget-exhaustion or near-exhaustion.
       ``None`` omits the field (backward-compatible default).
     * ``started_at`` — wall-clock timestamp when the process was launched.
     * ``wall_clock_s`` — measured wall-clock duration from launch to exit.
@@ -1157,6 +1163,12 @@ def _build_process_lifecycle_evidence(
     # the filesystem context. Omitted when None for backward compatibility.
     if cwd is not None:
         result["cwd"] = str(cwd)
+    # Only include duration_budget_s when explicitly provided. This is the
+    # max_duration_s value from run_governed, recorded so consumers can
+    # compare the budget against wall_clock_s to detect budget-exhaustion
+    # or near-exhaustion. Omitted when None for backward compatibility.
+    if duration_budget_s is not None:
+        result["duration_budget_s"] = duration_budget_s
     return result
 
 
@@ -1561,6 +1573,7 @@ def run_governed(
         exit_code=exit_code if proc is not None else 127,
         run_command=run_command,
         cwd=str(work_dir),
+        duration_budget_s=max_duration_s,
     )
     result = GovernanceRunResult(
         exit_code=exit_code if proc is not None else 127,

@@ -671,6 +671,134 @@ class TestCwdRedaction:
         assert "cwd" not in d["process_lifecycle"]
 
 
+# ── duration_budget_s evidence tests ──────────────────────────────────────────
+
+
+class TestDurationBudgetEvidence:
+    """Tests for the duration_budget_s field in process-lifecycle evidence."""
+
+    def test_duration_budget_absent_when_omitted(self) -> None:
+        """Backward compat: duration_budget_s defaults to None and is not included."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(12345),  # type: ignore[arg-type]
+            command=["echo", "hello"],
+            launch_monotonic=time.monotonic() - 0.1,
+            launch_wall_clock=time.time() - 0.1,
+            exit_code=0,
+        )
+        assert "duration_budget_s" not in result
+
+    def test_duration_budget_present_when_provided(self) -> None:
+        """When duration_budget_s is provided, it is included in the evidence."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(12345),  # type: ignore[arg-type]
+            command=["echo", "hello"],
+            launch_monotonic=time.monotonic() - 0.1,
+            launch_wall_clock=time.time() - 0.1,
+            exit_code=0,
+            duration_budget_s=300,
+        )
+        assert result["duration_budget_s"] == 300
+
+    def test_duration_budget_is_int_type(self) -> None:
+        """duration_budget_s is an integer (seconds)."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(12345),  # type: ignore[arg-type]
+            command=["echo", "hello"],
+            launch_monotonic=time.monotonic() - 0.1,
+            launch_wall_clock=time.time() - 0.1,
+            exit_code=0,
+            duration_budget_s=300,
+        )
+        assert isinstance(result["duration_budget_s"], int)
+
+    def test_duration_budget_zero_is_included(self) -> None:
+        """A zero budget is still included (it is not None)."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(12345),  # type: ignore[arg-type]
+            command=["echo", "hello"],
+            launch_monotonic=time.monotonic() - 0.1,
+            launch_wall_clock=time.time() - 0.1,
+            exit_code=0,
+            duration_budget_s=0,
+        )
+        assert result["duration_budget_s"] == 0
+
+    def test_duration_budget_in_result_dict(self) -> None:
+        """duration_budget_s survives the to_result_dict round-trip."""
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home="/tmp/x",
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+                "duration_budget_s": 300,
+            },
+        )
+        d = result.to_result_dict()
+        assert d["process_lifecycle"]["duration_budget_s"] == 300
+
+    def test_duration_budget_not_redacted(self) -> None:
+        """duration_budget_s is a plain integer — redaction does not touch it."""
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home="/tmp/x",
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+                "duration_budget_s": 300,
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        assert d["process_lifecycle"]["duration_budget_s"] == 300
+
+
 # ── format_summary tests ──────────────────────────────────────────────────────
 
 
