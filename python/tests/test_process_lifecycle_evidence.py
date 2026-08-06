@@ -377,7 +377,6 @@ class TestRunCommandEvidence:
             run_command=["echo", "hi"],
         )
         assert "run_command" not in result
-
     def test_run_command_absent_when_omitted(self) -> None:
         """Backward compat: run_command defaults to None and is not included."""
         result = _build_process_lifecycle_evidence(
@@ -488,6 +487,188 @@ class TestRunCommandEvidence:
         d = result.to_result_dict(redact_paths=False)
         rc = d["process_lifecycle"]["run_command"]
         assert rc[2] == f"{home}/plugin"
+
+
+# ── cwd evidence tests ────────────────────────────────────────────────────────
+
+
+class TestCwdEvidence:
+    """Tests for the cwd field in process-lifecycle evidence."""
+
+    def test_cwd_absent_when_omitted(self) -> None:
+        """Backward compat: cwd defaults to None and is not included."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+        )
+        assert "cwd" not in result
+
+    def test_cwd_present_when_provided(self) -> None:
+        """When cwd is explicitly provided, it is captured."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+            cwd="/home/user/project",
+        )
+        assert result["cwd"] == "/home/user/project"
+
+    def test_cwd_is_string_type(self) -> None:
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["echo"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+            cwd="/tmp/work",
+        )
+        assert isinstance(result["cwd"], str)
+
+    def test_cwd_preserved_with_none_command_difference(self) -> None:
+        """cwd is independent of run_command presence."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(1),  # type: ignore[arg-type]
+            command=["claude"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+            run_command=["claude", "--plugin-dir", "/tmp/p"],
+            cwd="/home/user/work",
+        )
+        assert "run_command" in result
+        assert result["cwd"] == "/home/user/work"
+
+
+class TestCwdRedaction:
+    """Tests for cwd path redaction in to_result_dict."""
+
+    def test_cwd_redacted_when_redact_paths_true(self) -> None:
+        """W3: cwd with local path must be redacted."""
+        import os
+
+        home = os.path.expanduser("~")
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=home,
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["node", "script.js"],
+                "cwd": f"{home}/secret/project",
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        redacted_cwd = d["process_lifecycle"]["cwd"]
+        assert home not in redacted_cwd, (
+            f"Home path leaked in redacted cwd: {redacted_cwd}"
+        )
+        assert "<home>" in redacted_cwd, (
+            f"Expected <home> placeholder, got {redacted_cwd}"
+        )
+
+    def test_cwd_preserved_when_redact_paths_false(self) -> None:
+        """Without redact_paths, cwd is returned verbatim."""
+        import os
+
+        home = os.path.expanduser("~")
+        original_cwd = f"{home}/project"
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=home,
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["node", "script.js"],
+                "cwd": original_cwd,
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+            },
+        )
+        d = result.to_result_dict(redact_paths=False)
+        assert d["process_lifecycle"]["cwd"] == original_cwd
+
+    def test_cwd_absent_does_not_crash_redaction(self) -> None:
+        """When process_lifecycle has no cwd key, redaction should not fail."""
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home="/tmp/x",
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        assert "cwd" not in d["process_lifecycle"]
 
 
 # ── format_summary tests ──────────────────────────────────────────────────────
@@ -655,4 +836,71 @@ class TestRunGovernedLifecycleIntegration:
         assert "run_command" not in pl, (
             "run_command should not appear when identical to command "
             f"(via=env), got keys: {sorted(pl)}"
+        )
+
+    def test_cwd_captured_in_lifecycle_evidence(self) -> None:
+        """Integration: run_governed captures the resolved cwd."""
+        from vibap.run_bridge import run_governed
+
+        result = run_governed(
+            command=["echo", "cwd-check"],
+            mission="test",
+            allowed_tools=[],
+            forbidden_tools=[],
+            via="env",
+            max_duration_s=10,
+        )
+        pl = result.process_lifecycle
+        assert "cwd" in pl, (
+            f"cwd should be in process_lifecycle, got keys: {sorted(pl)}"
+        )
+        assert isinstance(pl["cwd"], str)
+        assert len(pl["cwd"]) > 0
+
+    def test_cwd_captures_explicit_workdir(self) -> None:
+        """Integration: explicit cwd parameter is reflected in lifecycle evidence."""
+        import tempfile
+
+        from pathlib import Path
+
+        from vibap.run_bridge import run_governed
+
+        explicit_cwd = Path(tempfile.mkdtemp(prefix="ardur-cwd-test-"))
+        try:
+            result = run_governed(
+                command=["echo", "explicit-cwd"],
+                mission="test",
+                allowed_tools=[],
+                forbidden_tools=[],
+                via="env",
+                max_duration_s=10,
+                cwd=explicit_cwd,
+            )
+            pl = result.process_lifecycle
+            assert pl["cwd"] == str(explicit_cwd.resolve())
+        finally:
+            import shutil
+
+            shutil.rmtree(str(explicit_cwd), ignore_errors=True)
+
+    def test_cwd_redacted_with_redact_paths(self) -> None:
+        """Integration: cwd is redacted when redact_paths=True."""
+        import os
+
+        from vibap.run_bridge import run_governed
+
+        result = run_governed(
+            command=["echo", "redact-cwd"],
+            mission="test",
+            allowed_tools=[],
+            forbidden_tools=[],
+            via="env",
+            max_duration_s=10,
+        )
+        d = result.to_result_dict(redact_paths=True)
+        pl = d["process_lifecycle"]
+        assert "cwd" in pl
+        home = os.path.expanduser("~")
+        assert home not in pl["cwd"], (
+            f"Home path leaked in redacted cwd: {pl['cwd']}"
         )

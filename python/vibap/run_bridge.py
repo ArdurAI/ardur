@@ -562,6 +562,10 @@ class GovernanceRunResult:
             process_lifecycle_out["run_command"] = [
                 _redact_local_path_embedded(c) for c in process_lifecycle_out["run_command"]
             ]
+        if redact_paths and process_lifecycle_out.get("cwd"):
+            process_lifecycle_out["cwd"] = _redact_local_path(
+                process_lifecycle_out["cwd"]
+            )
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
@@ -1085,6 +1089,7 @@ def _build_process_lifecycle_evidence(
     launch_wall_clock: float,
     exit_code: int,
     run_command: list[str] | None = None,
+    cwd: str | None = None,
 ) -> dict[str, Any]:
     """Capture zero-privilege process-lifecycle evidence for the launched root.
 
@@ -1100,6 +1105,10 @@ def _build_process_lifecycle_evidence(
       launch-gate wrapping). May differ from ``command``; both are captured so
       consumers can distinguish "what was asked" from "what the OS ran".
       ``None`` when identical to ``command`` (backward-compatible default).
+    * ``cwd`` — the absolute working directory the launched process was
+      started in (resolved via ``Path.resolve()`` before launch). Captured
+      so consumers can reproduce the filesystem context of the run.
+      ``None`` omits the field (backward-compatible default).
     * ``started_at`` — wall-clock timestamp when the process was launched.
     * ``wall_clock_s`` — measured wall-clock duration from launch to exit.
     * ``exit_code`` — the integer exit status (host-reported).
@@ -1143,6 +1152,11 @@ def _build_process_lifecycle_evidence(
     # adapter/seccomp/gate wrapping auditable in the evidence.
     if run_command is not None and list(run_command) != list(command):
         result["run_command"] = list(run_command)
+    # Only include cwd when explicitly provided. The caller resolves the
+    # absolute path before launch; including it here lets consumers reproduce
+    # the filesystem context. Omitted when None for backward compatibility.
+    if cwd is not None:
+        result["cwd"] = str(cwd)
     return result
 
 
@@ -1546,6 +1560,7 @@ def run_governed(
         launch_wall_clock=_launch_wall_clock,
         exit_code=exit_code if proc is not None else 127,
         run_command=run_command,
+        cwd=str(work_dir),
     )
     result = GovernanceRunResult(
         exit_code=exit_code if proc is not None else 127,
