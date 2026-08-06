@@ -39,6 +39,10 @@ dependencies = [
     # boundary, not an opt-in dev convenience, so the validator must be
     # present in every install.
     "jsonschema>=4.0,<5",
+    # psutil is used by the host-observer capture tier to enumerate child
+    # processes of the launched agent. It is a cross-platform, zero-privilege
+    # dependency that does not require kernel support.
+    "psutil>=5.9.0,<7",
 ]
 
 [project.optional-dependencies]

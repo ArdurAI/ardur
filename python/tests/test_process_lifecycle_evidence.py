@@ -167,7 +167,7 @@ class TestBuildProcessLifecycleEvidence:
             exit_code=0,
         )
         boundary = result["capture_boundary"]
-        assert "root-process lifecycle only" in boundary
+        assert "root-process lifecycle" in boundary
         assert "eBPF daemon" in boundary
 
     def test_proc_none_yields_null_pid(self) -> None:
@@ -888,7 +888,7 @@ class TestRunGovernedLifecycleIntegration:
         assert pl["exit_signal"] is None
         assert pl["capture_tier"] == "host-observer"
         assert pl["wall_clock_s"] > 0
-        assert "root-process lifecycle only" in pl["capture_boundary"]
+        assert "root-process lifecycle" in pl["capture_boundary"]
 
     def test_failing_command_captures_nonzero_exit(self) -> None:
         from vibap.run_bridge import run_governed
@@ -1029,3 +1029,293 @@ class TestRunGovernedLifecycleIntegration:
         assert home not in pl["cwd"], (
             f"Home path leaked in redacted cwd: {pl['cwd']}"
         )
+
+
+# ── child-process enumeration tests ──────────────────────────────────────────
+
+
+class TestEnumerateChildProcesses:
+    """Unit tests for _enumerate_child_processes."""
+
+    def test_none_pid_returns_empty(self) -> None:
+        from vibap.run_bridge import _enumerate_child_processes
+
+        result = _enumerate_child_processes(None)
+        assert result == []
+
+    def test_nonexistent_pid_returns_empty(self) -> None:
+        from vibap.run_bridge import _enumerate_child_processes
+
+        result = _enumerate_child_processes(99999999)
+        assert result == []
+
+    def test_own_process_returns_children(self) -> None:
+        """Smoke: enumerating our own process should not raise."""
+        import os
+
+        from vibap.run_bridge import _enumerate_child_processes
+
+        result = _enumerate_child_processes(os.getpid())
+        assert isinstance(result, list)
+
+
+class TestChildrenInLifecycleEvidence:
+    """Tests for the children field in process-lifecycle evidence."""
+
+    def test_children_absent_when_no_children(self) -> None:
+        """When no children are observed, the key is absent."""
+        result = _build_process_lifecycle_evidence(
+            proc=_FakeProc(99999999),  # type: ignore[arg-type]
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+        )
+        assert "children" not in result
+
+    def test_children_absent_when_proc_none(self) -> None:
+        """When proc is None, children key is absent."""
+        result = _build_process_lifecycle_evidence(
+            proc=None,
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+        )
+        assert "children" not in result
+
+    def test_children_present_when_has_children(self) -> None:
+        """When children are observed, the key is present and non-empty."""
+        import os
+        import subprocess
+
+        # Launch a child process so our own process has at least one child.
+        child = subprocess.Popen(
+            ["sleep", "0.5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _build_process_lifecycle_evidence(
+                proc=_FakeProc(os.getpid()),  # type: ignore[arg-type]
+                command=["echo", "hi"],
+                launch_monotonic=time.monotonic(),
+                launch_wall_clock=time.time(),
+                exit_code=0,
+            )
+            assert "children" in result, (
+                f"Expected children key, got keys: {sorted(result)}"
+            )
+            assert len(result["children"]) >= 1
+        finally:
+            child.wait()
+
+    def test_children_shape_is_valid(self) -> None:
+        """Each child entry has the expected fields."""
+        import os
+        import subprocess
+
+        child = subprocess.Popen(
+            ["sleep", "0.5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _build_process_lifecycle_evidence(
+                proc=_FakeProc(os.getpid()),  # type: ignore[arg-type]
+                command=["echo", "hi"],
+                launch_monotonic=time.monotonic(),
+                launch_wall_clock=time.time(),
+                exit_code=0,
+            )
+            for child_entry in result.get("children", []):
+                assert "pid" in child_entry
+                assert "command" in child_entry
+                assert "started_at" in child_entry
+                assert "wall_clock_s" in child_entry
+                assert "exit_code" in child_entry
+                assert "exit_signal" in child_entry
+                assert isinstance(child_entry["pid"], int)
+                assert isinstance(child_entry["command"], list)
+        finally:
+            child.wait()
+
+
+class TestChildrenRedaction:
+    """Tests for child-process redaction in to_result_dict."""
+
+    def test_children_redacted_when_redact_paths_true(self) -> None:
+        """Children with local paths are redacted."""
+        import os
+
+        home = os.path.expanduser("~")
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=home,
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+                "children": [
+                    {
+                        "pid": 9999,
+                        "command": ["node", f"{home}/secret/script.js"],
+                        "started_at": "2026-01-01T00:00:00.000000Z",
+                        "wall_clock_s": 0.1,
+                        "exit_code": None,
+                        "exit_signal": None,
+                    },
+                ],
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        children = d["process_lifecycle"]["children"]
+        assert home not in children[0]["command"][1], (
+            f"Home path leaked in redacted child command: {children[0]['command'][1]}"
+        )
+        assert "<home>" in children[0]["command"][1]
+
+    def test_children_preserved_when_redact_off(self) -> None:
+        """Without redact_paths, children are returned verbatim."""
+        import os
+
+        home = os.path.expanduser("~")
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home=home,
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+                "children": [
+                    {
+                        "pid": 9999,
+                        "command": ["node", f"{home}/script.js"],
+                        "started_at": "2026-01-01T00:00:00.000000Z",
+                        "wall_clock_s": 0.1,
+                        "exit_code": None,
+                        "exit_signal": None,
+                    },
+                ],
+            },
+        )
+        d = result.to_result_dict(redact_paths=False)
+        children = d["process_lifecycle"]["children"]
+        assert children[0]["command"][1] == f"{home}/script.js"
+
+    def test_children_absent_does_not_crash_redaction(self) -> None:
+        """When process_lifecycle has no children key, redaction should not fail."""
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home="/tmp/x",
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        assert "children" not in d["process_lifecycle"]
+
+    def test_children_empty_list_does_not_crash_redaction(self) -> None:
+        """Empty children list is handled safely."""
+        result = GovernanceRunResult(
+            exit_code=0,
+            session_id="s1",
+            mission_id="m1",
+            agent_id="a1",
+            adapter="env",
+            via="env",
+            proxy_url="http://127.0.0.1:1",
+            home="/tmp/x",
+            passport_path="/tmp/x/p.jwt",
+            summary={},
+            permits=0,
+            denials=0,
+            total_events=0,
+            attestation_token="t",
+            attestation_digest="d",
+            receipts_path="/tmp/r.jsonl",
+            receipt_count=0,
+            correlation={},
+            kernel_policy={},
+            process_lifecycle={
+                "root_pid": 4242,
+                "command": ["echo", "hi"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.123,
+                "exit_code": 0,
+                "exit_signal": None,
+                "capture_tier": "host-observer",
+                "capture_boundary": "test",
+                "children": [],
+            },
+        )
+        d = result.to_result_dict(redact_paths=True)
+        assert d["process_lifecycle"]["children"] == []

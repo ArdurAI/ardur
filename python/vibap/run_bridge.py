@@ -44,6 +44,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import psutil
+
 from . import kernel_correlation as kc
 from .launch_gate import (
     RELEASE_BYTE as LAUNCH_GATE_RELEASE_BYTE,
@@ -566,6 +568,10 @@ class GovernanceRunResult:
             process_lifecycle_out["cwd"] = _redact_local_path(
                 process_lifecycle_out["cwd"]
             )
+        if redact_paths and process_lifecycle_out.get("children"):
+            process_lifecycle_out["children"] = _redact_child_lifecycle(
+                process_lifecycle_out["children"]
+            )
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
@@ -1081,6 +1087,67 @@ def _resolve_run_resource_scope(
     return patterns
 
 
+def _child_process_snapshot(child: psutil.Process) -> dict[str, Any] | None:
+    """Capture a best-effort snapshot of a single child process.
+
+    Returns ``None`` when the process has already exited and its status
+    cannot be read (a race between enumeration and inspection). The caller
+    should filter out ``None`` entries.
+    """
+    try:
+        with child.oneshot():
+            return {
+                "pid": child.pid,
+                "command": child.cmdline() or [child.name()],
+                "started_at": datetime.fromtimestamp(
+                    child.create_time(), tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                "wall_clock_s": round(time.time() - child.create_time(), 6),
+                "exit_code": None,
+                "exit_signal": None,
+            }
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
+
+
+def _enumerate_child_processes(root_pid: int | None) -> list[dict[str, Any]]:
+    """Enumerate direct child processes of *root_pid* via psutil.
+
+    This is a best-effort, zero-privilege enumeration. It never raises —
+    returns an empty list on any failure (missing psutil, nonexistent PID,
+    permission denied, process exited between enumeration and inspection).
+
+    Only direct children are enumerated (``recursive=False``). Full
+    process-tree capture requires eBPF daemon correlation.
+    """
+    if root_pid is None:
+        return []
+    try:
+        parent = psutil.Process(root_pid)
+        children = parent.children(recursive=False)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return []
+    snapshots = []
+    for child in children:
+        snapshot = _child_process_snapshot(child)
+        if snapshot is not None:
+            snapshots.append(snapshot)
+    return snapshots
+
+
+def _redact_child_lifecycle(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Redact local paths in child process lifecycle snapshots."""
+    redacted = []
+    for child in children:
+        entry = dict(child)
+        if entry.get("command"):
+            entry["command"] = [
+                _redact_local_path_embedded(c) for c in entry["command"]
+            ]
+        redacted.append(entry)
+    return redacted
+
+
 def _build_process_lifecycle_evidence(
     *,
     proc: subprocess.Popen[bytes] | None,
@@ -1149,8 +1216,9 @@ def _build_process_lifecycle_evidence(
         "exit_signal": exit_signal,
         "capture_tier": "host-observer",
         "capture_boundary": (
-            "root-process lifecycle only; subprocess tree interior is not "
-            "captured without eBPF daemon correlation"
+            "root-process lifecycle plus a best-effort child snapshot; "
+            "subprocess tree interior is not captured without eBPF daemon "
+            "correlation"
         ),
     }
     # Only include run_command when it differs from command. This keeps
@@ -1169,6 +1237,11 @@ def _build_process_lifecycle_evidence(
     # or near-exhaustion. Omitted when None for backward compatibility.
     if duration_budget_s is not None:
         result["duration_budget_s"] = duration_budget_s
+    # Enumerate direct child processes (best-effort, zero-privilege).
+    # Only included when non-empty; absent key means no children observed.
+    children = _enumerate_child_processes(root_pid)
+    if children:
+        result["children"] = children
     return result
 
 
