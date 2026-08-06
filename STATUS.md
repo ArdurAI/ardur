@@ -12,8 +12,9 @@ hook or provider-hidden actions.
 `ardur run -- <cli>` additionally captures zero-privilege host-observer
 process-lifecycle evidence for any CLI launch: the root process's PID, command,
 `run_command` (the actual argv when adapter wrapping transforms it before
-launch, omitted when identical), `cwd` (absolute working directory), started-at
-timestamp, wall-clock duration, exit code, and exit signal. This is recorded as
+launch, omitted when identical), `cwd` (absolute working directory),
+`duration_budget_s` (the caller-set time budget, omitted when not set),
+started-at timestamp, wall-clock duration, exit code, and exit signal. This is recorded as
 `capture_tier=host-observer` and works on macOS and Linux without any host
 plugin API dependency or kernel daemon. It captures the root process only —
 not the subprocess tree, syscalls, file/network effects, or provider-side
