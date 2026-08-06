@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4704b3f0a2901b4b519721f25c099dc78f07063fb808260b9042871a5bffa07a"
+source_sha256: "50e9fa7c3a85a7a8807f6b8f9a91ee86c5ebcc3b3fb8254553b545a7632ae6a5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -114,6 +114,13 @@ All notable changes to Ardur will be documented in this file.
   was started in as part of the host-observer lifecycle evidence. This
   lets consumers reproduce the filesystem context of the run. The `cwd`
   field is redacted under `--redact-paths`.
+- Sign host-observer lifecycle evidence into the session-final attestation
+  token. The `process_lifecycle` object (root_pid, command, run_command,
+  cwd, duration_budget_s, started_at, wall_clock_s, exit_code, exit_signal,
+  capture_tier) is now injected as a `process_lifecycle` claim in the
+  ES256-signed attestation JWT, making the lifecycle evidence
+  cryptographically verifiable in the attestation chain. The claim is
+  omitted when no lifecycle evidence is available (backward-compatible).
 - Add `SyntheticKernelReceiptVerdictUnknown` constant in the Go
   kernelcapture correlator and wire daemon-restart-gap and
   coverage-unknown events to emit verdict `"unknown"` instead of
