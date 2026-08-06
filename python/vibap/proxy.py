@@ -4385,6 +4385,7 @@ class GovernanceProxy:
         private_key: ec.EllipticCurvePrivateKey,
         *,
         kernel_enforcement: dict[str, Any] | None = None,
+        process_lifecycle: dict[str, Any] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         self.flush_risk_lifecycle_outbox(session_id)
         created_summary = False
@@ -4407,6 +4408,8 @@ class GovernanceProxy:
                         }
                     if kernel_enforcement is not None:
                         extra_claims["kernel_enforcement"] = kernel_enforcement
+                    if process_lifecycle:
+                        extra_claims["process_lifecycle"] = process_lifecycle
                     target.attestation_token = issue_attestation(
                         passport_jti=target.jti,
                         agent_id=target.passport_claims["sub"],

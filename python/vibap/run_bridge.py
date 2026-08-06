@@ -1401,6 +1401,7 @@ def run_governed(
         # 5. Launch the agent.
         _launch_monotonic = time.monotonic()
         _launch_wall_clock = time.time()
+        exit_code: int | None = None
         try:
             proc = subprocess.Popen(
                 run_command,
@@ -1539,9 +1540,20 @@ def run_governed(
         kernel_enforcement = _kernel_enforcement_claim(session_id, correlation)
         if registration_note := receipt_registrar.failure_note():
             notes.append(registration_note)
+        _process_lifecycle = _build_process_lifecycle_evidence(
+            proc=proc,
+            command=command,
+            launch_monotonic=_launch_monotonic,
+            launch_wall_clock=_launch_wall_clock,
+            exit_code=exit_code if exit_code is not None else 127,
+            run_command=run_command,
+            cwd=str(work_dir),
+            duration_budget_s=max_duration_s,
+        )
         summary = proxy.end_session(session_id)
         attestation_token, _claims = proxy.issue_attestation_for_session(
-            session_id, proxy.receipt_private_key, kernel_enforcement=kernel_enforcement
+            session_id, proxy.receipt_private_key, kernel_enforcement=kernel_enforcement,
+            process_lifecycle=_process_lifecycle,
         )
         if daemon_registered and cgroup_handle is not None:
             try:
@@ -1565,18 +1577,8 @@ def run_governed(
         server.server_close()
 
     receipts_path = proxy.receipts_log_path
-    _process_lifecycle = _build_process_lifecycle_evidence(
-        proc=proc,
-        command=command,
-        launch_monotonic=_launch_monotonic,
-        launch_wall_clock=_launch_wall_clock,
-        exit_code=exit_code if proc is not None else 127,
-        run_command=run_command,
-        cwd=str(work_dir),
-        duration_budget_s=max_duration_s,
-    )
     result = GovernanceRunResult(
-        exit_code=exit_code if proc is not None else 127,
+        exit_code=exit_code if exit_code is not None else 127,
         session_id=session_id,
         mission_id=mission_id,
         agent_id=agent_id,
