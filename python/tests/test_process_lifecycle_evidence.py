@@ -15,10 +15,7 @@ is encoded honestly in ``capture_tier``.
 from __future__ import annotations
 
 import json
-import sys
 import time
-
-import pytest
 
 from vibap.run_bridge import (
     GovernanceRunResult,
