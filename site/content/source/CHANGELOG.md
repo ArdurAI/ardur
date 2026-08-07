@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "6fab515d3677908fae69fad929c3a4d49b507e52188d6a63de2d2c5aef97476f"
+source_sha256: "ad7edfd66bbf52e09e7386735a08b324f6ffa16cc40ca67729782be8ed5f4220"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -143,6 +143,14 @@ All notable changes to Ardur will be documented in this file.
   was started in as part of the host-observer lifecycle evidence. This
   lets consumers reproduce the filesystem context of the run. The `cwd`
   field is redacted under `--redact-paths`.
+- Host-observer process-lifecycle evidence now enumerates descendant
+  processes recursively (direct children, grandchildren, etc.) instead
+  of only direct children. Each descendant entry includes `depth` (0 =
+  direct child) and `parent_pid` so consumers can reconstruct the full
+  process-tree structure from the flat snapshot list. Depth is capped at
+  16 and total count at 500 to prevent runaway recursion. The
+  `capture_boundary` string honestly describes this as a point-in-time
+  snapshot, not a real-time exec/fork event stream.
 - Sign host-observer lifecycle evidence into the session-final attestation
   token. The `process_lifecycle` object (root_pid, command, run_command,
   cwd, duration_budget_s, started_at, wall_clock_s, exit_code, exit_signal,

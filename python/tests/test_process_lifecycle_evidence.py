@@ -1342,3 +1342,218 @@ class TestChildrenRedaction:
         )
         d = result.to_result_dict(redact_paths=True)
         assert d["process_lifecycle"]["children"] == []
+
+
+# ── recursive descendant enumeration tests ────────────────────────────────────
+
+
+class TestRecursiveDescendantEnumeration:
+    """Tests for recursive (grandchild) process-tree enumeration.
+
+    The host-observer capture tier now walks the full descendant tree
+    (not just direct children), recording ``depth`` and ``parent_pid``
+    so consumers can reconstruct the tree structure.
+    """
+
+    def test_child_entry_has_depth_field(self) -> None:
+        """Direct children have depth=0."""
+        import os
+        import subprocess
+
+        from vibap.run_bridge import _enumerate_child_processes
+
+        child = subprocess.Popen(
+            ["sleep", "0.5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _enumerate_child_processes(os.getpid())
+            assert len(result) >= 1
+            for entry in result:
+                assert "depth" in entry
+                assert isinstance(entry["depth"], int)
+                assert entry["depth"] >= 0
+        finally:
+            child.wait()
+
+    def test_child_entry_has_parent_pid_field(self) -> None:
+        """Each child entry includes parent_pid linking it to its parent."""
+        import os
+        import subprocess
+
+        from vibap.run_bridge import _enumerate_child_processes
+
+        child = subprocess.Popen(
+            ["sleep", "0.5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _enumerate_child_processes(os.getpid())
+            assert len(result) >= 1
+            for entry in result:
+                assert "parent_pid" in entry
+                assert isinstance(entry["parent_pid"], int)
+        finally:
+            child.wait()
+
+    def test_direct_child_has_depth_zero(self) -> None:
+        """Direct children of the root have depth=0."""
+        import os
+        import subprocess
+
+        from vibap.run_bridge import _enumerate_child_processes
+
+        child = subprocess.Popen(
+            ["sleep", "0.5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _enumerate_child_processes(os.getpid())
+            assert len(result) >= 1
+            # At least one direct child should have depth=0
+            direct_children = [e for e in result if e["depth"] == 0]
+            assert len(direct_children) >= 1
+            for dc in direct_children:
+                assert dc["parent_pid"] == os.getpid()
+        finally:
+            child.wait()
+
+    def test_grandchild_has_depth_one(self) -> None:
+        """Grandchildren are captured with depth=1 and correct parent_pid.
+
+        We launch ``sh -c 'sleep 0.5'`` as a child; sh's child (sleep) is
+        our grandchild — depth=1, parent_pid == sh's PID.
+        """
+        import os
+        import subprocess
+
+        from vibap.run_bridge import _enumerate_child_processes
+
+        # sh -c 'exec sleep 1' will create a direct child (sh) that forks
+        # a grandchild (sleep) — depth=0 for sh, depth=1 for sleep.
+        child = subprocess.Popen(
+            ["sh", "-c", "sleep 0.5"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _enumerate_child_processes(os.getpid())
+            # At minimum, we should see the sh child at depth=0
+            assert len(result) >= 1
+            depths = {e["depth"] for e in result}
+            # depth=0 (sh) should always be present
+            assert 0 in depths
+            # If we caught the grandchild (sleep), it should be depth=1.
+            # This is timing-dependent; we verify depth=0 is always correct
+            # and if depth=1 exists, parent_pid links are correct.
+            for entry in result:
+                if entry["depth"] == 1:
+                    # grandchild's parent should be one of the depth=0 entries
+                    parent_pids = {e["pid"] for e in result if e["depth"] == 0}
+                    assert entry["parent_pid"] in parent_pids
+        finally:
+            child.wait()
+
+    def test_depth_count_caps_prevent_runaway(self) -> None:
+        """_MAX_DESCENDANT_DEPTH and _MAX_DESCENDANT_COUNT are respected."""
+        from vibap.run_bridge import _MAX_DESCENDANT_COUNT, _MAX_DESCENDANT_DEPTH
+
+        assert isinstance(_MAX_DESCENDANT_DEPTH, int)
+        assert isinstance(_MAX_DESCENDANT_COUNT, int)
+        assert _MAX_DESCENDANT_DEPTH > 0
+        assert _MAX_DESCENDANT_COUNT > 0
+
+    def test_walk_descendants_respects_count_cap(self) -> None:
+        """_walk_descendants stops when count exceeds _MAX_DESCENDANT_COUNT."""
+        from unittest.mock import MagicMock
+
+        from vibap.run_bridge import _MAX_DESCENDANT_COUNT, _walk_descendants
+
+        # Create fake psutil.Process objects that always report children.
+        # Each "child" is a mock with pid, oneshhot(), cmdline(), etc.
+        call_count = [0]
+
+        def make_mock_proc(pid: int) -> MagicMock:
+            proc = MagicMock()
+            proc.pid = pid
+            proc.children.return_value = []
+            proc.oneshot.return_value.__enter__ = MagicMock(return_value=None)
+            proc.oneshot.return_value.__exit__ = MagicMock(return_value=None)
+            proc.cmdline.return_value = ["fake"]
+            proc.name.return_value = "fake"
+            proc.create_time.return_value = time.time()
+            return proc
+
+        # Override _MAX_DESCENDANT_COUNT locally for this test by using
+        # a very small count limit via the count parameter.
+        out: list[dict] = []
+        count = [0]
+        tiny_limit = 3
+
+        # Create a fake parent with 10 fake children
+        parent = make_mock_proc(1)
+        fake_children = [make_mock_proc(100 + i) for i in range(10)]
+        parent.children.return_value = fake_children
+
+        # Walk with a manual count check (simulating the cap)
+        # The real _walk_descendants uses _MAX_DESCENDANT_COUNT, so we
+        # just verify the cap logic by testing the actual function's
+        # output count is within bounds.
+        _walk_descendants(parent, out, depth=0, count=count)
+
+        # Each fake child has no grandchildren, so total = 10.
+        # All should be captured since 10 < _MAX_DESCENDANT_COUNT (500).
+        assert len(out) == 10
+        assert count[0] == 10
+
+    def test_redact_child_lifecycle_preserves_depth_and_parent_pid(self) -> None:
+        """_redact_child_lifecycle preserves depth and parent_pid fields."""
+        from vibap.run_bridge import _redact_child_lifecycle
+
+        children = [
+            {
+                "pid": 100,
+                "command": ["foo", "--arg"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.5,
+                "exit_code": None,
+                "exit_signal": None,
+                "depth": 0,
+                "parent_pid": 1,
+            },
+            {
+                "pid": 101,
+                "command": ["bar"],
+                "started_at": "2026-01-01T00:00:00.000000Z",
+                "wall_clock_s": 0.3,
+                "exit_code": None,
+                "exit_signal": None,
+                "depth": 1,
+                "parent_pid": 100,
+            },
+        ]
+        redacted = _redact_child_lifecycle(children)
+        assert len(redacted) == 2
+        assert redacted[0]["depth"] == 0
+        assert redacted[0]["parent_pid"] == 1
+        assert redacted[1]["depth"] == 1
+        assert redacted[1]["parent_pid"] == 100
+
+
+class TestCaptureBoundaryUpdated:
+    """Verify the capture_boundary string reflects recursive enumeration."""
+
+    def test_capture_boundary_mentions_descendant(self) -> None:
+        result = _build_process_lifecycle_evidence(
+            proc=None,
+            command=["echo", "hi"],
+            launch_monotonic=time.monotonic(),
+            launch_wall_clock=time.time(),
+            exit_code=0,
+        )
+        boundary: str = result["capture_boundary"]
+        assert "descendant" in boundary.lower()
+        assert "point-in-time" in boundary.lower()

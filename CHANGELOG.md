@@ -126,6 +126,14 @@ All notable changes to Ardur will be documented in this file.
   was started in as part of the host-observer lifecycle evidence. This
   lets consumers reproduce the filesystem context of the run. The `cwd`
   field is redacted under `--redact-paths`.
+- Host-observer process-lifecycle evidence now enumerates descendant
+  processes recursively (direct children, grandchildren, etc.) instead
+  of only direct children. Each descendant entry includes `depth` (0 =
+  direct child) and `parent_pid` so consumers can reconstruct the full
+  process-tree structure from the flat snapshot list. Depth is capped at
+  16 and total count at 500 to prevent runaway recursion. The
+  `capture_boundary` string honestly describes this as a point-in-time
+  snapshot, not a real-time exec/fork event stream.
 - Sign host-observer lifecycle evidence into the session-final attestation
   token. The `process_lifecycle` object (root_pid, command, run_command,
   cwd, duration_budget_s, started_at, wall_clock_s, exit_code, exit_signal,

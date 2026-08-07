@@ -1092,16 +1092,30 @@ def _resolve_run_resource_scope(
     return patterns
 
 
-def _child_process_snapshot(child: psutil.Process) -> dict[str, Any] | None:
+_MAX_DESCENDANT_DEPTH = 16
+_MAX_DESCENDANT_COUNT = 500
+
+
+def _child_process_snapshot(
+    child: psutil.Process,
+    *,
+    depth: int = 0,
+    parent_pid: int | None = None,
+) -> dict[str, Any] | None:
     """Capture a best-effort snapshot of a single child process.
 
     Returns ``None`` when the process has already exited and its status
     cannot be read (a race between enumeration and inspection). The caller
     should filter out ``None`` entries.
+
+    *depth* is 0 for direct children of the root, 1 for grandchildren, etc.
+    *parent_pid* is the PID of this process's immediate parent within the
+    root's descendant tree.  Together these let consumers reconstruct the
+    tree structure from the flat snapshot list.
     """
     try:
         with child.oneshot():
-            return {
+            entry: dict[str, Any] = {
                 "pid": child.pid,
                 "command": child.cmdline() or [child.name()],
                 "started_at": datetime.fromtimestamp(
@@ -1110,34 +1124,82 @@ def _child_process_snapshot(child: psutil.Process) -> dict[str, Any] | None:
                 "wall_clock_s": round(time.time() - child.create_time(), 6),
                 "exit_code": None,
                 "exit_signal": None,
+                "depth": depth,
             }
+            if parent_pid is not None:
+                entry["parent_pid"] = parent_pid
+            return entry
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return None
 
 
 def _enumerate_child_processes(root_pid: int | None) -> list[dict[str, Any]]:
-    """Enumerate direct child processes of *root_pid* via psutil.
+    """Enumerate descendant processes of *root_pid* via psutil.
 
     This is a best-effort, zero-privilege enumeration. It never raises —
     returns an empty list on any failure (missing psutil, nonexistent PID,
     permission denied, process exited between enumeration and inspection).
 
-    Only direct children are enumerated (``recursive=False``). Full
-    process-tree capture requires eBPF daemon correlation.
+    Descendants are enumerated recursively (direct children, grandchildren,
+    etc.) so the full process-tree *structure* is captured.  Each entry
+    includes ``depth`` (0 = direct child) and ``parent_pid`` so consumers can
+    reconstruct the tree.
+
+    The depth is capped at :data:`_MAX_DESCENDANT_DEPTH` and the total count
+    at :data:`_MAX_DESCENDANT_COUNT` to prevent runaway recursion in
+    pathological process trees.
+
+    .. note::
+
+       This is a *point-in-time* snapshot, not a real-time exec/fork event
+       stream.  Processes that start and exit between the root's children()
+       call and the snapshot will be missed.  Full lifecycle capture
+       (exec/fork timing, interleaving) requires eBPF daemon correlation.
     """
     if root_pid is None:
         return []
     try:
-        parent = psutil.Process(root_pid)
-        children = parent.children(recursive=False)
+        root_proc = psutil.Process(root_pid)
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return []
-    snapshots = []
-    for child in children:
-        snapshot = _child_process_snapshot(child)
-        if snapshot is not None:
-            snapshots.append(snapshot)
+
+    # Manual recursive walk so we can track depth + parent_pid and enforce
+    # the count/depth caps.  psutil's recursive=True flattens the tree but
+    # does not provide per-process depth or parent linkage.
+    snapshots: list[dict[str, Any]] = []
+    _walk_descendants(root_proc, snapshots, depth=0, count=[0])
     return snapshots
+
+
+def _walk_descendants(
+    parent: psutil.Process,
+    out: list[dict[str, Any]],
+    *,
+    depth: int,
+    count: list[int],
+) -> None:
+    """Recursively walk *parent*'s descendants, appending snapshots to *out*.
+
+    *count* is a single-element list used as a mutable counter so the
+    :data:`_MAX_DESCENDANT_COUNT` cap is enforced across the full recursion.
+    """
+    if depth > _MAX_DESCENDANT_DEPTH:
+        return
+    try:
+        children = parent.children(recursive=False)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return
+    parent_pid = parent.pid
+    for child in children:
+        if count[0] >= _MAX_DESCENDANT_COUNT:
+            return
+        snapshot = _child_process_snapshot(
+            child, depth=depth, parent_pid=parent_pid
+        )
+        if snapshot is not None:
+            out.append(snapshot)
+            count[0] += 1
+            _walk_descendants(child, out, depth=depth + 1, count=count)
 
 
 def _redact_child_lifecycle(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1241,9 +1303,10 @@ def _build_process_lifecycle_evidence(
 
     This evidence is structurally weaker than eBPF daemon correlation
     (``correlation.available == True``) which captures process-tree *interior*
-    exec/fork events. The host-observer tier captures only the root process's
-    own lifecycle. The honest boundary is encoded in ``capture_tier`` so
-    consumers never mistake root-only lifecycle for full process-tree capture.
+    exec/fork events. The host-observer tier captures the root process's
+    own lifecycle plus a best-effort recursive descendant snapshot. The
+    honest boundary is encoded in ``capture_tier`` so consumers never
+    mistake point-in-time snapshots for real-time event capture.
 
     ``launch_wall_clock`` must be an epoch timestamp from ``time.time()``;
     ``launch_monotonic`` must be from ``time.monotonic()``.  The two clocks
@@ -1267,8 +1330,10 @@ def _build_process_lifecycle_evidence(
         "exit_signal": exit_signal,
         "capture_tier": "host-observer",
         "capture_boundary": (
-            "root-process lifecycle plus a best-effort child snapshot; "
-            "subprocess tree interior is not captured without eBPF daemon "
+            "root-process lifecycle plus a best-effort recursive descendant "
+            "snapshot (direct children, grandchildren, etc.); point-in-time "
+            "snapshot, not real-time exec/fork event stream — full "
+            "subprocess-tree interior lifecycle requires eBPF daemon "
             "correlation"
         ),
     }
