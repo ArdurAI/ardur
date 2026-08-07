@@ -1474,8 +1474,6 @@ class TestRecursiveDescendantEnumeration:
 
         # Create fake psutil.Process objects that always report children.
         # Each "child" is a mock with pid, oneshhot(), cmdline(), etc.
-        call_count = [0]
-
         def make_mock_proc(pid: int) -> MagicMock:
             proc = MagicMock()
             proc.pid = pid
@@ -1491,7 +1489,6 @@ class TestRecursiveDescendantEnumeration:
         # a very small count limit via the count parameter.
         out: list[dict] = []
         count = [0]
-        tiny_limit = 3
 
         # Create a fake parent with 10 fake children
         parent = make_mock_proc(1)
