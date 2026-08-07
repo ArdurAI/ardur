@@ -5,6 +5,28 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Redact local paths in `_build_process_lifecycle_evidence` at the source,
+  before the evidence is signed into the ES256 attestation token. Previously
+  the `command`, `run_command`, `cwd`, and `children[*].command` fields
+  carried unredacted absolute paths that were cryptographically signed
+  into the attestation JWT, permanently embedding the user's home dir,
+  project layout, temp paths, and child argv in shareable evidence.
+- Add `violations` count to `_build_summary` and `_child_lifecycle_summary`
+  so VIOLATION decisions (credential compromise, chain tampering) are
+  distinguishable from routine DENY verdicts in session summaries and
+  child-lifecycle rollups. Previously VIOLATION was silently folded into
+  the aggregate `denials` count with no separate audit trail.
+- Unify `_redact_local_path` and `_redact_local_path_embedded` in
+  `run_bridge.py` with `redact_local_path_text`, closing the same
+  `file://`/percent-encoded/unknown-root path-leak vector that was fixed
+  in cli.py.
+- Ensure `_child_lifecycle_summary` default dict includes
+  `unknowns`, `insufficient_evidence`, and `violations` keys on all
+  error paths (missing child_jti, child session unavailable) so
+  downstream consumers do not encounter `KeyError`.
+- Sanitize child-lifecycle exception messages to use `type(exc).__name__`
+  instead of raw `str(exc)`, preventing internal state from being signed
+  into attestation evidence on error paths.
 - Unify `_redact_local_path_string` with `redact_local_path_text` so
   `--redact-paths` also catches `file://` URIs, percent-encoded
   separators, and arbitrary local absolute paths under unknown roots

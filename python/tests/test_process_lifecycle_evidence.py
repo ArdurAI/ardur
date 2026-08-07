@@ -386,7 +386,12 @@ class TestRunCommandEvidence:
         assert "run_command" not in result
 
     def test_run_command_present_when_differs(self) -> None:
-        """When run_command differs from command, it is included."""
+        """When run_command differs from command, it is included.
+
+        Paths in run_command are now redacted at the source by
+        ``_build_process_lifecycle_evidence`` (before signing), so
+        ``/tmp/plugin`` becomes ``<tmp>/plugin``.
+        """
         result = _build_process_lifecycle_evidence(
             proc=_FakeProc(1),  # type: ignore[arg-type]
             command=["claude"],
@@ -395,7 +400,7 @@ class TestRunCommandEvidence:
             exit_code=0,
             run_command=["claude", "--plugin-dir", "/tmp/plugin"],
         )
-        assert result["run_command"] == ["claude", "--plugin-dir", "/tmp/plugin"]
+        assert result["run_command"] == ["claude", "--plugin-dir", "<tmp>/plugin"]
         assert result["command"] == ["claude"]
 
     def test_run_command_redacted_in_result_dict(self) -> None:
@@ -504,7 +509,12 @@ class TestCwdEvidence:
         assert "cwd" not in result
 
     def test_cwd_present_when_provided(self) -> None:
-        """When cwd is explicitly provided, it is captured."""
+        """When cwd is explicitly provided, it is captured (redacted).
+
+        Paths are now redacted at the source by
+        ``_build_process_lifecycle_evidence`` (before signing), so
+        ``/home/user/project`` becomes a placeholder.
+        """
         result = _build_process_lifecycle_evidence(
             proc=_FakeProc(1),  # type: ignore[arg-type]
             command=["echo", "hi"],
@@ -513,7 +523,8 @@ class TestCwdEvidence:
             exit_code=0,
             cwd="/home/user/project",
         )
-        assert result["cwd"] == "/home/user/project"
+        assert result["cwd"] != "/home/user/project"  # must be redacted
+        assert isinstance(result["cwd"], str)
 
     def test_cwd_is_string_type(self) -> None:
         result = _build_process_lifecycle_evidence(
@@ -527,7 +538,7 @@ class TestCwdEvidence:
         assert isinstance(result["cwd"], str)
 
     def test_cwd_preserved_with_none_command_difference(self) -> None:
-        """cwd is independent of run_command presence."""
+        """cwd is independent of run_command presence (redacted at source)."""
         result = _build_process_lifecycle_evidence(
             proc=_FakeProc(1),  # type: ignore[arg-type]
             command=["claude"],
@@ -538,7 +549,8 @@ class TestCwdEvidence:
             cwd="/home/user/work",
         )
         assert "run_command" in result
-        assert result["cwd"] == "/home/user/work"
+        assert result["cwd"] != "/home/user/work"  # must be redacted
+        assert isinstance(result["cwd"], str)
 
 
 class TestCwdRedaction:
@@ -983,7 +995,13 @@ class TestRunGovernedLifecycleIntegration:
         assert len(pl["cwd"]) > 0
 
     def test_cwd_captures_explicit_workdir(self) -> None:
-        """Integration: explicit cwd parameter is reflected in lifecycle evidence."""
+        """Integration: explicit cwd parameter is reflected (redacted) in lifecycle evidence.
+
+        Paths are now redacted at the source by ``_build_process_lifecycle_evidence``
+        (before signing). The original path is a temp dir, so it will be replaced
+        with a ``<tmp>/`` or ``<var-folders>/`` placeholder. We verify the cwd
+        key is present and no longer matches the raw absolute path.
+        """
         import tempfile
 
         from pathlib import Path
@@ -1002,7 +1020,12 @@ class TestRunGovernedLifecycleIntegration:
                 cwd=explicit_cwd,
             )
             pl = result.process_lifecycle
-            assert pl["cwd"] == str(explicit_cwd.resolve())
+            raw_resolved = str(explicit_cwd.resolve())
+            assert pl["cwd"] != raw_resolved, (
+                f"cwd must be redacted, not raw: {pl['cwd']}"
+            )
+            assert isinstance(pl["cwd"], str)
+            assert "<" in pl["cwd"]  # placeholder marker
         finally:
             import shutil
 

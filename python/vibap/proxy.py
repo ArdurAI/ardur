@@ -4500,6 +4500,7 @@ class GovernanceProxy:
         insufficient = sum(
             1 for e in events if e.decision == Decision.INSUFFICIENT_EVIDENCE
         )
+        violations = sum(1 for e in events if e.decision == Decision.VIOLATION)
         return {
             "type": "session_end",
             "jti": session.jti,
@@ -4510,6 +4511,7 @@ class GovernanceProxy:
             "denials": denials,
             "unknowns": unknowns,
             "insufficient_evidence": insufficient,
+            "violations": violations,
             "elapsed_s": round(session.elapsed_s, 3),
             "scope_compliance": "full" if denials == 0 else "violated",
             "delegation_count": len(session.delegated_children),
@@ -4584,6 +4586,9 @@ class GovernanceProxy:
             "receipt_count": 0,
             "permits": 0,
             "denials": 0,
+            "unknowns": 0,
+            "insufficient_evidence": 0,
+            "violations": 0,
             "total_events": 0,
             "scope_compliance": "unknown",
         }
@@ -4594,7 +4599,7 @@ class GovernanceProxy:
         try:
             child_session = self.get_session(child_jti)
         except Exception as exc:  # pragma: no cover - defensive audit metadata
-            summary["error"] = f"child session unavailable: {exc}"
+            summary["error"] = f"child session unavailable: {type(exc).__name__}"
             return summary
 
         child_summary = (
@@ -4613,6 +4618,7 @@ class GovernanceProxy:
                 "insufficient_evidence": int(
                     child_summary.get("insufficient_evidence", 0)
                 ),
+                "violations": int(child_summary.get("violations", 0)),
                 "total_events": int(
                     child_summary.get("total_events", len(child_session.events))
                 ),

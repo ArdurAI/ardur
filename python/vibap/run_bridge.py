@@ -441,10 +441,18 @@ def _build_embedded_server(
 def _redact_local_path(path_str: str | None) -> str | None:
     """Replace local absolute path roots with stable placeholders.
 
-    Shares the same redaction philosophy as the proof-bundle path-leak
-    scanner: absolute paths under the temp directory, the user's home,
-    or well-known system paths are replaced with descriptive placeholders
-    so the JSON output is safe to share in CI artifacts or bug reports.
+    Uses a three-step approach for comprehensive coverage, mirroring
+    :func:`vibap.cli._redact_local_path_string`:
+
+    1. Replace known prefix roots (``/tmp/``, ``/Users/<home>``,
+       ``/private/var/folders/``, etc.) anchored at the start.
+    2. Replace the same roots when they appear embedded in the string.
+    3. Delegate to :func:`vibap.shareable_redaction.redact_local_path_text`
+       to catch ``file://`` URIs, percent-encoded separators, and arbitrary
+       local absolute paths under unknown roots (e.g. ``/opt/…``).
+
+    Without step 3, paths like ``/Users/otheruser/project`` or
+    ``file:///opt/local/…`` would pass through unredacted.
     """
     if path_str is None:
         return None
@@ -458,7 +466,7 @@ def _redact_local_path(path_str: str | None) -> str | None:
         return "<tmp>/" + result[len(temp_prefix):]
     home = os.path.expanduser("~")
     if result.startswith(home + "/"):
-        return result.replace(home, "<home>", 1)
+        result = result.replace(home, "<home>", 1)
     # macOS resolves /tmp → /private/tmp; redact both forms.
     result = re.sub(r"^/private/tmp/", "<tmp>/", result)
     result = re.sub(r"^/tmp/", "<tmp>/", result)
@@ -469,7 +477,10 @@ def _redact_local_path(path_str: str | None) -> str | None:
     result = re.sub(r"^/run/ardur/", "<run-ardur>/", result)
     # Linux system paths that reveal local cgroup or runtime layout.
     result = re.sub(r"^/sys/fs/cgroup/", "<cgroup>/", result)
-    return result
+    # Step 3: catch file:// URIs and arbitrary absolute paths under
+    # unknown roots that the hand-rolled regex above does not cover.
+    from .shareable_redaction import redact_local_path_text
+    return redact_local_path_text(result)
 
 
 def _redact_local_path_embedded(value: str) -> str:
@@ -479,6 +490,10 @@ def _redact_local_path_embedded(value: str) -> str:
     mid-sentence (e.g. ``"launched via --plugin-dir /tmp/foo/..."``).
     Also replaces the current user's home directory if it appears
     embedded in the string.
+
+    Delegates to :func:`redact_local_path_text` as a final pass to
+    catch ``file://`` URIs and arbitrary local absolute paths under
+    unknown roots (e.g. ``/Users/otheruser/...``, ``/opt/...``).
     """
     if not value:
         return value
@@ -497,7 +512,10 @@ def _redact_local_path_embedded(value: str) -> str:
     home = os.path.expanduser("~")
     if home and home in result:
         result = result.replace(home, "<home>")
-    return result
+    # Final pass: catch file:// URIs, percent-encoded separators, and
+    # arbitrary local absolute paths under unknown roots.
+    from .shareable_redaction import redact_local_path_text
+    return redact_local_path_text(result)
 
 
 @dataclass
@@ -555,6 +573,11 @@ class GovernanceRunResult:
                     correlation["cgroup_path"]
                 )
         notes_out = [_redact_local_path_embedded(n) for n in self.notes] if redact_paths else list(self.notes)
+        # ``_build_process_lifecycle_evidence`` already redacts paths at the
+        # source (before signing), so the passes below are idempotent
+        # belt-and-suspenders for the JSON-output path.  They guard against
+        # any future caller that constructs ``process_lifecycle`` without
+        # going through the builder.
         process_lifecycle_out = dict(self.process_lifecycle) if self.process_lifecycle else {}
         if redact_paths and process_lifecycle_out.get("command"):
             process_lifecycle_out["command"] = [
@@ -1148,6 +1171,31 @@ def _redact_child_lifecycle(children: list[dict[str, Any]]) -> list[dict[str, An
     return redacted
 
 
+def _redact_process_lifecycle(lifecycle: dict[str, Any]) -> dict[str, Any]:
+    """Redact local paths in process-lifecycle evidence at the source.
+
+    Applied before the dict is returned from ``_build_process_lifecycle_evidence``
+    so that the same redaction covers the signed attestation-token path and the
+    JSON-output path.  Without this, local absolute paths in ``command``,
+    ``run_command``, ``cwd``, and ``children[*].command`` would be
+    cryptographically signed into the ES256 attestation JWT.
+    """
+    redacted = dict(lifecycle)
+    if redacted.get("command"):
+        redacted["command"] = [
+            _redact_local_path_embedded(c) for c in redacted["command"]
+        ]
+    if redacted.get("run_command"):
+        redacted["run_command"] = [
+            _redact_local_path_embedded(c) for c in redacted["run_command"]
+        ]
+    if redacted.get("cwd"):
+        redacted["cwd"] = _redact_local_path(redacted["cwd"])
+    if redacted.get("children"):
+        redacted["children"] = _redact_child_lifecycle(redacted["children"])
+    return redacted
+
+
 def _build_process_lifecycle_evidence(
     *,
     proc: subprocess.Popen[bytes] | None,
@@ -1242,6 +1290,13 @@ def _build_process_lifecycle_evidence(
     children = _enumerate_child_processes(root_pid)
     if children:
         result["children"] = children
+    # Redact local paths BEFORE returning.  This evidence flows into the
+    # ES256-signed attestation token (via ``issue_attestation_for_session``)
+    # and into shareable JSON output.  Redacting at the source — rather
+    # than only in ``to_result_dict`` — ensures signed evidence never
+    # embeds the user's home dir, project layout, temp paths, or child
+    # argv in cleartext.
+    result = _redact_process_lifecycle(result)
     return result
 
 
