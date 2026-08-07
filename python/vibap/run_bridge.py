@@ -441,18 +441,10 @@ def _build_embedded_server(
 def _redact_local_path(path_str: str | None) -> str | None:
     """Replace local absolute path roots with stable placeholders.
 
-    Uses a three-step approach for comprehensive coverage, mirroring
-    :func:`vibap.cli._redact_local_path_string`:
-
-    1. Replace known prefix roots (``/tmp/``, ``/Users/<home>``,
-       ``/private/var/folders/``, etc.) anchored at the start.
-    2. Replace the same roots when they appear embedded in the string.
-    3. Delegate to :func:`vibap.shareable_redaction.redact_local_path_text`
-       to catch ``file://`` URIs, percent-encoded separators, and arbitrary
-       local absolute paths under unknown roots (e.g. ``/opt/…``).
-
-    Without step 3, paths like ``/Users/otheruser/project`` or
-    ``file:///opt/local/…`` would pass through unredacted.
+    Shares the same redaction philosophy as the proof-bundle path-leak
+    scanner: absolute paths under the temp directory, the user's home,
+    or well-known system paths are replaced with descriptive placeholders
+    so the JSON output is safe to share in CI artifacts or bug reports.
     """
     if path_str is None:
         return None
@@ -466,7 +458,7 @@ def _redact_local_path(path_str: str | None) -> str | None:
         return "<tmp>/" + result[len(temp_prefix):]
     home = os.path.expanduser("~")
     if result.startswith(home + "/"):
-        result = result.replace(home, "<home>", 1)
+        return result.replace(home, "<home>", 1)
     # macOS resolves /tmp → /private/tmp; redact both forms.
     result = re.sub(r"^/private/tmp/", "<tmp>/", result)
     result = re.sub(r"^/tmp/", "<tmp>/", result)
@@ -477,10 +469,7 @@ def _redact_local_path(path_str: str | None) -> str | None:
     result = re.sub(r"^/run/ardur/", "<run-ardur>/", result)
     # Linux system paths that reveal local cgroup or runtime layout.
     result = re.sub(r"^/sys/fs/cgroup/", "<cgroup>/", result)
-    # Step 3: catch file:// URIs and arbitrary absolute paths under
-    # unknown roots that the hand-rolled regex above does not cover.
-    from .shareable_redaction import redact_local_path_text
-    return redact_local_path_text(result)
+    return result
 
 
 def _redact_local_path_embedded(value: str) -> str:
@@ -490,10 +479,6 @@ def _redact_local_path_embedded(value: str) -> str:
     mid-sentence (e.g. ``"launched via --plugin-dir /tmp/foo/..."``).
     Also replaces the current user's home directory if it appears
     embedded in the string.
-
-    Delegates to :func:`redact_local_path_text` as a final pass to
-    catch ``file://`` URIs and arbitrary local absolute paths under
-    unknown roots (e.g. ``/Users/otheruser/...``, ``/opt/...``).
     """
     if not value:
         return value
@@ -512,10 +497,7 @@ def _redact_local_path_embedded(value: str) -> str:
     home = os.path.expanduser("~")
     if home and home in result:
         result = result.replace(home, "<home>")
-    # Final pass: catch file:// URIs, percent-encoded separators, and
-    # arbitrary local absolute paths under unknown roots.
-    from .shareable_redaction import redact_local_path_text
-    return redact_local_path_text(result)
+    return result
 
 
 @dataclass
@@ -1179,20 +1161,41 @@ def _redact_process_lifecycle(lifecycle: dict[str, Any]) -> dict[str, Any]:
     JSON-output path.  Without this, local absolute paths in ``command``,
     ``run_command``, ``cwd``, and ``children[*].command`` would be
     cryptographically signed into the ES256 attestation JWT.
+
+    Uses a two-layer approach:
+    1. ``_redact_local_path`` / ``_redact_local_path_embedded`` replace
+       known roots (``/tmp/``, ``/Users/<home>``, ``/private/var/folders/``,
+       etc.) with stable placeholders (``<tmp>/``, ``<home>``, etc.).
+    2. ``redact_local_path_text`` catches what layer 1 misses:
+       ``file://`` URIs, percent-encoded separators, and arbitrary local
+       absolute paths under unknown roots (e.g. ``/opt/…``).
     """
+    from .shareable_redaction import redact_local_path_text
+
     redacted = dict(lifecycle)
     if redacted.get("command"):
         redacted["command"] = [
-            _redact_local_path_embedded(c) for c in redacted["command"]
+            redact_local_path_text(_redact_local_path_embedded(c))
+            for c in redacted["command"]
         ]
     if redacted.get("run_command"):
         redacted["run_command"] = [
-            _redact_local_path_embedded(c) for c in redacted["run_command"]
+            redact_local_path_text(_redact_local_path_embedded(c))
+            for c in redacted["run_command"]
         ]
     if redacted.get("cwd"):
-        redacted["cwd"] = _redact_local_path(redacted["cwd"])
+        redacted["cwd"] = redact_local_path_text(
+            _redact_local_path(redacted["cwd"]) or ""
+        )
     if redacted.get("children"):
         redacted["children"] = _redact_child_lifecycle(redacted["children"])
+        # Also apply redact_local_path_text to child commands for
+        # file:// URIs and unknown-root paths.
+        for child in redacted["children"]:
+            if child.get("command"):
+                child["command"] = [
+                    redact_local_path_text(c) for c in child["command"]
+                ]
     return redacted
 
 
