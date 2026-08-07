@@ -1848,9 +1848,16 @@ def format_summary(result: GovernanceRunResult) -> str:
         exit_line = f"exit={pl.get('exit_code')}"
         if signal_text:
             exit_line += f" ({signal_text})"
-        lines.append(
-            f"  process       pid={pid_text} {dur_text} {exit_line} [{tier_text}]"
-        )
+        process_line = f"  process       pid={pid_text} {dur_text} {exit_line} [{tier_text}]"
+        budget_s = pl.get("duration_budget_s")
+        if isinstance(budget_s, (int, float)) and budget_s > 0:
+            wall = pl.get("wall_clock_s", 0)
+            if wall >= budget_s:
+                process_line += " budget exceeded"
+            else:
+                pct = (wall / budget_s) * 100
+                process_line += f" budget {wall:.1f}s/{budget_s:.0f}s ({pct:.0f}%)"
+        lines.append(process_line)
         children = pl.get("children")
         if isinstance(children, list) and children:
             max_depth = max(

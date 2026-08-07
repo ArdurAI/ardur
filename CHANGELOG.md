@@ -5,6 +5,10 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show duration budget usage in the `ardur run` human-readable summary.
+  When lifecycle evidence includes `duration_budget_s`, the process line
+  now appends `budget Xs/Ys (Z%)` or `budget exceeded` so CI/automation
+  consumers can detect runaway processes without parsing JSON output.
 - Show descendant process count and max depth in the `ardur run`
   human-readable summary. When host-observer lifecycle evidence includes
   captured descendants (direct children, grandchildren, etc.), the summary

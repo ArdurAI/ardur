@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "1e03525888fd80c6ec344aeb53aaa2ed1e7cb6b96e0bf097ae70503dcd9059eb"
+source_sha256: "af92244812fcda3d13fda7931c0dd41837683d5736aedf00d6b0163b4de99b19"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,10 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show duration budget usage in the `ardur run` human-readable summary.
+  When lifecycle evidence includes `duration_budget_s`, the process line
+  now appends `budget Xs/Ys (Z%)` or `budget exceeded` so CI/automation
+  consumers can detect runaway processes without parsing JSON output.
 - Show descendant process count and max depth in the `ardur run`
   human-readable summary. When host-observer lifecycle evidence includes
   captured descendants (direct children, grandchildren, etc.), the summary
