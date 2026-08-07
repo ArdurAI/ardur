@@ -4324,36 +4324,54 @@ def _redact_paths_deep(obj: Any) -> Any:
 
 
 def _redact_local_path_string(value: str) -> str:
-    """Redact all local path roots from *value*, including embedded ones.
+    """Redact local path roots, ``file://`` URIs, and absolute paths from *value*.
 
-    First applies the prefix-based :func:`_redact_local_path`, then replaces
-    any remaining local-path roots that appear after non-path characters
-    (``=``, spaces, etc.) so that command strings like
-    ``VIBAP_HOME=/private/tmp/...`` are fully redacted.
+    Uses a three-step approach for comprehensive coverage:
+
+    1. :func:`_redact_local_path` replaces known prefix roots (``/tmp/``,
+       ``/Users/``, ``/private/var/folders/``, etc.) anchored at the start.
+
+    2. A non-anchored regex pass catches the same roots when they appear
+       embedded in strings (e.g. ``VIBAP_HOME=/private/tmp/...``) and
+       replaces them with the same stable placeholders.
+
+    3. :func:`redact_local_path_text` from :mod:`shareable_redaction` catches
+       what steps 1+2 miss: ``file://`` URIs, percent-encoded separators,
+       and arbitrary local absolute paths under unknown roots
+       (e.g. ``/opt/…``).
+
+    This unification closes a path-leak vector where the previous hand-rolled
+    regex pass only covered a fixed list of roots and missed ``file://`` URIs
+    and absolute paths under unknown roots.
     """
     import tempfile
 
     result = _redact_local_path(value)
     if result is None:
         return value
-    # Replace any remaining local-path roots that appear inside the string
-    # (not just at the start).  Ordered from most-specific to least-specific.
+    # Step 2: replace remaining local-path roots that appear inside the
+    # string (not just at the start).  Ordered from most-specific to
+    # least-specific so longer roots match before shorter substrings.
     temp_root = tempfile.gettempdir()
     home = os.path.expanduser("~")
-    # Escape roots for regex use.
-    roots = [
+    embedded_roots = [
         (re.escape("/private/var/folders/"), "<var-folders>/"),
         (re.escape("/var/folders/"), "<var-folders>/"),
         (re.escape("/private/tmp/"), "<tmp>/"),
         (re.escape("/tmp/"), "<tmp>/"),
         (re.escape(home + "/"), "<home>/"),
-        (re.escape(temp_root + "/") if temp_root.endswith("/") else re.escape(temp_root), "<tmp>"),
+        (
+            re.escape(temp_root + "/") if temp_root.endswith("/") else re.escape(temp_root),
+            "<tmp>",
+        ),
         (re.escape("/run/ardur/"), "<run-ardur>/"),
         (re.escape("/sys/fs/cgroup/"), "<cgroup>/"),
     ]
-    for pattern, replacement in roots:
+    for pattern, replacement in embedded_roots:
         result = re.sub(pattern, replacement, result)
-    return result
+    # Step 3: catch file:// URIs, percent-encoded separators, and arbitrary
+    # local absolute paths under unknown roots.
+    return redact_local_path_text(result)
 
 
 def cmd_status(args: argparse.Namespace) -> int:

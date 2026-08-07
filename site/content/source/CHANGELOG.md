@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "2905fc44feb2a001727fc041ee685362d89dd56f0765c8f69a5a8d516142beaf"
+source_sha256: "4ab8dba7e68491c2bc5030c4819a02e568e0661a80ffca7f9a6797c873c9a818"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,15 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Security
+- Unify `_redact_local_path_string` with `redact_local_path_text` so
+  `--redact-paths` also catches `file://` URIs, percent-encoded
+  separators, and arbitrary local absolute paths under unknown roots
+  (e.g. `/opt/…`). The previous hand-rolled regex pass only covered a
+  fixed list of known roots and leaked the broader path class.
+- Propagate `unknowns` and `insufficient_evidence` verdict counts from
+  child session summaries in `_child_lifecycle_summary`, closing a
+  verdict-taxonomy sibling-sweep gap after the `UNKNOWN` Decision enum
+  was added.
 - Bump `cryptography` upper bound from `<50` to `<51` to pull in
   `50.0.0`, which fixes CVE-2026-69247 (PKCS#7 EnvelopedData
   decryption Bleichenbacher oracle via distinguishable errors). The

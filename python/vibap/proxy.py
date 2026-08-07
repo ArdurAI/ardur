@@ -4609,6 +4609,10 @@ class GovernanceProxy:
                 "receipt_count": len(child_session.events),
                 "permits": int(child_summary.get("permits", 0)),
                 "denials": int(child_summary.get("denials", 0)),
+                "unknowns": int(child_summary.get("unknowns", 0)),
+                "insufficient_evidence": int(
+                    child_summary.get("insufficient_evidence", 0)
+                ),
                 "total_events": int(
                     child_summary.get("total_events", len(child_session.events))
                 ),
