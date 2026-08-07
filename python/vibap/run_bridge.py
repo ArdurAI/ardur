@@ -1851,6 +1851,16 @@ def format_summary(result: GovernanceRunResult) -> str:
         lines.append(
             f"  process       pid={pid_text} {dur_text} {exit_line} [{tier_text}]"
         )
+        children = pl.get("children")
+        if isinstance(children, list) and children:
+            max_depth = max(
+                (c.get("depth", 0) for c in children if isinstance(c, dict)),
+                default=0,
+            )
+            lines.append(
+                f"  descendants   {len(children)} captured"
+                f" (max depth {max_depth})"
+            )
     for note in result.notes:
         lines.append(f"  note          {note}")
     lines.append("─────────────────────────────────────────────────────────")

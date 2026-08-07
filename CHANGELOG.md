@@ -4,6 +4,13 @@ All notable changes to Ardur will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Show descendant process count and max depth in the `ardur run`
+  human-readable summary. When host-observer lifecycle evidence includes
+  captured descendants (direct children, grandchildren, etc.), the summary
+  now includes a `descendants   N captured (max depth D)` line so users
+  get immediate visibility without parsing JSON output.
+
 ### Security
 - Redact local paths in `_build_process_lifecycle_evidence` at the source
   via a new `_redact_process_lifecycle` helper that layers

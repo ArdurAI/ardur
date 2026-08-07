@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "ad7edfd66bbf52e09e7386735a08b324f6ffa16cc40ca67729782be8ed5f4220"
+source_sha256: "1e03525888fd80c6ec344aeb53aaa2ed1e7cb6b96e0bf097ae70503dcd9059eb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -20,6 +20,13 @@ This page is generated from the public repository source file. Edit the source f
 All notable changes to Ardur will be documented in this file.
 
 ## [Unreleased]
+
+### Added
+- Show descendant process count and max depth in the `ardur run`
+  human-readable summary. When host-observer lifecycle evidence includes
+  captured descendants (direct children, grandchildren, etc.), the summary
+  now includes a `descendants   N captured (max depth D)` line so users
+  get immediate visibility without parsing JSON output.
 
 ### Security
 - Redact local paths in `_build_process_lifecycle_evidence` at the source
