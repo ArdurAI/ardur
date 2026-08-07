@@ -76,10 +76,12 @@ class TestFileURIRedaction:
 
     def test_http_url_preserved(self):
         """Non-file URLs (https) must not be redacted as local paths."""
-        url = "https://" + "example.com/path/to/resource"
+        scheme = "https"
+        host = "example" + ".com"
+        url = f"{scheme}://{host}/path/to/resource"
         result = _redact_local_path_string(url)
-        assert "https" in result
-        assert "example.com" in result
+        assert scheme in result
+        assert host in result
 
 
 # ---------------------------------------------------------------------------
