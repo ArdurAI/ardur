@@ -11,7 +11,6 @@ When no children are present, the line should be absent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
 from vibap.run_bridge import format_summary, GovernanceRunResult

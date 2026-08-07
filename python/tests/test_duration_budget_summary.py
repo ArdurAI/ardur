@@ -1,6 +1,5 @@
 """Tests for duration-budget display in governance summary format_summary()."""
 
-from dataclasses import dataclass, field
 from typing import Any
 
 from vibap.run_bridge import GovernanceRunResult, format_summary
