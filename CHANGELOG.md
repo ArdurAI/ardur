@@ -5,6 +5,11 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Surface denied tool names in the human-readable governance summary. When
+  a session has denials, the summary now shows `denied   Tool1, Tool2`
+  (up to 5 unique tools, with a `(+N more)` suffix) so the user can see
+  *which* tools were blocked without opening receipts. The full list is
+  also available in `--json` output as `summary.denied_tools`.
 - Surface aggregate child resource usage in the human-readable governance
   summary. When descendant processes have per-child CPU/RSS metrics, the
   summary now shows `child cpu N.NNNs (user Xs / sys Ys)` (summed across

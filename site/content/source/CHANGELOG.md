@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "2707b0e65830d7a2780e7c17ea2e4f96087b01cb6cf360b53e28f681b01755b3"
+source_sha256: "8c09784ec2a1c29d7c085a8d059227fd23e27949a5d86beba406b9b902cc6ca9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,11 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Surface denied tool names in the human-readable governance summary. When
+  a session has denials, the summary now shows `denied   Tool1, Tool2`
+  (up to 5 unique tools, with a `(+N more)` suffix) so the user can see
+  *which* tools were blocked without opening receipts. The full list is
+  also available in `--json` output as `summary.denied_tools`.
 - Surface aggregate child resource usage in the human-readable governance
   summary. When descendant processes have per-child CPU/RSS metrics, the
   summary now shows `child cpu N.NNNs (user Xs / sys Ys)` (summed across

@@ -4501,6 +4501,24 @@ class GovernanceProxy:
             1 for e in events if e.decision == Decision.INSUFFICIENT_EVIDENCE
         )
         violations = sum(1 for e in events if e.decision == Decision.VIOLATION)
+        # Collect unique tool names from denied events so the summary can
+        # show *which* tools were blocked, not just a count.  Order is
+        # preserved by first occurrence so the line is deterministic.
+        denied_tools: list[str] = []
+        _seen: set[str] = set()
+        for e in events:
+            if (
+                e.decision
+                in (
+                    Decision.DENY,
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    Decision.VIOLATION,
+                    Decision.UNKNOWN,
+                )
+                and e.tool_name not in _seen
+            ):
+                _seen.add(e.tool_name)
+                denied_tools.append(e.tool_name)
         return {
             "type": "session_end",
             "jti": session.jti,
@@ -4512,6 +4530,7 @@ class GovernanceProxy:
             "unknowns": unknowns,
             "insufficient_evidence": insufficient,
             "violations": violations,
+            "denied_tools": denied_tools,
             "elapsed_s": round(session.elapsed_s, 3),
             "scope_compliance": "full" if denials == 0 else "violated",
             "delegation_count": len(session.delegated_children),

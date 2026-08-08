@@ -1972,10 +1972,19 @@ def format_summary(result: GovernanceRunResult) -> str:
         f"  adapter       {result.adapter} (--via {result.via})",
         f"  tool calls    {result.total_events} evaluated "
         f"({result.permits} permit / {result.denials} deny)",
-        f"  scope         {_scope_label(result.summary)}",
-        f"  receipts      {result.receipt_count} signed → {result.receipts_path}",
-        f"  attestation   {result.attestation_digest}",
     ]
+    # When there are denials, show which tools were blocked so the user
+    # does not have to open receipts to find out.
+    denied_tools = result.summary.get("denied_tools") or []
+    if isinstance(denied_tools, list) and denied_tools:
+        # Truncate to a reasonable number for the summary line; the full
+        # list remains in --json output.
+        shown = denied_tools[:5]
+        suffix = f" (+{len(denied_tools) - 5} more)" if len(denied_tools) > 5 else ""
+        lines.append(f"  denied        {', '.join(shown)}{suffix}")
+    lines.append(f"  scope         {_scope_label(result.summary)}")
+    lines.append(f"  receipts      {result.receipt_count} signed → {result.receipts_path}")
+    lines.append(f"  attestation   {result.attestation_digest}")
     # Only show kernel lines when kernel correlation is available or
     # explicitly configured but failed. When the run simply did not use a
     # kernel daemon (the common case), suppress these lines to reduce noise.
