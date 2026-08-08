@@ -5,6 +5,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show delegation count and child sessions in the `ardur run`
+  human-readable summary. When the governance session includes
+  subagent delegations (`delegation_count > 0`), the summary now
+  includes a `delegations   N requested (M child sessions)` line so
+  users get immediate visibility into multi-agent runs without parsing
+  JSON output.
 - Show duration budget usage in the `ardur run` human-readable summary.
   When lifecycle evidence includes `duration_budget_s`, the process line
   now appends `budget Xs/Ys (Z%)` or `budget exceeded` so CI/automation

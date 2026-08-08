@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "af92244812fcda3d13fda7931c0dd41837683d5736aedf00d6b0163b4de99b19"
+source_sha256: "34e3ed77c5398fdafadf691729a324ed482b395db100c1b76e6b81afb2e73e21"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show delegation count and child sessions in the `ardur run`
+  human-readable summary. When the governance session includes
+  subagent delegations (`delegation_count > 0`), the summary now
+  includes a `delegations   N requested (M child sessions)` line so
+  users get immediate visibility into multi-agent runs without parsing
+  JSON output.
 - Show duration budget usage in the `ardur run` human-readable summary.
   When lifecycle evidence includes `duration_budget_s`, the process line
   now appends `budget Xs/Ys (Z%)` or `budget exceeded` so CI/automation

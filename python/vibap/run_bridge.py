@@ -1868,6 +1868,13 @@ def format_summary(result: GovernanceRunResult) -> str:
                 f"  descendants   {len(children)} captured"
                 f" (max depth {max_depth})"
             )
+    delegation_count = int(result.summary.get("delegation_count", 0))
+    if delegation_count > 0:
+        children_spawned = int(result.summary.get("children_spawned", 0))
+        lines.append(
+            f"  delegations   {delegation_count} requested"
+            f" ({children_spawned} child sessions)"
+        )
     for note in result.notes:
         lines.append(f"  note          {note}")
     lines.append("─────────────────────────────────────────────────────────")
