@@ -2022,6 +2022,30 @@ def format_summary(result: GovernanceRunResult) -> str:
                 f"  descendants   {len(children)} captured"
                 f" (max depth {max_depth})"
             )
+            # Aggregate child resource usage from per-child cpu/rss fields.
+            child_cpu_u = sum(
+                c.get("cpu_user_s", 0)
+                for c in children
+                if isinstance(c, dict) and isinstance(c.get("cpu_user_s"), (int, float))
+            )
+            child_cpu_s = sum(
+                c.get("cpu_system_s", 0)
+                for c in children
+                if isinstance(c, dict) and isinstance(c.get("cpu_system_s"), (int, float))
+            )
+            child_rss_max = max(
+                (c.get("rss_bytes", 0) for c in children
+                 if isinstance(c, dict) and isinstance(c.get("rss_bytes"), (int, float))),
+                default=0,
+            )
+            if child_cpu_u or child_cpu_s:
+                child_cpu_total = child_cpu_u + child_cpu_s
+                lines.append(
+                    f"  child cpu     {child_cpu_total:.3f}s"
+                    f" (user {child_cpu_u:.3f}s / sys {child_cpu_s:.3f}s)"
+                )
+            if child_rss_max:
+                lines.append(f"  child max rss {_format_bytes(int(child_rss_max))}")
         cpu_user = pl.get("cpu_user_s")
         cpu_sys = pl.get("cpu_system_s")
         peak_rss = pl.get("peak_rss_bytes")

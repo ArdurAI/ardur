@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4ecd62ad1d3883b50e8d2b7c254e38165d90051f62b2ff0195ea3873d3607567"
+source_sha256: "07823ed8992ca08f1772fe242f928f26f97f4223fb189395c9a03ab033bcb159"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,11 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Surface aggregate child resource usage in the human-readable governance
+  summary. When descendant processes have per-child CPU/RSS metrics, the
+  summary now shows `child cpu N.NNNs (user Xs / sys Ys)` (summed across
+  children) and `child max rss N MB` (maximum child RSS). Children without
+  metrics are skipped gracefully.
 - Capture per-child CPU time and RSS in host-observer descendant snapshots.
   Each child process entry in `process_lifecycle.children` now includes
   `cpu_user_s`, `cpu_system_s` (cumulative CPU time from psutil), and
