@@ -596,7 +596,29 @@ class GovernanceRunResult:
             "correlation": correlation,
             "kernel_policy": self.kernel_policy,
             "process_lifecycle": process_lifecycle_out,
+            "summary": self._summary_for_json(),
             "notes": notes_out,
+        }
+
+    def _summary_for_json(self) -> dict[str, Any]:
+        """Return the aggregate governance summary for JSON consumers.
+
+        ``format_summary`` renders these fields into the human-readable text
+        output.  Programmatic consumers using ``--json`` need the same
+        aggregate verdict breakdown (scope_compliance, elapsed_s, unknowns,
+        insufficient_evidence, violations, delegation_count,
+        children_spawned) so they do not have to iterate every receipt and
+        re-derive it.
+        """
+        s = self.summary
+        return {
+            "scope_compliance": s.get("scope_compliance", "full"),
+            "elapsed_s": s.get("elapsed_s", 0),
+            "unknowns": int(s.get("unknowns", 0)),
+            "insufficient_evidence": int(s.get("insufficient_evidence", 0)),
+            "violations": int(s.get("violations", 0)),
+            "delegation_count": int(s.get("delegation_count", 0)),
+            "children_spawned": int(s.get("children_spawned", 0)),
         }
 
 

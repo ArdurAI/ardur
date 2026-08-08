@@ -5,6 +5,13 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Include aggregate governance `summary` block in `ardur run --json` output.
+  Programmatic consumers (CI pipelines, scripts) using `--json` now see
+  `scope_compliance`, `elapsed_s`, `unknowns`, `insufficient_evidence`,
+  `violations`, `delegation_count`, and `children_spawned` — the same
+  aggregate verdict breakdown that `format_summary` renders in the
+  human-readable text output. Previously these fields required iterating
+  every receipt and re-deriving the totals.
 - Capture CPU time and peak memory usage in host-observer lifecycle
   evidence. `cpu_user_s`, `cpu_system_s`, and `peak_rss_bytes` are now
   recorded via POSIX `getrusage(RUSAGE_CHILDREN)` delta around the

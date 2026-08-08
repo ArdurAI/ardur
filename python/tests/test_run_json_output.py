@@ -84,6 +84,7 @@ class TestToResultDict:
             "correlation",
             "kernel_policy",
             "process_lifecycle",
+            "summary",
             "notes",
         }
         assert set(d.keys()) == expected_keys
@@ -135,11 +136,78 @@ class TestToResultDict:
         d = result.to_result_dict()
         assert "proxy_url" not in d
 
-    def test_summary_omitted_from_json(self) -> None:
-        """The raw summary dict is internal; JSON uses its flattened fields."""
-        result = _make_result(summary={"extra": "internal"})
+    def test_summary_includes_aggregate_governance_fields(self) -> None:
+        """The summary block gives JSON consumers the same aggregate verdict
+        breakdown that ``format_summary`` renders in the text view."""
+        result = _make_result(
+            summary={
+                "permits": 3,
+                "denials": 2,
+                "total_events": 5,
+                "scope_compliance": "violated",
+                "elapsed_s": 1.234,
+                "unknowns": 1,
+                "insufficient_evidence": 1,
+                "violations": 1,
+                "delegation_count": 2,
+                "children_spawned": 2,
+            }
+        )
         d = result.to_result_dict()
-        assert "summary" not in d
+        assert d["summary"]["scope_compliance"] == "violated"
+        assert d["summary"]["elapsed_s"] == 1.234
+        assert d["summary"]["unknowns"] == 1
+        assert d["summary"]["insufficient_evidence"] == 1
+        assert d["summary"]["violations"] == 1
+        assert d["summary"]["delegation_count"] == 2
+        assert d["summary"]["children_spawned"] == 2
+
+    def test_summary_defaults_when_source_dict_is_sparse(self) -> None:
+        """Missing keys in the source summary dict must not crash."""
+        result = _make_result(summary={"permits": 0, "denials": 0, "total_events": 0})
+        d = result.to_result_dict()
+        assert d["summary"]["scope_compliance"] == "full"
+        assert d["summary"]["elapsed_s"] == 0
+        assert d["summary"]["unknowns"] == 0
+        assert d["summary"]["insufficient_evidence"] == 0
+        assert d["summary"]["violations"] == 0
+        assert d["summary"]["delegation_count"] == 0
+        assert d["summary"]["children_spawned"] == 0
+
+    def test_summary_does_not_leak_internal_fields(self) -> None:
+        """The raw Hub summary dict contains internal fields (jti, agent,
+        mission, child_jtis, delegated_budget_reserved) that must not leak
+        into the JSON consumer block."""
+        result = _make_result(
+            summary={
+                "jti": "secret-session-jti",
+                "agent": "internal-agent-id",
+                "mission": "secret-mission-text",
+                "child_jtis": ["jti-1", "jti-2"],
+                "delegated_budget_reserved": 999,
+                "permits": 0,
+                "denials": 0,
+                "total_events": 0,
+                "scope_compliance": "full",
+                "elapsed_s": 0.1,
+            }
+        )
+        d = result.to_result_dict()
+        assert "jti" not in d["summary"]
+        assert "agent" not in d["summary"]
+        assert "mission" not in d["summary"]
+        assert "child_jtis" not in d["summary"]
+        assert "delegated_budget_reserved" not in d["summary"]
+        # Only the curated consumer-facing keys should appear.
+        assert set(d["summary"].keys()) == {
+            "scope_compliance",
+            "elapsed_s",
+            "unknowns",
+            "insufficient_evidence",
+            "violations",
+            "delegation_count",
+            "children_spawned",
+        }
 
 
 # ---------------------------------------------------------------------------
