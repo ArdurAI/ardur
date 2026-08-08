@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "f813a676ff270686ad0837b155f35076885ac0bb9f9d66ef0b72b571516d6c58"
+source_sha256: "dd2984c46182d04c40dae2aa5bc63f664138b03ca52ac92948535e9a6b7aa100"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -57,6 +57,13 @@ All notable changes to Ardur will be documented in this file.
   captured descendants (direct children, grandchildren, etc.), the summary
   now includes a `descendants   N captured (max depth D)` line so users
   get immediate visibility without parsing JSON output.
+
+### Changed
+- Suppress `kernel link` and `kernel policy` lines in the `ardur run`
+  human-readable summary when no kernel daemon correlation is active.
+  These lines previously always appeared with "kernel correlation disabled
+  by caller" noise even when no daemon was configured. They now show only
+  when kernel correlation is available or a kernel policy tier was applied.
 
 ### Fixed
 - Fix `test_real_child_process_produces_nonzero_cpu` assertion: `ru_maxrss`

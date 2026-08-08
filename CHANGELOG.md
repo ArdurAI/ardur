@@ -41,6 +41,13 @@ All notable changes to Ardur will be documented in this file.
   now includes a `descendants   N captured (max depth D)` line so users
   get immediate visibility without parsing JSON output.
 
+### Changed
+- Suppress `kernel link` and `kernel policy` lines in the `ardur run`
+  human-readable summary when no kernel daemon correlation is active.
+  These lines previously always appeared with "kernel correlation disabled
+  by caller" noise even when no daemon was configured. They now show only
+  when kernel correlation is available or a kernel policy tier was applied.
+
 ### Fixed
 - Fix `test_real_child_process_produces_nonzero_cpu` assertion: `ru_maxrss`
   is a high-water mark (not cumulative), so its delta can legitimately be 0

@@ -1935,10 +1935,20 @@ def format_summary(result: GovernanceRunResult) -> str:
         f"  scope         {_scope_label(result.summary)}",
         f"  receipts      {result.receipt_count} signed → {result.receipts_path}",
         f"  attestation   {result.attestation_digest}",
-        f"  kernel link   {result.correlation.get('reason')}",
-        f"  kernel policy {result.kernel_policy.get('reason')}",
-        f"  agent exit    {result.exit_code}",
     ]
+    # Only show kernel lines when kernel correlation is available or
+    # explicitly configured but failed. When the run simply did not use a
+    # kernel daemon (the common case), suppress these lines to reduce noise.
+    corr_available = result.correlation.get("available", False)
+    if corr_available:
+        corr_reason = result.correlation.get("reason") or "available"
+        lines.append(f"  kernel link   {corr_reason}")
+    kp_reason = result.kernel_policy.get("reason", "")
+    if result.kernel_policy.get("tier") or result.kernel_policy.get("wrapped"):
+        lines.append(f"  kernel policy {kp_reason}")
+    elif corr_available and kp_reason:
+        lines.append(f"  kernel policy {kp_reason}")
+    lines.append(f"  agent exit    {result.exit_code}")
     pl = result.process_lifecycle
     if pl:
         pid_text = str(pl.get("root_pid") or "unknown")
