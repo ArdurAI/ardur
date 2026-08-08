@@ -5,6 +5,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Capture CPU time and peak memory usage in host-observer lifecycle
+  evidence. `cpu_user_s`, `cpu_system_s`, and `peak_rss_bytes` are now
+  recorded via POSIX `getrusage(RUSAGE_CHILDREN)` delta around the
+  launched process — zero-privilege, no polling. The human-readable
+  summary now shows `cpu   N.NNNs (user Xs / sys Ys)` and
+  `peak rss   N.N MB` lines.
 - Show scope compliance status in the `ardur run` human-readable
   summary. A `scope   full` or `scope   violated` line now appears
   right after the tool-call counts, surfacing the session-level

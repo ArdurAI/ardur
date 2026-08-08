@@ -1261,6 +1261,49 @@ def _redact_process_lifecycle(lifecycle: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
+def _get_child_rusage() -> dict[str, float]:
+    """Capture a snapshot of ``RUSAGE_CHILDREN`` accounting fields.
+
+    Returns a plain dict so the delta computation is trivially testable
+    without touching the ``resource`` module.  On platforms where the
+    ``resource`` module is unavailable (non-POSIX), all fields are zero.
+    """
+    try:
+        import resource as _resource
+
+        r = _resource.getrusage(_resource.RUSAGE_CHILDREN)
+    except (ImportError, AttributeError, OSError):
+        return {"ru_utime": 0.0, "ru_stime": 0.0, "ru_maxrss": 0.0}
+    return {
+        "ru_utime": float(r.ru_utime),
+        "ru_stime": float(r.ru_stime),
+        # macOS reports ru_maxrss in bytes; Linux in kilobytes.
+        # Normalise to bytes here so downstream consumers get a
+        # consistent unit regardless of host platform.
+        "ru_maxrss": float(r.ru_maxrss * 1024 if sys.platform != "darwin" else r.ru_maxrss),
+    }
+
+
+def _compute_rusage_delta(
+    before: dict[str, float], after: dict[str, float]
+) -> dict[str, float]:
+    """Compute the resource-usage delta between two snapshots.
+
+    ``ru_maxrss`` is a *peak*, not a cumulative total — it reports the
+    maximum RSS seen across all waited-for children *up to this point*.
+    So the delta is ``max(0, after - before)`` which gives the peak RSS
+    attributable to processes waited for since *before*.  When other
+    children were waited for concurrently this may slightly over-credit,
+    but in the ``run_governed`` path the launched agent is the only
+    child waited for between the two snapshots.
+    """
+    return {
+        "ru_utime": max(0.0, after["ru_utime"] - before["ru_utime"]),
+        "ru_stime": max(0.0, after["ru_stime"] - before["ru_stime"]),
+        "ru_maxrss": max(0.0, after["ru_maxrss"] - before["ru_maxrss"]),
+    }
+
+
 def _build_process_lifecycle_evidence(
     *,
     proc: subprocess.Popen[bytes] | None,
@@ -1271,6 +1314,7 @@ def _build_process_lifecycle_evidence(
     run_command: list[str] | None = None,
     cwd: str | None = None,
     duration_budget_s: int | None = None,
+    rusage_delta: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Capture zero-privilege process-lifecycle evidence for the launched root.
 
@@ -1295,6 +1339,17 @@ def _build_process_lifecycle_evidence(
       ``run_governed``, recorded so consumers can compare the budget against
       ``wall_clock_s`` to detect budget-exhaustion or near-exhaustion.
       ``None`` omits the field (backward-compatible default).
+    * ``cpu_user_s`` — user-mode CPU time consumed by the launched process
+      and its descendants, measured via POSIX ``getrusage(RUSAGE_CHILDREN)``
+      delta around ``proc.wait()``.  Zero-privilege, no polling.  Omitted
+      when ``rusage_delta`` is ``None`` (backward-compatible default).
+    * ``cpu_system_s`` — kernel-mode CPU time for the same scope.
+      Omitted when ``rusage_delta`` is ``None``.
+    * ``peak_rss_bytes`` — maximum resident set size (RSS) of the launched
+      process and its descendants, platform-normalised to bytes.  macOS
+      ``getrusage`` reports bytes; Linux reports kilobytes — the caller
+      normalises before passing the delta.  Omitted when ``rusage_delta``
+      is ``None``.
     * ``started_at`` — wall-clock timestamp when the process was launched.
     * ``wall_clock_s`` — measured wall-clock duration from launch to exit.
     * ``exit_code`` — the integer exit status (host-reported).
@@ -1353,6 +1408,15 @@ def _build_process_lifecycle_evidence(
     # or near-exhaustion. Omitted when None for backward compatibility.
     if duration_budget_s is not None:
         result["duration_budget_s"] = duration_budget_s
+    # Include CPU/memory usage from POSIX getrusage(RUSAGE_CHILDREN) delta.
+    # Zero-privilege, no daemon, no polling — the kernel tracks these
+    # accounting fields for all waited-for children.  Only included when
+    # the caller captured a before/after delta (the run_governed path does
+    # this around proc.wait()).  Omitted when None for backward compat.
+    if rusage_delta is not None:
+        result["cpu_user_s"] = round(rusage_delta.get("ru_utime", 0.0), 6)
+        result["cpu_system_s"] = round(rusage_delta.get("ru_stime", 0.0), 6)
+        result["peak_rss_bytes"] = int(rusage_delta.get("ru_maxrss", 0))
     # Enumerate direct child processes (best-effort, zero-privilege).
     # Only included when non-empty; absent key means no children observed.
     children = _enumerate_child_processes(root_pid)
@@ -1526,6 +1590,7 @@ def run_governed(
     launch_gate_read_fd: int | None = None
     launch_gate_write_fd: int | None = None
     bpf_exec_stopped = False
+    _rusage_before: dict[str, float] = {"ru_utime": 0.0, "ru_stime": 0.0, "ru_maxrss": 0.0}
     try:
         _wait_for_health(proxy_url, api_token)
 
@@ -1598,6 +1663,11 @@ def run_governed(
         _launch_monotonic = time.monotonic()
         _launch_wall_clock = time.time()
         exit_code: int | None = None
+        # Capture RUSAGE_CHILDREN baseline before launching so we can
+        # compute the launched process's resource-accounting delta
+        # (user/sys CPU time, peak RSS) after it exits.  Zero-privilege
+        # POSIX accounting — no polling, no daemon.
+        _rusage_before = _get_child_rusage()
         try:
             proc = subprocess.Popen(
                 run_command,
@@ -1736,6 +1806,8 @@ def run_governed(
         kernel_enforcement = _kernel_enforcement_claim(session_id, correlation)
         if registration_note := receipt_registrar.failure_note():
             notes.append(registration_note)
+        _rusage_after = _get_child_rusage()
+        _rusage_delta = _compute_rusage_delta(_rusage_before, _rusage_after)
         _process_lifecycle = _build_process_lifecycle_evidence(
             proc=proc,
             command=command,
@@ -1745,6 +1817,7 @@ def run_governed(
             run_command=run_command,
             cwd=str(work_dir),
             duration_budget_s=max_duration_s,
+            rusage_delta=_rusage_delta,
         )
         summary = proxy.end_session(session_id)
         attestation_token, _claims = proxy.issue_attestation_for_session(
@@ -1840,6 +1913,17 @@ def _scope_label(summary: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _format_bytes(n: int) -> str:
+    """Format a byte count as a human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / (1024 * 1024 * 1024):.2f} GB"
+
+
 def format_summary(result: GovernanceRunResult) -> str:
     lines = [
         "── Ardur governance summary ─────────────────────────────",
@@ -1884,6 +1968,17 @@ def format_summary(result: GovernanceRunResult) -> str:
                 f"  descendants   {len(children)} captured"
                 f" (max depth {max_depth})"
             )
+        cpu_user = pl.get("cpu_user_s")
+        cpu_sys = pl.get("cpu_system_s")
+        peak_rss = pl.get("peak_rss_bytes")
+        if isinstance(cpu_user, (int, float)) or isinstance(cpu_sys, (int, float)):
+            cpu_total = float(cpu_user or 0) + float(cpu_sys or 0)
+            lines.append(
+                f"  cpu           {cpu_total:.3f}s"
+                f" (user {cpu_user or 0:.3f}s / sys {cpu_sys or 0:.3f}s)"
+            )
+        if isinstance(peak_rss, (int, float)) and peak_rss > 0:
+            lines.append(f"  peak rss      {_format_bytes(int(peak_rss))}")
     delegation_count = int(result.summary.get("delegation_count", 0))
     if delegation_count > 0:
         children_spawned = int(result.summary.get("children_spawned", 0))

@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4ee6717e2b864dc87b93dcdc9a198438481f73b4d04bcb20f1a49264fa036891"
+source_sha256: "d541d209a72096bfe3475cb4627957c5a2d97f63f35ae6b5af1de244efcc6802"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Capture CPU time and peak memory usage in host-observer lifecycle
+  evidence. `cpu_user_s`, `cpu_system_s`, and `peak_rss_bytes` are now
+  recorded via POSIX `getrusage(RUSAGE_CHILDREN)` delta around the
+  launched process — zero-privilege, no polling. The human-readable
+  summary now shows `cpu   N.NNNs (user Xs / sys Ys)` and
+  `peak rss   N.N MB` lines.
 - Show scope compliance status in the `ardur run` human-readable
   summary. A `scope   full` or `scope   violated` line now appears
   right after the tool-call counts, surfacing the session-level
