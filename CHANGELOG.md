@@ -67,6 +67,10 @@ All notable changes to Ardur will be documented in this file.
   when kernel correlation is available or a kernel policy tier was applied.
 
 ### Fixed
+- Replace bare `except ... pass` blocks in child-process snapshot with
+  `contextlib.suppress` for clearer intent. Remove unused `import pytest`
+  and unused local variable in `test_child_resource_attribution.py`.
+  Resolves CodeQL #377–#380 (all quality-only, no security severity).
 - Fix `test_real_child_process_produces_nonzero_cpu` assertion: `ru_maxrss`
   is a high-water mark (not cumulative), so its delta can legitimately be 0
   when prior test-subprocesses already set a higher mark. Relaxed to

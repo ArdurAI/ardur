@@ -19,8 +19,6 @@ import os
 import subprocess
 import time
 
-import pytest
-
 from vibap.run_bridge import (
     _build_process_lifecycle_evidence,
     _child_process_snapshot,
@@ -107,8 +105,6 @@ class TestChildResourceAttribution:
 
         # Patch cpu_times to raise AccessDenied
         import psutil
-
-        original_cpu_times = fake.cpu_times
 
         def _raise_access_denied(*args, **kwargs):
             raise psutil.AccessDenied()

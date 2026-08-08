@@ -1159,17 +1159,13 @@ def _child_process_snapshot(
             # returns cumulative totals since process start; memory_info()
             # returns current RSS.  Both are omitted on access failure so
             # partial snapshots remain useful.
-            try:
+            with suppress(psutil.NoSuchProcess, psutil.AccessDenied):
                 cpu_times = child.cpu_times()
                 entry["cpu_user_s"] = round(cpu_times.user, 6)
                 entry["cpu_system_s"] = round(cpu_times.system, 6)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-            try:
+            with suppress(psutil.NoSuchProcess, psutil.AccessDenied):
                 mem = child.memory_info()
                 entry["rss_bytes"] = mem.rss
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
             if parent_pid is not None:
                 entry["parent_pid"] = parent_pid
             return entry

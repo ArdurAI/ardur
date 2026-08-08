@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "07823ed8992ca08f1772fe242f928f26f97f4223fb189395c9a03ab033bcb159"
+source_sha256: "2707b0e65830d7a2780e7c17ea2e4f96087b01cb6cf360b53e28f681b01755b3"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -84,6 +84,10 @@ All notable changes to Ardur will be documented in this file.
   when kernel correlation is available or a kernel policy tier was applied.
 
 ### Fixed
+- Replace bare `except ... pass` blocks in child-process snapshot with
+  `contextlib.suppress` for clearer intent. Remove unused `import pytest`
+  and unused local variable in `test_child_resource_attribution.py`.
+  Resolves CodeQL #377–#380 (all quality-only, no security severity).
 - Fix `test_real_child_process_produces_nonzero_cpu` assertion: `ru_maxrss`
   is a high-water mark (not cumulative), so its delta can legitimately be 0
   when prior test-subprocesses already set a higher mark. Relaxed to
