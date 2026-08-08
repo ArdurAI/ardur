@@ -5,6 +5,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show honest-abstention verdict breakdown in the `ardur run`
+  human-readable summary. When the governance session has non-zero
+  `unknowns`, `insufficient_evidence`, or `violations` counts, the summary
+  now includes a `verdicts   N violation, M unknown, K insufficient` line
+  so users can immediately see honest-abstention categories without parsing
+  JSON output.
 - Show delegation count and child sessions in the `ardur run`
   human-readable summary. When the governance session includes
   subagent delegations (`delegation_count > 0`), the summary now

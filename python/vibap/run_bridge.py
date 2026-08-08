@@ -1875,6 +1875,20 @@ def format_summary(result: GovernanceRunResult) -> str:
             f"  delegations   {delegation_count} requested"
             f" ({children_spawned} child sessions)"
         )
+    unknowns = int(result.summary.get("unknowns", 0))
+    insufficient = int(result.summary.get("insufficient_evidence", 0))
+    violations = int(result.summary.get("violations", 0))
+    if unknowns or insufficient or violations:
+        parts: list[str] = []
+        if violations:
+            parts.append(f"{violations} violation")
+        if unknowns:
+            parts.append(f"{unknowns} unknown")
+        if insufficient:
+            parts.append(f"{insufficient} insufficient")
+        lines.append(
+            f"  verdicts      {', '.join(parts)}"
+        )
     for note in result.notes:
         lines.append(f"  note          {note}")
     lines.append("─────────────────────────────────────────────────────────")

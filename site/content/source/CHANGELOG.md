@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "34e3ed77c5398fdafadf691729a324ed482b395db100c1b76e6b81afb2e73e21"
+source_sha256: "4d6a776c37957d04081095fe8392a430d34f2325b5a0715b775be8d5482ea594"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show honest-abstention verdict breakdown in the `ardur run`
+  human-readable summary. When the governance session has non-zero
+  `unknowns`, `insufficient_evidence`, or `violations` counts, the summary
+  now includes a `verdicts   N violation, M unknown, K insufficient` line
+  so users can immediately see honest-abstention categories without parsing
+  JSON output.
 - Show delegation count and child sessions in the `ardur run`
   human-readable summary. When the governance session includes
   subagent delegations (`delegation_count > 0`), the summary now
