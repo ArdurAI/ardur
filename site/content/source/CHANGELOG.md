@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "4d6a776c37957d04081095fe8392a430d34f2325b5a0715b775be8d5482ea594"
+source_sha256: "4ee6717e2b864dc87b93dcdc9a198438481f73b4d04bcb20f1a49264fa036891"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,14 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show scope compliance status in the `ardur run` human-readable
+  summary. A `scope   full` or `scope   violated` line now appears
+  right after the tool-call counts, surfacing the session-level
+  compliance verdict that was previously visible only in JSON output.
+- Show governance session elapsed time in the `ardur run`
+  human-readable summary. An `elapsed   N.NNNs` line now appears
+  before notes, giving users the session wall-clock duration at a
+  glance.
 - Show honest-abstention verdict breakdown in the `ardur run`
   human-readable summary. When the governance session has non-zero
   `unknowns`, `insufficient_evidence`, or `violations` counts, the summary

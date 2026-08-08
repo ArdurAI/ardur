@@ -5,6 +5,14 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Show scope compliance status in the `ardur run` human-readable
+  summary. A `scope   full` or `scope   violated` line now appears
+  right after the tool-call counts, surfacing the session-level
+  compliance verdict that was previously visible only in JSON output.
+- Show governance session elapsed time in the `ardur run`
+  human-readable summary. An `elapsed   N.NNNs` line now appears
+  before notes, giving users the session wall-clock duration at a
+  glance.
 - Show honest-abstention verdict breakdown in the `ardur run`
   human-readable summary. When the governance session has non-zero
   `unknowns`, `insufficient_evidence`, or `violations` counts, the summary

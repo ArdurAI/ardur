@@ -1825,6 +1825,21 @@ def _wait_for_health(proxy_url: str, api_token: str, timeout_s: float = 5.0) -> 
 # ── human-readable summary + CLI glue ──────────────────────────────────────────
 
 
+def _scope_label(summary: dict[str, Any]) -> str:
+    """Render the session-level scope compliance status.
+
+    Reads ``scope_compliance`` from the governance summary dict produced by
+    ``proxy._build_summary()``.  Returns ``"full"`` when all tool calls were
+    within the configured mission scope, ``"violated"`` when any denial or
+    violation occurred, and ``"unknown"`` when the field is absent (e.g. the
+    summary was constructed from a minimal dict in tests).
+    """
+    raw = summary.get("scope_compliance")
+    if raw in ("full", "violated"):
+        return str(raw)
+    return "unknown"
+
+
 def format_summary(result: GovernanceRunResult) -> str:
     lines = [
         "── Ardur governance summary ─────────────────────────────",
@@ -1833,6 +1848,7 @@ def format_summary(result: GovernanceRunResult) -> str:
         f"  adapter       {result.adapter} (--via {result.via})",
         f"  tool calls    {result.total_events} evaluated "
         f"({result.permits} permit / {result.denials} deny)",
+        f"  scope         {_scope_label(result.summary)}",
         f"  receipts      {result.receipt_count} signed → {result.receipts_path}",
         f"  attestation   {result.attestation_digest}",
         f"  kernel link   {result.correlation.get('reason')}",
@@ -1889,6 +1905,9 @@ def format_summary(result: GovernanceRunResult) -> str:
         lines.append(
             f"  verdicts      {', '.join(parts)}"
         )
+    elapsed_s = result.summary.get("elapsed_s")
+    if isinstance(elapsed_s, (int, float)) and elapsed_s >= 0:
+        lines.append(f"  elapsed       {elapsed_s:.3f}s")
     for note in result.notes:
         lines.append(f"  note          {note}")
     lines.append("─────────────────────────────────────────────────────────")
