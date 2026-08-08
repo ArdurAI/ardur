@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "5c715f9ab5db41a7dbf871b50b1b098376ef908d30d24f981b476a8fca8c58bf"
+source_sha256: "4ecd62ad1d3883b50e8d2b7c254e38165d90051f62b2ff0195ea3873d3607567"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Capture per-child CPU time and RSS in host-observer descendant snapshots.
+  Each child process entry in `process_lifecycle.children` now includes
+  `cpu_user_s`, `cpu_system_s` (cumulative CPU time from psutil), and
+  `rss_bytes` (current resident set size) — zero-privilege, point-in-time at
+  snapshot. Fields are omitted gracefully when psutil cannot read them (zombie,
+  permission denied).
 - Include aggregate governance `summary` block in `ardur run --json` output.
   Programmatic consumers (CI pipelines, scripts) using `--json` now see
   `scope_compliance`, `elapsed_s`, `unknowns`, `insufficient_evidence`,

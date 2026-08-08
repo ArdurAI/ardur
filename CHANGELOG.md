@@ -5,6 +5,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Capture per-child CPU time and RSS in host-observer descendant snapshots.
+  Each child process entry in `process_lifecycle.children` now includes
+  `cpu_user_s`, `cpu_system_s` (cumulative CPU time from psutil), and
+  `rss_bytes` (current resident set size) — zero-privilege, point-in-time at
+  snapshot. Fields are omitted gracefully when psutil cannot read them (zombie,
+  permission denied).
 - Include aggregate governance `summary` block in `ardur run --json` output.
   Programmatic consumers (CI pipelines, scripts) using `--json` now see
   `scope_compliance`, `elapsed_s`, `unknowns`, `insufficient_evidence`,

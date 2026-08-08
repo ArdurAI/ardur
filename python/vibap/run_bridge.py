@@ -1134,6 +1134,12 @@ def _child_process_snapshot(
     *parent_pid* is the PID of this process's immediate parent within the
     root's descendant tree.  Together these let consumers reconstruct the
     tree structure from the flat snapshot list.
+
+    Each snapshot also includes best-effort CPU time and RSS (zero-privilege,
+    via psutil).  These are point-in-time values at snapshot time, not totals
+    over the process's full lifetime.  Fields are omitted when psutil cannot
+    read them (e.g. zombie, permission denied) so partial snapshots remain
+    useful.
     """
     try:
         with child.oneshot():
@@ -1148,6 +1154,22 @@ def _child_process_snapshot(
                 "exit_signal": None,
                 "depth": depth,
             }
+            # Best-effort CPU/memory attribution (zero-privilege via psutil).
+            # These are point-in-time values at snapshot time.  cpu_times()
+            # returns cumulative totals since process start; memory_info()
+            # returns current RSS.  Both are omitted on access failure so
+            # partial snapshots remain useful.
+            try:
+                cpu_times = child.cpu_times()
+                entry["cpu_user_s"] = round(cpu_times.user, 6)
+                entry["cpu_system_s"] = round(cpu_times.system, 6)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            try:
+                mem = child.memory_info()
+                entry["rss_bytes"] = mem.rss
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
             if parent_pid is not None:
                 entry["parent_pid"] = parent_pid
             return entry
