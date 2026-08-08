@@ -298,9 +298,21 @@ class TestSummaryCpuRssLines:
 
 class TestRealRusageIntegration:
     def test_real_child_process_produces_nonzero_cpu(self):
-        """Launch a real CPU-burning child and verify rusage captures it."""
+        """Launch a real CPU-burning child and verify rusage captures it.
+
+        CPU time (ru_utime/ru_stime) is cumulative across waited-for children,
+        so the delta is always positive for a process that burns CPU.
+
+        ru_maxrss is a **high-water mark** (not cumulative): it tracks the
+        maximum RSS of any single waited-for child, not the sum. When this test
+        runs after other tests that spawned child processes with higher RSS
+        (common in CI with hundreds of prior test-subprocess calls), the
+        high-water mark was already set by an earlier child and the delta is
+        legitimately 0. We therefore assert non-negativity, not positivity.
+        On Linux, ru_maxrss is reported in KB, so a small child may also round
+        to the same KB value as a prior one.
+        """
         import subprocess
-        import time
 
         before = _get_child_rusage()
         proc = subprocess.Popen(
@@ -311,4 +323,4 @@ class TestRealRusageIntegration:
         delta = _compute_rusage_delta(before, after)
 
         assert delta["ru_utime"] > 0.0
-        assert delta["ru_maxrss"] > 0.0
+        assert delta["ru_maxrss"] >= 0.0

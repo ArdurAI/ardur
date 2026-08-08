@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "d541d209a72096bfe3475cb4627957c5a2d97f63f35ae6b5af1de244efcc6802"
+source_sha256: "f813a676ff270686ad0837b155f35076885ac0bb9f9d66ef0b72b571516d6c58"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -57,6 +57,12 @@ All notable changes to Ardur will be documented in this file.
   captured descendants (direct children, grandchildren, etc.), the summary
   now includes a `descendants   N captured (max depth D)` line so users
   get immediate visibility without parsing JSON output.
+
+### Fixed
+- Fix `test_real_child_process_produces_nonzero_cpu` assertion: `ru_maxrss`
+  is a high-water mark (not cumulative), so its delta can legitimately be 0
+  when prior test-subprocesses already set a higher mark. Relaxed to
+  non-negative; CPU-time assertions remain strict-positive.
 
 ### Security
 - Redact local paths in `_build_process_lifecycle_evidence` at the source

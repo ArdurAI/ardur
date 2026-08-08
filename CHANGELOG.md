@@ -41,6 +41,12 @@ All notable changes to Ardur will be documented in this file.
   now includes a `descendants   N captured (max depth D)` line so users
   get immediate visibility without parsing JSON output.
 
+### Fixed
+- Fix `test_real_child_process_produces_nonzero_cpu` assertion: `ru_maxrss`
+  is a high-water mark (not cumulative), so its delta can legitimately be 0
+  when prior test-subprocesses already set a higher mark. Relaxed to
+  non-negative; CPU-time assertions remain strict-positive.
+
 ### Security
 - Redact local paths in `_build_process_lifecycle_evidence` at the source
   via a new `_redact_process_lifecycle` helper that layers
