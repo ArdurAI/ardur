@@ -111,8 +111,8 @@ class TestDelegationSummaryPresent:
             )
         )
         lines = summary.splitlines()
-        proc_idx = next(i for i, l in enumerate(lines) if "process" in l and "pid=" in l)
-        del_idx = next(i for i, l in enumerate(lines) if "delegations" in l)
+        proc_idx = next(i for i, line in enumerate(lines) if "process" in line and "pid=" in line)
+        del_idx = next(i for i, line in enumerate(lines) if "delegations" in line)
         assert del_idx > proc_idx
 
 
@@ -186,6 +186,6 @@ class TestDelegationSummaryEdgeCases:
             )
         )
         lines = summary.splitlines()
-        del_idx = next(i for i, l in enumerate(lines) if "delegations" in l)
-        note_idx = next(i for i, l in enumerate(lines) if "note" in l)
+        del_idx = next(i for i, line in enumerate(lines) if "delegations" in line)
+        note_idx = next(i for i, line in enumerate(lines) if "note" in line)
         assert del_idx < note_idx

@@ -287,9 +287,9 @@ class TestSummaryCpuRssLines:
         })
         summary = format_summary(result)
         lines = summary.split("\n")
-        cpu_idx = next(i for i, l in enumerate(lines) if "cpu          " in l)
-        rss_idx = next(i for i, l in enumerate(lines) if "peak rss" in l)
-        desc_idx = next(i for i, l in enumerate(lines) if "descendants" in l)
+        cpu_idx = next(i for i, line in enumerate(lines) if "cpu          " in line)
+        rss_idx = next(i for i, line in enumerate(lines) if "peak rss" in line)
+        desc_idx = next(i for i, line in enumerate(lines) if "descendants" in line)
         assert desc_idx < cpu_idx < rss_idx
 
 

@@ -205,9 +205,9 @@ class TestScopeElapsedIntegration:
         out = format_summary(result)
         lines = out.splitlines()
         # Verify key labels appear in expected order
-        scope_line = next(i for i, l in enumerate(lines) if "scope" in l)
-        delegations_line = next(i for i, l in enumerate(lines) if "delegations" in l)
-        verdicts_line = next(i for i, l in enumerate(lines) if "verdicts" in l)
-        elapsed_line = next(i for i, l in enumerate(lines) if "elapsed" in l)
-        note_line = next(i for i, l in enumerate(lines) if "watch this" in l)
+        scope_line = next(i for i, line in enumerate(lines) if "scope" in line)
+        delegations_line = next(i for i, line in enumerate(lines) if "delegations" in line)
+        verdicts_line = next(i for i, line in enumerate(lines) if "verdicts" in line)
+        elapsed_line = next(i for i, line in enumerate(lines) if "elapsed" in line)
+        note_line = next(i for i, line in enumerate(lines) if "watch this" in line)
         assert scope_line < delegations_line < verdicts_line < elapsed_line < note_line

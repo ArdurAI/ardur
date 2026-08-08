@@ -6,10 +6,6 @@ noise. When correlation IS available (or kernel policy was actively applied),
 those lines should appear.
 """
 
-import sys
-
-import pytest
-
 from vibap.run_bridge import format_summary, GovernanceRunResult
 
 
