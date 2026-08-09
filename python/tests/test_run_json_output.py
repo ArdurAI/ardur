@@ -207,6 +207,7 @@ class TestToResultDict:
             "violations",
             "delegation_count",
             "children_spawned",
+            "denied_tools",
         }
 
 
