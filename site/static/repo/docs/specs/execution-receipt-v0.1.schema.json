@@ -590,7 +590,8 @@
           "verdict": {
             "enum": [
               "violation",
-              "insufficient_evidence"
+              "insufficient_evidence",
+              "unknown"
             ]
           }
         },
