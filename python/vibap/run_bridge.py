@@ -580,6 +580,8 @@ class GovernanceRunResult:
         return {
             "ok": self.exit_code == 0,
             "exit_code": self.exit_code,
+            "exit_signal": _signal_name_for_exit(self.exit_code),
+            "exit_hint": _exit_code_hint(self.exit_code),
             "session_id": self.session_id,
             "mission_id": self.mission_id,
             "agent_id": self.agent_id,
@@ -1481,6 +1483,27 @@ def _signal_name(signum: int) -> str:
         return _signal.Signals(-signum).name
     except (ValueError, AttributeError):
         return f"signal {-signum}"
+
+
+def _signal_name_for_exit(exit_code: int | None) -> str | None:
+    """Return the POSIX signal name for an exit code, or ``None`` if not signal-killed.
+
+    Handles both raw negative exit codes (pre-normalization, e.g. ``-9``)
+    and POSIX-conventional codes (``128 + signal``, e.g. ``137``).
+    """
+    if exit_code is None or exit_code == 0:
+        return None
+    import signal as _signal
+
+    if exit_code < 0:
+        return _signal_name(exit_code)
+    if exit_code > 128:
+        signum = exit_code - 128
+        try:
+            return _signal.Signals(signum).name
+        except (ValueError, AttributeError):
+            return None
+    return None
 
 
 def _exit_code_hint(exit_code: int | None) -> str:

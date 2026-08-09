@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "42111f2fcb0473c1b1a45d04630b01d6a7ab1f7a0d71d5a3f366a1a9106bd018"
+source_sha256: "cd64f5bd1bb6a304e6d14ad48d31566956c3f9ad4e8f0355c16606df329af358"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,13 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Include `exit_signal` and `exit_hint` in `ardur run --json` output. The
+  top-level JSON result now includes `exit_signal` (POSIX signal name, e.g.
+  `"SIGKILL"`, or `null`) and `exit_hint` (human-readable string, e.g.
+  `"killed by SIGKILL"`) so programmatic consumers can detect signal kills
+  without reimplementing the detection logic or digging into
+  `process_lifecycle`. Previously these were only in the human-readable text
+  summary.
 - Surface denied tool names in the human-readable governance summary. When
   a session has denials, the summary now shows `denied   Tool1, Tool2`
   (up to 5 unique tools, with a `(+N more)` suffix) so the user can see

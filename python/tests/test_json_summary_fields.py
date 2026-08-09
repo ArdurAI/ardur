@@ -1,12 +1,16 @@
 """Tests for ``_summary_for_json`` and POSIX exit-code normalization.
 
-These cover two DX gaps found during the 2026-08-08 CLI probe:
+These cover three DX gaps found during CLI probes:
 
 1. ``_summary_for_json`` must include ``denied_tools`` so ``--json``
    consumers get the same data the human-readable summary shows.
 2. Signal-killed processes must produce POSIX-conventional exit codes
    (``128 + signal``) rather than raw negative values that wrap to
    unexpected codes under ``sys.exit``.
+3. ``--json`` output (``to_result_dict``) must include ``exit_signal``
+   and ``exit_hint`` at the top level so programmatic consumers can
+   detect signal kills without reimplementing the detection logic or
+   digging into ``process_lifecycle``.
 """
 
 from __future__ import annotations
@@ -208,6 +212,114 @@ class TestExitCodeNormalization(unittest.TestCase):
             normalized = rc
         self.assertNotEqual(normalized, 247)
         self.assertEqual(normalized, 137)
+
+
+class TestJsonExitSignalAndHint(unittest.TestCase):
+    """``to_result_dict`` must include ``exit_signal`` and ``exit_hint``."""
+
+    def test_exit_signal_none_for_zero_exit(self):
+        """Exit 0 is not a signal kill → ``exit_signal`` must be ``None``."""
+        result = _make_result(exit_code=0)
+        d = result.to_result_dict()
+        self.assertIn("exit_signal", d)
+        self.assertIsNone(d["exit_signal"])
+
+    def test_exit_hint_empty_for_zero_exit(self):
+        """Exit 0 needs no hint → ``exit_hint`` must be empty string."""
+        result = _make_result(exit_code=0)
+        d = result.to_result_dict()
+        self.assertIn("exit_hint", d)
+        self.assertEqual(d["exit_hint"], "")
+
+    def test_exit_signal_for_posix_sigkill(self):
+        """Exit 137 (128 + 9) → ``SIGKILL``."""
+        result = _make_result(exit_code=137)
+        d = result.to_result_dict()
+        self.assertEqual(d["exit_signal"], "SIGKILL")
+        self.assertEqual(d["exit_hint"], "killed by SIGKILL")
+
+    def test_exit_signal_for_posix_sigterm(self):
+        """Exit 143 (128 + 15) → ``SIGTERM``."""
+        result = _make_result(exit_code=143)
+        d = result.to_result_dict()
+        self.assertEqual(d["exit_signal"], "SIGTERM")
+        self.assertEqual(d["exit_hint"], "killed by SIGTERM")
+
+    def test_exit_signal_for_raw_negative_sigkill(self):
+        """Raw ``-9`` (pre-normalization) → ``SIGKILL``."""
+        result = _make_result(exit_code=-9)
+        d = result.to_result_dict()
+        self.assertEqual(d["exit_signal"], "SIGKILL")
+
+    def test_exit_signal_none_for_non_signal_nonzero(self):
+        """Exit 42 is not a signal kill → ``exit_signal`` must be ``None``."""
+        result = _make_result(exit_code=42)
+        d = result.to_result_dict()
+        self.assertIsNone(d["exit_signal"])
+        self.assertEqual(d["exit_hint"], "non-zero exit")
+
+    def test_exit_signal_none_for_exit_1(self):
+        """Exit 1 (common error) is not a signal kill."""
+        result = _make_result(exit_code=1)
+        d = result.to_result_dict()
+        self.assertIsNone(d["exit_signal"])
+        self.assertEqual(d["exit_hint"], "non-zero exit")
+
+    def test_exit_signal_and_hint_keys_always_present(self):
+        """Both keys must always exist in the JSON dict, even for exit 0."""
+        result = _make_result(exit_code=0)
+        d = result.to_result_dict()
+        self.assertIn("exit_signal", d)
+        self.assertIn("exit_hint", d)
+
+    def test_exit_signal_for_sigsegv(self):
+        """Exit 139 (128 + 11) → ``SIGSEGV``."""
+        result = _make_result(exit_code=139)
+        d = result.to_result_dict()
+        self.assertEqual(d["exit_signal"], "SIGSEGV")
+        self.assertEqual(d["exit_hint"], "killed by SIGSEGV")
+
+    def test_exit_signal_for_posix_high_signal(self):
+        """Exit 158 (128 + 30) → ``SIGUSR1`` on macOS/Linux."""
+        result = _make_result(exit_code=158)
+        d = result.to_result_dict()
+        # SIGUSR1 is signal 30 on macOS/Linux
+        self.assertEqual(d["exit_signal"], "SIGUSR1")
+
+    def test_redact_paths_preserves_exit_signal(self):
+        """``redact_paths=True`` must not affect exit_signal or exit_hint."""
+        result = _make_result(exit_code=137)
+        d = result.to_result_dict(redact_paths=True)
+        self.assertEqual(d["exit_signal"], "SIGKILL")
+        self.assertEqual(d["exit_hint"], "killed by SIGKILL")
+
+    def test_existing_fields_still_present(self):
+        """Existing fields in ``to_result_dict`` must not regress."""
+        result = _make_result(exit_code=0)
+        d = result.to_result_dict()
+        for key in (
+            "ok",
+            "exit_code",
+            "session_id",
+            "mission_id",
+            "agent_id",
+            "adapter",
+            "via",
+            "total_events",
+            "permits",
+            "denials",
+            "receipt_count",
+            "receipts_path",
+            "attestation_digest",
+            "home",
+            "passport_path",
+            "correlation",
+            "kernel_policy",
+            "process_lifecycle",
+            "summary",
+            "notes",
+        ):
+            self.assertIn(key, d)
 
 
 if __name__ == "__main__":

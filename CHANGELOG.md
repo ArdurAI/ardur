@@ -5,6 +5,13 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Include `exit_signal` and `exit_hint` in `ardur run --json` output. The
+  top-level JSON result now includes `exit_signal` (POSIX signal name, e.g.
+  `"SIGKILL"`, or `null`) and `exit_hint` (human-readable string, e.g.
+  `"killed by SIGKILL"`) so programmatic consumers can detect signal kills
+  without reimplementing the detection logic or digging into
+  `process_lifecycle`. Previously these were only in the human-readable text
+  summary.
 - Surface denied tool names in the human-readable governance summary. When
   a session has denials, the summary now shows `denied   Tool1, Tool2`
   (up to 5 unique tools, with a `(+N more)` suffix) so the user can see
