@@ -1900,6 +1900,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
         _print_json(_verify_failure_response(exc))
         return 1
     token_report = {"valid": True, "claims": claims}
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        token_report = _redact_paths_deep(token_report)
     if getattr(args, "output", None) is not None:
         try:
             payload = _write_json_report_to_file(args.output, token_report)
@@ -2249,6 +2256,13 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             event_batch,
             correlation_window_s=args.correlation_window_s,
         )
+        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "evidence_output", None) is None:
+            print(
+                "ardur: warning: --redact-paths has no effect without --json or --output",
+                file=sys.stderr,
+            )
+        if getattr(args, "redact_paths", False):
+            report = _redact_paths_deep(report)
         payload = (
             canonical_report_bytes(report)
             if args.report_format == "json"
@@ -2481,6 +2495,13 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             receipt_public_key=receipt_public_key,
             verify_expiry=args.verify_expiry,
         )
+        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "telemetry_output", None) is None:
+            print(
+                "ardur: warning: --redact-paths has no effect without --json or --output",
+                file=sys.stderr,
+            )
+        if getattr(args, "redact_paths", False):
+            events = _redact_paths_deep(events)
         payloads = otlp_payloads(events)
         artifact = (
             jsonl_bytes(events)
@@ -3714,6 +3735,14 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
 
     from .runtime_evidence import RuntimeEvidenceError, write_report
 
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "posture_scan_output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        posture = _redact_paths_deep(posture)
+
     payload = (
         (json.dumps(posture, indent=2, sort_keys=True) + "\n").encode("utf-8")
         if args.format == "json" or getattr(args, "json", False)
@@ -3769,6 +3798,13 @@ def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
 
     try:
         report = scan_tool_server_config(args.config)
+        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+            print(
+                "ardur: warning: --redact-paths has no effect without --json or --output",
+                file=sys.stderr,
+            )
+        if getattr(args, "redact_paths", False):
+            report = _redact_paths_deep(report)
         payload = (
             json.dumps(report, indent=2, sort_keys=True) + "\n"
             if args.format == "json"
@@ -3897,6 +3933,14 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
         return 1
 
     from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "posture_report_output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        posture = _redact_paths_deep(posture)
 
     payload = (
         (json.dumps(posture, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -6912,6 +6956,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically write the JSON explorer report to an owner-only file",
     )
     verify.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    verify.add_argument(
         "--unsafe-show-sensitive",
         action="store_true",
         help="disable default report redaction for explicit local inspection",
@@ -6982,6 +7031,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically write an owner-only report instead of printing it",
     )
     evidence_correlate.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    evidence_correlate.add_argument(
         "--json",
         action="store_true",
         help="explicitly request JSON output (output defaults to JSON; "
@@ -7028,6 +7082,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="telemetry_output",
         type=str,
         help="atomically write an owner-only local artifact instead of stdout",
+    )
+    telemetry_export.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
     )
     telemetry_export.add_argument(
         "--otlp-endpoint",
@@ -7370,6 +7429,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically write an owner-only report instead of printing it",
     )
     posture_scan.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    posture_scan.add_argument(
         "--json",
         action="store_true",
         help="explicitly request JSON output (output defaults to JSON; "
@@ -7398,6 +7462,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="posture_report_output",
         type=str,
         help="atomically write an owner-only report instead of printing it",
+    )
+    posture_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
     )
     posture_report.add_argument(
         "--json",
@@ -7434,6 +7503,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=str,
         help="atomically write an owner-only report instead of printing it",
+    )
+    tool_server_preflight.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
     )
     tool_server_preflight.add_argument(
         "--fail-on",

@@ -267,7 +267,7 @@ ardur verify EVIDENCE.json
              [--max-bundle-age-s SECONDS]
              [--freshness-clock-skew-s SECONDS]
              [--html-report FILE] [--output FILE] [--json]
-             [--unsafe-show-sensitive]
+             [--redact-paths] [--unsafe-show-sensitive]
 
 ardur verify RECEIPTS.jsonl --receipt-public-key FILE --chain-only
 
@@ -374,7 +374,7 @@ ardur evidence correlate RECEIPTS.jsonl EVENTS.jsonl
                         [--correlation-window-s SECONDS]
                         [--verify-expiry]
                         [--format json|text]
-                        [--output FILE]
+                        [--output FILE] [--json] [--redact-paths]
 ```
 
 Receipt verification happens before event parsing. A bad receipt signature or
@@ -434,7 +434,7 @@ ardur telemetry export RECEIPTS.jsonl
                        [--output FILE]
                        [--otlp-endpoint URL]
                        [--timeout-s 10]
-                       [--verify-expiry]
+                       [--verify-expiry] [--json] [--redact-paths]
 ```
 
 The command verifies every signature, parent hash, trace/run lineage, and
@@ -1853,6 +1853,7 @@ ardur preflight tool-server --config FILE
     [--format json|markdown]
     [--output FILE]
     [--fail-on critical|high|medium|low|none]
+    [--json] [--redact-paths]
 ```
 
 The default JSON report is deterministic and conforms to
@@ -1922,7 +1923,7 @@ ardur posture scan --receipts DIR_OR_JSONL
                     [--evidence-bundle bundle.redacted.json]
                     [--verify-expiry]
                     [--format json|markdown]
-                    [--output FILE] [--json]
+                    [--output FILE] [--json] [--redact-paths]
 ```
 
 The JSON output uses `positioning=derived_local_evidence`. This is an honest
@@ -1976,7 +1977,7 @@ concise Markdown report, or re-emit it as formatted JSON.
 
 ```text
 ardur posture report --input posture.json [--format markdown|json]
-                     [--output FILE] [--json]
+                     [--output FILE] [--json] [--redact-paths]
 ```
 
 If `--input` is empty or whitespace-only, the command fails closed before path

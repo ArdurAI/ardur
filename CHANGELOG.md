@@ -5,6 +5,14 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--redact-paths` flag to `verify`, `evidence correlate`,
+  `telemetry export`, `posture scan`, `posture report`, and
+  `preflight tool-server` for replacing local absolute paths in the
+  JSON/file output with stable placeholders. This matches the
+  established pattern from `claude-code-report`, `gemini-cli-report`,
+  `codex-app-server-report`, and `run`. The flag affects both `--json`
+  stdout output and `--output` file content. A warning is emitted on
+  stderr when `--redact-paths` is used without `--json` or `--output`.
 - Add `--redact-paths` flag to `claude-code-report`, `gemini-cli-report`,
   and `codex-app-server-report` for replacing local absolute paths in the
   JSON/file output with stable placeholders. This matches the established
