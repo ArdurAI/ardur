@@ -607,8 +607,8 @@ class GovernanceRunResult:
         output.  Programmatic consumers using ``--json`` need the same
         aggregate verdict breakdown (scope_compliance, elapsed_s, unknowns,
         insufficient_evidence, violations, delegation_count,
-        children_spawned) so they do not have to iterate every receipt and
-        re-derive it.
+        children_spawned, denied_tools) so they do not have to iterate every
+        receipt and re-derive it.
         """
         s = self.summary
         return {
@@ -619,6 +619,7 @@ class GovernanceRunResult:
             "violations": int(s.get("violations", 0)),
             "delegation_count": int(s.get("delegation_count", 0)),
             "children_spawned": int(s.get("children_spawned", 0)),
+            "denied_tools": list(s.get("denied_tools") or []),
         }
 
 
@@ -2767,7 +2768,14 @@ def run_governed_cli(args: Any) -> int:
         )
     else:
         print(format_summary(result), file=sys.stderr)
-    return result.exit_code
+    # Normalize signal-killed exit codes to the POSIX convention (128 +
+    # signal number) instead of returning the raw negative value from
+    # ``proc.wait()``.  Without this, ``sys.exit(-9)`` wraps to 247 instead
+    # of 137 (128 + 9), breaking shell ``$?`` and ``&&`` / ``||`` patterns.
+    rc = result.exit_code
+    if rc is not None and rc < 0:
+        return 128 + abs(rc)
+    return rc
 
 
 def _split_csv(value: Any) -> list[str]:

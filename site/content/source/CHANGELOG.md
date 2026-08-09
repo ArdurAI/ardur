@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8c09784ec2a1c29d7c085a8d059227fd23e27949a5d86beba406b9b902cc6ca9"
+source_sha256: "abf6db16ad1f9c278e0925f523ac427e9e6456185c3885f29c5d742f1969264f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -27,6 +27,18 @@ All notable changes to Ardur will be documented in this file.
   (up to 5 unique tools, with a `(+N more)` suffix) so the user can see
   *which* tools were blocked without opening receipts. The full list is
   also available in `--json` output as `summary.denied_tools`.
+
+### Fixed
+- Include `denied_tools` in `--json` output (`summary.denied_tools`). The
+  previous release added the field to the human-readable summary but the
+  JSON consumer path (`_summary_for_json`) was not updated, leaving the
+  CHANGELOG claim unfilled for programmatic consumers.
+- Normalize signal-killed exit codes to POSIX convention (`128 + signal`).
+  Previously, when a governed child was killed by a signal (SIGKILL from a
+  duration-budget timeout, SIGTERM, etc.), the wrapper returned the raw
+  negative value from `proc.wait()`, which `sys.exit()` wrapped to an
+  unexpected code (e.g. `-9` → `247` instead of `137`). This broke shell
+  `$?` and `&&` / `||` patterns.
 - Surface aggregate child resource usage in the human-readable governance
   summary. When descendant processes have per-child CPU/RSS metrics, the
   summary now shows `child cpu N.NNNs (user Xs / sys Ys)` (summed across
