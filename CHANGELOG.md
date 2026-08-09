@@ -5,6 +5,14 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--output` flag to `ardur run` for writing the governance result JSON
+  to a file. Works with or without `--json`: without `--json`, the
+  human-readable summary is shown on stderr and the JSON is written to the
+  file; with `--json`, both stderr and file receive JSON. When `--redact-paths`
+  is also given, the file content has local paths replaced with stable
+  placeholders. This completes the `--output` contract across ALL
+  report-producing commands (`verify`, `posture`, `preflight`, `telemetry`,
+  `evidence correlate`, `run`).
 - Include `exit_signal` and `exit_hint` in `ardur run --json` output. The
   top-level JSON result now includes `exit_signal` (POSIX signal name, e.g.
   `"SIGKILL"`, or `null`) and `exit_hint` (human-readable string, e.g.

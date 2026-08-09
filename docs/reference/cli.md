@@ -920,7 +920,7 @@ ardur run [--home DIR]
           [--no-kernel-correlation]
           [--enforce]
           [--resource-scope PATH ... | --no-resource-scope]
-          [--json] [--redact-paths]
+          [--json] [--redact-paths] [--output FILE]
           -- <command>
 ```
 
@@ -948,7 +948,14 @@ instead. `--redact-paths` replaces local absolute paths in the JSON output
 `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
 `<var-folders>`, `<run-ardur>`, `<cgroup>`) so the result is safe to share in
 CI artifacts or bug reports without leaking the filesystem layout. It has no
-effect without `--json`; a warning is printed to stderr in that case.
+effect without `--json`; a warning is printed to stderr in that case. `--output`
+writes the governance result JSON to the given file path using the same atomic
+owner-only writer as other report-producing commands. It works with or without
+`--json`: without `--json`, the human-readable summary is shown on stderr and
+the JSON is written to the file; with `--json`, both stderr and the file receive
+JSON. When combined with `--redact-paths`, the file content has local paths
+replaced with stable placeholders. This completes the `--output` contract across
+ALL report-producing commands.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or

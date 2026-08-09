@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "ebebe3fd5e352a1c1eb0a68dec0204cab84dde72444774ac12018d773295d6aa"
+source_sha256: "46dc9345f6e4f1db9cb314728289cc4af1cc47d10d7548a8787e1af4bc9fa3b6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -937,7 +937,7 @@ ardur run [--home DIR]
           [--no-kernel-correlation]
           [--enforce]
           [--resource-scope PATH ... | --no-resource-scope]
-          [--json] [--redact-paths]
+          [--json] [--redact-paths] [--output FILE]
           -- <command>
 ```
 
@@ -965,7 +965,14 @@ instead. `--redact-paths` replaces local absolute paths in the JSON output
 `correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
 `<var-folders>`, `<run-ardur>`, `<cgroup>`) so the result is safe to share in
 CI artifacts or bug reports without leaking the filesystem layout. It has no
-effect without `--json`; a warning is printed to stderr in that case.
+effect without `--json`; a warning is printed to stderr in that case. `--output`
+writes the governance result JSON to the given file path using the same atomic
+owner-only writer as other report-producing commands. It works with or without
+`--json`: without `--json`, the human-readable summary is shown on stderr and
+the JSON is written to the file; with `--json`, both stderr and the file receive
+JSON. When combined with `--redact-paths`, the file content has local paths
+replaced with stable placeholders. This completes the `--output` contract across
+ALL report-producing commands.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or

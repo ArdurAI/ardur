@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "cd64f5bd1bb6a304e6d14ad48d31566956c3f9ad4e8f0355c16606df329af358"
+source_sha256: "7242c01e466ca0be6a115d81c79f5c0a8785157e26b2d4d295a8eefce6a461ae"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,14 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--output` flag to `ardur run` for writing the governance result JSON
+  to a file. Works with or without `--json`: without `--json`, the
+  human-readable summary is shown on stderr and the JSON is written to the
+  file; with `--json`, both stderr and file receive JSON. When `--redact-paths`
+  is also given, the file content has local paths replaced with stable
+  placeholders. This completes the `--output` contract across ALL
+  report-producing commands (`verify`, `posture`, `preflight`, `telemetry`,
+  `evidence correlate`, `run`).
 - Include `exit_signal` and `exit_hint` in `ardur run --json` output. The
   top-level JSON result now includes `exit_signal` (POSIX signal name, e.g.
   `"SIGKILL"`, or `null`) and `exit_hint` (human-readable string, e.g.

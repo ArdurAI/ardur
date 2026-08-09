@@ -2802,16 +2802,50 @@ def run_governed_cli(args: Any) -> int:
             file=sys.stderr,
         )
 
+    # --output writes the governance result JSON to a file.  It is valid
+    # without --json so CI pipelines can capture a persistent artifact
+    # while still seeing the human-readable summary on stderr.  When both
+    # --json and --output are given, the JSON goes to stderr as usual AND
+    # the file copy is written.
+    output_path = getattr(args, "output", None)
+    output_digest: str | None = None
+    if output_path is not None:
+        redact = getattr(args, "redact_paths", False)
+        result_dict = result.to_result_dict(redact_paths=redact)
+        payload = json.dumps(result_dict, indent=2, sort_keys=True).encode("utf-8")
+        from .runtime_evidence import RuntimeEvidenceError, write_report
+
+        try:
+            write_report(output_path, payload)
+        except RuntimeEvidenceError as exc:
+            print(
+                f"ardur run --output: {exc.code}",
+                file=sys.stderr,
+            )
+            return 2
+        output_digest = hashlib.sha256(payload).hexdigest()
+
     if getattr(args, "json", False):
         # JSON goes to stderr so the child process's stdout stays transparent.
         # This lets consumers do: ardur run --json -- pytest  2>governance.json
         redact = getattr(args, "redact_paths", False)
+        json_dict = result.to_result_dict(redact_paths=redact)
+        if output_path is not None and output_digest is not None:
+            json_dict["output_file"] = str(output_path)
+            json_dict["output_sha256"] = output_digest
         print(
             json.dumps(
-                result.to_result_dict(redact_paths=redact),
+                json_dict,
                 indent=2,
                 sort_keys=True,
             ),
+            file=sys.stderr,
+        )
+    elif output_path is not None and output_digest is not None:
+        # Human-readable summary to stderr + confirmation that file was written.
+        print(format_summary(result), file=sys.stderr)
+        print(
+            f"  output file   {output_path} (sha256:{output_digest[:16]})",
             file=sys.stderr,
         )
     else:

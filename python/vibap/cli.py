@@ -7549,6 +7549,13 @@ def build_parser() -> argparse.ArgumentParser:
         "(governance path only; requires --json)",
     )
     run.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="write the governance run result JSON to this file "
+        "(requires --json; useful for CI pipelines that need a persistent artifact)",
+    )
+    run.add_argument(
         "command", nargs=argparse.REMAINDER, help="command to run after --"
     )
     run.set_defaults(func=cmd_run)
