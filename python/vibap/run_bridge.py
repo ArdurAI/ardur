@@ -1483,6 +1483,27 @@ def _signal_name(signum: int) -> str:
         return f"signal {-signum}"
 
 
+def _exit_code_hint(exit_code: int | None) -> str:
+    """Return a short human-readable hint for a non-zero exit code.
+
+    * Zero or ``None`` → empty string (no hint needed).
+    * 128 + signal (POSIX convention) → ``"killed by SIGNAME"``.
+    * Other non-zero → ``"non-zero exit"``.
+    """
+    if exit_code is None or exit_code == 0:
+        return ""
+    import signal as _signal
+
+    if exit_code > 128:
+        signum = exit_code - 128
+        try:
+            name = _signal.Signals(signum).name
+            return f"killed by {name}"
+        except (ValueError, AttributeError):
+            return f"killed by signal {signum}"
+    return "non-zero exit"
+
+
 def run_governed(
     *,
     command: list[str],
@@ -1998,7 +2019,11 @@ def format_summary(result: GovernanceRunResult) -> str:
         lines.append(f"  kernel policy {kp_reason}")
     elif corr_available and kp_reason:
         lines.append(f"  kernel policy {kp_reason}")
-    lines.append(f"  agent exit    {result.exit_code}")
+    exit_hint = _exit_code_hint(result.exit_code)
+    if exit_hint:
+        lines.append(f"  agent exit    {result.exit_code} ({exit_hint})")
+    else:
+        lines.append(f"  agent exit    {result.exit_code}")
     pl = result.process_lifecycle
     if pl:
         pid_text = str(pl.get("root_pid") or "unknown")

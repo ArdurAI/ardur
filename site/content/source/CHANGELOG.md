@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "abf6db16ad1f9c278e0925f523ac427e9e6456185c3885f29c5d742f1969264f"
+source_sha256: "42111f2fcb0473c1b1a45d04630b01d6a7ab1f7a0d71d5a3f366a1a9106bd018"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -27,6 +27,9 @@ All notable changes to Ardur will be documented in this file.
   (up to 5 unique tools, with a `(+N more)` suffix) so the user can see
   *which* tools were blocked without opening receipts. The full list is
   also available in `--json` output as `summary.denied_tools`.
+- Annotate non-zero exit codes with a human-readable hint in the governance
+  summary. Signal-killed processes show `agent exit  137 (killed by SIGKILL)`
+  instead of bare `137`; other non-zero exits show `(non-zero exit)`.
 
 ### Fixed
 - Include `denied_tools` in `--json` output (`summary.denied_tools`). The

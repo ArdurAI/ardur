@@ -10,6 +10,9 @@ All notable changes to Ardur will be documented in this file.
   (up to 5 unique tools, with a `(+N more)` suffix) so the user can see
   *which* tools were blocked without opening receipts. The full list is
   also available in `--json` output as `summary.denied_tools`.
+- Annotate non-zero exit codes with a human-readable hint in the governance
+  summary. Signal-killed processes show `agent exit  137 (killed by SIGKILL)`
+  instead of bare `137`; other non-zero exits show `(non-zero exit)`.
 
 ### Fixed
 - Include `denied_tools` in `--json` output (`summary.denied_tools`). The
