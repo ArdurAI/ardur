@@ -12,7 +12,6 @@ These cover two DX gaps found during the 2026-08-08 CLI probe:
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
 
 from vibap.run_bridge import GovernanceRunResult
 
