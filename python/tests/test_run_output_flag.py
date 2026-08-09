@@ -223,3 +223,28 @@ class TestRunOutputError:
         with patch("vibap.run_bridge.run_governed", return_value=mock):
             rc = run_governed_cli(args)
         assert rc == 2
+
+
+class TestRedactPathsWarningGuard:
+    """The --redact-paths no-op warning should not fire when --output is active."""
+
+    def test_redact_paths_output_no_warning(self, tmp_path, capsys):
+        """--redact-paths + --output (no --json) should NOT print the warning."""
+        output_file = tmp_path / "result.json"
+        args = _base_args(redact_paths=True, output=str(output_file), json=False)
+        mock = _mock_result()
+        with patch("vibap.run_bridge.run_governed", return_value=mock):
+            rc = run_governed_cli(args)
+        assert rc == 0
+        stderr = capsys.readouterr().err
+        assert "--redact-paths has no effect" not in stderr
+
+    def test_redact_paths_without_json_or_output_still_warns(self, tmp_path, capsys):
+        """--redact-paths alone (no --json, no --output) should still warn."""
+        args = _base_args(redact_paths=True, json=False, output=None)
+        mock = _mock_result()
+        with patch("vibap.run_bridge.run_governed", return_value=mock):
+            rc = run_governed_cli(args)
+        assert rc == 0
+        stderr = capsys.readouterr().err
+        assert "--redact-paths has no effect" in stderr

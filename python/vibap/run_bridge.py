@@ -2792,11 +2792,13 @@ def run_governed_cli(args: Any) -> int:
             )
         return 2
 
-    # --redact-paths only affects the JSON output path.  When it is set
-    # without --json, surface the relationship to stderr so users do not
-    # believe local paths were redacted from the human-readable summary
-    # (they are not — the summary is not path-redacted).
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False):
+    # --redact-paths only affects the JSON output paths (--json and/or
+    # --output).  When it is set without either flag, surface the
+    # relationship to stderr so users do not believe local paths were
+    # redacted from the human-readable summary (they are not — the summary
+    # is not path-redacted).
+    output_path = getattr(args, "output", None)
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and output_path is None:
         print(
             "ardur: warning: --redact-paths has no effect without --json",
             file=sys.stderr,
@@ -2807,7 +2809,6 @@ def run_governed_cli(args: Any) -> int:
     # while still seeing the human-readable summary on stderr.  When both
     # --json and --output are given, the JSON goes to stderr as usual AND
     # the file copy is written.
-    output_path = getattr(args, "output", None)
     output_digest: str | None = None
     if output_path is not None:
         redact = getattr(args, "redact_paths", False)
