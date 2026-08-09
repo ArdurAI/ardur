@@ -68,6 +68,8 @@ class TestToResultDict:
         expected_keys = {
             "ok",
             "exit_code",
+            "exit_signal",
+            "exit_hint",
             "session_id",
             "mission_id",
             "agent_id",

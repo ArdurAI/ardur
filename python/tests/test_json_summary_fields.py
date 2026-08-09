@@ -280,11 +280,11 @@ class TestJsonExitSignalAndHint(unittest.TestCase):
         self.assertEqual(d["exit_hint"], "killed by SIGSEGV")
 
     def test_exit_signal_for_posix_high_signal(self):
-        """Exit 158 (128 + 30) → ``SIGUSR1`` on macOS/Linux."""
-        result = _make_result(exit_code=158)
+        """Exit 143 (128 + 15 = SIGTERM) on all POSIX platforms."""
+        result = _make_result(exit_code=143)
         d = result.to_result_dict()
-        # SIGUSR1 is signal 30 on macOS/Linux
-        self.assertEqual(d["exit_signal"], "SIGUSR1")
+        # SIGTERM (15) is portable across macOS and Linux
+        self.assertEqual(d["exit_signal"], "SIGTERM")
 
     def test_redact_paths_preserves_exit_signal(self):
         """``redact_paths=True`` must not affect exit_signal or exit_hint."""
