@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "1abeabf71891d7c83e0a48dca67e1f1f903b67b3fa286cdf4ef1e7dc0c6e7f87"
+source_sha256: "e7dfdb43fb192edee7dd689f65b7d95fd9964a35125a10ab2fee262bcb5b0b72"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,11 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--redact-paths` flag to `claude-code-report`, `gemini-cli-report`,
+  and `codex-app-server-report` for replacing local absolute paths in the
+  JSON/file output with stable placeholders. This matches the established
+  pattern from `run`, `status`, `doctor`, and `protect claude-code`. The
+  flag affects both `--json` stdout output and `--output` file content.
 - Add `--output` flag to `claude-code-report`, `gemini-cli-report`, and
   `codex-app-server-report` for writing the adapter report JSON to a file.
   This matches the established pattern from `verify`, `posture`, `preflight`,

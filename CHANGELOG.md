@@ -5,6 +5,11 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--redact-paths` flag to `claude-code-report`, `gemini-cli-report`,
+  and `codex-app-server-report` for replacing local absolute paths in the
+  JSON/file output with stable placeholders. This matches the established
+  pattern from `run`, `status`, `doctor`, and `protect claude-code`. The
+  flag affects both `--json` stdout output and `--output` file content.
 - Add `--output` flag to `claude-code-report`, `gemini-cli-report`, and
   `codex-app-server-report` for writing the adapter report JSON to a file.
   This matches the established pattern from `verify`, `posture`, `preflight`,

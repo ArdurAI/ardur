@@ -1549,6 +1549,7 @@ deny, and chain-verification outcomes.
 ```text
 ardur claude-code-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                          [--verify-expiry] [--json] [--output FILE]
+                         [--redact-paths]
 ```
 
 `--verify-expiry` also enforces short receipt expiry windows during chain
@@ -1693,6 +1694,7 @@ and the explicit non-claims for provider-hidden reasoning/server-side tool calls
 ```text
 ardur gemini-cli-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                         [--verify-expiry] [--json] [--output FILE]
+                        [--redact-paths]
 ```
 
 When no local Gemini CLI hook receipts are present, the JSON report includes a
@@ -1816,6 +1818,7 @@ enforcement.
 ```text
 ardur codex-app-server-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
                               [--verify-expiry] [--json] [--output FILE]
+                              [--redact-paths]
 ```
 
 When no local Codex app-server receipts are present, the JSON report includes a

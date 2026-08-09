@@ -2850,6 +2850,13 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        report = _redact_paths_deep(report)
     if getattr(args, "output", None) is not None:
         try:
             payload = _write_json_report_to_file(args.output, report)
@@ -3439,6 +3446,13 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        report = _redact_paths_deep(report)
     if getattr(args, "output", None) is not None:
         try:
             payload = _write_json_report_to_file(args.output, report)
@@ -3632,6 +3646,13 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        report = _redact_paths_deep(report)
     if getattr(args, "output", None) is not None:
         try:
             payload = _write_json_report_to_file(args.output, report)
@@ -7172,6 +7193,11 @@ def build_parser() -> argparse.ArgumentParser:
     cc_report.add_argument(
         "--output", type=str, help="write the JSON report to a file"
     )
+    cc_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output with stable placeholders",
+    )
     cc_report.set_defaults(func=cmd_claude_code_report)
 
     gemini_hook = subparsers.add_parser(
@@ -7230,6 +7256,11 @@ def build_parser() -> argparse.ArgumentParser:
     gemini_report.add_argument(
         "--output", type=str, help="write the JSON report to a file"
     )
+    gemini_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output with stable placeholders",
+    )
     gemini_report.set_defaults(func=cmd_gemini_cli_report)
 
     codex_event = subparsers.add_parser(
@@ -7285,6 +7316,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     codex_report.add_argument(
         "--output", type=str, help="write the JSON report to a file"
+    )
+    codex_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output with stable placeholders",
     )
     codex_report.set_defaults(func=cmd_codex_app_server_report)
 
