@@ -2828,6 +2828,13 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
                 "claude_code_report_keys_dir_empty",
                 False,
             ),
+            (
+                "output",
+                "--output",
+                "output",
+                "claude_code_report_output_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -2843,6 +2850,36 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "claude_code_report_output_write_failed",
+                    "condition": "claude_code_report_output_write_failed",
+                    "detail": str(exc),
+                    "next_steps": [
+                        {
+                            "condition": "claude_code_report_output_write_failed",
+                            "action": "choose_writable_output_path",
+                            "command": "ardur claude-code-report --output <writable-file-path>",
+                            "detail": "Provide a writable file path (not an existing directory) for the JSON report.",
+                        },
+                    ],
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "claude_code_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
         return 0
@@ -3380,6 +3417,13 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
                 "gemini_cli_report_keys_dir_empty",
                 False,
             ),
+            (
+                "output",
+                "--output",
+                "output",
+                "gemini_cli_report_output_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -3395,6 +3439,36 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "gemini_cli_report_output_write_failed",
+                    "condition": "gemini_cli_report_output_write_failed",
+                    "detail": str(exc),
+                    "next_steps": [
+                        {
+                            "condition": "gemini_cli_report_output_write_failed",
+                            "action": "choose_writable_output_path",
+                            "command": "ardur gemini-cli-report --output <writable-file-path>",
+                            "detail": "Provide a writable file path (not an existing directory) for the JSON report.",
+                        },
+                    ],
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "gemini_cli_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
         return 0
@@ -3536,6 +3610,13 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
                 "codex_app_server_report_keys_dir_empty",
                 False,
             ),
+            (
+                "output",
+                "--output",
+                "output",
+                "codex_app_server_report_output_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -3551,6 +3632,36 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "codex_app_server_report_output_write_failed",
+                    "condition": "codex_app_server_report_output_write_failed",
+                    "detail": str(exc),
+                    "next_steps": [
+                        {
+                            "condition": "codex_app_server_report_output_write_failed",
+                            "action": "choose_writable_output_path",
+                            "command": "ardur codex-app-server-report --output <writable-file-path>",
+                            "detail": "Provide a writable file path (not an existing directory) for the JSON report.",
+                        },
+                    ],
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "codex_app_server_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
         return 0
@@ -7058,6 +7169,9 @@ def build_parser() -> argparse.ArgumentParser:
     cc_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
     )
+    cc_report.add_argument(
+        "--output", type=str, help="write the JSON report to a file"
+    )
     cc_report.set_defaults(func=cmd_claude_code_report)
 
     gemini_hook = subparsers.add_parser(
@@ -7113,6 +7227,9 @@ def build_parser() -> argparse.ArgumentParser:
     gemini_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
     )
+    gemini_report.add_argument(
+        "--output", type=str, help="write the JSON report to a file"
+    )
     gemini_report.set_defaults(func=cmd_gemini_cli_report)
 
     codex_event = subparsers.add_parser(
@@ -7165,6 +7282,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     codex_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
+    )
+    codex_report.add_argument(
+        "--output", type=str, help="write the JSON report to a file"
     )
     codex_report.set_defaults(func=cmd_codex_app_server_report)
 

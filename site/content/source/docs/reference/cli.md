@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "46dc9345f6e4f1db9cb314728289cc4af1cc47d10d7548a8787e1af4bc9fa3b6"
+source_sha256: "423e56000a2b9e5f3276d81e02a23b19035a8019f7a03ed0c9d8a19106c1a16c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1565,7 +1565,7 @@ deny, and chain-verification outcomes.
 
 ```text
 ardur claude-code-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
-                         [--verify-expiry] [--json]
+                         [--verify-expiry] [--json] [--output FILE]
 ```
 
 `--verify-expiry` also enforces short receipt expiry windows during chain
@@ -1709,7 +1709,7 @@ and the explicit non-claims for provider-hidden reasoning/server-side tool calls
 
 ```text
 ardur gemini-cli-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
-                        [--verify-expiry] [--json]
+                        [--verify-expiry] [--json] [--output FILE]
 ```
 
 When no local Gemini CLI hook receipts are present, the JSON report includes a
@@ -1832,7 +1832,7 @@ enforcement.
 
 ```text
 ardur codex-app-server-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
-                              [--verify-expiry] [--json]
+                              [--verify-expiry] [--json] [--output FILE]
 ```
 
 When no local Codex app-server receipts are present, the JSON report includes a

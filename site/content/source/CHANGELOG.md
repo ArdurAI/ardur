@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "7242c01e466ca0be6a115d81c79f5c0a8785157e26b2d4d295a8eefce6a461ae"
+source_sha256: "1abeabf71891d7c83e0a48dca67e1f1f903b67b3fa286cdf4ef1e7dc0c6e7f87"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,13 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--output` flag to `claude-code-report`, `gemini-cli-report`, and
+  `codex-app-server-report` for writing the adapter report JSON to a file.
+  This matches the established pattern from `verify`, `posture`, `preflight`,
+  `telemetry`, `evidence correlate`, and `run`. The flag uses the same
+  atomic owner-only writer and returns a success JSON with `output` path and
+  `report_sha256` digest. Now every report-producing CLI command has
+  `--output`.
 - Add `--output` flag to `ardur run` for writing the governance result JSON
   to a file. Works with or without `--json`: without `--json`, the
   human-readable summary is shown on stderr and the JSON is written to the
