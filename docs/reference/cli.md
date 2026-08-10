@@ -349,6 +349,22 @@ after issuance — previously attestation JWTs could only be inspected from the
 `ardur attest` output at issuance time. Supports `--output` for file-writing
 and `--redact-paths` for path-safe output.
 
+Attestation-token verification failures use attestation-specific error codes
+so that auditors see attestation-oriented messages rather than passport-oriented
+ones. A malformed, expired, or wrong-key token yields `ok: false` with
+`condition`/`error` `invalid_attestation_token` (no `error_code` field on this
+path) and `next_steps` pointing to `ardur verify --attestation-token` and
+`ardur attest`. A missing public key in the key directory yields
+`condition`/`error`/`error_code` `attestation_public_key_missing` with a
+message about the Behavioral Attestation public key. An unparseable or
+wrong-curve public key yields `attestation_public_key_invalid` (also with an
+`error_code` field). All failure paths keep stderr clean, emit no traceback,
+do not echo raw token material, and do not create keys. The passport-token
+failure path uses the analogous `invalid_passport_token` (no `error_code`),
+`passport_public_key_missing` (with `error_code`), and
+`passport_public_key_invalid` (with `error_code`) codes with `next_steps`
+pointing to `ardur verify --token` and `ardur issue`.
+
 Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
 token verification, or any filesystem work. It exits non-zero and writes
 parseable stdout JSON with `ok: false`, stable `condition`/`error`/`error_code`
