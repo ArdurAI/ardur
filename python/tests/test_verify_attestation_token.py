@@ -234,3 +234,99 @@ def test_verify_no_input_still_errors(tmp_path, capsys):
     result = json.loads(captured.out)
     assert result["valid"] is False
     assert "--attestation-token" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Attestation-specific error codes / conditions / next_steps
+# (regression: verify --attestation-token must NOT reuse passport error codes)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_attestation_malformed_uses_attestation_error_code(tmp_path, capsys):
+    """Malformed attestation JWT returns invalid_attestation_token, not invalid_passport_token."""
+    rc = cli_main([
+        "verify", "--attestation-token", "garbage-token",
+        "--keys-dir", str(tmp_path),
+    ])
+    assert rc == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["error"] == "invalid_attestation_token"
+    assert result["condition"] == "invalid_attestation_token"
+
+
+def test_verify_attestation_malformed_next_steps_reference_attestation_commands(tmp_path, capsys):
+    """Malformed attestation JWT next_steps point to attest/verify-attestation-token, not issue/verify-token."""
+    rc = cli_main([
+        "verify", "--attestation-token", "garbage-token",
+        "--keys-dir", str(tmp_path),
+    ])
+    assert rc == 1
+    result = json.loads(capsys.readouterr().out)
+    steps = result["next_steps"]
+    assert len(steps) == 2
+    for step in steps:
+        assert step["condition"] == "invalid_attestation_token"
+    commands = " ".join(s["command"] for s in steps)
+    assert "--attestation-token" in commands
+    assert "ardur attest" in commands
+    # Must NOT mention passport-only commands
+    assert "ardur issue" not in commands
+    assert "ardur verify --token" not in commands
+
+
+def test_verify_attestation_wrong_key_uses_attestation_error_code(tmp_path, capsys):
+    """Attestation signed by a different key returns invalid_attestation_token."""
+    token = _issue_attestation(tmp_path)
+    other_keys = tmp_path / "other-keys"
+    other_keys.mkdir()
+    generate_keypair(keys_dir=other_keys)
+    rc = cli_main([
+        "verify", "--attestation-token", token,
+        "--keys-dir", str(other_keys),
+    ])
+    assert rc == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["valid"] is False
+    assert result["error"] == "invalid_attestation_token"
+    assert result["condition"] == "invalid_attestation_token"
+
+
+def test_verify_attestation_missing_public_key_uses_attestation_error_code(tmp_path, capsys):
+    """Missing passport_public.pem returns attestation_public_key_missing, not passport_public_key_missing."""
+    token = _issue_attestation(tmp_path)
+    empty_dir = tmp_path / "empty-keys"
+    empty_dir.mkdir()
+    rc = cli_main([
+        "verify", "--attestation-token", token,
+        "--keys-dir", str(empty_dir),
+    ])
+    assert rc == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["valid"] is False
+    assert result["error"] == "attestation_public_key_missing"
+    assert result["error_code"] == "attestation_public_key_missing"
+    assert result["condition"] == "attestation_public_key_missing"
+    assert "Behavioral Attestation" in result["message"]
+    steps = result["next_steps"]
+    commands = " ".join(s["command"] for s in steps)
+    assert "--attestation-token" in commands
+    assert "ardur attest" in commands
+    assert "ardur issue" not in commands
+
+
+def test_verify_passport_malformed_still_uses_passport_error_code(tmp_path, capsys):
+    """Passport verification error codes are unchanged by the attestation refactor."""
+    rc = cli_main([
+        "verify", "--token", "garbage-token",
+        "--keys-dir", str(tmp_path),
+    ])
+    assert rc == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["error"] == "invalid_passport_token"
+    assert result["condition"] == "invalid_passport_token"
+    assert "Mission Passport" in result["message"]
+    steps = result["next_steps"]
+    commands = " ".join(s["command"] for s in steps)
+    assert "ardur verify --token" in commands
+    assert "ardur issue" in commands
+    assert "--attestation-token" not in commands

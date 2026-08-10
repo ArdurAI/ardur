@@ -1743,22 +1743,45 @@ def cmd_issue(args: argparse.Namespace) -> int:
     return _handle_output_and_redact(args, response, command="issue")
 
 
-def _verify_failure_next_steps() -> list[dict[str, str]]:
+def _verify_failure_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+    if label == "Mission Passport":
+        condition = "invalid_passport_token"
+        return [
+            {
+                "condition": condition,
+                "action": "verify_a_fresh_passport_token",
+                "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+                "detail": (
+                    "Use a Mission Passport JWT issued by this Ardur key directory. "
+                    "Keep raw tokens out of shared logs and reports."
+                ),
+            },
+            {
+                "condition": condition,
+                "action": "issue_a_new_passport_if_needed",
+                "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+                "detail": "Issue a fresh local Mission Passport when the old token is malformed, expired, or signed by a different key.",
+            },
+        ]
+    condition = "invalid_attestation_token"
     return [
         {
-            "condition": "invalid_passport_token",
-            "action": "verify_a_fresh_passport_token",
-            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "condition": condition,
+            "action": "verify_a_fresh_attestation_token",
+            "command": "ardur verify --attestation-token <token> --keys-dir <keys-dir>",
             "detail": (
-                "Use a Mission Passport JWT issued by this Ardur key directory. "
-                "Keep raw tokens out of shared logs and reports."
+                "Use a Behavioral Attestation JWT issued by this Ardur key "
+                "directory. Keep raw tokens out of shared logs and reports."
             ),
         },
         {
-            "condition": "invalid_passport_token",
-            "action": "issue_a_new_passport_if_needed",
-            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
-            "detail": "Issue a fresh local Mission Passport when the old token is malformed, expired, or signed by a different key.",
+            "condition": condition,
+            "action": "issue_a_new_attestation_if_needed",
+            "command": "ardur attest --session <session-id> --keys-dir <keys-dir>",
+            "detail": (
+                "Issue a fresh local Behavioral Attestation when the old token "
+                "is malformed, expired, or signed by a different key."
+            ),
         },
     ]
 
@@ -1767,19 +1790,49 @@ def _verify_failure_response(
     exc: Exception, label: str = "Mission Passport"
 ) -> dict:
     detail = _safe_exception_message(exc)
+    is_attestation = label != "Mission Passport"
+    error_code = (
+        "invalid_attestation_token" if is_attestation else "invalid_passport_token"
+    )
     return {
         "ok": False,
         "valid": False,
-        "error": "invalid_passport_token",
-        "condition": "invalid_passport_token",
+        "error": error_code,
+        "condition": error_code,
         "message": f"{label} token could not be verified.",
         "detail": detail,
-        "next_steps": _verify_failure_next_steps(),
+        "next_steps": _verify_failure_next_steps(label=label),
     }
 
 
-def _verify_public_key_missing_next_steps() -> list[dict[str, str]]:
-    condition = "passport_public_key_missing"
+def _verify_public_key_missing_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+    condition = (
+        "attestation_public_key_missing"
+        if label != "Mission Passport"
+        else "passport_public_key_missing"
+    )
+    if label != "Mission Passport":
+        return [
+            {
+                "condition": condition,
+                "action": "verify_with_issuing_key_directory",
+                "command": "ardur verify --attestation-token <token> --keys-dir <keys-dir>",
+                "detail": (
+                    "Use the key directory that issued this Behavioral "
+                    "Attestation. Keep raw tokens, private keys, and local "
+                    "paths out of shared logs."
+                ),
+            },
+            {
+                "condition": condition,
+                "action": "issue_a_new_attestation_if_needed",
+                "command": "ardur attest --session <session-id> --keys-dir <keys-dir>",
+                "detail": (
+                    "Issue a fresh local Behavioral Attestation when the "
+                    "original public key is unavailable."
+                ),
+            },
+        ]
     return [
         {
             "condition": condition,
@@ -1801,7 +1854,22 @@ def _verify_public_key_missing_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _verify_public_key_missing_response() -> dict:
+def _verify_public_key_missing_response(label: str = "Mission Passport") -> dict:
+    if label != "Mission Passport":
+        condition = "attestation_public_key_missing"
+        return {
+            "ok": False,
+            "valid": False,
+            "error": condition,
+            "error_code": condition,
+            "condition": condition,
+            "message": "Behavioral Attestation public key is required for verification.",
+            "detail": (
+                "The selected key directory does not contain passport_public.pem. "
+                "Verification is read-only and will not create signing keys."
+            ),
+            "next_steps": _verify_public_key_missing_next_steps(label=label),
+        }
     condition = "passport_public_key_missing"
     return {
         "ok": False,
@@ -1818,8 +1886,34 @@ def _verify_public_key_missing_response() -> dict:
     }
 
 
-def _verify_public_key_invalid_next_steps() -> list[dict[str, str]]:
-    condition = "passport_public_key_invalid"
+def _verify_public_key_invalid_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+    condition = (
+        "attestation_public_key_invalid"
+        if label != "Mission Passport"
+        else "passport_public_key_invalid"
+    )
+    if label != "Mission Passport":
+        return [
+            {
+                "condition": condition,
+                "action": "restore_issuing_public_key",
+                "command": "ardur verify --attestation-token <token> --keys-dir <keys-dir>",
+                "detail": (
+                    "Replace passport_public.pem with the EC public key that "
+                    "issued this Behavioral Attestation, then retry verification. "
+                    "Keep raw tokens, private keys, and local paths out of shared logs."
+                ),
+            },
+            {
+                "condition": condition,
+                "action": "issue_a_new_attestation_if_needed",
+                "command": "ardur attest --session <session-id> --keys-dir <keys-dir>",
+                "detail": (
+                    "Issue a fresh local Behavioral Attestation only after "
+                    "choosing a key directory with valid key material."
+                ),
+            },
+        ]
     return [
         {
             "condition": condition,
@@ -1843,7 +1937,22 @@ def _verify_public_key_invalid_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _verify_public_key_invalid_response() -> dict:
+def _verify_public_key_invalid_response(label: str = "Mission Passport") -> dict:
+    if label != "Mission Passport":
+        condition = "attestation_public_key_invalid"
+        return {
+            "ok": False,
+            "valid": False,
+            "error": condition,
+            "error_code": condition,
+            "condition": condition,
+            "message": "Behavioral Attestation public key could not be loaded for verification.",
+            "detail": (
+                "passport_public.pem exists but is not a readable EC public key. "
+                "Verification is read-only and will not repair, overwrite, or create signing keys."
+            ),
+            "next_steps": _verify_public_key_invalid_next_steps(label=label),
+        }
     condition = "passport_public_key_invalid"
     return {
         "ok": False,
@@ -1903,10 +2012,10 @@ def _cmd_verify_attestation(args: argparse.Namespace) -> int:
         _print_json(_keys_dir_failure_response(exc))
         return 1
     except FileNotFoundError:
-        _print_json(_verify_public_key_missing_response())
+        _print_json(_verify_public_key_missing_response(label="Behavioral attestation"))
         return 1
     except ValueError:
-        _print_json(_verify_public_key_invalid_response())
+        _print_json(_verify_public_key_invalid_response(label="Behavioral attestation"))
         return 1
     try:
         claims = verify_attestation(args.attestation_token, public_key)

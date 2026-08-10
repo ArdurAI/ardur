@@ -4,6 +4,16 @@ All notable changes to Ardur will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `verify --attestation-token` error responses now use attestation-specific
+  error codes (`invalid_attestation_token`, `attestation_public_key_missing`,
+  `attestation_public_key_invalid`) and attestation-oriented `next_steps`
+  pointing to `ardur verify --attestation-token` and `ardur attest`. Previously
+  these error paths reused the passport error code
+  (`invalid_passport_token`), passport-oriented messages ("Mission Passport
+  public key"), and next_steps pointing to `ardur verify --token` / `ardur
+  issue`, which was confusing for an auditor verifying a behavioral attestation.
+
 ### Added
 - Add `--output` and `--redact-paths` flags to `issue`, `anchor`, and
   `attest` — the last three JSON-producing CLI commands that lacked them.
