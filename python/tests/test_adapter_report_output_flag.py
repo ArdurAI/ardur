@@ -17,14 +17,11 @@ correlate``, and ``run``.  This file verifies:
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
-
+from vibap import cli
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -130,7 +127,6 @@ class TestClaudeCodeReportOutput:
         output_path = tmp_path / "cc-report.json"
         fake_report = {"receipt_count": 3, "chain_count": 1, "home": "redacted"}
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_claude_code_report", lambda **kw: fake_report
@@ -148,7 +144,6 @@ class TestClaudeCodeReportOutput:
         output_path = tmp_path / "cc-report.json"
         fake_report = {"receipt_count": 0, "chain_count": 0}
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_claude_code_report", lambda **kw: fake_report
@@ -167,7 +162,6 @@ class TestClaudeCodeReportOutput:
     def test_empty_output_rejected(self, monkeypatch, capsys):
         """Empty ``--output`` is caught by ``_coerce_report_path_args``."""
 
-        import vibap.cli as cli
 
         # The handler calls _coerce_report_path_args first; pass empty str
         args = _make_args(output="")
@@ -179,7 +173,6 @@ class TestClaudeCodeReportOutput:
         assert "empty" in response["condition"]
 
     def test_whitespace_output_rejected(self, monkeypatch, capsys):
-        import vibap.cli as cli
 
         args = _make_args(output="   ")
         rc = cli.cmd_claude_code_report(args)
@@ -200,7 +193,6 @@ class TestGeminiCliReportOutput:
             "coverage_gaps": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_gemini_shareable_report", lambda **kw: fake_report
@@ -213,7 +205,6 @@ class TestGeminiCliReportOutput:
         assert written == fake_report
 
     def test_empty_output_rejected(self, capsys):
-        import vibap.cli as cli
 
         args = _make_args(output="")
         rc = cli.cmd_gemini_cli_report(args)
@@ -234,7 +225,6 @@ class TestCodexAppServerReportOutput:
             "coverage_gaps": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_codex_shareable_report", lambda **kw: fake_report
@@ -247,7 +237,6 @@ class TestCodexAppServerReportOutput:
         assert written == fake_report
 
     def test_empty_output_rejected(self, capsys):
-        import vibap.cli as cli
 
         args = _make_args(output="")
         rc = cli.cmd_codex_app_server_report(args)
@@ -292,8 +281,6 @@ def test_directory_output_rejected_claude_code(tmp_path, monkeypatch, capsys):
     output_dir.mkdir()
 
     fake_report = {"receipt_count": 0, "chain_count": 0}
-
-    import vibap.cli as cli
 
     monkeypatch.setattr(
         cli, "build_claude_code_report", lambda **kw: fake_report

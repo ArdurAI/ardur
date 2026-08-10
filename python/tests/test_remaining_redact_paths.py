@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
+from vibap import cli
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -108,7 +108,6 @@ def test_preflight_tool_server_has_redact_paths_flag():
 class TestPostureScanRedactPathsWarning:
     def test_warning_without_json_or_output(self, tmp_path, monkeypatch, capsys):
         """``posture scan --redact-paths`` without ``--json`` or ``--output`` warns."""
-        import vibap.cli as cli
 
         fake_posture = {"home": str(tmp_path), "summary": {"receipt_count": 0}}
         monkeypatch.setattr(
@@ -137,7 +136,6 @@ class TestPostureScanRedactPathsWarning:
 class TestPreflightToolServerRedactPathsWarning:
     def test_warning_without_json_or_output(self, tmp_path, monkeypatch, capsys):
         """``preflight tool-server --redact-paths`` without ``--json`` or ``--output`` warns."""
-        import vibap.cli as cli
 
         fake_report = {
             "summary": {"verdict": "pass", "finding_count": 0},
@@ -176,7 +174,6 @@ class TestPostureScanRedactPathsJson:
             "summary": {"receipt_count": 0},
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_posture_index", lambda **kw: fake_posture
@@ -214,7 +211,6 @@ class TestPreflightToolServerRedactPathsJson:
             "findings": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "scan_tool_server_config", lambda config: fake_report

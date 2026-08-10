@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
+from vibap import cli
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -104,7 +104,6 @@ class TestClaudeCodeReportRedactPaths:
             "totals": {"tools": 0, "verdicts": {}, "side_effect_classes": []},
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_claude_code_report", lambda **kw: fake_report
@@ -130,7 +129,6 @@ class TestClaudeCodeReportRedactPaths:
             "totals": {"tools": 0, "verdicts": {}, "side_effect_classes": []},
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_claude_code_report", lambda **kw: fake_report
@@ -169,7 +167,6 @@ class TestClaudeCodeReportRedactPaths:
 
         fake_report = {"receipt_count": 0, "chain_count": 0}
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_claude_code_report", lambda **kw: fake_report
@@ -191,7 +188,6 @@ class TestGeminiCliReportRedactPaths:
             "coverage_gaps": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_gemini_shareable_report", lambda **kw: fake_report
@@ -213,7 +209,6 @@ class TestGeminiCliReportRedactPaths:
             "coverage_gaps": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_gemini_shareable_report", lambda **kw: fake_report
@@ -236,7 +231,6 @@ class TestCodexAppServerReportRedactPaths:
             "coverage_gaps": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_codex_shareable_report", lambda **kw: fake_report
@@ -258,7 +252,6 @@ class TestCodexAppServerReportRedactPaths:
             "coverage_gaps": [],
         }
 
-        import vibap.cli as cli
 
         monkeypatch.setattr(
             cli, "build_codex_shareable_report", lambda **kw: fake_report
