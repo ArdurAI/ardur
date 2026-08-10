@@ -48,6 +48,7 @@ from .passport import (
     load_mission_file,
     verify_passport,
 )
+from .attestation import verify_attestation
 from .package_assets import claude_code_plugin_dir
 from .personal_hub import (
     DEFAULT_HUB_HOST,
@@ -1826,6 +1827,65 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
     return None
 
 
+def _cmd_verify_attestation(args: argparse.Namespace) -> int:
+    """Verify a behavioral attestation JWT and display its signed claims."""
+    malformed_token_failure = _verify_malformed_token_failure_exit_code(
+        args.attestation_token
+    )
+    if malformed_token_failure is not None:
+        return malformed_token_failure
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    try:
+        public_key = load_existing_public_key(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
+    except FileNotFoundError:
+        _print_json(_verify_public_key_missing_response())
+        return 1
+    except ValueError:
+        _print_json(_verify_public_key_invalid_response())
+        return 1
+    try:
+        claims = verify_attestation(args.attestation_token, public_key)
+    except (jwt.PyJWTError, PermissionError, ValueError) as exc:
+        _print_json(_verify_failure_response(exc))
+        return 1
+    token_report = {"valid": True, "claims": claims}
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        token_report = _redact_paths_deep(token_report)
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, token_report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    "error": "verify_output_write_failed",
+                    "detail": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
+    _print_json(token_report)
+    return 0
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     path_failure = _path_arg_invalid_failure(args)
     if path_failure is not None:
@@ -1836,6 +1896,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         for value in (
             args.journal,
             args.token,
+            args.attestation_token,
             args.anchor_bundle,
             args.receiver_envelope,
         )
@@ -1847,7 +1908,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "error": "verify_input_invalid",
                 "message": (
                     "Choose exactly one verification input: a positional journal, "
-                    "--token, --anchor-bundle, or --receiver-envelope."
+                    "--token, --attestation-token, --anchor-bundle, or --receiver-envelope."
                 ),
             }
         )
@@ -1877,6 +1938,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return _cmd_verify_anchor(args)
     if args.receiver_envelope is not None:
         return _cmd_verify_receiver_attestation(args)
+    if args.attestation_token is not None:
+        return _cmd_verify_attestation(args)
     keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
     if keys_dir_failure is not None:
         return keys_dir_failure
@@ -6856,7 +6919,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = subparsers.add_parser(
         "verify",
-        help="verify an offline receipt journal, mission passport, receipt anchor, or receiver attestation",
+        help="verify an offline receipt journal, mission passport, behavioral attestation, receipt anchor, or receiver attestation",
     )
     verify.add_argument(
         "journal",
@@ -6866,6 +6929,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_input = verify.add_mutually_exclusive_group(required=False)
     verify_input.add_argument("--token", help="passport token to verify")
+    verify_input.add_argument(
+        "--attestation-token",
+        type=str,
+        help="behavioral attestation JWT to verify",
+    )
     verify_input.add_argument(
         "--anchor-bundle",
         type=str,

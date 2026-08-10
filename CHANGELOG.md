@@ -5,6 +5,15 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--attestation-token` flag to `verify` for independently verifying a
+  behavioral attestation JWT and inspecting its signed claims. Previously,
+  attestation JWTs could only be inspected from the `ardur attest` output at
+  issuance time — there was no CLI path to verify a token after the fact. Now
+  an auditor can run `ardur verify --attestation-token <jwt>` to confirm
+  cryptographic integrity and see all signed claims including the verdict
+  breakdown (`unknowns`, `insufficient_evidence`, `violations`,
+  `denied_tools`). Supports `--output` for file-writing and `--redact-paths`
+  for path-safe output, matching the established `verify --token` pattern.
 - Sign the verdict breakdown (`unknowns`, `insufficient_evidence`,
   `violations`, `denied_tools`) into the attestation JWT itself. Previously
   these fields existed only in the unsigned governance summary dict — an

@@ -282,6 +282,9 @@ ardur verify --receiver-envelope FILE --keys-dir DIR
              [--mcp-request FILE --mcp-response FILE]
              [--max-attestation-delay-s SECONDS]
              [--receiver-clock-skew-s SECONDS]
+
+ardur verify --attestation-token JWT [--keys-dir DIR]
+             [--output FILE] [--redact-paths]
 ```
 
 Full-bundle mode performs no network request and requires independent receipt,
@@ -335,6 +338,15 @@ receiver signature and is reported at that lower tier. When exact MCP request
 and response JSON files are supplied, the verifier compares both receiver-
 signed digests and reports the two content bindings explicitly. A response file
 without its request fails closed.
+
+Attestation mode verifies a behavioral attestation JWT signed by the Ardur
+governance proxy. It confirms the token's cryptographic integrity using the
+session signing key, then returns all signed claims including the verdict
+breakdown (`unknowns`, `insufficient_evidence`, `violations`, `denied_tools`)
+when present. This allows an auditor to independently verify an attestation
+after issuance — previously attestation JWTs could only be inspected from the
+`ardur attest` output at issuance time. Supports `--output` for file-writing
+and `--redact-paths` for path-safe output.
 
 Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
 token verification, or any filesystem work. It exits non-zero and writes
