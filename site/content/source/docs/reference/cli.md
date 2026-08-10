@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "746b86224ebcf12c5abd0ddfdb981e3420e6dbedd6879421fba74761c0128ac7"
+source_sha256: "a67e27722412ed366cf0e9765278b0ec11a145be660ebaa785343bc16c155d84"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -236,6 +236,7 @@ ardur issue --agent-id ID --mission TEXT
             [--max-tool-calls N] [--max-duration-s N]
             [--delegation-allowed] [--max-delegation-depth N]
             [--ttl-s N] [--keys-dir DIR]
+            [--output FILE] [--redact-paths]
 ```
 
 Prints `{"token": "...", "claims": {...}}` to stdout. An absent or empty
@@ -522,9 +523,11 @@ Drain pending receipt sidecars outside the governance decision path.
 ```text
 ardur anchor --receipt-log FILE --backend c2sp-local-v1
              --local-log FILE --log-private-key FILE --origin NAME
+             [--output FILE] [--redact-paths]
 
 ardur anchor --receipt-log FILE --backend rekor-v1
              --keys-dir DIR [--rekor-url HTTPS_URL]
+             [--output FILE] [--redact-paths]
 ```
 
 Receipt sinks persist an idempotent pending sidecar next to each receipt log.
@@ -627,6 +630,7 @@ chain.
 ```text
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
+             [--output FILE] [--redact-paths]
 ```
 
 Empty or whitespace-only path arguments (`--keys-dir`, `--state-dir`,

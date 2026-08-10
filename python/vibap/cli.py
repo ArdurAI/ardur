@@ -180,6 +180,62 @@ def _write_json_report_to_file(path: str | Path, report: object) -> bytes:
     return payload
 
 
+def _handle_output_and_redact(
+    args: argparse.Namespace,
+    response: dict[str, Any],
+    *,
+    command: str,
+    exit_code: int | None = None,
+) -> int:
+    """Apply ``--redact-paths`` and ``--output`` to *response*, then emit.
+
+    Shared terminal logic for commands whose JSON response is the final
+    output.  When ``--redact-paths`` is set, local absolute paths in
+    *response* are recursively replaced.  When ``--output`` is set, the
+    (possibly redacted) response is atomically written to an owner-only
+    file and a success confirmation is printed instead.  When neither is
+    set, *response* is printed directly to stdout via :func:`_print_json`.
+
+    If *exit_code* is ``None`` (default), returns ``0`` on success.  When
+    the caller provides an explicit *exit_code*, that value is returned
+    after successful output so commands like ``anchor`` can propagate
+    their ``ok``-based exit status even when writing to a file.
+    """
+
+    redact = getattr(args, "redact_paths", False)
+    output = getattr(args, "output", None)
+    if redact and not getattr(args, "json", False) and output is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if redact:
+        response = _redact_paths_deep(response)
+    if output is not None:
+        try:
+            payload = _write_json_report_to_file(output, response)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": f"{command}_output_write_failed",
+                    "detail": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": f"{command}_report_written",
+                "output": str(output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return exit_code if exit_code is not None else 0
+    _print_json(response)
+    return exit_code if exit_code is not None else 0
+
+
 def _hub_path_error_code() -> str:
     return "_".join(("personal", "home", "not", "directory"))
 
@@ -1684,8 +1740,7 @@ def cmd_issue(args: argparse.Namespace) -> int:
         response["warnings"] = [
             "resource_scope explicitly permits all resources via the sole '**' pattern"
         ]
-    _print_json(response)
-    return 0
+    return _handle_output_and_redact(args, response, command="issue")
 
 
 def _verify_failure_next_steps() -> list[dict[str, str]]:
@@ -2729,8 +2784,9 @@ def cmd_anchor(args: argparse.Namespace) -> int:
             for result in results
         ],
     }
-    _print_json(output)
-    return 0 if output["ok"] else 1
+    return _handle_output_and_redact(
+        args, output, command="anchor", exit_code=0 if output["ok"] else 1
+    )
 
 
 def _attest_failure_condition(exc: Exception) -> tuple[str, str]:
@@ -2881,8 +2937,8 @@ def cmd_attest(args: argparse.Namespace) -> int:
     except (ValueError, PermissionError, jwt.PyJWTError) as exc:
         _print_json(_attest_failure_response(exc))
         return 1
-    _print_json({"token": token, "claims": claims})
-    return 0
+    response = {"token": token, "claims": claims}
+    return _handle_output_and_redact(args, response, command="attest")
 
 
 def cmd_claude_code_hook(args: argparse.Namespace) -> int:
@@ -6920,6 +6976,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
     )
+    issue.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON response to an owner-only file",
+    )
+    issue.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
     issue.set_defaults(func=cmd_issue)
 
     verify = subparsers.add_parser(
@@ -7228,6 +7294,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
     )
+    anchor.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON response to an owner-only file",
+    )
+    anchor.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
     anchor.set_defaults(func=cmd_anchor)
 
     receiver_fixture = subparsers.add_parser(
@@ -7284,6 +7360,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly request JSON output (output is always JSON; "
         "this flag is accepted for consistency with other commands)",
+    )
+    attest.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON response to an owner-only file",
+    )
+    attest.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
     )
     attest.set_defaults(func=cmd_attest)
 

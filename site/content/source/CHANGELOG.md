@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "c44d51e48d2b97f38bf5c723ba617e39e74456d7a14cba8b4ebd0763f82dd86b"
+source_sha256: "8a52b66a4e13b2c09145327135530f36a757548b53ad4a1b35713b95ac21e3ba"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Add `--output` and `--redact-paths` flags to `issue`, `anchor`, and
+  `attest` — the last three JSON-producing CLI commands that lacked them.
+  Now every JSON-producing command supports writing the response to an
+  owner-only file and replacing local absolute paths with stable
+  placeholders. The flags share a `_handle_output_and_redact` terminal
+  helper for consistent semantics across all protocol-path commands.
 - Add `--attestation-token` flag to `verify` for independently verifying a
   behavioral attestation JWT and inspecting its signed claims. Previously,
   attestation JWTs could only be inspected from the `ardur attest` output at
