@@ -1708,14 +1708,16 @@ def _verify_failure_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _verify_failure_response(exc: Exception) -> dict:
+def _verify_failure_response(
+    exc: Exception, label: str = "Mission Passport"
+) -> dict:
     detail = _safe_exception_message(exc)
     return {
         "ok": False,
         "valid": False,
         "error": "invalid_passport_token",
         "condition": "invalid_passport_token",
-        "message": "Mission Passport token could not be verified.",
+        "message": f"{label} token could not be verified.",
         "detail": detail,
         "next_steps": _verify_failure_next_steps(),
     }
@@ -1803,7 +1805,9 @@ def _verify_public_key_invalid_response() -> dict:
     }
 
 
-def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
+def _verify_malformed_token_failure_exit_code(
+    token: str, label: str = "Mission Passport"
+) -> int | None:
     try:
         jwt.get_unverified_header(token)
         jwt.decode(
@@ -1820,7 +1824,8 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
     except jwt.PyJWTError:
         _print_json(
             _verify_failure_response(
-                jwt.DecodeError("Mission Passport token is malformed.")
+                jwt.DecodeError(f"{label} token is malformed."),
+                label=label,
             )
         )
         return 1
@@ -1830,7 +1835,7 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
 def _cmd_verify_attestation(args: argparse.Namespace) -> int:
     """Verify a behavioral attestation JWT and display its signed claims."""
     malformed_token_failure = _verify_malformed_token_failure_exit_code(
-        args.attestation_token
+        args.attestation_token, label="Behavioral attestation"
     )
     if malformed_token_failure is not None:
         return malformed_token_failure
@@ -1851,7 +1856,7 @@ def _cmd_verify_attestation(args: argparse.Namespace) -> int:
     try:
         claims = verify_attestation(args.attestation_token, public_key)
     except (jwt.PyJWTError, PermissionError, ValueError) as exc:
-        _print_json(_verify_failure_response(exc))
+        _print_json(_verify_failure_response(exc, label="Behavioral attestation"))
         return 1
     token_report = {"valid": True, "claims": claims}
     if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:

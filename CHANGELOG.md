@@ -65,6 +65,10 @@ All notable changes to Ardur will be documented in this file.
   instead of bare `137`; other non-zero exits show `(non-zero exit)`.
 
 ### Fixed
+- Parameterize the malformed-token error message in `ardur verify` so
+  `--attestation-token` failures say "Behavioral attestation token could
+  not be verified" instead of the misleading "Mission Passport token could
+  not be verified." The `--token` (passport) path is unchanged.
 - Include `denied_tools` in `--json` output (`summary.denied_tools`). The
   previous release added the field to the human-readable summary but the
   JSON consumer path (`_summary_for_json`) was not updated, leaving the

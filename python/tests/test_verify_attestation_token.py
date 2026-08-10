@@ -160,6 +160,22 @@ def test_verify_attestation_token_malformed(tmp_path, capsys):
     captured = capsys.readouterr()
     result = json.loads(captured.out)
     assert result["valid"] is False
+    assert "Behavioral attestation" in result["message"]
+    assert "Mission Passport" not in result["message"]
+
+
+def test_verify_attestation_token_malformed_message(tmp_path, capsys):
+    """Malformed --attestation-token error says 'Behavioral attestation', not 'Mission Passport'."""
+    rc = cli_main([
+        "verify", "--attestation-token", "garbage-token",
+        "--keys-dir", str(tmp_path),
+    ])
+    assert rc == 1
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["valid"] is False
+    assert "Behavioral attestation" in result["message"]
+    assert "Mission Passport" not in result["message"]
 
 
 def test_verify_attestation_token_wrong_key(tmp_path, capsys):
