@@ -109,7 +109,6 @@ class TestIssueKeysDirOSErrorCLI:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """``ardur issue --keys-dir /nonexistent`` must emit JSON, not traceback."""
-        import sys
 
         from vibap.cli import main
 

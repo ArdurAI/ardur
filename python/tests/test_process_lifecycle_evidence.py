@@ -1470,7 +1470,7 @@ class TestRecursiveDescendantEnumeration:
         """_walk_descendants stops when count exceeds _MAX_DESCENDANT_COUNT."""
         from unittest.mock import MagicMock
 
-        from vibap.run_bridge import _MAX_DESCENDANT_COUNT, _walk_descendants
+        from vibap.run_bridge import _walk_descendants
 
         # Create fake psutil.Process objects that always report children.
         # Each "child" is a mock with pid, oneshhot(), cmdline(), etc.

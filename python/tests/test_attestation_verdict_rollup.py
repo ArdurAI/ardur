@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import time
 
-from vibap.passport import issue_passport, MissionPassport
-from vibap.proxy import Decision, GovernanceProxy, GovernanceSession, PolicyEvent
+from vibap.passport import issue_passport
+from vibap.proxy import Decision, GovernanceSession, PolicyEvent
 
 
 def _make_event(decision: Decision, tool_name: str = "Bash") -> PolicyEvent:

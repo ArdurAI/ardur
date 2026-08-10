@@ -104,27 +104,27 @@ class TestAgentExitLineFormatting:
         summary = format_summary(result)
         assert "agent exit    0" in summary
         # No parenthesised hint after the zero
-        line = [l for l in summary.splitlines() if "agent exit" in l][0]
+        line = [ln for ln in summary.splitlines() if "agent exit" in ln][0]
         assert "(" not in line
 
     def test_sigkill_exit_shows_hint(self) -> None:
         result = _make_result(137)
         summary = format_summary(result)
-        line = [l for l in summary.splitlines() if "agent exit" in l][0]
+        line = [ln for ln in summary.splitlines() if "agent exit" in ln][0]
         assert "137" in line
         assert "killed by SIGKILL" in line
 
     def test_sigterm_exit_shows_hint(self) -> None:
         result = _make_result(143)
         summary = format_summary(result)
-        line = [l for l in summary.splitlines() if "agent exit" in l][0]
+        line = [ln for ln in summary.splitlines() if "agent exit" in ln][0]
         assert "143" in line
         assert "killed by SIGTERM" in line
 
     def test_generic_nonzero_shows_hint(self) -> None:
         result = _make_result(1)
         summary = format_summary(result)
-        line = [l for l in summary.splitlines() if "agent exit" in l][0]
+        line = [ln for ln in summary.splitlines() if "agent exit" in ln][0]
         assert "1" in line
         assert "non-zero exit" in line
 
@@ -132,7 +132,7 @@ class TestAgentExitLineFormatting:
         """Exit 127 should show 'non-zero exit', not a signal name."""
         result = _make_result(127)
         summary = format_summary(result)
-        line = [l for l in summary.splitlines() if "agent exit" in l][0]
+        line = [ln for ln in summary.splitlines() if "agent exit" in ln][0]
         assert "127" in line
         assert "non-zero exit" in line
         assert "killed by" not in line

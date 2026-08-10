@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from unittest import mock
 
 from vibap.cli import _redact_paths_deep, build_parser
 
@@ -108,7 +107,7 @@ class TestRedactPathsDeep:
         home = os.path.expanduser("~")
         response = {"config": f"{home}/.config/ardur/config.json"}
         redacted = _redact_paths_deep(response)
-        assert redacted["config"] == f"<home>/.config/ardur/config.json"
+        assert redacted["config"] == "<home>/.config/ardur/config.json"
 
     def test_does_not_mutate_input(self):
         original = {"home": "/private/tmp/test"}
