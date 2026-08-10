@@ -5,6 +5,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Sign the verdict breakdown (`unknowns`, `insufficient_evidence`,
+  `violations`, `denied_tools`) into the attestation JWT itself. Previously
+  these fields existed only in the unsigned governance summary dict — an
+  auditor verifying only the signed JWT could not see *why* a session was
+  non-compliant or which tools were blocked. Now the full honest-abstention
+  verdict breakdown is independently verifiable from the signed token alone.
 - Add `--redact-paths` flag to `verify`, `evidence correlate`,
   `telemetry export`, `posture scan`, `posture report`, and
   `preflight tool-server` for replacing local absolute paths in the

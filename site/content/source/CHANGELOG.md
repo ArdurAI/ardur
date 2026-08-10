@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "7fb3eca1b5450bffbecff984e81f3893c8a1a7036f3113bea8a6eb827ae8e649"
+source_sha256: "41b6fe890162d49a77eb7085fb287c6b0bff67265983169c78999301b5f6c14a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,12 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Sign the verdict breakdown (`unknowns`, `insufficient_evidence`,
+  `violations`, `denied_tools`) into the attestation JWT itself. Previously
+  these fields existed only in the unsigned governance summary dict — an
+  auditor verifying only the signed JWT could not see *why* a session was
+  non-compliant or which tools were blocked. Now the full honest-abstention
+  verdict breakdown is independently verifiable from the signed token alone.
 - Add `--redact-paths` flag to `verify`, `evidence correlate`,
   `telemetry export`, `posture scan`, `posture report`, and
   `preflight tool-server` for replacing local absolute paths in the

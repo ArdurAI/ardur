@@ -4398,6 +4398,19 @@ class GovernanceProxy:
                         target
                     )
                     extra_claims: dict[str, Any] = {}
+                    # Verdict breakdown: sign the honest-abstention counts
+                    # and denied tool names into the JWT itself so an auditor
+                    # can independently verify *why* a session was
+                    # non-compliant from the signed token alone — without
+                    # trusting the unsigned summary dict.  (2026-08-10)
+                    extra_claims["unknowns"] = int(summary.get("unknowns", 0))
+                    extra_claims["insufficient_evidence"] = int(
+                        summary.get("insufficient_evidence", 0)
+                    )
+                    extra_claims["violations"] = int(summary.get("violations", 0))
+                    extra_claims["denied_tools"] = list(
+                        summary.get("denied_tools") or []
+                    )
                     if int(lifecycle_claims["delegation_count"]) > 0:
                         extra_claims.update(lifecycle_claims)
                     if target.last_receipt_id and target.last_receipt_full_hash:
