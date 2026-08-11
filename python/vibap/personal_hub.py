@@ -51,6 +51,12 @@ from .metrics import metrics as ardur_metrics
 from .rate_limiter import RateLimiter
 from .tls import create_ssl_context, resolve_tls_paths
 
+# Characters that are invisible/whitespace but not caught by ``str.strip()``:
+# zero-width spaces (U+200B–U+200F), word joiner (U+2060), and BOM (U+FEFF).
+# Including these in the blank-command check prevents confusing subprocess
+# errors when a user's input contains only these characters.
+_INVISIBLE_OR_WS_RE = re.compile(r"^[\s\u200b-\u200f\u2060\ufeff]*$")
+
 HUB_SCHEMA_VERSION = "ardur.personal.hub.v0.1"
 EVENT_SCHEMA_VERSION = "ardur.personal.event.v0.1"
 SESSION_REVIEW_SCHEMA_VERSION = "ardur.personal.session_review.v0.1"
@@ -2728,6 +2734,22 @@ def run_under_hub(args: argparse.Namespace) -> int:
     json_mode = bool(getattr(args, "json", False))
     command = list(args.command or [])
     if not command or not command[0].strip():
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "missing_run_command",
+                    "error_code": "missing_run_command",
+                    "condition": "missing_run_command",
+                    "message": "ardur run requires a command after --",
+                    "next_steps": run_missing_command_next_steps(),
+                }
+            )
+            return 1
+        print("ardur run requires a command after --", file=sys.stderr)
+        _print_run_missing_command_next_steps()
+        return 2
+    if _INVISIBLE_OR_WS_RE.match(command[0]):
         if json_mode:
             _emit_json_error_to_stderr(
                 {

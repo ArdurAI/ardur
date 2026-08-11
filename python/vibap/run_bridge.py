@@ -57,6 +57,12 @@ from .package_assets import claude_code_plugin_dir
 if TYPE_CHECKING:
     from .passport import MissionPassport
 
+# Characters that are invisible/whitespace but not caught by ``str.strip()``:
+# zero-width spaces (U+200B–U+200F), word joiner (U+2060), and BOM (U+FEFF).
+# Including these in the blank-command check prevents confusing subprocess
+# errors when a user's input contains only these characters.
+_INVISIBLE_OR_WS_RE = re.compile(r"^[\s\u200b-\u200f\u2060\ufeff]*$")
+
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
 ENV_PROXY_URL = "ARDUR_PROXY_URL"
@@ -1584,6 +1590,8 @@ def run_governed(
 
     if not command or not command[0].strip():
         raise ValueError("ardur run requires a command to govern")
+    if _INVISIBLE_OR_WS_RE.match(command[0]):
+        raise ValueError("ardur run requires a command to govern")
     if via not in VALID_VIA_MODES:
         raise ValueError(
             f"unknown --via mode: {via!r} (choose from {', '.join(VALID_VIA_MODES)})"
@@ -2553,6 +2561,17 @@ def run_governed_cli(args: Any) -> int:
         command = command[1:]
     if not command or not command[0].strip():
         print("ardur run requires a command to govern after --", file=sys.stderr)
+        print(
+            'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
+            file=sys.stderr,
+        )
+        _print_run_governed_missing_command_next_steps()
+        return 2
+    if _INVISIBLE_OR_WS_RE.match(command[0]):
+        print(
+            "ardur run requires a command to govern after --",
+            file=sys.stderr,
+        )
         print(
             'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
             file=sys.stderr,

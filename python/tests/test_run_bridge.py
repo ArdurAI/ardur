@@ -1215,7 +1215,21 @@ def test_run_governed_rejects_empty_command(
         run_governed(command=[], mission="x", home=tmp_path / "h")
 
 
-@pytest.mark.parametrize("command", ([""], ["   "], ["\t\n"]))
+@pytest.mark.parametrize(
+    "command",
+    (
+        [""],
+        ["   "],
+        ["\t\n"],
+        # Zero-width and invisible characters that bypass str.strip().
+        # These should be treated as blank/whitespace-only commands.
+        ["\u200b"],
+        ["\u200c"],
+        ["\u2060"],
+        ["\ufeff"],
+        ["\u200b\u200b\u200b"],
+    ),
+)
 def test_run_governed_rejects_whitespace_only_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str]
 ) -> None:
@@ -1225,6 +1239,11 @@ def test_run_governed_rejects_whitespace_only_command(
     ``[""]`` or ``["   "]`` passed through to ``subprocess.Popen`` and crashed
     with an unhandled ``PermissionError`` traceback.  The fix tightens the guard
     to ``not command[0].strip()``.
+
+    Zero-width characters (U+200B–U+200F, U+2060, U+FEFF) are invisible but
+    are not stripped by Python's ``str.strip()``.  Without the additional
+    regex check they would pass validation and produce confusing subprocess
+    errors.  See ``_INVISIBLE_OR_WS_RE`` in ``run_bridge.py``.
     """
     _hermetic_kernel_env(monkeypatch, tmp_path)
     with pytest.raises(ValueError, match="requires a command"):
