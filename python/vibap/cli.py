@@ -3374,7 +3374,8 @@ def _safe_exception_message(exc: BaseException) -> str:
     """Return a user-safe representation of ``exc`` for JSON output.
 
     Domain exception types (``TransparencyError``, ``AnchorVerificationError``,
-    ``KeyDirectoryError``, etc.) carry intentionally-safe, user-facing
+    ``KeyDirectoryError``, ``OfflineVerificationError``, ``TelemetryExportError``,
+    ``jwt.InvalidTokenError``, etc.) carry intentionally-safe, user-facing
     messages and are preserved verbatim. ``FileNotFoundError`` /
     ``PermissionError`` from the passport module are re-raised with safe
     messages and also preserved. Generic Python built-ins
@@ -3414,6 +3415,20 @@ def _safe_exception_message(exc: BaseException) -> str:
         if isinstance(exc, KeyDirectoryError):
             return text
     except ImportError:  # noqa: BLE001 - passport optional in minimal installs
+        pass
+    try:
+        import jwt
+
+        # PyJWT InvalidTokenError subclasses (ExpiredSignatureError,
+        # ImmatureSignatureError, InvalidSignatureError, DecodeError,
+        # InvalidAudienceError, InvalidIssuerError, MissingRequiredClaimError,
+        # etc.) carry intentionally-safe, user-facing messages with no paths,
+        # credentials, or Python internals.  InvalidKeyError and
+        # PyJWKClientConnectionError can surface endpoint/key material and are
+        # intentionally NOT included — only InvalidTokenError is safe.
+        if isinstance(exc, jwt.InvalidTokenError):
+            return text
+    except ImportError:  # noqa: BLE001 - PyJWT optional in minimal installs
         pass
     # FileNotFoundError / PermissionError re-raised by the passport module
     # carry intentional messages (no errno pattern). Other OSError subclasses

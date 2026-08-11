@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "6808a4b4d30ee8f447a722037a29bc68f216496496a1dca01312c61c2d406fa8"
+source_sha256: "b2514c340d447cc4f273fabfebfe982cd177f15d468fce490ee70d6c0a7650c5"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,15 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `verify --token` and `verify --attestation-token` error responses now show
+  the actual JWT error message (e.g. `"Signature has expired"`) instead of the
+  raw PyJWT class name (`"ExpiredSignatureError"`) in the `detail` field.
+  `_safe_exception_message()` now recognises `jwt.InvalidTokenError` subclasses
+  as domain exception types with intentional user-safe messages, matching the
+  treatment already given to `TransparencyError`, `KeyDirectoryError`,
+  `OfflineVerificationError`, and `TelemetryExportError`. `InvalidKeyError` and
+  other non-token `PyJWTError` subclasses are intentionally NOT included because
+  they can surface key material or endpoint details.
 - `verify <journal>` and `telemetry export <journal>` error responses now show
   the actual domain error message (e.g. "offline verification input was not
   found") instead of the raw Python class name (`"OfflineVerificationError"`).
