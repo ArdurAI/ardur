@@ -5,6 +5,14 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `telemetry export` key-loading errors now show the actual cause (e.g.
+  `"passport_public.pem is missing from the Mission Passport key directory"`
+  or `"receipt public key was not found"`) instead of a generic
+  `"The trusted receipt public key could not be loaded."` message. The
+  `error` code remains `receipt_public_key_invalid`, but the `message` field
+  now carries the real diagnostic via `_safe_exception_message(exc)`, matching
+  the pattern already used by sibling commands `verify` and `evidence
+  correlate`.
 - `verify --token` and `verify --attestation-token` error responses now show
   the actual JWT error message (e.g. `"Signature has expired"`) instead of the
   raw PyJWT class name (`"ExpiredSignatureError"`) in the `detail` field.

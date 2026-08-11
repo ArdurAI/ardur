@@ -2711,12 +2711,12 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
-    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError):
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
         _print_json(
             {
                 "ok": False,
                 "error": "receipt_public_key_invalid",
-                "message": "The trusted receipt public key could not be loaded.",
+                "message": _safe_exception_message(exc),
             }
         )
         return 1
