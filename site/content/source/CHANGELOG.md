@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "9c937259337d8893028afaa99886cce7006606e89dfb587c8d3660766121947b"
+source_sha256: "b1e69f3dccf52a7bddab84d1b6e5d5780a7a84f841ce344a2d01d5be5571fbd1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,13 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `ardur run --output` write failures now produce structured JSON error
+  responses when `--json` is set (matching `issue`, `verify`, and all other
+  sibling commands with `--output`). Previously the error was a terse
+  `ardur run --output: <code>` string on stderr with no JSON structure,
+  no `next_steps`, and no `error_code` — inconsistent with every other
+  `--output`-bearing command. Without `--json`, the non-JSON path now also
+  includes remediation guidance (`Next steps:`).
 - fix(cli): reject empty/whitespace-only `--output` on `ardur run` before execution, preventing CWD pollution and late post-execution errors
 - `ardur run` now rejects empty or whitespace-only command arguments (e.g.
   `ardur run -- ""` or `ardur run --mission "..." -- "   "`) with a clear

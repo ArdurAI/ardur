@@ -2532,6 +2532,47 @@ def _run_governed_preexec_json_error(
     sys.stderr.write("\n")
 
 
+def _run_output_write_error(args: Any, exc: object) -> None:
+    """Emit a structured ``--output`` write-failure error.
+
+    When ``--json`` is set, the error goes to stderr as structured JSON
+    matching the sibling-command pattern (``issue``, ``verify``, etc.).
+    Without ``--json``, a human-readable message with remediation guidance
+    is printed to stderr.  ``stdout`` is never touched so the
+    child-process-output contract is preserved.
+    """
+    condition = "run_output_write_failed"
+    detail = str(exc)
+    next_steps = [
+        {
+            "action": "rerun_with_writable_output",
+            "command": "ardur run --mission <mission> --output <writable-file-path> -- <command>",
+            "detail": (
+                "The --output path parent must be a real directory and the "
+                "file must not be a symlink. Choose a writable path."
+            ),
+        },
+    ]
+    if getattr(args, "json", False):
+        response: dict[str, object] = {
+            "ok": False,
+            "error": condition,
+            "error_code": condition,
+            "condition": condition,
+            "message": "Run governance output file could not be written.",
+            "detail": detail,
+            "next_steps": next_steps,
+        }
+        json.dump(response, sys.stderr, indent=2)
+        sys.stderr.write("\n")
+    else:
+        print(
+            f"ardur run --output: {detail}",
+            file=sys.stderr,
+        )
+        _print_next_steps(next_steps)
+
+
 def _run_max_duration_invalid_next_steps(condition: str) -> list[dict[str, str]]:
     return [
         {
@@ -2838,10 +2879,7 @@ def run_governed_cli(args: Any) -> int:
         try:
             write_report(output_path, payload)
         except RuntimeEvidenceError as exc:
-            print(
-                f"ardur run --output: {exc.code}",
-                file=sys.stderr,
-            )
+            _run_output_write_error(args, exc)
             return 2
         output_digest = hashlib.sha256(payload).hexdigest()
 

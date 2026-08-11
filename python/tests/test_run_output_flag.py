@@ -219,6 +219,64 @@ class TestRunOutputError:
             rc = run_governed_cli(args)
         assert rc == 2
 
+    def test_output_write_failure_json_mode_produces_structured_error(
+        self, tmp_path, capsys
+    ):
+        """``--json`` + bad ``--output`` should emit structured JSON, not a terse string."""
+        blocking_file = tmp_path / "blocking"
+        blocking_file.write_text("data")
+        output_file = blocking_file / "result.json"
+        args = _base_args(output=str(output_file), json=True)
+        mock = _mock_result()
+        with patch("vibap.run_bridge.run_governed", return_value=mock):
+            rc = run_governed_cli(args)
+        assert rc == 2
+        stderr = capsys.readouterr().err
+        parsed = json.loads(stderr)
+        assert parsed["ok"] is False
+        assert parsed["error"] == "run_output_write_failed"
+        assert parsed["error_code"] == "run_output_write_failed"
+        assert parsed["condition"] == "run_output_write_failed"
+        assert "message" in parsed
+        # detail should be the human-readable RuntimeEvidenceError message,
+        # not the machine code (e.g. "output_parent_invalid").
+        assert parsed["detail"]
+        assert parsed["detail"] != "output_parent_invalid"
+        assert isinstance(parsed["next_steps"], list)
+        assert len(parsed["next_steps"]) >= 1
+
+    def test_output_write_failure_non_json_mode_shows_next_steps(
+        self, tmp_path, capsys
+    ):
+        """Without ``--json``, bad ``--output`` should show remediation guidance."""
+        blocking_file = tmp_path / "blocking"
+        blocking_file.write_text("data")
+        output_file = blocking_file / "result.json"
+        args = _base_args(output=str(output_file), json=False)
+        mock = _mock_result()
+        with patch("vibap.run_bridge.run_governed", return_value=mock):
+            rc = run_governed_cli(args)
+        assert rc == 2
+        stderr = capsys.readouterr().err
+        assert "ardur run --output:" in stderr
+        assert "Next steps:" in stderr
+        assert "writable" in stderr.lower()
+
+    def test_output_write_failure_does_not_touch_stdout(
+        self, tmp_path, capsys
+    ):
+        """stdout stays clean even on ``--output`` write failure."""
+        blocking_file = tmp_path / "blocking"
+        blocking_file.write_text("data")
+        output_file = blocking_file / "result.json"
+        args = _base_args(output=str(output_file), json=True)
+        mock = _mock_result()
+        with patch("vibap.run_bridge.run_governed", return_value=mock):
+            rc = run_governed_cli(args)
+        assert rc == 2
+        stdout = capsys.readouterr().out
+        assert stdout == ""
+
 
 class TestRedactPathsWarningGuard:
     """The --redact-paths no-op warning should not fire when --output is active."""
