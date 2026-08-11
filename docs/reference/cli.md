@@ -971,7 +971,13 @@ owner-only writer as other report-producing commands. It works with or without
 the JSON is written to the file; with `--json`, both stderr and the file receive
 JSON. When combined with `--redact-paths`, the file content has local paths
 replaced with stable placeholders. This completes the `--output` contract across
-ALL report-producing commands.
+ALL report-producing commands. If `--output` is supplied as an empty or
+whitespace-only string, `ardur run` exits non-zero without generating keys,
+creating a Mission Passport, or launching the governed command. Stdout receives
+parseable JSON with `ok: false`, stable `condition`/`error`/`error_code` values
+of `path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur run --output <output> -- <command>`. Omitting `--output` is
+valid and writes no file.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or
