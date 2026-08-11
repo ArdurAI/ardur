@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "feb8bc41d23cd1d0259b10a3617e4a62d274ea85ac9321e081c35f4019298c2e"
+source_sha256: "9c937259337d8893028afaa99886cce7006606e89dfb587c8d3660766121947b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,7 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- fix(cli): reject empty/whitespace-only `--output` on `ardur run` before execution, preventing CWD pollution and late post-execution errors
 - `ardur run` now rejects empty or whitespace-only command arguments (e.g.
   `ardur run -- ""` or `ardur run --mission "..." -- "   "`) with a clear
   error message and remediation hints instead of an unhandled

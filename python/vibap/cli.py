@@ -4885,6 +4885,10 @@ def _run_has_governance_intent(args: argparse.Namespace) -> bool:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     if _run_has_governance_intent(args):
         return run_governed_cli(args)
     # Legacy Hub-streaming path: reject whitespace-only --hub-token before the

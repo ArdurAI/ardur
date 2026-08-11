@@ -5,6 +5,7 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- fix(cli): reject empty/whitespace-only `--output` on `ardur run` before execution, preventing CWD pollution and late post-execution errors
 - `ardur run` now rejects empty or whitespace-only command arguments (e.g.
   `ardur run -- ""` or `ardur run --mission "..." -- "   "`) with a clear
   error message and remediation hints instead of an unhandled
