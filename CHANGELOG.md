@@ -5,6 +5,13 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `ardur run` now rejects empty or whitespace-only command arguments (e.g.
+  `ardur run -- ""` or `ardur run --mission "..." -- "   "`) with a clear
+  error message and remediation hints instead of an unhandled
+  `PermissionError` traceback (governance path) or a misleading
+  "Hub unavailable" error (legacy Hub path). The guard now checks
+  `not command[0].strip()` in both `run_governed_cli`,
+  `run_governed`, and `run_under_hub`.
 - `telemetry export` key-loading errors now show the actual cause (e.g.
   `"passport_public.pem is missing from the Mission Passport key directory"`
   or `"receipt public key was not found"`) instead of a generic

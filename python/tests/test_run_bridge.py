@@ -1215,6 +1215,22 @@ def test_run_governed_rejects_empty_command(
         run_governed(command=[], mission="x", home=tmp_path / "h")
 
 
+@pytest.mark.parametrize("command", ([""], ["   "], ["\t\n"]))
+def test_run_governed_rejects_whitespace_only_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """A whitespace-only executable must be rejected at the library level too.
+
+    Previously ``run_governed`` only checked ``not command`` (empty list) but
+    ``[""]`` or ``["   "]`` passed through to ``subprocess.Popen`` and crashed
+    with an unhandled ``PermissionError`` traceback.  The fix tightens the guard
+    to ``not command[0].strip()``.
+    """
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="requires a command"):
+        run_governed(command=command, mission="x", home=tmp_path / "h")
+
+
 def test_run_governed_rejects_unknown_via(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1549,7 +1565,7 @@ def test_run_governed_cli_passes_explicit_resource_scope(
     assert captured["no_resource_scope"] is False
 
 
-@pytest.mark.parametrize("command", ([], ["--"]))
+@pytest.mark.parametrize("command", ([], ["--"], [""], ["   "], ["\t\n"]))
 def test_run_governed_cli_missing_command_reports_placeholder_next_steps(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

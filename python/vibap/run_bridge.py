@@ -1582,7 +1582,7 @@ def run_governed(
         issue_passport,
     )
 
-    if not command:
+    if not command or not command[0].strip():
         raise ValueError("ardur run requires a command to govern")
     if via not in VALID_VIA_MODES:
         raise ValueError(
@@ -2551,7 +2551,7 @@ def run_governed_cli(args: Any) -> int:
     command = list(getattr(args, "command", None) or [])
     if command and command[0] == "--":
         command = command[1:]
-    if not command:
+    if not command or not command[0].strip():
         print("ardur run requires a command to govern after --", file=sys.stderr)
         print(
             'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',

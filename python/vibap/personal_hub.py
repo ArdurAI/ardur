@@ -2727,7 +2727,7 @@ def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
 def run_under_hub(args: argparse.Namespace) -> int:
     json_mode = bool(getattr(args, "json", False))
     command = list(args.command or [])
-    if not command:
+    if not command or not command[0].strip():
         if json_mode:
             _emit_json_error_to_stderr(
                 {
