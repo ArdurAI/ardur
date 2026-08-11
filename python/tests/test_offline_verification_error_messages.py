@@ -18,8 +18,6 @@ import argparse
 import inspect
 import json
 
-import pytest
-
 
 # ─── _safe_exception_message domain allowlist ──────────────────────
 

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -200,7 +199,7 @@ class TestHandleOutputAndRedactHelper:
 
     def test_redact_paths_applied(self, capsys: pytest.CaptureFixture[str]) -> None:
         import argparse
-        from vibap.cli import _handle_output_and_redact, _redact_paths_deep
+        from vibap.cli import _handle_output_and_redact
         args = argparse.Namespace(json=True, output=None, redact_paths=True)
         local_path = str(Path.home())
         response = {"ok": True, "path": local_path + "/some/file"}
