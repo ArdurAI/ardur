@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "a0413710943ed2e18819f2ead5684525d485cb14aabf24a7cf794291509cd835"
+source_sha256: "6808a4b4d30ee8f447a722037a29bc68f216496496a1dca01312c61c2d406fa8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,17 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `verify <journal>` and `telemetry export <journal>` error responses now show
+  the actual domain error message (e.g. "offline verification input was not
+  found") instead of the raw Python class name (`"OfflineVerificationError"`).
+  `_safe_exception_message()` now recognises `OfflineVerificationError` and
+  `TelemetryExportError` as domain exception types with intentional user-safe
+  messages, matching the treatment already given to `TransparencyError` and
+  `KeyDirectoryError`. Previously, a user who passed a missing, empty, or
+  malformed journal to `verify` or `telemetry export` got a `message` field
+  containing only `"OfflineVerificationError"` with zero diagnostic value,
+  while the `--token` / `--attestation-token` paths had rich, actionable error
+  responses.
 - `verify --attestation-token` error responses now use attestation-specific
   error codes (`invalid_attestation_token`, `attestation_public_key_missing`,
   `attestation_public_key_invalid`) and attestation-oriented `next_steps`

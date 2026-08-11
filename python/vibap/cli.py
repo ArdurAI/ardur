@@ -3395,6 +3395,20 @@ def _safe_exception_message(exc: BaseException) -> str:
     if isinstance(exc, TransparencyError):
         return text
     try:
+        from vibap.offline_verification import OfflineVerificationError
+
+        if isinstance(exc, OfflineVerificationError):
+            return text
+    except ImportError:  # noqa: BLE001 - offline_verification optional in minimal installs
+        pass
+    try:
+        from vibap.receipt_telemetry import TelemetryExportError
+
+        if isinstance(exc, TelemetryExportError):
+            return text
+    except ImportError:  # noqa: BLE001 - receipt_telemetry optional in minimal installs
+        pass
+    try:
         from vibap.passport import KeyDirectoryError
 
         if isinstance(exc, KeyDirectoryError):
