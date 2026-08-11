@@ -6,12 +6,10 @@ import sys
 
 import pytest
 
-VENV_PYTHON = "/tmp/ardur-dx-probe-20260811T0808/python/.venv/bin/python"
-
 
 def _run_ardur(*args: str) -> subprocess.CompletedProcess[str]:
     """Run `ardur run` with the given arguments and return the CompletedProcess."""
-    cmd = [VENV_PYTHON, "-m", "vibap.cli", "run", *args]
+    cmd = [sys.executable, "-m", "vibap.cli", "run", *args]
     return subprocess.run(
         cmd,
         capture_output=True,
