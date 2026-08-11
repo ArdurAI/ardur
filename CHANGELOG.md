@@ -5,6 +5,15 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `ardur run --json` input-validation errors from inside `run_governed`
+  (e.g. invalid `--resource-scope`, unknown `--via` mode, or path-root
+  validation failure) now produce structured JSON on stderr (`ok`, `error`,
+  `error_code`, `condition`, `message`, `detail`, `next_steps`) matching the
+  existing `FileNotFoundError` and `PermissionError` handlers. Previously
+  these errors always printed a human-readable stderr line even with
+  `--json`, making programmatic error handling impossible. The same fix
+  applies to `NotImplementedError` (platform-unsupported features) and
+  `KernelPolicyEnforcementError` (`--enforce` without kernel support).
 - `ardur run --output` write failures now produce structured JSON error
   responses when `--json` is set (matching `issue`, `verify`, and all other
   sibling commands with `--output`). Previously the error was a terse

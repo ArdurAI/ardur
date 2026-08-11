@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "b1e69f3dccf52a7bddab84d1b6e5d5780a7a84f841ce344a2d01d5be5571fbd1"
+source_sha256: "6f15b0caa78934ced051210cd0ddf0cd29497bf218e815ce94942eef2ce69de9"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -22,6 +22,15 @@ All notable changes to Ardur will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `ardur run --json` input-validation errors from inside `run_governed`
+  (e.g. invalid `--resource-scope`, unknown `--via` mode, or path-root
+  validation failure) now produce structured JSON on stderr (`ok`, `error`,
+  `error_code`, `condition`, `message`, `detail`, `next_steps`) matching the
+  existing `FileNotFoundError` and `PermissionError` handlers. Previously
+  these errors always printed a human-readable stderr line even with
+  `--json`, making programmatic error handling impossible. The same fix
+  applies to `NotImplementedError` (platform-unsupported features) and
+  `KernelPolicyEnforcementError` (`--enforce` without kernel support).
 - `ardur run --output` write failures now produce structured JSON error
   responses when `--json` is set (matching `issue`, `verify`, and all other
   sibling commands with `--output`). Previously the error was a terse

@@ -2595,6 +2595,34 @@ def _run_max_tool_calls_invalid_next_steps(condition: str) -> list[dict[str, str
     ]
 
 
+def run_governed_value_error_next_steps() -> list[dict[str, str]]:
+    """Return deterministic remediation hints for a generic ``ValueError``
+    raised inside ``run_governed`` (e.g. invalid ``--resource-scope``,
+    unknown ``--via`` mode, or path-root validation failure).
+    """
+    return [
+        {
+            "condition": "run_governed_value_error",
+            "action": "check_resource_scope_and_via",
+            "command": "ardur run --mission <mission> --resource-scope <project-dir> -- <command>",
+            "detail": (
+                "Resource-scope entries must be non-empty path roots inside the "
+                "governed working directory, not glob patterns. If --via is set, "
+                "choose from auto, claude-code, env, or intercept."
+            ),
+        },
+        {
+            "condition": "run_governed_value_error",
+            "action": "use_default_resource_scope",
+            "command": "ardur run --mission <mission> -- <command>",
+            "detail": (
+                "Omit --resource-scope to use the current working directory as "
+                "the default governed scope."
+            ),
+        },
+    ]
+
+
 def run_governed_cli(args: Any) -> int:
     """Argparse entry point used by ``cmd_run`` when governance flags are present."""
     command = list(getattr(args, "command", None) or [])
@@ -2800,16 +2828,43 @@ def run_governed_cli(args: Any) -> int:
             no_resource_scope=bool(getattr(args, "no_resource_scope", False)),
         )
     except NotImplementedError as exc:
-        print(f"ardur run: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_governed_not_implemented",
+                "Run governance feature is not available on this platform.",
+                str(exc),
+                run_governed_value_error_next_steps(),
+            )
+        else:
+            print(f"ardur run: {exc}", file=sys.stderr)
         return 2
     except KernelPolicyEnforcementError as exc:
-        print(
-            f"ardur run: --enforce requires kernel-level policy enforcement: {exc}",
-            file=sys.stderr,
-        )
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_kernel_enforcement_unavailable",
+                "Run governance --enforce requires kernel-level policy enforcement.",
+                str(exc),
+                run_governed_value_error_next_steps(),
+            )
+        else:
+            print(
+                f"ardur run: --enforce requires kernel-level policy enforcement: {exc}",
+                file=sys.stderr,
+            )
         return 3
     except ValueError as exc:
-        print(f"ardur run: {exc}", file=sys.stderr)
+        # Surface a structured JSON error when --json is set, matching the
+        # FileNotFoundError/PermissionError handlers above.  Without --json,
+        # keep the human-readable stderr message.
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_governed_value_error",
+                "Run governance input validation failed.",
+                str(exc),
+                run_governed_value_error_next_steps(),
+            )
+        else:
+            print(f"ardur run: {exc}", file=sys.stderr)
         return 2
     except FileNotFoundError as exc:
         # subprocess.Popen raises FileNotFoundError (Errno 2) when the
