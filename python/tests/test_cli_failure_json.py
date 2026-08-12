@@ -1495,6 +1495,91 @@ def test_start_invalid_tls_material_returns_safe_json_before_side_effects(
     assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
 
 
+def test_start_tls_error_preserves_domain_message(tmp_path, capsys, monkeypatch):
+    """``TLSConfigurationError`` carries a domain message; the JSON response
+    must include it in ``detail`` rather than discarding it for a fixed string."""
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_text("not a certificate", encoding="utf-8")
+    key_path.write_text("not a private key", encoding="utf-8")
+
+    def raise_tls_error(*_args, **_kwargs):
+        raise cli.TLSConfigurationError(
+            "TLS configuration is unavailable; verify the certificate and key"
+        )
+
+    monkeypatch.setattr(cli, "serve_proxy", raise_tls_error)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--keys-dir", str(keys_dir),
+            "--state-dir", str(state_dir),
+            "--log-path", str(audit_log),
+            "--host", "127.0.0.1",
+            "--port", "0",
+            "--require-auth",
+            "--tls-cert", str(cert_path),
+            "--tls-key", str(key_path),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_tls_material_invalid"
+    # The domain error message from TLSConfigurationError must appear in detail.
+    assert "TLS configuration is unavailable" in payload["detail"]
+    # The generic fallback text must NOT be the only content.
+    assert payload["detail"] != (
+        "TLS stays enabled unless --no-tls is explicitly supplied. When explicit "
+        "--tls-cert and --tls-key values are used, both must point to existing files "
+        "before Ardur starts the local governance proxy."
+    )
+
+
+def test_hub_tls_error_preserves_domain_message(tmp_path, capsys, monkeypatch):
+    """``HubTLSConfigurationError`` carries a domain message; the JSON response
+    must include it in ``detail`` rather than discarding it for a fixed string."""
+    home = tmp_path / "ardur_home"
+    home.mkdir()
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_text("not a certificate", encoding="utf-8")
+    key_path.write_text("not a private key", encoding="utf-8")
+
+    def raise_hub_tls_error(*_args, **_kwargs):
+        raise cli.HubTLSConfigurationError()
+
+    monkeypatch.setattr(cli, "serve_hub", raise_hub_tls_error)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "hub",
+            "--home", str(home),
+            "--host", "127.0.0.1",
+            "--port", "0",
+            "--tls-cert", str(cert_path),
+            "--tls-key", str(key_path),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "hub_tls_material_invalid"
+    # The domain error message from HubTLSConfigurationError must appear in detail.
+    assert "TLS configuration is unavailable" in payload["detail"]
+    # The generic fallback text must NOT be the only content.
+    assert payload["detail"] != (
+        "TLS remains enabled unless --no-tls is explicitly supplied. Explicit "
+        "certificate and key values must identify a usable matching pair."
+    )
+
+
 @pytest.mark.parametrize(
     ("budget_args", "condition"),
     [

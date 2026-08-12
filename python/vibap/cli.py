@@ -988,7 +988,7 @@ def _hub_tls_material_failure_next_steps(condition: str) -> list[dict[str, str]]
     ]
 
 
-def _hub_tls_material_failure_response() -> dict:
+def _hub_tls_material_failure_response(detail: str | None = None) -> dict:
     condition = HUB_TLS_MATERIAL_INVALID_CONDITION
     return {
         "ok": False,
@@ -996,7 +996,8 @@ def _hub_tls_material_failure_response() -> dict:
         "error_code": condition,
         "condition": condition,
         "message": "Ardur Personal Hub TLS material is invalid.",
-        "detail": (
+        "detail": detail
+        or (
             "TLS remains enabled unless --no-tls is explicitly supplied. Explicit "
             "certificate and key values must identify a usable matching pair."
         ),
@@ -1041,7 +1042,7 @@ def _start_tls_material_failure_next_steps(condition: str) -> list[dict[str, str
     ]
 
 
-def _start_tls_material_failure_response() -> dict:
+def _start_tls_material_failure_response(detail: str | None = None) -> dict:
     condition = _start_tls_material_failure_condition()
     return {
         "ok": False,
@@ -1049,7 +1050,8 @@ def _start_tls_material_failure_response() -> dict:
         "error_code": condition,
         "condition": condition,
         "message": "Ardur start TLS material is invalid.",
-        "detail": (
+        "detail": detail
+        or (
             "TLS stays enabled unless --no-tls is explicitly supplied. When explicit "
             "--tls-cert and --tls-key values are used, both must point to existing files "
             "before Ardur starts the local governance proxy."
@@ -1466,8 +1468,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             tls_key=args.tls_key,
             no_tls=args.no_tls,
         )
-    except TLSConfigurationError:
-        _print_json(_start_tls_material_failure_response())
+    except TLSConfigurationError as exc:
+        _print_json(_start_tls_material_failure_response(detail=str(exc)))
         return 1
     except OSError as exc:
         import errno
@@ -4291,8 +4293,8 @@ def cmd_hub(args: argparse.Namespace) -> int:
             tls_key=args.tls_key,
             no_tls=args.no_tls,
         )
-    except HubTLSConfigurationError:
-        _print_json(_hub_tls_material_failure_response())
+    except HubTLSConfigurationError as exc:
+        _print_json(_hub_tls_material_failure_response(detail=str(exc)))
         return 1
     except HubError as exc:
         return _path_failure_exit_code(exc)
