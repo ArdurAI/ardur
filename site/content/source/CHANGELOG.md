@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "46f648cad11aa18a67a216fa51f4f8c0f0683789ec70999fe091a090f871f8ca"
+source_sha256: "7269f084d437968394f9cda4bd10ae58faed36b7f1629455f0384c94c2a47182"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -33,6 +33,13 @@ All notable changes to Ardur will be documented in this file.
   making it consistent with every other JSON-producing CLI command.
 
 ### Fixed
+- `--output` write-failure error responses from `_handle_output_and_redact`
+  (used by `issue`, `anchor`, `attest`, `setup`, `status`, `doctor`,
+  `uninstall`, `protect claude-code`, `doctor-claude-code`, and
+  `latency-gate evaluate`) now include `condition`, `error_code`, `message`,
+  and `next_steps`, matching the structured-error contract used by every
+  other CLI command. Previously these returned a minimal response with only
+  `ok`, `error`, and `detail`.
 - `ardur evidence correlate` error responses now show the actual domain error
   message (e.g. `"runtime evidence input is empty"`, `"runtime evidence line 5
   is malformed JSON at column 10"`) instead of the raw Python class name

@@ -215,11 +215,31 @@ def _handle_output_and_redact(
         try:
             payload = _write_json_report_to_file(output, response)
         except ValueError as exc:
+            _condition = f"{command}_output_write_failed"
             _print_json(
                 {
                     "ok": False,
-                    "error": f"{command}_output_write_failed",
+                    "error": _condition,
+                    "error_code": _condition,
+                    "condition": _condition,
+                    "message": (
+                        f"Writing the --output file for ardur {command.replace('_', '-')} "
+                        "failed because the path is invalid or not writable."
+                    ),
                     "detail": str(exc),
+                    "next_steps": [
+                        {
+                            "action": "choose_writable_output_path",
+                            "command": (
+                                f"ardur {command.replace('_', '-')} "
+                                "--output <writable-file-path>"
+                            ),
+                            "detail": (
+                                "Provide a writable file path (not an existing "
+                                "directory or protected location) for the JSON report."
+                            ),
+                        },
+                    ],
                 }
             )
             return 1
