@@ -2274,8 +2274,15 @@ def _load_transparency_public_key(path: Path):  # type: ignore[no-untyped-def]
         raise ValueError("transparency log public key path must not be a symlink")
     if not path.is_file():
         raise FileNotFoundError("transparency log public key was not found")
-    with path.open("rb") as handle:
-        data = handle.read(64 * 1024 + 1)
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(64 * 1024 + 1)
+    except PermissionError as exc:
+        raise PermissionError(
+            "transparency log public key could not be read (permission denied)"
+        ) from exc
+    except OSError as exc:
+        raise OSError("transparency log public key could not be read") from exc
     if not data or len(data) > 64 * 1024:
         raise ValueError(
             "transparency log public key is empty or exceeds the size limit"
@@ -2379,8 +2386,13 @@ def _load_p256_public_key(path: Path, *, label: str):  # type: ignore[no-untyped
         raise ValueError(f"{label} path must not be a symlink")
     if not path.is_file():
         raise FileNotFoundError(f"{label} was not found")
-    with path.open("rb") as handle:
-        data = handle.read(64 * 1024 + 1)
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(64 * 1024 + 1)
+    except PermissionError as exc:
+        raise PermissionError(f"{label} could not be read (permission denied)") from exc
+    except OSError as exc:
+        raise OSError(f"{label} could not be read") from exc
     if not data or len(data) > 64 * 1024:
         raise ValueError(f"{label} is empty or exceeds the size limit")
     try:
