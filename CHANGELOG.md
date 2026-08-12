@@ -14,6 +14,13 @@ All notable changes to Ardur will be documented in this file.
   commands and returns a confirmation with `report_sha256`.
 
 ### Fixed
+- `ardur evidence correlate` error responses now show the actual domain error
+  message (e.g. `"runtime evidence input is empty"`, `"runtime evidence line 5
+  is malformed JSON at column 10"`) instead of the raw Python class name
+  (`"RuntimeEvidenceError"`). `_safe_exception_message()` now recognises
+  `RuntimeEvidenceError` as a domain exception type with intentional user-safe
+  messages, matching the treatment already given to `OfflineVerificationError`,
+  `TelemetryExportError`, `TransparencyError`, and `KeyDirectoryError`.
 - `ardur verify`, `ardur evidence correlate`, and `ardur telemetry export`
   now produce enriched structured JSON error responses (`error_code`,
   `condition`, `detail`, `next_steps`) for domain exceptions

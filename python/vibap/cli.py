@@ -3549,10 +3549,10 @@ def _safe_exception_message(exc: BaseException) -> str:
 
     Domain exception types (``TransparencyError``, ``AnchorVerificationError``,
     ``KeyDirectoryError``, ``OfflineVerificationError``, ``TelemetryExportError``,
-    ``jwt.InvalidTokenError``, etc.) carry intentionally-safe, user-facing
-    messages and are preserved verbatim. ``FileNotFoundError`` /
-    ``PermissionError`` from the passport module are re-raised with safe
-    messages and also preserved. Generic Python built-ins
+    ``RuntimeEvidenceError``, ``jwt.InvalidTokenError``, etc.) carry
+    intentionally-safe, user-facing messages and are preserved verbatim.
+    ``FileNotFoundError`` / ``PermissionError`` from the passport module are
+    re-raised with safe messages and also preserved. Generic Python built-ins
     (``OSError``, bare ``TypeError``/``ValueError``) can carry filesystem
     paths, errno details, or Python internals in ``str(exc)``, so only the
     class name is returned.
@@ -3582,6 +3582,16 @@ def _safe_exception_message(exc: BaseException) -> str:
         if isinstance(exc, TelemetryExportError):
             return text
     except ImportError:  # noqa: BLE001 - receipt_telemetry optional in minimal installs
+        pass
+    try:
+        from vibap.runtime_evidence import RuntimeEvidenceError
+
+        # RuntimeEvidenceError carries safe, hardcoded user-facing messages
+        # (e.g. "runtime evidence input is empty", "line N is malformed JSON")
+        # with no filesystem paths, errno patterns, or Python internals.
+        if isinstance(exc, RuntimeEvidenceError):
+            return text
+    except ImportError:  # noqa: BLE001 - runtime_evidence optional in minimal installs
         pass
     try:
         from vibap.passport import KeyDirectoryError
