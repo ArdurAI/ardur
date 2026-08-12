@@ -2281,7 +2281,10 @@ def _load_p256_public_key(path: Path, *, label: str):  # type: ignore[no-untyped
         data = handle.read(64 * 1024 + 1)
     if not data or len(data) > 64 * 1024:
         raise ValueError(f"{label} is empty or exceeds the size limit")
-    key = serialization.load_pem_public_key(data)
+    try:
+        key = serialization.load_pem_public_key(data)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"{label} is not a valid PEM public key") from exc
     if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(
         key.curve, ec.SECP256R1
     ):
@@ -2362,6 +2365,16 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receipt_public_key_invalid",
+                "message": str(exc),
+            }
+        )
+        return 1
+    try:
         log_public_key = (
             _load_transparency_public_key(args.transparency_log_key)
             if args.transparency_log_key is not None
@@ -2471,6 +2484,17 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+        _print_json(
+            {
+                "ok": False,
+                "valid": False,
+                "error": "receipt_public_key_invalid",
+                "message": str(exc),
+            }
+        )
+        return 1
+    try:
         receipt_report = verify_offline_path(
             args.journal,
             receipt_public_key=receipt_public_key,
@@ -2716,7 +2740,7 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             {
                 "ok": False,
                 "error": "receipt_public_key_invalid",
-                "message": _safe_exception_message(exc),
+                "message": str(exc),
             }
         )
         return 1
