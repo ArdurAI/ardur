@@ -74,7 +74,6 @@ class TestDoctorOutput:
             )
         assert exit_code == 0
         assert result["ok"] is True
-        written = json.loads(output_file.read_text())
         assert real_path not in output_file.read_text()
 
     def test_doctor_output_preserves_failure_exit_code(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

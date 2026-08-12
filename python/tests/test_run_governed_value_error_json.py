@@ -16,8 +16,6 @@ These tests verify:
 
 import json
 
-import pytest
-
 from vibap.run_bridge import (
     run_governed_cli,
     run_governed_value_error_next_steps,
