@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "8a3339f4241a9b92cba1df1b74b8d13f3fc6028810bbad287763c8cbda318d62"
+source_sha256: "152cf0be58995e221ac271c6f7d777c66f6621960ddb15df1be4d633b1daed96"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -31,6 +31,18 @@ All notable changes to Ardur will be documented in this file.
   commands and returns a confirmation with `report_sha256`.
 
 ### Fixed
+- `ardur verify`, `ardur evidence correlate`, and `ardur telemetry export`
+  now produce enriched structured JSON error responses (`error_code`,
+  `condition`, `detail`, `next_steps`) for domain exceptions
+  (`OfflineVerificationError`, `RuntimeEvidenceError`, `TelemetryExportError`,
+  `KeyDirectoryError`, `FileNotFoundError`, `PermissionError`, `OSError`,
+  `TypeError`, `ValueError`), matching the pattern used by all other CLI
+  commands. Previously these three commands returned legacy minimal responses
+  (`error` + `message` only), making programmatic error handling inconsistent
+  across the CLI surface. The existing `error` and `message` fields are
+  preserved for backward compatibility. The `next_steps` are tailored to the
+  specific error code (e.g. `input_missing` → check journal path,
+  `input_not_file` → use a regular file, `malformed_json` → validate JSON).
 - `ardur run --json` input-validation errors from inside `run_governed`
   (e.g. invalid `--resource-scope`, unknown `--via` mode, or path-root
   validation failure) now produce structured JSON on stderr (`ok`, `error`,

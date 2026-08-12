@@ -14,6 +14,18 @@ All notable changes to Ardur will be documented in this file.
   commands and returns a confirmation with `report_sha256`.
 
 ### Fixed
+- `ardur verify`, `ardur evidence correlate`, and `ardur telemetry export`
+  now produce enriched structured JSON error responses (`error_code`,
+  `condition`, `detail`, `next_steps`) for domain exceptions
+  (`OfflineVerificationError`, `RuntimeEvidenceError`, `TelemetryExportError`,
+  `KeyDirectoryError`, `FileNotFoundError`, `PermissionError`, `OSError`,
+  `TypeError`, `ValueError`), matching the pattern used by all other CLI
+  commands. Previously these three commands returned legacy minimal responses
+  (`error` + `message` only), making programmatic error handling inconsistent
+  across the CLI surface. The existing `error` and `message` fields are
+  preserved for backward compatibility. The `next_steps` are tailored to the
+  specific error code (e.g. `input_missing` → check journal path,
+  `input_not_file` → use a regular file, `malformed_json` → validate JSON).
 - `ardur run --json` input-validation errors from inside `run_governed`
   (e.g. invalid `--resource-scope`, unknown `--via` mode, or path-root
   validation failure) now produce structured JSON on stderr (`ok`, `error`,

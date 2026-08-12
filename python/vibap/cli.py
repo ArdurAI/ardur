@@ -277,6 +277,106 @@ def _path_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
     ]
 
 
+def _offline_verification_next_steps(error_code: str) -> list[dict[str, str]]:
+    """Return actionable next steps for offline verification error codes."""
+    if error_code == "input_missing":
+        return [
+            {
+                "condition": "input_missing",
+                "action": "check_journal_path",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal file was not found at the given path. "
+                    "Verify the file path and ensure the journal exists."
+                ),
+            },
+        ]
+    if error_code == "input_not_file":
+        return [
+            {
+                "condition": "input_not_file",
+                "action": "use_regular_file",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal path must be a regular file, not a directory or special file. "
+                    "Pass the path to a regular journal file."
+                ),
+            },
+        ]
+    if error_code == "malformed_json":
+        return [
+            {
+                "condition": "malformed_json",
+                "action": "validate_journal_json",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal contains malformed JSON. Validate the JSON syntax "
+                    "and ensure each line is a valid compact JWS or JSON object."
+                ),
+            },
+        ]
+    if error_code == "input_symlink":
+        return [
+            {
+                "condition": "input_symlink",
+                "action": "use_regular_file",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal path must not be a symlink. "
+                    "Pass the path to the actual regular file."
+                ),
+            },
+        ]
+    if error_code == "input_size_invalid" or error_code == "input_too_large":
+        return [
+            {
+                "condition": error_code,
+                "action": "check_journal_size",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal file size is outside the allowed range. "
+                    "Ensure the file is between 1 byte and 64 MiB."
+                ),
+            },
+        ]
+    if error_code == "duplicate_json_key":
+        return [
+            {
+                "condition": "duplicate_json_key",
+                "action": "validate_journal_json",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal contains duplicate JSON object keys. "
+                    "Remove duplicate keys and retry."
+                ),
+            },
+        ]
+    if error_code == "journal_entry_invalid" or error_code == "journal_token_invalid":
+        return [
+            {
+                "condition": error_code,
+                "action": "validate_journal_entries",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "One or more journal entries are not valid compact JWS tokens. "
+                    "Check the journal format and ensure each line is a valid receipt."
+                ),
+            },
+        ]
+    # Generic fallback for unknown error codes
+    return [
+        {
+            "condition": error_code,
+            "action": "check_input_files",
+            "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+            "detail": (
+                "Offline verification failed. Check that your journal file, "
+                "receipt public key, and any optional key files are valid and accessible."
+            ),
+        },
+    ]
+
+
 def _path_not_directory_response() -> dict:
     condition = _path_not_directory_condition()
     return {
@@ -2412,10 +2512,16 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
         TypeError,
         ValueError,
     ) as exc:
+        error_code = getattr(exc, "code", "offline_verification_failed")
+        safe_message = _safe_exception_message(exc)
         response: dict[str, object] = {
             "valid": False,
-            "error": getattr(exc, "code", "offline_verification_failed"),
-            "message": _safe_exception_message(exc),
+            "error": error_code,
+            "error_code": error_code,
+            "condition": error_code,
+            "message": safe_message,
+            "detail": safe_message,
+            "next_steps": _offline_verification_next_steps(error_code),
         }
         index = getattr(exc, "index", None)
         if index is not None:
@@ -2549,11 +2655,17 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
         OfflineVerificationError,
         KeyDirectoryError,
     ) as exc:
+        error_code = getattr(exc, "code", "runtime_evidence_correlation_failed")
+        safe_message = _safe_exception_message(exc)
         response: dict[str, object] = {
             "ok": False,
             "valid": False,
-            "error": getattr(exc, "code", "runtime_evidence_correlation_failed"),
-            "message": str(exc),
+            "error": error_code,
+            "error_code": error_code,
+            "condition": error_code,
+            "message": safe_message,
+            "detail": safe_message,
+            "next_steps": _offline_verification_next_steps(error_code),
         }
         line = getattr(exc, "line", None)
         if line is not None:
@@ -2564,21 +2676,33 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
         _print_json(response)
         return 1
     except (TypeError, ValueError) as exc:
+        error_code = "runtime_evidence_correlation_failed"
+        safe_message = _safe_exception_message(exc)
         response: dict[str, object] = {
             "ok": False,
             "valid": False,
-            "error": "runtime_evidence_correlation_failed",
-            "message": _safe_exception_message(exc),
+            "error": error_code,
+            "error_code": error_code,
+            "condition": error_code,
+            "message": safe_message,
+            "detail": safe_message,
+            "next_steps": _offline_verification_next_steps(error_code),
         }
         _print_json(response)
         return 1
     except OSError:
+        error_code = "runtime_evidence_io_failed"
+        safe_message = "runtime evidence correlation could not access a required local file safely"
         _print_json(
             {
                 "ok": False,
                 "valid": False,
-                "error": "runtime_evidence_io_failed",
-                "message": "runtime evidence correlation could not access a required local file safely",
+                "error": error_code,
+                "error_code": error_code,
+                "condition": error_code,
+                "message": safe_message,
+                "detail": safe_message,
+                "next_steps": _offline_verification_next_steps(error_code),
             }
         )
         return 1
@@ -2778,7 +2902,19 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             else []
         )
     except TelemetryExportError as exc:
-        _print_json({"ok": False, "error": exc.code, "message": _safe_exception_message(exc)})
+        error_code = exc.code
+        safe_message = _safe_exception_message(exc)
+        _print_json(
+            {
+                "ok": False,
+                "error": error_code,
+                "error_code": error_code,
+                "condition": error_code,
+                "message": safe_message,
+                "detail": safe_message,
+                "next_steps": _offline_verification_next_steps(error_code),
+            }
+        )
         return 1
 
     if args.telemetry_output is None and args.otlp_endpoint is None:
