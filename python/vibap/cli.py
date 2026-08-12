@@ -215,31 +215,10 @@ def _handle_output_and_redact(
         try:
             payload = _write_json_report_to_file(output, response)
         except ValueError as exc:
-            _condition = f"{command}_output_write_failed"
             _print_json(
                 {
                     "ok": False,
-                    "error": _condition,
-                    "error_code": _condition,
-                    "condition": _condition,
-                    "message": (
-                        f"Writing the --output file for ardur {command.replace('_', '-')} "
-                        "failed because the path is invalid or not writable."
-                    ),
-                    "detail": str(exc),
-                    "next_steps": [
-                        {
-                            "action": "choose_writable_output_path",
-                            "command": (
-                                f"ardur {command.replace('_', '-')} "
-                                "--output <writable-file-path>"
-                            ),
-                            "detail": (
-                                "Provide a writable file path (not an existing "
-                                "directory or protected location) for the JSON report."
-                            ),
-                        },
-                    ],
+                    **_output_write_error_response(command, exc),
                 }
             )
             return 1
@@ -254,6 +233,39 @@ def _handle_output_and_redact(
         return exit_code if exit_code is not None else 0
     _print_json(response)
     return exit_code if exit_code is not None else 0
+
+
+def _output_write_error_response(command: str, exc: Exception) -> dict[str, Any]:
+    """Build an enriched structured-error dict for a ``--output`` write failure.
+
+    Shared by inline verify handlers and report handlers so every command
+    that catches ``ValueError`` from ``_write_json_report_to_file`` emits the
+    same structured shape as ``_handle_output_and_redact``.
+    """
+    _condition = f"{command}_output_write_failed"
+    return {
+        "error": _condition,
+        "error_code": _condition,
+        "condition": _condition,
+        "message": (
+            f"Writing the --output file for ardur {command.replace('_', '-')} "
+            "failed because the path is invalid or not writable."
+        ),
+        "detail": str(exc),
+        "next_steps": [
+            {
+                "action": "choose_writable_output_path",
+                "command": (
+                    f"ardur {command.replace('_', '-')} "
+                    "--output <writable-file-path>"
+                ),
+                "detail": (
+                    "Provide a writable file path (not an existing "
+                    "directory or protected location) for the JSON report."
+                ),
+            },
+        ],
+    }
 
 
 def _hub_path_error_code() -> str:
@@ -2159,8 +2171,7 @@ def _cmd_verify_attestation(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "valid": False,
-                    "error": "verify_output_write_failed",
-                    "detail": str(exc),
+                    **_output_write_error_response("verify", exc),
                 }
             )
             return 1
@@ -2268,8 +2279,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "valid": False,
-                    "error": "verify_output_write_failed",
-                    "detail": str(exc),
+                    **_output_write_error_response("verify", exc),
                 }
             )
             return 1
@@ -2376,8 +2386,7 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "valid": False,
-                    "error": "verify_output_write_failed",
-                    "detail": str(exc),
+                    **_output_write_error_response("verify", exc),
                 }
             )
             return 1
@@ -2567,8 +2576,7 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "valid": False,
-                    "error": "verify_output_write_failed",
-                    "detail": str(exc),
+                    **_output_write_error_response("verify", exc),
                 }
             )
             return 1
@@ -2841,8 +2849,7 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "valid": False,
-                    "error": "verify_output_write_failed",
-                    "detail": str(exc),
+                    **_output_write_error_response("verify", exc),
                 }
             )
             return 1
@@ -3312,17 +3319,7 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "ok": False,
-                    "error": "claude_code_report_output_write_failed",
-                    "condition": "claude_code_report_output_write_failed",
-                    "detail": str(exc),
-                    "next_steps": [
-                        {
-                            "condition": "claude_code_report_output_write_failed",
-                            "action": "choose_writable_output_path",
-                            "command": "ardur claude-code-report --output <writable-file-path>",
-                            "detail": "Provide a writable file path (not an existing directory) for the JSON report.",
-                        },
-                    ],
+                    **_output_write_error_response("claude_code_report", exc),
                 }
             )
             return 1
@@ -3947,17 +3944,7 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "ok": False,
-                    "error": "gemini_cli_report_output_write_failed",
-                    "condition": "gemini_cli_report_output_write_failed",
-                    "detail": str(exc),
-                    "next_steps": [
-                        {
-                            "condition": "gemini_cli_report_output_write_failed",
-                            "action": "choose_writable_output_path",
-                            "command": "ardur gemini-cli-report --output <writable-file-path>",
-                            "detail": "Provide a writable file path (not an existing directory) for the JSON report.",
-                        },
-                    ],
+                    **_output_write_error_response("gemini_cli_report", exc),
                 }
             )
             return 1
@@ -4147,17 +4134,7 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
             _print_json(
                 {
                     "ok": False,
-                    "error": "codex_app_server_report_output_write_failed",
-                    "condition": "codex_app_server_report_output_write_failed",
-                    "detail": str(exc),
-                    "next_steps": [
-                        {
-                            "condition": "codex_app_server_report_output_write_failed",
-                            "action": "choose_writable_output_path",
-                            "command": "ardur codex-app-server-report --output <writable-file-path>",
-                            "detail": "Provide a writable file path (not an existing directory) for the JSON report.",
-                        },
-                    ],
+                    **_output_write_error_response("codex_app_server_report", exc),
                 }
             )
             return 1

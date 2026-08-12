@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "7269f084d437968394f9cda4bd10ae58faed36b7f1629455f0384c94c2a47182"
+source_sha256: "74a6e2cf90ba5ae498fca3d3aaa1008792eca6d18f6daf1957fd6113b693ebee"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -33,13 +33,17 @@ All notable changes to Ardur will be documented in this file.
   making it consistent with every other JSON-producing CLI command.
 
 ### Fixed
-- `--output` write-failure error responses from `_handle_output_and_redact`
-  (used by `issue`, `anchor`, `attest`, `setup`, `status`, `doctor`,
-  `uninstall`, `protect claude-code`, `doctor-claude-code`, and
-  `latency-gate evaluate`) now include `condition`, `error_code`, `message`,
-  and `next_steps`, matching the structured-error contract used by every
-  other CLI command. Previously these returned a minimal response with only
-  `ok`, `error`, and `detail`.
+- `--output` write-failure error responses now include `condition`,
+  `error_code`, `message`, and `next_steps` across **all** CLI commands that
+  support `--output`. The 5 inline `verify` handlers, 3 adapter report
+  handlers (`claude-code-report`, `gemini-cli-report`,
+  `codex-app-server-report`), and `_handle_output_and_redact` (used by
+  `issue`, `anchor`, `attest`, `setup`, `status`, `doctor`, `uninstall`,
+  `protect claude-code`, `doctor-claude-code`, `latency-gate evaluate`) now
+  share a single `_output_write_error_response` helper, completing full
+  structured-error parity. Previously the verify handlers returned a minimal
+  `error`/`detail` response and the report handlers had inconsistent
+  `next_steps` shapes.
 - `ardur evidence correlate` error responses now show the actual domain error
   message (e.g. `"runtime evidence input is empty"`, `"runtime evidence line 5
   is malformed JSON at column 10"`) instead of the raw Python class name
