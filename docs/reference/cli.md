@@ -724,7 +724,7 @@ the plist.
 ```text
 ardur setup [--host HOST] [--port PORT] [--home DIR]
             [--rotate-token] [--extension-path DIR]
-            [--json] [--redact-paths]
+            [--json] [--redact-paths] [--output FILE]
 ```
 
 `--rotate-token` forces a new token even if one already exists.
@@ -735,6 +735,9 @@ points users to (default: `examples/ardur-personal-extension`).
 `home`, `config`, and `launch_agent` fields) with stable placeholders (`<home>`,
 `<config>`, `<launch-agent>`) so the result is safe to share in CI artifacts or
 bug reports.
+
+`--output` atomically writes the JSON response to an owner-only file instead of
+printing it to stdout, matching every other JSON-producing command.
 
 If `--home` points to an existing file instead of a directory, `ardur setup`
 fails closed before writing setup state, generating or printing a token, or
@@ -781,7 +784,7 @@ token, LaunchAgent, key, session, log, state, or service artifacts are created.
 Show Hub status — current sessions, latest receipt, adapter availability.
 
 ```text
-ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR] [--redact-paths]
+ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR] [--redact-paths] [--output FILE]
 ```
 
 When the local Hub cannot be reached, returns a local token/auth setup error, or
@@ -820,7 +823,7 @@ Health-check the local Ardur Personal setup: config presence, Hub
 reachability, key material, write permissions.
 
 ```text
-ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN] [--redact-paths]
+ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN] [--redact-paths] [--output FILE]
 ```
 
 The JSON output preserves the `ok` and `checks` fields and includes a
@@ -856,7 +859,7 @@ plugin files, missing `claude` binary, missing or stale `active_mission.jwt`,
 and machine-readable `next_steps` remediation hints when a check fails.
 
 ```text
-ardur doctor-claude-code [--home DIR] [--plugin-dir DIR] [--redact-paths]
+ardur doctor-claude-code [--home DIR] [--plugin-dir DIR] [--redact-paths] [--output FILE]
 ```
 
 The command is local-only: it inspects files, PATH, and Claude Code plugin
@@ -1326,6 +1329,7 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
                           [--forbid-rules FILE]
                           [--cedar-policy FILE]
                           [--cedar-entities FILE]
+                          [--output FILE]
 ```
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown

@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "6f15b0caa78934ced051210cd0ddf0cd29497bf218e815ce94942eef2ce69de9"
+source_sha256: "8a3339f4241a9b92cba1df1b74b8d13f3fc6028810bbad287763c8cbda318d62"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -20,6 +20,15 @@ This page is generated from the public repository source file. Edit the source f
 All notable changes to Ardur will be documented in this file.
 
 ## [Unreleased]
+
+### Added
+- `--output` flag added to `doctor`, `status`, `setup`, `doctor-claude-code`,
+  and `protect claude-code` for atomically writing the JSON response to an
+  owner-only file. Every other JSON-producing command (`verify`, `posture`,
+  `preflight`, `telemetry`, `evidence correlate`, `run`, adapter reports)
+  already had `--output`; these five personal/diagnostic commands were the
+  last gap. The flag uses the same atomic owner-only writer as all other
+  commands and returns a confirmation with `report_sha256`.
 
 ### Fixed
 - `ardur run --json` input-validation errors from inside `run_governed`

@@ -4,6 +4,15 @@ All notable changes to Ardur will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `--output` flag added to `doctor`, `status`, `setup`, `doctor-claude-code`,
+  and `protect claude-code` for atomically writing the JSON response to an
+  owner-only file. Every other JSON-producing command (`verify`, `posture`,
+  `preflight`, `telemetry`, `evidence correlate`, `run`, adapter reports)
+  already had `--output`; these five personal/diagnostic commands were the
+  last gap. The flag uses the same atomic owner-only writer as all other
+  commands and returns a confirmation with `report_sha256`.
+
 ### Fixed
 - `ardur run --json` input-validation errors from inside `run_governed`
   (e.g. invalid `--resource-scope`, unknown `--via` mode, or path-root

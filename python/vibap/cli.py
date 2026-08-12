@@ -4717,10 +4717,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
         response = setup_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
-    if getattr(args, "redact_paths", False):
-        response = _redact_paths_deep(response)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="setup",
+        exit_code=0 if response.get("ok") else 1,
+    )
 
 
 def _redact_paths_in_response(response: dict[str, Any]) -> dict[str, Any]:
@@ -4825,10 +4827,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         home=args.home,
     )
     response = status_response_with_next_steps(response)
-    if getattr(args, "redact_paths", False):
-        response = _redact_paths_in_response(response)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="status",
+        exit_code=0 if response.get("ok") else 1,
+    )
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -4840,10 +4844,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         response = doctor_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
-    if getattr(args, "redact_paths", False):
-        response = _redact_paths_in_response(response)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="doctor",
+        exit_code=0 if response.get("ok") else 1,
+    )
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
@@ -6619,11 +6625,13 @@ def cmd_protect_claude_code(args: argparse.Namespace) -> int:
         return 1
     result = protect_claude_code(args)
     ok = bool(result.get("ok"))
-    if args.json:
-        if getattr(args, "redact_paths", False):
-            result = _redact_paths_deep(result)
-        _print_json(result)
-        return 0 if ok else 1
+    if args.json or getattr(args, "output", None) is not None:
+        return _handle_output_and_redact(
+            args,
+            result,
+            command="protect_claude_code",
+            exit_code=0 if ok else 1,
+        )
     if not ok:
         print("Ardur Claude Code protection was not configured.")
         message = result.get("message")
@@ -6801,10 +6809,12 @@ def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
         _print_json(path_failure)
         return 1
     response = claude_code_doctor(plugin_dir=args.plugin_dir, home=args.home)
-    if getattr(args, "redact_paths", False):
-        response = _redact_paths_in_response(response)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="doctor_claude_code",
+        exit_code=0 if response.get("ok") else 1,
+    )
 
 
 def _latency_gate_value_failure(
@@ -7866,6 +7876,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="replace local absolute paths in JSON output with stable placeholders "
         "so the result is safe to share in CI artifacts or bug reports",
     )
+    setup.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
+    )
     setup.set_defaults(func=cmd_setup)
 
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
@@ -7886,6 +7903,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="replace local absolute paths in JSON output with stable placeholders "
         "so the result is safe to share in CI artifacts or bug reports",
     )
+    status.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
+    )
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
@@ -7905,6 +7929,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace local absolute paths in JSON output with stable placeholders "
         "so the result is safe to share in CI artifacts or bug reports",
+    )
+    doctor.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
     )
     doctor.set_defaults(func=cmd_doctor)
 
@@ -7931,6 +7962,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace local absolute paths in JSON output with stable placeholders "
         "so the result is safe to share in CI artifacts or bug reports",
+    )
+    doctor_cc.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
     )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
 
@@ -8298,6 +8336,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--cedar-entities",
         type=str,
         help="Cedar entities JSON file (used with --cedar-policy)",
+    )
+    protect_cc.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing human-readable or JSON output to stdout",
     )
     protect_cc.set_defaults(func=cmd_protect_claude_code)
 
