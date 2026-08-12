@@ -111,6 +111,8 @@ def _restore_permissions(key_path: Path) -> None:
     try:
         os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
+        # Best-effort cleanup; if the file is already gone or unwriteable,
+        # pytest's tmp_path will handle removal on the next session.
         pass
 
 
