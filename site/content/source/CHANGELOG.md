@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "88a833e273b445eb19cf92b02a622ee2af972556e687d3f182527a0a60bc6c47"
+source_sha256: "46f648cad11aa18a67a216fa51f4f8c0f0683789ec70999fe091a090f871f8ca"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -29,6 +29,8 @@ All notable changes to Ardur will be documented in this file.
   already had `--output`; these five personal/diagnostic commands were the
   last gap. The flag uses the same atomic owner-only writer as all other
   commands and returns a confirmation with `report_sha256`.
+- `ardur latency-gate evaluate` now supports `--output` and `--redact-paths`,
+  making it consistent with every other JSON-producing CLI command.
 
 ### Fixed
 - `ardur evidence correlate` error responses now show the actual domain error

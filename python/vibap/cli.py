@@ -7168,7 +7168,18 @@ def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
             "decision": body,
             "invalid_files": invalid_reports,
         }
-        _print_json(envelope)
+        # Determine exit code from verdict (0=pass, 1=fail, 2=inconclusive)
+        # BEFORE calling _handle_output_and_redact so the file write path
+        # preserves the verdict-based exit code.
+        if decision.verdict == "pass":
+            verdict_exit = 0
+        elif decision.verdict == "fail":
+            verdict_exit = 1
+        else:
+            verdict_exit = 2
+        return _handle_output_and_redact(
+            args, envelope, command="latency_gate_evaluate", exit_code=verdict_exit
+        )
     else:
         sys.stdout.write(rendered)
         if invalid_reports:
@@ -8582,6 +8593,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="explicitly request JSON output (output defaults to JSON; "
         "this flag is accepted for consistency with other commands)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON/file output with "
+        "stable placeholders so the result is safe to share in "
+        "CI artifacts or bug reports",
+    )
+    latency_gate_evaluate.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the gate decision JSON to an owner-only "
+        "file instead of printing it to stdout",
     )
     latency_gate_evaluate.set_defaults(func=cmd_latency_gate_evaluate)
 
