@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "21a631e83877e9a55c8fbcde14eb3079562aa3dfa9b6c2c97e693a41af85fcbb"
+source_sha256: "fdf651980dd3f2b73c2d981e69f29519b01aec329d107e9156539a201d98db06"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -757,7 +757,7 @@ the plist.
 ```text
 ardur setup [--host HOST] [--port PORT] [--home DIR]
             [--rotate-token] [--extension-path DIR]
-            [--json] [--redact-paths]
+            [--json] [--redact-paths] [--output FILE]
 ```
 
 `--rotate-token` forces a new token even if one already exists.
@@ -768,6 +768,9 @@ points users to (default: `examples/ardur-personal-extension`).
 `home`, `config`, and `launch_agent` fields) with stable placeholders (`<home>`,
 `<config>`, `<launch-agent>`) so the result is safe to share in CI artifacts or
 bug reports.
+
+`--output` atomically writes the JSON response to an owner-only file instead of
+printing it to stdout, matching every other JSON-producing command.
 
 If `--home` points to an existing file instead of a directory, `ardur setup`
 fails closed before writing setup state, generating or printing a token, or
@@ -814,7 +817,7 @@ token, LaunchAgent, key, session, log, state, or service artifacts are created.
 Show Hub status — current sessions, latest receipt, adapter availability.
 
 ```text
-ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR] [--redact-paths]
+ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR] [--redact-paths] [--output FILE]
 ```
 
 When the local Hub cannot be reached, returns a local token/auth setup error, or
@@ -853,7 +856,7 @@ Health-check the local Ardur Personal setup: config presence, Hub
 reachability, key material, write permissions.
 
 ```text
-ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN] [--redact-paths]
+ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN] [--redact-paths] [--output FILE]
 ```
 
 The JSON output preserves the `ok` and `checks` fields and includes a
@@ -889,7 +892,7 @@ plugin files, missing `claude` binary, missing or stale `active_mission.jwt`,
 and machine-readable `next_steps` remediation hints when a check fails.
 
 ```text
-ardur doctor-claude-code [--home DIR] [--plugin-dir DIR] [--redact-paths]
+ardur doctor-claude-code [--home DIR] [--plugin-dir DIR] [--redact-paths] [--output FILE]
 ```
 
 The command is local-only: it inspects files, PATH, and Claude Code plugin
@@ -1004,7 +1007,13 @@ owner-only writer as other report-producing commands. It works with or without
 the JSON is written to the file; with `--json`, both stderr and the file receive
 JSON. When combined with `--redact-paths`, the file content has local paths
 replaced with stable placeholders. This completes the `--output` contract across
-ALL report-producing commands.
+ALL report-producing commands. If `--output` is supplied as an empty or
+whitespace-only string, `ardur run` exits non-zero without generating keys,
+creating a Mission Passport, or launching the governed command. Stdout receives
+parseable JSON with `ok: false`, stable `condition`/`error`/`error_code` values
+of `path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur run --output <output> -- <command>`. Omitting `--output` is
+valid and writes no file.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or
@@ -1353,6 +1362,7 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
                           [--forbid-rules FILE]
                           [--cedar-policy FILE]
                           [--cedar-entities FILE]
+                          [--output FILE]
 ```
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown
