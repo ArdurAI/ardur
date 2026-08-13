@@ -9,13 +9,10 @@ Covers:
 
 import errno
 import json
-import os
-import subprocess
 from unittest.mock import patch
 
-import pytest
-
 from vibap import cli
+
 
 def _parse_last_json(stdout: str):
     """Parse the last JSON object from stdout (start emits session_started before errors)."""

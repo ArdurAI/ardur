@@ -23,8 +23,6 @@ shape for all of them.
 
 import inspect
 
-import pytest
-
 from vibap.cli import _output_write_error_response
 
 
