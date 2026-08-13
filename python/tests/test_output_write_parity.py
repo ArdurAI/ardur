@@ -99,7 +99,7 @@ class TestVerifyHandlersUseSharedHelper:
 
             {"valid": False, **_output_write_error_response("verify", exc)}
         """
-        import vibap.cli as cli
+        from vibap import cli as cli
         source = inspect.getsource(cli)
         # The old inline pattern should NOT be present
         assert '"error": "verify_output_write_failed"' not in source, \
