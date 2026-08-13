@@ -834,6 +834,46 @@ def _start_port_in_use_response() -> dict:
     }
 
 
+def _start_oserror_condition() -> str:
+    return "start_oserror"
+
+
+def _start_oserror_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "check_start_permissions",
+            "command": "ardur start --mission <mission.json> --keys-dir <keys-dir>",
+            "detail": (
+                "If the error is EACCES or EPERM, verify the user has permission "
+                "to bind the requested host and port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_ephemeral_port",
+            "command": "ardur start --mission <mission.json> --keys-dir <keys-dir> --port 0",
+            "detail": "Use --port 0 for an ephemeral port to avoid conflicts.",
+        },
+    ]
+
+
+def _start_oserror_response(exc: OSError) -> dict:
+    import errno as _errno
+
+    condition = _start_oserror_condition()
+    detail = f"OSError errno {_errno.errorcode.get(exc.errno or 0, exc.errno)}: {exc.strerror or str(exc)}"
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start failed with an unexpected OSError.",
+        "detail": detail,
+        "next_steps": _start_oserror_next_steps(condition),
+    }
+
+
 def _start_host_failure_condition() -> str:
     return "start_host_invalid"
 
@@ -1014,6 +1054,46 @@ def _hub_port_in_use_response() -> dict:
             "Use --port 0 for an ephemeral port."
         ),
         "next_steps": _hub_port_in_use_next_steps(condition),
+    }
+
+
+def _hub_oserror_condition() -> str:
+    return "hub_oserror"
+
+
+def _hub_oserror_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "check_hub_permissions",
+            "command": "ardur hub",
+            "detail": (
+                "If the error is EACCES or EPERM, verify the user has permission "
+                "to bind the requested host and port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_ephemeral_port",
+            "command": "ardur hub --port 0",
+            "detail": "Use --port 0 for an ephemeral port to avoid conflicts.",
+        },
+    ]
+
+
+def _hub_oserror_response(exc: OSError) -> dict:
+    import errno as _errno
+
+    condition = _hub_oserror_condition()
+    detail = f"OSError errno {_errno.errorcode.get(exc.errno or 0, exc.errno)}: {exc.strerror or str(exc)}"
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur hub failed with an unexpected OSError.",
+        "detail": detail,
+        "next_steps": _hub_oserror_next_steps(condition),
     }
 
 
@@ -1609,7 +1689,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         if exc.errno == errno.EADDRINUSE:
             _print_json(_start_port_in_use_response())
             return 1
-        raise
+        _print_json(_start_oserror_response(exc))
+        return 1
     return 0
 
 
@@ -4459,7 +4540,8 @@ def cmd_hub(args: argparse.Namespace) -> int:
         if exc.errno == errno.EADDRINUSE:
             _print_json(_hub_port_in_use_response())
             return 1
-        raise
+        _print_json(_hub_oserror_response(exc))
+        return 1
     return 0
 
 
@@ -5041,7 +5123,7 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     if getattr(args, "redact_paths", False):
         response = _redact_paths_deep(response)
     _print_json(response)
-    return 0
+    return 0 if response.get("ok", True) else 1
 
 
 def _run_has_governance_intent(args: argparse.Namespace) -> bool:
@@ -5251,7 +5333,7 @@ def cmd_personal_firewall_demo(args: argparse.Namespace) -> int:
         return 1
     if args.json:
         _print_json(result)
-    return 0
+    return 0 if result.get("ok", True) else 1
 
 
 CLAUDE_CODE_PROTECT_MODES = {

@@ -2,7 +2,7 @@
 title: "Changelog"
 description: "All notable changes to Ardur will be documented in this file."
 source_path: "CHANGELOG.md"
-source_sha256: "74a6e2cf90ba5ae498fca3d3aaa1008792eca6d18f6daf1957fd6113b693ebee"
+source_sha256: "8e1e5b2d3c399b8f4d6c3e2d02816eb38cadebe7c631b85b3776b95f3e9cb219"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -33,6 +33,15 @@ All notable changes to Ardur will be documented in this file.
   making it consistent with every other JSON-producing CLI command.
 
 ### Fixed
+- Non-`EADDRINUSE` `OSError` from `ardur start` and `ardur hub` now produces
+  structured JSON (`start_oserror` / `hub_oserror`) with `error_code`,
+  `condition`, `detail`, and `next_steps` instead of a bare Python traceback.
+  The `EADDRINUSE` case still uses the dedicated `start_port_in_use` /
+  `hub_port_in_use` response.
+- `ardur uninstall` now returns exit code 1 when the response `ok` field is
+  `False`, instead of always returning 0.
+- `ardur personal-firewall demo` now returns exit code 1 when the result `ok`
+  field is `False` on the non-exception path, instead of always returning 0.
 - `--output` write-failure error responses now include `condition`,
   `error_code`, `message`, and `next_steps` across **all** CLI commands that
   support `--output`. The 5 inline `verify` handlers, 3 adapter report

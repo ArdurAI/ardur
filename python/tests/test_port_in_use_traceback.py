@@ -135,11 +135,11 @@ def test_hub_port_in_use_response_shape():
     assert resp["next_steps"][0]["action"] == "choose_available_hub_port"
 
 
-# ── non-EADDRINUSE OSError re-raises (not swallowed) ────────────────────────
+# ── non-EADDRINUSE OSError emits structured JSON (not swallowed, not re-raised) ─
 
 
-def test_start_non_addrinuse_oserror_reraises(tmp_path):
-    """OSError without EADDRINUSE should re-raise, not be swallowed."""
+def test_start_non_addrinuse_oserror_emits_structured_json(tmp_path, capsys):
+    """OSError without EADDRINUSE should produce structured JSON and exit 1, not re-raise."""
     from vibap import cli as cli_module
     import argparse
 
@@ -170,7 +170,31 @@ def test_start_non_addrinuse_oserror_reraises(tmp_path):
 
     cli_module.serve_proxy = raise_permission_denied
     try:
-        with pytest.raises(PermissionError):
-            cli_module.cmd_start(args)
+        rc = cli_module.cmd_start(args)
+        assert rc == 1
+        captured = capsys.readouterr()
+        # start emits pretty-printed JSON; the error response is the last JSON object
+        import re
+        # Find the last JSON object by looking for the last opening brace
+        out = captured.out.strip()
+        # Split on "}\n{" pattern to separate multiple JSON objects
+        json_objects = []
+        decoder = json.JSONDecoder()
+        idx = 0
+        while idx < len(out):
+            while idx < len(out) and out[idx] in " \t\n\r":
+                idx += 1
+            if idx >= len(out):
+                break
+            obj, end = decoder.raw_decode(out, idx)
+            json_objects.append(obj)
+            idx = end
+        data = json_objects[-1]
+        assert data["ok"] is False
+        assert data["error"] == "start_oserror"
+        assert data["error_code"] == "start_oserror"
+        assert "EACCES" in data["detail"]
+        assert "next_steps" in data
+        assert "Traceback" not in captured.err
     finally:
         cli_module.serve_proxy = original_serve_proxy
