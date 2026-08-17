@@ -42,7 +42,7 @@ dependencies = [
     # psutil is used by the host-observer capture tier to enumerate child
     # processes of the launched agent. It is a cross-platform, zero-privilege
     # dependency that does not require kernel support.
-    "psutil>=5.9.0,<7",
+    "psutil>=5.9.0,<8",
 ]
 
 [project.optional-dependencies]
@@ -54,13 +54,13 @@ dev = [
     "wheel==0.47.0",
     "PyYAML>=6.0,<7",
     "cedarpy>=4.0,<6",
-    "z3-solver>=4.16,<5",
+    "z3-solver>=4.16,<6",
     "biscuit-python==0.4.0",
     "spiffe>=0.2,<0.4",
     # spiffe's ASN.1 dependency must stay above the three network-DoS fixes in
     # pyasn1 0.6.4 (CVE-2026-59884, CVE-2026-59885, CVE-2026-59886).
     "pyasn1>=0.6.4,<0.7",
-    "mcp>=1.23.0,<2",
+    "mcp>=1.23.0,<3",
     "python-multipart>=0.0.26,<1",
 ]
 langgraph = [
