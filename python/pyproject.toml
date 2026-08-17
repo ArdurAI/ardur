@@ -54,7 +54,7 @@ dev = [
     "wheel==0.47.0",
     "PyYAML>=6.0,<7",
     "cedarpy>=4.0,<6",
-    "z3-solver>=4.16,<5",
+    "z3-solver>=4.16,<6",
     "biscuit-python==0.4.0",
     "spiffe>=0.2,<0.4",
     # spiffe's ASN.1 dependency must stay above the three network-DoS fixes in
