@@ -1,8 +1,13 @@
 # Ardur Agent Instructions
 
-These instructions are mandatory for coding agents working in this repository.
+The canonical entry point for coding agents working in this repository. These
+instructions are mandatory. Human contributors should read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`docs/engineering-standards.md`](docs/engineering-standards.md); this file
+restates the parts an agent gets wrong most often and adds the parts that only
+matter to agents.
 
-## First Action In Every New Session
+## 0. First Action In Every New Session
 
 Run the Conductor bootstrap before doing task-specific work:
 
@@ -23,89 +28,436 @@ If the bootstrap fails, stop and inspect the failure before editing files. A
 failed bootstrap usually means the local toolchain, branch state, or generated
 context is not trustworthy yet.
 
-## Workspace Contract
-
-- Work from the current branch. Do not rename it.
-- Use `origin/dev` as the default diff and PR base for normal development work.
-- Treat `dev` as the integration branch where new improvements land first.
-- Treat `main` as release-only: only tested, verified, public-facing work should
-  be promoted there from `dev`.
-- If a Conductor workspace was created from `origin/main`, keep the branch name
-  unchanged but target the resulting PR/merge at `dev` unless the user says this
-  is a release-promotion task.
-- Preserve user work in progress. Do not reset, checkout, clean, or revert
-  unrelated local changes unless the user explicitly asks for that operation.
-- Generated session and graph artifacts belong under `.context/`, which is
-  intentionally ignored by git.
-- Private/local skills belong under `.context/skills/`, `.agents/`, or
-  `.local-skills/` only. They must not be committed to the open source repo.
-
-## Repo Truth Hierarchy
-
-Use live repo state over stale prose.
+**Repo truth hierarchy.** Use live repo state over stale prose, in this order:
 
 1. `git status`, branch refs, and the actual files in this checkout.
 2. `.github/workflows/` for the current CI surface.
-3. `README.md`, `STATUS.md`, `docs/public-import-plan.md`, `docs/TESTING.md`,
-   `docs/engineering-standards.md`, and `docs/decisions/`.
+3. `README.md`, `STATUS.md`, `docs/TESTING.md`, `docs/engineering-standards.md`,
+   `docs/known-limitations.md`, and `docs/decisions/`.
 4. Prior notes and generated `.context/` files, after checking their timestamp.
 
 If two sources conflict, cite the conflict and verify from the current tree.
-For example, this repo has changed quickly around Python and Go CI; the live
-workflow files are the authority for what currently runs.
+This repo has changed quickly around Python and Go CI; the live workflow files
+are the authority for what currently runs. That includes this file — if
+`AGENTS.md` disagrees with a workflow, the workflow is right and this file is a
+bug.
 
-## Engineering Defaults
+## 1. What Ardur Is, And What It Does Not Claim
 
-- Agent-specific public guides live under `docs/agent-instructions/`:
-  `conductor.md`, `codex.md`, and `claude.md`. They share the same contract and
-  only differ where the runtime needs different startup or local-state handling.
-- Follow `docs/engineering-standards.md` for foundation, testing, review,
-  release, security, and AI-agent work rules.
-- Keep public claims evidence-backed: command, test, artifact, verifier path, or
-  explicit limitation.
-- Keep public product naming as `Ardur`. Preserve protocol/source names such as
-  `VIBAP`, `MCEP`, `SPIFFE`, `SPIRE`, `Biscuit`, `Cedar`, `AAT`, and `EAT`
-  where they describe real technical artifacts.
-- Do not hardcode secrets, local private paths, or generated credentials.
-- Live external-API tests are allowed only when they materially verify the task,
-  are explicit/opt-in, and use environment credentials approved for that local
-  run. Keep calls minimal and cost-aware; never print, log, persist, or commit
-  secret values. Public CI must not require private credentials.
-- Prefer small, reviewable changes with targeted tests.
-- For runtime changes, run the relevant Python and/or Go checks before claiming
-  success.
+Ardur governs AI-agent tool calls that pass through a configured adapter or
+proxy. It checks mission, resource, budget, and delegation constraints before
+that integration dispatches the call, then emits an issuer-signed, hash-linked
+receipt for the decision. The goal is to prove what your agents do, not just
+what they say.
 
-## Private Skills And Local Instructions
+The honesty of those claims is the product. Overclaiming is a defect on the
+same level as a failing test, and CI, review, and the proof registry all exist
+to catch it. **Read this list before you write a sentence describing what Ardur
+can do:**
 
-Public, repo-safe agent instructions live in this tracked `AGENTS.md` file.
-Everything else is local-only:
+- **Ardur does not claim visibility into calls that bypass the hook or
+  provider-hidden actions.** (`STATUS.md`) The capture boundary is the
+  configured adapter. This boundary is intentional and disclosed.
+- **The public proof does not establish** universal agent capture,
+  provider-hidden behavior, or cross-platform kernel enforcement. (`README.md`)
+- **Ardur is not** a sandbox by itself, a universal discovery layer for calls
+  that bypass its configured adapter, a universal semantic-safety engine, or a
+  replacement for identity, workload isolation, or network controls.
+  (`docs/known-limitations.md`)
+- **Not captured today:** side effects of shell commands (a `Bash` tool call is
+  recorded as a string; the resulting syscalls are invisible), subprocess trees,
+  network connections from tool-spawned processes, and filesystem changes
+  outside typed file tools. Provider-side reasoning and server-side tool calls
+  are out of scope by definition for any local tool. (`STATUS.md`)
+- **Kernel enforcement is Linux-only and tier-dependent.** Mid-run guard loss
+  degrades honestly to tier `none`; automatic BPF-to-seccomp failover is not
+  claimed. (`STATUS.md`)
+- **Semantic judging and behavioral fingerprinting are library-only
+  prototypes**: neither is wired into `python/vibap/proxy.py`, so their outputs
+  are not authoritative governance verdicts. (`docs/known-limitations.md`)
+- **JWT-SVID remains a replayable bearer credential**, so Ardur does not claim
+  complete replay prevention. (`STATUS.md`)
 
-- `.ardur/` and `.vibap/` for runtime state, generated receipts, sockets, and
-  local key material. These paths are allowlisted in `.gitleaks.toml` only so
-  tests can run before the local secret scan; they must stay untracked.
-- `.context/skills/` for Conductor/session skills and notes.
-- `.agents/` for local agent runtimes that expect that folder name.
-- `.local-skills/` for imported or experimental local skills.
-- `.ai-context/`, `.agent-context/`, `.codex/`, and `.claude/` for
-  tool-specific private state.
-- `HANDOFF.md` and `workdone-so-far.md` for local-only handoff notes.
+Two rules follow, and they govern both the code and the prose you write about
+it:
 
-Never force-add files from those paths. `scripts/check-local.sh --quick` and
-the `secret-scan` workflow both fail if any local-only agent path becomes
-tracked.
+> When Ardur lacks evidence, it must deny or return `unknown` rather than claim
+> safe success. — `docs/security-model.md`
 
-## Local Commands
+> "What the protocol guarantees" is wider than "what the reference proxy
+> enforces today." The latter is the conservative claim — use it whenever you
+> cite Ardur in a security context against a real adversary. —
+> `docs/security-model.md`
+
+The full, current list lives in
+[`docs/known-limitations.md`](docs/known-limitations.md) and
+[`STATUS.md`](STATUS.md). Those files win over this summary.
+
+## 2. TL;DR Commands
+
+<!-- START generated-commands -->
+<!-- Generated by scripts/gen-agent-docs.py. Do not edit by hand; run `make gen-agent-docs`. -->
+
+**Toolchain versions this repository builds against:**
+
+| Toolchain | Version | Source of truth |
+| --- | --- | --- |
+| Go | `1.26.5` | `go/go.mod` (`go` directive) |
+| Python | `>=3.10` | `python/pyproject.toml` |
+| ruff | `v0.13.0` | `.pre-commit-config.yaml` |
+
+CI pins the Go toolchain to the `go` directive above as a literal string in each workflow. If you bump `go/go.mod`, bump the `go-version:` in `.github/workflows/` in the same PR — nothing enforces that pairing automatically.
+
+**Make targets:**
 
 ```bash
-# Generate fresh Conductor context and, when supported, graph artifacts.
-./scripts/conductor-bootstrap.sh
-
-# Create/update local Python dev env and check Go toolchain.
-./scripts/setup-dev.sh
-
-# Fast local validation.
-./scripts/check-local.sh --quick
-
-# Full local validation when the toolchain is ready.
-./scripts/check-local.sh --full
+make demo                  # Start the full MVP stack (docker compose up --build)
+make demo-down             # Stop and remove the full MVP stack
+make test-python           # Run the Python test suite
+make test-go               # Run the Go test suite
+make test                  # Run both Python and Go tests
+make lint-python           # Lint Python with ruff
+make lint-go               # Lint Go with vet
+make lint                  # Lint both Python and Go
+make build-proxy           # Build the proxy Docker image
+make build-hub             # Build the hub Docker image
+make build                 # Build both Docker images
+make cert                  # Generate self-signed TLS certs for local dev
+make bench                 # Run the AuditBench evaluation harness and write results to bench-results/
+make bench-protocol-test   # Test the AuditBench evaluation protocol (no real annotation study)
+make gen-agent-docs        # Regenerate the generated command block in AGENTS.md
+make gen-agent-docs-check  # Fail if the AGENTS.md command block is stale (local equivalent of the CI gate)
+make clean                 # Remove build artifacts
 ```
+
+These are the convenience wrappers, and they are a **subset** of what CI runs. CI is authoritative for the full matrix.
+
+<!-- END generated-commands -->
+
+Repo-local helper scripts, which the `make` targets do not cover:
+
+```bash
+./scripts/conductor-bootstrap.sh   # Generate fresh context and graph under .context/
+./scripts/setup-dev.sh             # Create/update the local Python dev env; check the Go toolchain
+./scripts/check-local.sh --quick   # Fast local validation
+./scripts/check-local.sh --full    # Full local validation when the toolchain is ready
+```
+
+**Dependencies are installed with `pip`, not `uv`.** There is no `uv` in the
+Makefile or any workflow; a `python/uv.lock` on your disk is untracked local
+state, not a source of truth.
+
+## 3. Architecture And Trust Boundaries
+
+Each component has a boundary it must not cross. Crossing one is how
+overclaiming gets into the code rather than just the docs.
+
+| Component | Lives in | Does | Must not cross |
+| --- | --- | --- | --- |
+| **Python governance runtime + reference proxy** | `python/vibap/`, entry `python/vibap/proxy.py` | The reference enforcement point; gates the call before dispatch and emits the receipt | Anything not routed through the configured adapter is **unobserved**. Never let the proxy report success for a call it did not see. |
+| **`ardur` CLI** | `python/vibap/cli.py` | Protocol path (`issue`, `verify`, `evidence correlate`, `attest`, `anchor`, `start`) and personal path (`hub`, `run`, `personal-firewall`, `doctor`) | Local-operator trust. `ardur-verify` must keep verifying offline with no service running. |
+| **Go kernel-capture daemon** | `go/cmd/ardur-kernelcaptured/`, `go/pkg/kernelcapture/` | Linux cgroup-scoped process exec/exit capture; publishes BPF policy-map handles and the guard tier; feeds `observability_gap` into the signed attestation | Receipt source assurance is the authenticated session owner, **not** daemon-side JWT verification. Do not describe capture as enforcement. |
+| **eBPF (BPF-LSM) / seccomp user-notify** | `go/cmd/ardur-kernelcaptured/daemon_guard_linux.go` and `daemon_enforce.go`; smoke bins in `go/cmd/ardur-guard-smoke/`, `go/cmd/ardur-seccomp-smoke/` | Two-tier runtime enforcement; tier selected and serialized at startup | **Linux only.** Losing the guard mid-run degrades to tier `none` and says so. Never silently fail open. |
+| **Biscuit attenuation** | `python/vibap/biscuit_passport.py`; semantics in `docs/decisions/ADR-017-*` | First-party attenuation; child authority strictly a subset of parent | Closes presenter-owned-root forgery; does **not** make a JWT-SVID proof of a live channel or one-time possession. |
+| **Mission Passport (JWT)** | `python/vibap/passport.py`, `mission.py`, `mission_compile.py`; schema `docs/specs/mission-declaration-v0.1.schema.json` | ES256-signed mission credential; bounded-iat skew enforced at every decode site | Issuer key is the root. The pinned fetch rejects all 3xx redirects — do not add redirect following. |
+| **Signed hash-chained receipts** | `python/vibap/receipt.py`, `offline_verification.py`, `receiver_attestation.py`; `go/pkg/transparency/` | ES256-signed, SHA-256 hash-linked decisions; optional transparency anchor and receiver-attestation envelope | The bundle verifies **the evidence it is given**. Trust roots are external inputs; it reports `revocation_checked: false`. Two separate trust roots — do not conflate them. |
+| **Go credential / AAT / SPIFFE** | `go/pkg/credential/`, `pkg/aat/`, `pkg/spiffe/`, `pkg/issuer/`, `pkg/policy/`, `pkg/trust/` | Draft JWT delegation contract and the AAT profile | SPIRE authenticates `spiffe_id`; `owner_id` is `self_asserted` and must never be presented as an authenticated binding. |
+| **Kubernetes control plane** | `go/cmd/operator/`, `go/cmd/webhook/`, `deploy/k8s/` | Operator and admission webhook | The reference manifests ship **without** a metrics-auth sidecar; production deployments must add one. Do not imply otherwise. |
+
+KVM is **not** an architecture component. It appears only in CI, where the
+BPF-LSM smoke job boots a virtme-ng kernel. The seccomp tier needs no KVM.
+
+## 4. Repo Layout
+
+| Path | What it is |
+| --- | --- |
+| `python/` | The Python governance runtime (`vibap/`) plus `tests/` — reference proxy, `ardur` CLI, passports, receipts, Personal Hub, agent hooks. |
+| `go/` | Go module: `cmd/` binaries (kernel-capture daemon, operator, webhook, auditbench tooling) and `pkg/` libraries, plus `benchmark/`. |
+| `docs/` | Public docs spine: `specs/`, ADRs under `decisions/`, `guides/`, `reference/`, `comparisons/`, `audit/`, `agent-instructions/`. |
+| `site/` | The Hugo evidence site. Mostly **generated** — read §11 before editing anything here. |
+| `examples/` | Runnable adapters and quickstarts, plus reference `missions/` JSON. |
+| `plugins/` | The Claude Code plugin and its tool-use hooks. |
+| `deploy/` | `helm/`, `k8s/` (incl. `spire/`), and `local/` deployment manifests. |
+| `packaging/` | Distribution scaffolding: homebrew, launchd, macos, oci, systemd. |
+| `scripts/` | Bootstrap, validation, demo, and fixture-generation scripts. |
+| `reports/` | Dated point-in-time review memos. Archival — not a live surface. |
+| `media/` | Recorded casts and selected media assets. |
+
+`python/` and `go/` are each large enough, and different enough in toolchain, to
+warrant their own nested `AGENTS.md` later; today both carry a `README.md` and
+this file covers them. `site/` is the third candidate, because hand-editing
+generated content there is the most common avoidable mistake in this repo.
+
+## 5. Build
+
+**Python.** No compilation step. Install editable with the dev extra:
+
+```bash
+cd python && python -m pip install -e '.[dev]'
+```
+
+**Go.**
+
+```bash
+cd go && go build ./...
+```
+
+**eBPF objects (Linux only).** The `.o` and generated `*_bpfel.go` files are
+committed, and CI regenerates them and fails on any drift. Regeneration needs
+Linux with `clang`, `llvm`, `libbpf-dev`, and `linux-libc-dev`. CI pins
+`ubuntu-24.04`, whose default clang is what the committed objects were built
+with; on a different clang you will produce a spurious diff.
+
+```bash
+cd go/pkg/kernelcapture && go generate ./...
+```
+
+If CI reports a bpf2go drift failure, regenerate on Linux with a matching clang
+and commit the result. Never hand-edit generated `*_bpfel.go` or `*_bpfel.o`.
+
+**Docker images.** `make build-proxy` / `make build-hub`.
+
+## 6. Test
+
+Run the local subset while you work. **CI is authoritative** — it runs a wider
+matrix than anything below, and a green local run is not a green PR.
+
+**Python:**
+
+```bash
+cd python && python -m pytest tests/ -q
+```
+
+CI additionally enforces that **pytest leaves the checkout clean** — a test that
+writes a stray file into the working tree fails the build. If your test produces
+artifacts, write them to a temp dir.
+
+**Go:**
+
+```bash
+cd go && go test -count=1 -timeout 120s ./...   # what `make test-go` runs
+cd go && go test -count=1 -race ./...           # what the kernel-enforce job runs
+```
+
+**Privileged enforcement tests.** These are gated by the `//go:build linux` tag
+and by workflow path filters — there is no `ARDUR_*` env var that turns them on.
+Non-Linux hosts compile the `!linux` stubs instead, so a green `go test ./...`
+on macOS proves nothing about enforcement.
+
+- *seccomp* needs root but no KVM and no custom kernel; it runs on the runner's
+  own kernel:
+  ```bash
+  sudo /tmp/ardur-seccomp-smoke --daemon-bin /tmp/ardur-kernelcaptured --shim-bin /tmp/ardur-exec-shim
+  ```
+- *BPF-LSM* needs a kernel booted with `lsm=bpf`, which CI gets from virtme-ng
+  on a KVM-capable runner. That job is `continue-on-error` — a red
+  `kernel-smoke` is a signal, not a merge blocker.
+- *End-to-end enforcement* runs in Docker with `--privileged --pid=host` and
+  asserts on real markers (`RESULT=DENIED_EPERM`, `chain intact = true`,
+  `attestation digest match = true`).
+
+If you cannot run these locally, say so in the PR rather than implying you did.
+`docs/TESTING.md` and `REPRODUCE.md` carry the full procedures.
+
+## 7. How To Use It
+
+The shortest real loop — local, no API key, reaching a `PERMIT`, a `DENY`, and a
+locally verified signed attestation:
+
+```bash
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
+python scripts/run-no-key-mvp-demo.py
+```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. Use it
+rather than a hand-rolled `python3 -m venv` + `pip install -e python/`: macOS
+system Python 3.9 and its bundled pip are too old (`python/pyproject.toml`
+requires ≥3.10, and PEP 660 editable installs need a newer pip). For a manual
+install, upgrade pip first — `python -m pip install --upgrade pip`, then
+`python -m pip install -e python/`.
+
+That demo disables TLS and bearer auth **for the child process only**. It is not
+a production launch command.
+
+Issuing and verifying a Mission Passport directly:
+
+```bash
+cd python && pip install -e .   # Python ≥3.10; see the setup note above
+ardur issue \
+  --agent-id alice \
+  --mission "summarize sales from sales/q1.csv into reports/" \
+  --allowed-tools read_file write_report \
+  --resource-scope 'sales/*' 'reports/*'
+ardur verify --token <token-from-issue-output>
+```
+
+`ardur issue` takes mission claims via **flags, not a JSON file** — the mission
+files under `examples/missions/` are spec-layer reference documents.
+
+**Biscuit attenuation has no CLI quickstart.** It is exercised through
+`python/vibap/biscuit_passport.py`, the governed-subagent adapter
+(`docs/reference/governed-subagent-adapter.md`), and `python/tests/`. Do not
+document an `ardur attenuate` command; there isn't one.
+
+Other entry points: `ardur personal-firewall demo`; `make demo` plus
+`scripts/verify-mvp.sh` (needs `ARDUR_API_TOKEN`); and the quickstart at
+`site/content/try-it.md`.
+
+## 8. Code Style And Conventions
+
+**Python.** ruff is both linter and formatter, pinned in
+`.pre-commit-config.yaml` (see §2). Note the asymmetry: the CI `ruff check` step
+runs against an explicit **allowlist of paths**, while `make lint-python` checks
+`vibap/` and `tests/` broadly — prefer the Makefile locally. `ruff format` runs
+only via pre-commit. There is **no** typechecker configured; do not bolt
+mypy/pyright onto a PR that is about something else.
+
+**Go.** `gofmt` and `goimports` (local prefix `github.com/ArdurAI/ardur`) via
+`.golangci.yml`, which enables `govet`, `ineffassign`, `staticcheck`, and
+`unused`. CI runs `golangci-lint` on `./pkg/credential ./pkg/policy` only, and
+`go vet ./...` across the module.
+
+**Error handling: fail closed.** Missing evidence is `unknown` or a denial,
+never a success. That is a correctness rule, not a style preference.
+
+**Never log, print, persist, or commit secret values** — keys, tokens,
+passports, or signing material. Live external-API tests are opt-in, must use
+environment credentials, and public CI must never require private credentials.
+
+**No specific LLM model names in public surfaces.** This is a hard, CI-enforced
+rule: the `secret-scan` workflow's `llm-model-names` job blocks PRs containing
+provider/version model identifiers in docs, comments, docstrings, commit
+messages, PR descriptions, or default-parameter literals. Framework names
+(LangChain, AutoGen) and bare vendor names are fine; a product name like "Claude
+Code" describing an integration target is fine. Use generic phrasing or
+env-var-driven config. `CONTRIBUTING.md` has the full rule.
+
+## 9. Security Posture And Boundaries
+
+Report vulnerabilities through [`SECURITY.md`](SECURITY.md) — a GitHub Security
+Advisory is preferred. Never open a public issue for an active vulnerability.
+
+**In scope:** out-of-scope tool or resource execution; delegation scope
+widening; forged, replayed, stripped, or tampered receipts; verifier bypasses
+that turn missing evidence into false success; downgrade attacks on governance
+tiers; secret leakage through official artifacts.
+
+**Out of scope / documented boundaries:** everything in §1 and
+`docs/known-limitations.md`. Those documented boundaries may still be important
+product risks even when they are not implementation bugs — treat them that way.
+
+### Ask first
+
+- Weakening, bypassing, or adding an opt-out to any enforcement default.
+- Changing a fail-closed path to fail-open, or narrowing what counts as
+  evidence.
+- Touching trust roots, key handling, or the receipt chain format.
+- Adding a network call, redirect following, or a new external dependency to a
+  verification path.
+
+### Never
+
+- Never weaken an enforcement default to make a test pass.
+- Never commit keys or credentials. `.pem` files, `.ardur/`, and `.vibap/` are
+  local runtime state and must stay untracked. The `detect-private-key`
+  pre-commit hook and the `secret-scan` workflow are backstops, not permission
+  to be careless.
+- Never hand-edit receipts, attestations, or test fixtures to make a verifier
+  agree. Regenerate them from the generator that owns them.
+- Never hand-edit generated files (§11).
+- Never call a capability proven unless the verifier and public artifacts back
+  it.
+
+## 10. Contributing Workflow
+
+- **`dev` is the trunk.** Use `origin/dev` as the default diff and PR base for
+  all normal work. **`main` is release-only** and human-gated: promote to it
+  only after work has landed on `dev`, passed verification, and is explicitly a
+  release-promotion task. Do not target `main` on your own initiative. If a
+  workspace was created from `origin/main`, keep the branch name but target the
+  PR at `dev`.
+- **Work from the current branch; do not rename it.** Preserve work in progress:
+  do not reset, checkout, clean, or revert unrelated local changes unless
+  explicitly asked.
+- **Prefer an isolated worktree** for agent work, so a dirty feature branch in
+  the main checkout cannot leak staged files into your commit.
+- **Sign off your commits.** `Signed-off-by:` is the convention in this repo's
+  history, though no bot enforces it today:
+  ```bash
+  git commit -s
+  ```
+- **A human is the commit author.** See §12.
+- **Keep PRs scoped and reviewable.** Explain user-facing behavior changes;
+  mention any security, compatibility, or proof-boundary impact; link the
+  verifier, artifacts, or limitation note when a claim is affected.
+- **Never use `--no-verify`.** If a hook fails, fix the cause. Install the hooks
+  with `pre-commit install`; they run the same checks as CI, only earlier.
+- **Force-push only your own branch, and only with `--force-with-lease`.**
+
+There is no CODEOWNERS file and no automated approval-count gate today; review
+is a human judgment call by the maintainer. See [`GOVERNANCE.md`](GOVERNANCE.md).
+
+## 11. Where Docs Live
+
+- **In-repo Markdown under `docs/`** is the source of truth. Start at
+  `docs/README.md`.
+- **The Hugo site under `site/`** is a published mirror built from that Markdown
+  by `site/scripts/sync_source_docs.py`. Its audience is external evaluators.
+- **Obsidian vaults and `architect/`-style planning notes**, where present, are
+  local-only and must never be committed to this repo.
+
+**`site/content/source/` and `site/static/repo/` are generated. Never hand-edit
+them.** Edit the source file at its real path, then regenerate:
+
+```bash
+python3 site/scripts/sync_source_docs.py          # regenerate
+python3 site/scripts/sync_source_docs.py --check  # what CI runs; fails on drift
+python3 site/scripts/validate_claims.py           # claim cards must cite real paths
+hugo --source site --gc --minify
+```
+
+**This file is itself mirrored to `site/content/source/AGENTS.md`.** If you edit
+`AGENTS.md`, run the sync script or the `hugo-site` job will fail.
+
+**Keep §2 in sync with its sources — CI checks it.** That command block is
+generated:
+
+```bash
+make gen-agent-docs                        # regenerate the block
+python3 scripts/gen-agent-docs.py --check  # fails on drift, without writing
+```
+
+The `agent-docs` job does not run `--check`; it regenerates the block and then
+runs `git diff --exit-code`, so a failure prints the exact drift in the log. The
+two are equivalent as a pass/fail gate — use `--check` locally, because it
+reports staleness without touching your working tree.
+
+The hosted site reflects the last Pages deployment from `main`, not the latest
+`dev` commit.
+
+## 12. Agent Etiquette And Accountability
+
+- **No agent is a commit author.** A human takes authorship and signs off. Do
+  not add AI or assistant `Co-authored-by:` trailers, and do not put an
+  assistant's name in commit messages, PR titles, or PR bodies.
+- **Disclose AI assistance in the PR body**, in prose, where a reviewer will see
+  it. Accountability sits with the human who opened the PR.
+- **Fail closed on duplicate or trivial work.** Before opening a PR, check
+  whether the change already exists on `dev` or in an open PR. A PR that
+  restates existing behavior, churns formatting, or re-fixes something already
+  fixed wastes a reviewer's scarcest resource. If the honest answer is that
+  there is nothing to do, say so instead of manufacturing a diff.
+- **Verify before claiming.** Never report a command as run, a test as passing,
+  or a gate as green unless you ran it and read the output. If you could not run
+  something — privileged tests on a non-Linux host, say — state that plainly.
+- **Cite the conflict.** When two sources disagree, prefer live repo state over
+  prose and call out the discrepancy rather than silently picking one.
+- **Private skills and local state stay local.** `.context/skills/`, `.agents/`,
+  `.local-skills/`, `.ai-context/`, `.agent-context/`, `.codex/`, `.claude/`,
+  `HANDOFF.md`, and `workdone-so-far.md` are never committed. `.ardur/` and
+  `.vibap/` hold runtime state, receipts, sockets, and local key material; they
+  are allowlisted in `.gitleaks.toml` only so tests can run before the local
+  secret scan, and they must stay untracked. Never force-add from those paths.
+  `scripts/check-local.sh --quick` and the `secret-scan` workflow both fail if a
+  local-only agent path becomes tracked.

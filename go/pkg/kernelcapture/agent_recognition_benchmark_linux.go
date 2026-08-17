@@ -277,8 +277,7 @@ func runAgentRecognitionBenchmarkArm(ctx context.Context, root string, opts Agen
 			return nil, err
 		}
 		settleStarted := time.Now()
-		after, err := daemon.waitForAccounting(enabled, registrySHA256, before, uint64(profile.EventCount), opts.AccountingTimeout)
-		if err != nil {
+		if _, err := daemon.waitForAccounting(enabled, registrySHA256, before, uint64(profile.EventCount), opts.AccountingTimeout); err != nil {
 			return nil, err
 		}
 		if enabled {
@@ -291,7 +290,7 @@ func runAgentRecognitionBenchmarkArm(ctx context.Context, root string, opts Agen
 		if err := daemon.waitForFingerprintObservationLogs(ctx, expectedFingerprintObservations, opts.AccountingTimeout); err != nil {
 			return nil, err
 		}
-		after, err = daemon.snapshot(enabled, registrySHA256)
+		after, err := daemon.snapshot(enabled, registrySHA256)
 		if err != nil {
 			return nil, err
 		}

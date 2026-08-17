@@ -32,10 +32,11 @@ credentials.
 ## Running the mission examples (today, no agent required)
 
 ```bash
-cd ../python
-pip install -e .
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
-# Issue and verify a passport. ardur issue takes mission claims via flags,
+# 2. Issue and verify a passport. ardur issue takes mission claims via flags,
 # not a JSON file — the example mission files under missions/ are reference
 # documents for the spec layer. To exercise the protocol path:
 ardur issue \
@@ -46,6 +47,12 @@ ardur issue \
 
 ardur verify --token <token-from-issue-output>
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 That exercises the core protocol surface end-to-end — mission compilation, passport issuance, signature, verification — without an LLM or framework in the loop. It's the fastest way to confirm a local install actually works.
 

@@ -37,3 +37,27 @@ paths = [
   '''(^|/)\.pytest_cache/''',
   '''(^|/)__pycache__/''',
 ]
+
+# Detect PKCS#8 private key PEM blocks.  Ardur's passport module serialises
+# keys with serialization.PrivateFormat.PKCS8, which produces
+# "-----BEGIN PRIVATE KEY-----" (not the SEC1 "EC PRIVATE KEY" header).
+# Without this rule a committed PKCS#8 EC private key would silently pass.
+[[rules]]
+id = "ardur-pkcs8-private-key"
+description = "PKCS#8 private key PEM block"
+regex = '''-----BEGIN PRIVATE KEY-----'''
+paths = [
+  '''\.pem$''',
+  '''\.py$''',
+  '''\.md$''',
+  '''\.json$''',
+]
+[rules.allowlist]
+paths = [
+  '''(^|/)python/tests/artifacts/''',
+  '''(^|/)python/tests/test_real_world_harness_contract''',
+  '''(^|/)\.ardur/''',
+  '''(^|/)\.vibap/''',
+  '''(^|/)\.pytest_cache/''',
+  '''(^|/)__pycache__/''',
+]

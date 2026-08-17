@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "af9b9b934aa2a12bef4c6c4e22b380cbeed6e2b82a91b0c3253418b6569fa9ac"
+source_sha256: "6b4b11ec6c7583159a588735f9fb199af8de6f15f8943980e341a3753ec6afbc"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -26,6 +26,25 @@ subagent dispatches (`Task`). Each observed invocation is signed (ES256) and
 chained (SHA-256). Ardur does not claim visibility into calls that bypass the
 hook or provider-hidden actions.
 
+`ardur run -- <cli>` additionally captures zero-privilege host-observer
+process-lifecycle evidence for any CLI launch: the root process's PID, command,
+`run_command` (the actual argv when adapter wrapping transforms it before
+launch, omitted when identical), `cwd` (absolute working directory),
+`duration_budget_s` (the caller-set time budget, omitted when not set),
+started-at timestamp, wall-clock duration, exit code, exit signal, and CPU/memory
+usage (`cpu_user_s`/`cpu_system_s` user/system CPU time and `peak_rss_bytes` peak
+resident set size, all via POSIX `getrusage(RUSAGE_CHILDREN)` delta around
+`proc.wait()`, platform-normalised to bytes). It also enumerates descendant
+processes recursively (direct children, grandchildren, etc. — PID, command,
+started-at, wall-clock duration, depth, parent_pid; child exit codes are
+best-effort and may be null when a child exits between snapshot and inspection).
+This is recorded as `capture_tier=host-observer` and works on macOS and Linux
+without any host plugin API dependency or kernel daemon. It captures a
+point-in-time snapshot of the root process and its descendant tree — not
+real-time exec/fork event streams, syscalls, file/network effects, or
+provider-side actions — so consumers never mistake it for full process-tree
+lifecycle capture (which requires eBPF daemon correlation).
+
 What we do **not** yet capture:
 
 - **Side effects of shell commands.** A `Bash("rm foo")` is recorded as the
@@ -42,6 +61,16 @@ adds Linux eBPF kernel-level capture; v1.0 adds macOS Endpoint Security
 Framework. See [`docs/coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/) for the full
 audit, [`docs/known-limitations.md`](/__ardur_internal__/source/docs/known-limitations/) for the
 caveat list, and [`ROADMAP.md`](/__ardur_internal__/source/roadmap/) for the phase plan.
+
+Each observed tool call results in a five-state Decision: `PERMIT`,
+`DENY`, `VIOLATION`, `INSUFFICIENT_EVIDENCE`, or `UNKNOWN`. Only `PERMIT`
+allows execution; all others block the call (fail-closed discipline).
+`INSUFFICIENT_EVIDENCE` records a transient operational failure (state file
+corrupted, approval operator unreachable) — might be retried. `UNKNOWN`
+records a structural observation gap where the activity is outside Ardur's
+capture boundary — the honest "I cannot know what happened" outcome. Both
+fail-closed as `DENY` on the receipt. See [`docs/security-model.md`](/__ardur_internal__/source/docs/security-model/) for the
+full taxonomy.
 
 An opt-in Linux `ardur-kernelcaptured --agent-recognition` preview now admits
 exec events whose exact 15-byte-or-shorter Linux `comm` or bounded

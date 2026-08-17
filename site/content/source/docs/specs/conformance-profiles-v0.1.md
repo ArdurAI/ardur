@@ -2,7 +2,7 @@
 title: "MCEP Conformance Profiles v0.1"
 description: "This document defines version `v0.1` of the conformance profile matrix for"
 source_path: "docs/specs/conformance-profiles-v0.1.md"
-source_sha256: "3aec8da12b2c8886d3137552b617bc7c067aeff893258e5fa3783348a17a7b8b"
+source_sha256: "137c795aff8fdd18c70445c1172f1f6ef3cca1a6866f5a7ae58cd5f7903eebc6"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -92,8 +92,8 @@ capability attenuation, cascading revocation, and basic receipt emission.
    (A.6 §4).
 7. The verifier MUST emit a linked Execution Receipt (A.3) for every
    evaluated step. Receipt `parent_receipt_id` MUST chain correctly.
-8. The verifier MUST use the tri-state verdict codomain: `compliant`,
-   `violation`, `insufficient_evidence` (A.4 §4).
+8. The verifier MUST use the verdict codomain: `compliant`,
+   `violation`, `insufficient_evidence`, `unknown` (A.4 §4).
 
 ### 3.2. MIC-State
 

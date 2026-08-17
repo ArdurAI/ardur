@@ -118,12 +118,22 @@ func main() {
 	flag.Parse()
 
 	args := flag.Args()
-	if *sessionID == "" || len(args) == 0 {
+	if !validateArguments(*sessionID, args) {
 		usage()
 		os.Exit(2)
 	}
 
-	if err := run(*sessionID, *seccompSocket, *readyFile, args); err != nil {
+	// Trim whitespace from session-id, seccomp-socket, and ready-file so
+	// whitespace-only values are handled consistently with the validation
+	// guard above.
+	trimmedSessionID := strings.TrimSpace(*sessionID)
+	trimmedSeccompSocket := strings.TrimSpace(*seccompSocket)
+	trimmedReadyFile := strings.TrimSpace(*readyFile)
+	if trimmedSeccompSocket == "" {
+		fmt.Fprintln(os.Stderr, "ardur-exec-shim: --seccomp-socket must not be empty or whitespace-only")
+		os.Exit(2)
+	}
+	if err := run(trimmedSessionID, trimmedSeccompSocket, trimmedReadyFile, args); err != nil {
 		fmt.Fprintf(os.Stderr, "ardur-exec-shim: %v\n", err)
 		os.Exit(1)
 	}
@@ -134,6 +144,14 @@ func main() {
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: %s --session-id ID [--seccomp-socket PATH] [--ready-file PATH] -- COMMAND [ARGS...]\n", os.Args[0])
 	flag.PrintDefaults()
+}
+
+// validateArguments enforces the required session-id and the non-empty
+// command vector without depending on process-wide side effects, so the
+// whitespace guard can be unit tested independently of runtime.LockOSThread
+// and seccomp installation in main().
+func validateArguments(sessionID string, args []string) bool {
+	return strings.TrimSpace(sessionID) != "" && len(args) != 0
 }
 
 func run(sessionID, seccompSocketPath, readyFilePath string, args []string) error {

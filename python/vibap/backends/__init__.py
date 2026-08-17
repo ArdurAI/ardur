@@ -6,13 +6,13 @@ available. NativeBackend is always importable.
 
 import logging
 
-_logger = logging.getLogger(__name__)
-
 from vibap.backends.forbid_rules import (
     ForbidRulesBackend,
     register as register_forbid_rules,
 )
 from vibap.backends.native import NativeBackend
+
+_logger = logging.getLogger(__name__)
 
 __all__ = [
     "ForbidRulesBackend",

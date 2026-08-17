@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from unittest import mock
 
 import pytest
@@ -65,7 +64,6 @@ def test_doctor_claude_code_omitted_home_omitted_plugin_dir_proceeds(
     fake_response = {"ok": True, "checks": []}
     with mock.patch("vibap.cli.claude_code_doctor", return_value=fake_response) as patched:
         rc = main(["doctor-claude-code"])
-    captured = capsys.readouterr()
     assert rc == 0
     assert patched.called
     # home defaults to None; plugin_dir defaults to the stringified default.

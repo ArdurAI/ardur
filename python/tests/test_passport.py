@@ -707,7 +707,11 @@ class TestKbJwtSecondDecodeIatBound:
             public_key=public_key,
             keys_dir=session_keys_dir,
         )
-        with pytest.raises(PermissionError, match="KB-JWT iat"):
+        # The KB-JWT iat window failure now surfaces a fixed sanitized code
+        # (kb_jwt_iat_invalid) instead of the raw PyJWT InvalidTokenError
+        # message, which could carry library internals. The full traceback is
+        # preserved via the exception chain (``from exc``).
+        with pytest.raises(PermissionError, match="kb_jwt_iat_invalid"):
             proxy.start_session(
                 passport_token,
                 holder_public_key=holder_pub,

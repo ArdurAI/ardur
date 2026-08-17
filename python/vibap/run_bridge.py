@@ -29,6 +29,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,9 +39,12 @@ import urllib.error
 import urllib.request
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import psutil
 
 from . import kernel_correlation as kc
 from .launch_gate import (
@@ -52,6 +56,12 @@ from .package_assets import claude_code_plugin_dir
 
 if TYPE_CHECKING:
     from .passport import MissionPassport
+
+# Characters that are invisible/whitespace but not caught by ``str.strip()``:
+# zero-width spaces (U+200B–U+200F), word joiner (U+2060), and BOM (U+FEFF).
+# Including these in the blank-command check prevents confusing subprocess
+# errors when a user's input contains only these characters.
+_INVISIBLE_OR_WS_RE = re.compile(r"^[\s\u200b-\u200f\u2060\ufeff]*$")
 
 # Environment-variable contract the bridge exports to the launched agent. The
 # proxy-routed path (EnvProxyAdapter) and any cooperating agent read these.
@@ -145,7 +155,11 @@ class EnvProxyAdapter(AgentAdapter):
         env[ENV_HOME] = str(ctx.home)
         env[ENV_MISSION_PASSPORT] = str(ctx.passport_path)
         env[ENV_TRACE_ID] = ctx.trace_id
-        return env, list(command), [f"governance routed via env → {ctx.proxy_url}/evaluate"]
+        return (
+            env,
+            list(command),
+            [f"governance routed via env → {ctx.proxy_url}/evaluate"],
+        )
 
 
 class ClaudeCodeAdapter(EnvProxyAdapter):
@@ -187,7 +201,12 @@ class ClaudeCodeAdapter(EnvProxyAdapter):
             and ctx.plugin_dir is not None
             and "--plugin-dir" not in command
         ):
-            new_command = [command[0], "--plugin-dir", str(ctx.plugin_dir), *command[1:]]
+            new_command = [
+                command[0],
+                "--plugin-dir",
+                str(ctx.plugin_dir),
+                *command[1:],
+            ]
             notes.append(
                 f"Claude Code hook scoped to this run via --plugin-dir {ctx.plugin_dir} "
                 "and VIBAP_HOME (no settings.json edit)"
@@ -333,7 +352,7 @@ def _build_embedded_server(
             prefix = "Bearer "
             if not header.startswith(prefix):
                 return False
-            supplied = header[len(prefix):].strip().encode("utf-8")
+            supplied = header[len(prefix) :].strip().encode("utf-8")
             return hmac.compare_digest(supplied, token_material)
 
         def _read_json(self) -> dict[str, Any]:
@@ -373,9 +392,14 @@ def _build_embedded_server(
                         sid,
                         str(tool_name),
                         dict(arguments),
-                        receipt_callback=receipt_registrar.register if receipt_registrar is not None else None,
+                        receipt_callback=receipt_registrar.register
+                        if receipt_registrar is not None
+                        else None,
                     )
-                    response: dict[str, Any] = {"decision": decision.value, "session_id": sid}
+                    response: dict[str, Any] = {
+                        "decision": decision.value,
+                        "session_id": sid,
+                    }
                     if decision != Decision.PERMIT:
                         response["reason"] = reason
                     self._send(200, response)
@@ -394,14 +418,22 @@ def _build_embedded_server(
                     self._send(200, {"attestation_token": token, "summary": summary})
                     return
                 if path == "/attest":
-                    token, claims = proxy.issue_attestation_for_session(sid, private_key)
+                    token, claims = proxy.issue_attestation_for_session(
+                        sid, private_key
+                    )
                     self._send(200, {"token": token, "claims": claims})
                     return
             except (ValueError, KeyError, PermissionError) as exc:
-                self._send(400, {"error": str(exc)})
+                # Never leak raw ``str(exc)``: these exceptions can carry
+                # internal field names, Python internals, or filesystem paths.
+                if isinstance(exc, PermissionError):
+                    safe = "permission denied"
+                else:
+                    safe = type(exc).__name__
+                self._send(400, {"error": safe})
                 return
-            except Exception as exc:  # noqa: BLE001 — embedded server must not crash the run
-                self._send(500, {"error": f"internal error: {exc}"})
+            except Exception:  # noqa: BLE001 — embedded server must not crash the run
+                self._send(500, {"error": "internal error"})
                 return
             self._send(404, {"error": "not found"})
 
@@ -410,6 +442,68 @@ def _build_embedded_server(
 
 
 # ── result type ────────────────────────────────────────────────────────────────
+
+
+def _redact_local_path(path_str: str | None) -> str | None:
+    """Replace local absolute path roots with stable placeholders.
+
+    Shares the same redaction philosophy as the proof-bundle path-leak
+    scanner: absolute paths under the temp directory, the user's home,
+    or well-known system paths are replaced with descriptive placeholders
+    so the JSON output is safe to share in CI artifacts or bug reports.
+    """
+    if path_str is None:
+        return None
+    result = str(path_str)
+    temp_root = tempfile.gettempdir()
+    # Guard against substring false-positives: ensure temp_root is matched
+    # as a directory boundary, not just a string prefix (e.g. "/tmp" must
+    # not match "/tmp2/foo").
+    temp_prefix = temp_root if temp_root.endswith("/") else temp_root + "/"
+    if result.startswith(temp_prefix):
+        return "<tmp>/" + result[len(temp_prefix):]
+    home = os.path.expanduser("~")
+    if result.startswith(home + "/"):
+        return result.replace(home, "<home>", 1)
+    # macOS resolves /tmp → /private/tmp; redact both forms.
+    result = re.sub(r"^/private/tmp/", "<tmp>/", result)
+    result = re.sub(r"^/tmp/", "<tmp>/", result)
+    # Common macOS/var roots — handle both /private/var/folders (resolved)
+    # and bare /var/folders (as returned by some macOS APIs).
+    result = re.sub(r"^/private/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"^/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"^/run/ardur/", "<run-ardur>/", result)
+    # Linux system paths that reveal local cgroup or runtime layout.
+    result = re.sub(r"^/sys/fs/cgroup/", "<cgroup>/", result)
+    return result
+
+
+def _redact_local_path_embedded(value: str) -> str:
+    """Redact local path roots anywhere in *value*, not just at the start.
+
+    Used for free-form strings like ``notes`` where a path may appear
+    mid-sentence (e.g. ``"launched via --plugin-dir /tmp/foo/..."``).
+    Also replaces the current user's home directory if it appears
+    embedded in the string.
+    """
+    if not value:
+        return value
+    result = _redact_local_path(value)
+    if result is None:
+        return value
+    # Replace embedded path roots (same patterns as _redact_local_path but
+    # without the ^ anchor so they match anywhere in the string).
+    result = re.sub(r"/private/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"/var/folders/", "<var-folders>/", result)
+    result = re.sub(r"/private/tmp/", "<tmp>/", result)
+    result = re.sub(r"/tmp/", "<tmp>/", result)
+    result = re.sub(r"/sys/fs/cgroup/", "<cgroup>/", result)
+    result = re.sub(r"/run/ardur/", "<run-ardur>/", result)
+    # Also redact embedded home dir.
+    home = os.path.expanduser("~")
+    if home and home in result:
+        result = result.replace(home, "<home>")
+    return result
 
 
 @dataclass
@@ -433,7 +527,108 @@ class GovernanceRunResult:
     receipt_count: int
     correlation: dict[str, Any]
     kernel_policy: dict[str, Any]
+    process_lifecycle: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+
+    def to_result_dict(self, *, redact_paths: bool = False) -> dict[str, Any]:
+        """Return a JSON-serialisable summary of the governance run.
+
+        Used by ``ardur run --json`` so CI pipelines and programmatic
+        consumers can consume the governance result without parsing
+        human-readable summary text. The ``attestation_token`` is omitted
+        because it is a JWT-like bearer credential; consumers should use
+        ``attestation_digest`` to verify the attestation identity.
+
+        When *redact_paths* is ``True``, local absolute paths are replaced
+        with stable placeholders so the output is safe to share in CI
+        artifacts or bug reports without leaking the user's filesystem
+        layout.
+        """
+        receipts_path = self.receipts_path
+        home = self.home
+        passport_path = self.passport_path
+        correlation = dict(self.correlation) if self.correlation else {}
+        if redact_paths:
+            receipts_path = _redact_local_path(receipts_path)
+            home = _redact_local_path(home)
+            passport_path = _redact_local_path(passport_path)
+            if correlation.get("daemon_socket"):
+                correlation["daemon_socket"] = _redact_local_path(
+                    correlation["daemon_socket"]
+                )
+            if correlation.get("cgroup_path"):
+                correlation["cgroup_path"] = _redact_local_path(
+                    correlation["cgroup_path"]
+                )
+        notes_out = [_redact_local_path_embedded(n) for n in self.notes] if redact_paths else list(self.notes)
+        # ``_build_process_lifecycle_evidence`` already redacts paths at the
+        # source (before signing), so the passes below are idempotent
+        # belt-and-suspenders for the JSON-output path.  They guard against
+        # any future caller that constructs ``process_lifecycle`` without
+        # going through the builder.
+        process_lifecycle_out = dict(self.process_lifecycle) if self.process_lifecycle else {}
+        if redact_paths and process_lifecycle_out.get("command"):
+            process_lifecycle_out["command"] = [
+                _redact_local_path_embedded(c) for c in process_lifecycle_out["command"]
+            ]
+        if redact_paths and process_lifecycle_out.get("run_command"):
+            process_lifecycle_out["run_command"] = [
+                _redact_local_path_embedded(c) for c in process_lifecycle_out["run_command"]
+            ]
+        if redact_paths and process_lifecycle_out.get("cwd"):
+            process_lifecycle_out["cwd"] = _redact_local_path(
+                process_lifecycle_out["cwd"]
+            )
+        if redact_paths and process_lifecycle_out.get("children"):
+            process_lifecycle_out["children"] = _redact_child_lifecycle(
+                process_lifecycle_out["children"]
+            )
+        return {
+            "ok": self.exit_code == 0,
+            "exit_code": self.exit_code,
+            "exit_signal": _signal_name_for_exit(self.exit_code),
+            "exit_hint": _exit_code_hint(self.exit_code),
+            "session_id": self.session_id,
+            "mission_id": self.mission_id,
+            "agent_id": self.agent_id,
+            "adapter": self.adapter,
+            "via": self.via,
+            "total_events": self.total_events,
+            "permits": self.permits,
+            "denials": self.denials,
+            "receipt_count": self.receipt_count,
+            "receipts_path": receipts_path,
+            "attestation_digest": self.attestation_digest,
+            "home": home,
+            "passport_path": passport_path,
+            "correlation": correlation,
+            "kernel_policy": self.kernel_policy,
+            "process_lifecycle": process_lifecycle_out,
+            "summary": self._summary_for_json(),
+            "notes": notes_out,
+        }
+
+    def _summary_for_json(self) -> dict[str, Any]:
+        """Return the aggregate governance summary for JSON consumers.
+
+        ``format_summary`` renders these fields into the human-readable text
+        output.  Programmatic consumers using ``--json`` need the same
+        aggregate verdict breakdown (scope_compliance, elapsed_s, unknowns,
+        insufficient_evidence, violations, delegation_count,
+        children_spawned, denied_tools) so they do not have to iterate every
+        receipt and re-derive it.
+        """
+        s = self.summary
+        return {
+            "scope_compliance": s.get("scope_compliance", "full"),
+            "elapsed_s": s.get("elapsed_s", 0),
+            "unknowns": int(s.get("unknowns", 0)),
+            "insufficient_evidence": int(s.get("insufficient_evidence", 0)),
+            "violations": int(s.get("violations", 0)),
+            "delegation_count": int(s.get("delegation_count", 0)),
+            "children_spawned": int(s.get("children_spawned", 0)),
+            "denied_tools": list(s.get("denied_tools") or []),
+        }
 
 
 def _count_lines(path: Path) -> int:
@@ -482,7 +677,9 @@ def _correlate_launch(
     """
     socket_path = kc.daemon_socket_path()
     if not enabled:
-        return kc.CorrelationResult(available=False, reason="kernel correlation disabled by caller")
+        return kc.CorrelationResult(
+            available=False, reason="kernel correlation disabled by caller"
+        )
     if cgroup_handle is None:
         return kc.CorrelationResult(
             available=False,
@@ -601,17 +798,27 @@ def _plan_seccomp_shim(*, enabled: bool) -> SeccompShimPlan:
     whether that is a permissive degrade or an ``--enforce`` abort.
     """
     if not enabled:
-        return SeccompShimPlan(tier=None, wrapped=False, reason="kernel correlation disabled by caller")
+        return SeccompShimPlan(
+            tier=None, wrapped=False, reason="kernel correlation disabled by caller"
+        )
     socket_path = kc.daemon_socket_path()
     if not kc.daemon_available(socket_path):
-        return SeccompShimPlan(tier=None, wrapped=False, reason="kernelcapture daemon socket not present")
+        return SeccompShimPlan(
+            tier=None, wrapped=False, reason="kernelcapture daemon socket not present"
+        )
     try:
         response = kc.KernelCaptureClient(socket_path).health()
     except (kc.DaemonUnavailable, kc.DaemonProtocolError, ValueError) as exc:
-        return SeccompShimPlan(tier=None, wrapped=False, reason=f"daemon health check failed: {exc}")
+        return SeccompShimPlan(
+            tier=None, wrapped=False, reason=f"daemon health check failed: {exc}"
+        )
     tier = response.get("enforcement_tier") or None
     if tier != kc.ENFORCEMENT_TIER_SECCOMP:
-        return SeccompShimPlan(tier=tier, wrapped=False, reason=f"active enforcement tier is {tier!r}, no shim needed")
+        return SeccompShimPlan(
+            tier=tier,
+            wrapped=False,
+            reason=f"active enforcement tier is {tier!r}, no shim needed",
+        )
     shim_path = kc.exec_shim_path()
     if shim_path is None:
         return SeccompShimPlan(
@@ -710,7 +917,11 @@ def _verify_seccomp_listener_attached(
     any daemon-communication failure.
     """
     timeout_s = SECCOMP_LISTENER_VERIFY_TIMEOUT_S if timeout_s is None else timeout_s
-    poll_interval_s = SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S if poll_interval_s is None else poll_interval_s
+    poll_interval_s = (
+        SECCOMP_LISTENER_VERIFY_POLL_INTERVAL_S
+        if poll_interval_s is None
+        else poll_interval_s
+    )
     deadline = time.time() + timeout_s
     client = kc.KernelCaptureClient(kc.daemon_socket_path())
     while True:
@@ -728,7 +939,7 @@ def _verify_seccomp_listener_attached(
 def _apply_kernel_policy(
     *,
     session_id: str,
-    passport: "MissionPassport",
+    passport: MissionPassport,
     kernel_resource_scope: list[str],
     correlation: kc.CorrelationResult,
     enforce: bool,
@@ -772,7 +983,12 @@ def _apply_kernel_policy(
         return {"applied": False, "reason": reason, "tier2_ops": []}
 
     from .bpf_lower import OpPolicyEntry, lower_to_bpf_policy_plan
-    from .bpf_types import ACT_DENY, ENFORCE_MODE_ENFORCE, ENFORCE_MODE_PERMISSIVE, OP_NET_CONNECT
+    from .bpf_types import (
+        ACT_DENY,
+        ENFORCE_MODE_ENFORCE,
+        ENFORCE_MODE_PERMISSIVE,
+        OP_NET_CONNECT,
+    )
 
     plan = lower_to_bpf_policy_plan(
         allowed_side_effect_classes=passport.allowed_side_effect_classes,
@@ -788,7 +1004,9 @@ def _apply_kernel_policy(
     # endpoint exceptions without it), while the dedicated root-PID/port BPF
     # map makes only this tuple reachable. Every unrelated connect remains
     # denied in strict mode.
-    if control_plane_endpoint is not None and not any(entry.op == OP_NET_CONNECT for entry in plan.op_policies):
+    if control_plane_endpoint is not None and not any(
+        entry.op == OP_NET_CONNECT for entry in plan.op_policies
+    ):
         plan = replace(
             plan,
             op_policies=plan.op_policies
@@ -803,7 +1021,10 @@ def _apply_kernel_policy(
         }
 
     generation = 1  # first (and only) apply for this fresh session/cgroup pair.
-    if seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP and control_plane_endpoint is None:
+    if (
+        seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP
+        and control_plane_endpoint is None
+    ):
         reason = "seccomp tier requires an exact governance control-plane endpoint"
         if enforce:
             raise KernelPolicyEnforcementError(reason)
@@ -878,7 +1099,9 @@ def _resolve_run_resource_scope(
         if not isinstance(raw_root, str) or not raw_root.strip():
             raise ValueError("resource_scope entries must be non-empty path roots")
         if any(char in raw_root for char in "*?[]"):
-            raise ValueError("resource_scope entries must be path roots, not glob patterns")
+            raise ValueError(
+                "resource_scope entries must be path roots, not glob patterns"
+            )
         candidate = Path(raw_root).expanduser()
         if not candidate.is_absolute():
             candidate = work_dir / candidate
@@ -887,7 +1110,9 @@ def _resolve_run_resource_scope(
         except (OSError, ValueError) as exc:
             raise ValueError(f"invalid resource_scope path root: {exc}") from exc
         if root != work_dir and not root.is_relative_to(work_dir):
-            raise ValueError("resource_scope path roots must stay inside the governed cwd")
+            raise ValueError(
+                "resource_scope path roots must stay inside the governed cwd"
+            )
         if root not in roots:
             roots.append(root)
 
@@ -896,6 +1121,416 @@ def _resolve_run_resource_scope(
         root_text = str(root)
         patterns.extend((root_text, "/*" if root_text == "/" else f"{root_text}/*"))
     return patterns
+
+
+_MAX_DESCENDANT_DEPTH = 16
+_MAX_DESCENDANT_COUNT = 500
+
+
+def _child_process_snapshot(
+    child: psutil.Process,
+    *,
+    depth: int = 0,
+    parent_pid: int | None = None,
+) -> dict[str, Any] | None:
+    """Capture a best-effort snapshot of a single child process.
+
+    Returns ``None`` when the process has already exited and its status
+    cannot be read (a race between enumeration and inspection). The caller
+    should filter out ``None`` entries.
+
+    *depth* is 0 for direct children of the root, 1 for grandchildren, etc.
+    *parent_pid* is the PID of this process's immediate parent within the
+    root's descendant tree.  Together these let consumers reconstruct the
+    tree structure from the flat snapshot list.
+
+    Each snapshot also includes best-effort CPU time and RSS (zero-privilege,
+    via psutil).  These are point-in-time values at snapshot time, not totals
+    over the process's full lifetime.  Fields are omitted when psutil cannot
+    read them (e.g. zombie, permission denied) so partial snapshots remain
+    useful.
+    """
+    try:
+        with child.oneshot():
+            entry: dict[str, Any] = {
+                "pid": child.pid,
+                "command": child.cmdline() or [child.name()],
+                "started_at": datetime.fromtimestamp(
+                    child.create_time(), tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                "wall_clock_s": round(time.time() - child.create_time(), 6),
+                "exit_code": None,
+                "exit_signal": None,
+                "depth": depth,
+            }
+            # Best-effort CPU/memory attribution (zero-privilege via psutil).
+            # These are point-in-time values at snapshot time.  cpu_times()
+            # returns cumulative totals since process start; memory_info()
+            # returns current RSS.  Both are omitted on access failure so
+            # partial snapshots remain useful.
+            with suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                cpu_times = child.cpu_times()
+                entry["cpu_user_s"] = round(cpu_times.user, 6)
+                entry["cpu_system_s"] = round(cpu_times.system, 6)
+            with suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                mem = child.memory_info()
+                entry["rss_bytes"] = mem.rss
+            if parent_pid is not None:
+                entry["parent_pid"] = parent_pid
+            return entry
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
+
+
+def _enumerate_child_processes(root_pid: int | None) -> list[dict[str, Any]]:
+    """Enumerate descendant processes of *root_pid* via psutil.
+
+    This is a best-effort, zero-privilege enumeration. It never raises —
+    returns an empty list on any failure (missing psutil, nonexistent PID,
+    permission denied, process exited between enumeration and inspection).
+
+    Descendants are enumerated recursively (direct children, grandchildren,
+    etc.) so the full process-tree *structure* is captured.  Each entry
+    includes ``depth`` (0 = direct child) and ``parent_pid`` so consumers can
+    reconstruct the tree.
+
+    The depth is capped at :data:`_MAX_DESCENDANT_DEPTH` and the total count
+    at :data:`_MAX_DESCENDANT_COUNT` to prevent runaway recursion in
+    pathological process trees.
+
+    .. note::
+
+       This is a *point-in-time* snapshot, not a real-time exec/fork event
+       stream.  Processes that start and exit between the root's children()
+       call and the snapshot will be missed.  Full lifecycle capture
+       (exec/fork timing, interleaving) requires eBPF daemon correlation.
+    """
+    if root_pid is None:
+        return []
+    try:
+        root_proc = psutil.Process(root_pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return []
+
+    # Manual recursive walk so we can track depth + parent_pid and enforce
+    # the count/depth caps.  psutil's recursive=True flattens the tree but
+    # does not provide per-process depth or parent linkage.
+    snapshots: list[dict[str, Any]] = []
+    _walk_descendants(root_proc, snapshots, depth=0, count=[0])
+    return snapshots
+
+
+def _walk_descendants(
+    parent: psutil.Process,
+    out: list[dict[str, Any]],
+    *,
+    depth: int,
+    count: list[int],
+) -> None:
+    """Recursively walk *parent*'s descendants, appending snapshots to *out*.
+
+    *count* is a single-element list used as a mutable counter so the
+    :data:`_MAX_DESCENDANT_COUNT` cap is enforced across the full recursion.
+    """
+    if depth > _MAX_DESCENDANT_DEPTH:
+        return
+    try:
+        children = parent.children(recursive=False)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return
+    parent_pid = parent.pid
+    for child in children:
+        if count[0] >= _MAX_DESCENDANT_COUNT:
+            return
+        snapshot = _child_process_snapshot(
+            child, depth=depth, parent_pid=parent_pid
+        )
+        if snapshot is not None:
+            out.append(snapshot)
+            count[0] += 1
+            _walk_descendants(child, out, depth=depth + 1, count=count)
+
+
+def _redact_child_lifecycle(children: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Redact local paths in child process lifecycle snapshots."""
+    redacted = []
+    for child in children:
+        entry = dict(child)
+        if entry.get("command"):
+            entry["command"] = [
+                _redact_local_path_embedded(c) for c in entry["command"]
+            ]
+        redacted.append(entry)
+    return redacted
+
+
+def _redact_process_lifecycle(lifecycle: dict[str, Any]) -> dict[str, Any]:
+    """Redact local paths in process-lifecycle evidence at the source.
+
+    Applied before the dict is returned from ``_build_process_lifecycle_evidence``
+    so that the same redaction covers the signed attestation-token path and the
+    JSON-output path.  Without this, local absolute paths in ``command``,
+    ``run_command``, ``cwd``, and ``children[*].command`` would be
+    cryptographically signed into the ES256 attestation JWT.
+
+    Uses a two-layer approach:
+    1. ``_redact_local_path`` / ``_redact_local_path_embedded`` replace
+       known roots (``/tmp/``, ``/Users/<home>``, ``/private/var/folders/``,
+       etc.) with stable placeholders (``<tmp>/``, ``<home>``, etc.).
+    2. ``redact_local_path_text`` catches what layer 1 misses:
+       ``file://`` URIs, percent-encoded separators, and arbitrary local
+       absolute paths under unknown roots (e.g. ``/opt/…``).
+    """
+    from .shareable_redaction import redact_local_path_text
+
+    redacted = dict(lifecycle)
+    if redacted.get("command"):
+        redacted["command"] = [
+            redact_local_path_text(_redact_local_path_embedded(c))
+            for c in redacted["command"]
+        ]
+    if redacted.get("run_command"):
+        redacted["run_command"] = [
+            redact_local_path_text(_redact_local_path_embedded(c))
+            for c in redacted["run_command"]
+        ]
+    if redacted.get("cwd"):
+        redacted["cwd"] = redact_local_path_text(
+            _redact_local_path(redacted["cwd"]) or ""
+        )
+    if redacted.get("children"):
+        redacted["children"] = _redact_child_lifecycle(redacted["children"])
+        # Also apply redact_local_path_text to child commands for
+        # file:// URIs and unknown-root paths.
+        for child in redacted["children"]:
+            if child.get("command"):
+                child["command"] = [
+                    redact_local_path_text(c) for c in child["command"]
+                ]
+    return redacted
+
+
+def _get_child_rusage() -> dict[str, float]:
+    """Capture a snapshot of ``RUSAGE_CHILDREN`` accounting fields.
+
+    Returns a plain dict so the delta computation is trivially testable
+    without touching the ``resource`` module.  On platforms where the
+    ``resource`` module is unavailable (non-POSIX), all fields are zero.
+    """
+    try:
+        import resource as _resource
+
+        r = _resource.getrusage(_resource.RUSAGE_CHILDREN)
+    except (ImportError, AttributeError, OSError):
+        return {"ru_utime": 0.0, "ru_stime": 0.0, "ru_maxrss": 0.0}
+    return {
+        "ru_utime": float(r.ru_utime),
+        "ru_stime": float(r.ru_stime),
+        # macOS reports ru_maxrss in bytes; Linux in kilobytes.
+        # Normalise to bytes here so downstream consumers get a
+        # consistent unit regardless of host platform.
+        "ru_maxrss": float(r.ru_maxrss * 1024 if sys.platform != "darwin" else r.ru_maxrss),
+    }
+
+
+def _compute_rusage_delta(
+    before: dict[str, float], after: dict[str, float]
+) -> dict[str, float]:
+    """Compute the resource-usage delta between two snapshots.
+
+    ``ru_maxrss`` is a *peak*, not a cumulative total — it reports the
+    maximum RSS seen across all waited-for children *up to this point*.
+    So the delta is ``max(0, after - before)`` which gives the peak RSS
+    attributable to processes waited for since *before*.  When other
+    children were waited for concurrently this may slightly over-credit,
+    but in the ``run_governed`` path the launched agent is the only
+    child waited for between the two snapshots.
+    """
+    return {
+        "ru_utime": max(0.0, after["ru_utime"] - before["ru_utime"]),
+        "ru_stime": max(0.0, after["ru_stime"] - before["ru_stime"]),
+        "ru_maxrss": max(0.0, after["ru_maxrss"] - before["ru_maxrss"]),
+    }
+
+
+def _build_process_lifecycle_evidence(
+    *,
+    proc: subprocess.Popen[bytes] | None,
+    command: list[str],
+    launch_monotonic: float,
+    launch_wall_clock: float,
+    exit_code: int,
+    run_command: list[str] | None = None,
+    cwd: str | None = None,
+    duration_budget_s: int | None = None,
+    rusage_delta: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Capture zero-privilege process-lifecycle evidence for the launched root.
+
+    This is the host-observer capture boundary that works with *any* CLI —
+    not just hook-supporting agents. It records what the host OS can observe
+    about the launched process without any plugin API dependency:
+
+    * ``root_pid`` — the launched process's PID (host-assigned identity).
+    * ``command`` — the argv the user asked to run (before adapter/wrap
+      transforms).
+    * ``run_command`` — the actual argv passed to ``subprocess.Popen`` after
+      adapter wrapping (Claude Code ``--plugin-dir`` injection, seccomp shim,
+      launch-gate wrapping). May differ from ``command``; both are captured so
+      consumers can distinguish "what was asked" from "what the OS ran".
+      ``None`` when identical to ``command`` (backward-compatible default).
+    * ``cwd`` — the absolute working directory the launched process was
+      started in (resolved via ``Path.resolve()`` before launch). Captured
+      so consumers can reproduce the filesystem context of the run.
+      ``None`` omits the field (backward-compatible default).
+    * ``duration_budget_s`` — the time budget (in seconds) the caller set
+      for the process, if any. This is the ``max_duration_s`` value from
+      ``run_governed``, recorded so consumers can compare the budget against
+      ``wall_clock_s`` to detect budget-exhaustion or near-exhaustion.
+      ``None`` omits the field (backward-compatible default).
+    * ``cpu_user_s`` — user-mode CPU time consumed by the launched process
+      and its descendants, measured via POSIX ``getrusage(RUSAGE_CHILDREN)``
+      delta around ``proc.wait()``.  Zero-privilege, no polling.  Omitted
+      when ``rusage_delta`` is ``None`` (backward-compatible default).
+    * ``cpu_system_s`` — kernel-mode CPU time for the same scope.
+      Omitted when ``rusage_delta`` is ``None``.
+    * ``peak_rss_bytes`` — maximum resident set size (RSS) of the launched
+      process and its descendants, platform-normalised to bytes.  macOS
+      ``getrusage`` reports bytes; Linux reports kilobytes — the caller
+      normalises before passing the delta.  Omitted when ``rusage_delta``
+      is ``None``.
+    * ``started_at`` — wall-clock timestamp when the process was launched.
+    * ``wall_clock_s`` — measured wall-clock duration from launch to exit.
+    * ``exit_code`` — the integer exit status (host-reported).
+    * ``exit_signal`` — POSIX signal name if terminated by signal, else ``null``.
+    * ``capture_tier`` — ``"host-observer"`` (zero-privilege, no kernel daemon).
+
+    This evidence is structurally weaker than eBPF daemon correlation
+    (``correlation.available == True``) which captures process-tree *interior*
+    exec/fork events. The host-observer tier captures the root process's
+    own lifecycle plus a best-effort recursive descendant snapshot. The
+    honest boundary is encoded in ``capture_tier`` so consumers never
+    mistake point-in-time snapshots for real-time event capture.
+
+    ``launch_wall_clock`` must be an epoch timestamp from ``time.time()``;
+    ``launch_monotonic`` must be from ``time.monotonic()``.  The two clocks
+    measure different things — wall-clock date vs. elapsed duration — and
+    must not be mixed.
+    """
+    started_at = datetime.fromtimestamp(launch_wall_clock, tz=timezone.utc)
+    wall_clock_s = round(time.monotonic() - launch_monotonic, 6)
+    root_pid: int | None = None
+    exit_signal: str | None = None
+    if proc is not None:
+        root_pid = proc.pid
+    if exit_code is not None and exit_code < 0:
+        exit_signal = _signal_name(exit_code)
+    result = {
+        "root_pid": root_pid,
+        "command": list(command),
+        "started_at": started_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+        "wall_clock_s": wall_clock_s,
+        "exit_code": exit_code,
+        "exit_signal": exit_signal,
+        "capture_tier": "host-observer",
+        "capture_boundary": (
+            "root-process lifecycle plus a best-effort recursive descendant "
+            "snapshot (direct children, grandchildren, etc.); point-in-time "
+            "snapshot, not real-time exec/fork event stream — full "
+            "subprocess-tree interior lifecycle requires eBPF daemon "
+            "correlation"
+        ),
+    }
+    # Only include run_command when it differs from command. This keeps
+    # the no-wrapping case (via=env, most agents) clean while making
+    # adapter/seccomp/gate wrapping auditable in the evidence.
+    if run_command is not None and list(run_command) != list(command):
+        result["run_command"] = list(run_command)
+    # Only include cwd when explicitly provided. The caller resolves the
+    # absolute path before launch; including it here lets consumers reproduce
+    # the filesystem context. Omitted when None for backward compatibility.
+    if cwd is not None:
+        result["cwd"] = str(cwd)
+    # Only include duration_budget_s when explicitly provided. This is the
+    # max_duration_s value from run_governed, recorded so consumers can
+    # compare the budget against wall_clock_s to detect budget-exhaustion
+    # or near-exhaustion. Omitted when None for backward compatibility.
+    if duration_budget_s is not None:
+        result["duration_budget_s"] = duration_budget_s
+    # Include CPU/memory usage from POSIX getrusage(RUSAGE_CHILDREN) delta.
+    # Zero-privilege, no daemon, no polling — the kernel tracks these
+    # accounting fields for all waited-for children.  Only included when
+    # the caller captured a before/after delta (the run_governed path does
+    # this around proc.wait()).  Omitted when None for backward compat.
+    if rusage_delta is not None:
+        result["cpu_user_s"] = round(rusage_delta.get("ru_utime", 0.0), 6)
+        result["cpu_system_s"] = round(rusage_delta.get("ru_stime", 0.0), 6)
+        result["peak_rss_bytes"] = int(rusage_delta.get("ru_maxrss", 0))
+    # Enumerate direct child processes (best-effort, zero-privilege).
+    # Only included when non-empty; absent key means no children observed.
+    children = _enumerate_child_processes(root_pid)
+    if children:
+        result["children"] = children
+    # Redact local paths BEFORE returning.  This evidence flows into the
+    # ES256-signed attestation token (via ``issue_attestation_for_session``)
+    # and into shareable JSON output.  Redacting at the source — rather
+    # than only in ``to_result_dict`` — ensures signed evidence never
+    # embeds the user's home dir, project layout, temp paths, or child
+    # argv in cleartext.
+    result = _redact_process_lifecycle(result)
+    return result
+
+
+def _signal_name(signum: int) -> str:
+    """Map a negative exit code to its POSIX signal name."""
+    import signal as _signal
+
+    try:
+        return _signal.Signals(-signum).name
+    except (ValueError, AttributeError):
+        return f"signal {-signum}"
+
+
+def _signal_name_for_exit(exit_code: int | None) -> str | None:
+    """Return the POSIX signal name for an exit code, or ``None`` if not signal-killed.
+
+    Handles both raw negative exit codes (pre-normalization, e.g. ``-9``)
+    and POSIX-conventional codes (``128 + signal``, e.g. ``137``).
+    """
+    if exit_code is None or exit_code == 0:
+        return None
+    import signal as _signal
+
+    if exit_code < 0:
+        return _signal_name(exit_code)
+    if exit_code > 128:
+        signum = exit_code - 128
+        try:
+            return _signal.Signals(signum).name
+        except (ValueError, AttributeError):
+            return None
+    return None
+
+
+def _exit_code_hint(exit_code: int | None) -> str:
+    """Return a short human-readable hint for a non-zero exit code.
+
+    * Zero or ``None`` → empty string (no hint needed).
+    * 128 + signal (POSIX convention) → ``"killed by SIGNAME"``.
+    * Other non-zero → ``"non-zero exit"``.
+    """
+    if exit_code is None or exit_code == 0:
+        return ""
+    import signal as _signal
+
+    if exit_code > 128:
+        signum = exit_code - 128
+        try:
+            name = _signal.Signals(signum).name
+            return f"killed by {name}"
+        except (ValueError, AttributeError):
+            return f"killed by signal {signum}"
+    return "non-zero exit"
 
 
 def run_governed(
@@ -953,10 +1588,14 @@ def run_governed(
         issue_passport,
     )
 
-    if not command:
+    if not command or not command[0].strip():
+        raise ValueError("ardur run requires a command to govern")
+    if _INVISIBLE_OR_WS_RE.match(command[0]):
         raise ValueError("ardur run requires a command to govern")
     if via not in VALID_VIA_MODES:
-        raise ValueError(f"unknown --via mode: {via!r} (choose from {', '.join(VALID_VIA_MODES)})")
+        raise ValueError(
+            f"unknown --via mode: {via!r} (choose from {', '.join(VALID_VIA_MODES)})"
+        )
 
     work_dir = Path(cwd).expanduser().resolve() if cwd else Path.cwd()
     scope_patterns = _resolve_run_resource_scope(
@@ -1000,6 +1639,7 @@ def run_governed(
 
     proxy = GovernanceProxy(
         log_path=home / "governance_log.jsonl",
+        receipts_log_path=home / "receipts.jsonl",
         state_dir=state_dir,
         keys_dir=keys_dir,
     )
@@ -1020,7 +1660,9 @@ def run_governed(
     proxy_host = str(server.server_address[0])
     port = server.server_address[1]
     proxy_url = f"http://{proxy_host}:{port}"
-    server_thread = threading.Thread(target=server.serve_forever, name="ardur-run-proxy", daemon=True)
+    server_thread = threading.Thread(
+        target=server.serve_forever, name="ardur-run-proxy", daemon=True
+    )
     server_thread.start()
 
     cgroup_handle: kc.CgroupHandle | None = None
@@ -1034,11 +1676,14 @@ def run_governed(
         )
     # Pre-initialized so the finally block has a safe value even if an
     # exception is raised before kernel correlation is attempted below.
-    correlation = kc.CorrelationResult(available=False, reason="run did not reach kernel correlation")
+    correlation = kc.CorrelationResult(
+        available=False, reason="run did not reach kernel correlation"
+    )
     seccomp_ready_file: Path | None = None
     launch_gate_read_fd: int | None = None
     launch_gate_write_fd: int | None = None
     bpf_exec_stopped = False
+    _rusage_before: dict[str, float] = {"ru_utime": 0.0, "ru_stime": 0.0, "ru_maxrss": 0.0}
     try:
         _wait_for_health(proxy_url, api_token)
 
@@ -1069,9 +1714,14 @@ def run_governed(
         seccomp_ready_file = home / f"seccomp-ready-{session_id}"
         if seccomp_plan.wrapped and seccomp_plan.shim_path is not None:
             run_command = _wrap_command_with_seccomp_shim(
-                run_command, session_id=session_id, shim_path=seccomp_plan.shim_path, ready_file=seccomp_ready_file
+                run_command,
+                session_id=session_id,
+                shim_path=seccomp_plan.shim_path,
+                ready_file=seccomp_ready_file,
             )
-            notes.append(f"seccomp enforcement tier active — agent launched via ardur-exec-shim ({seccomp_plan.shim_path})")
+            notes.append(
+                f"seccomp enforcement tier active — agent launched via ardur-exec-shim ({seccomp_plan.shim_path})"
+            )
         elif seccomp_plan.tier == kc.ENFORCEMENT_TIER_SECCOMP:
             # Recorded now so it's visible even if the run never reaches
             # _apply_kernel_policy's own (mission-content-gated) check of
@@ -1097,10 +1747,20 @@ def run_governed(
             run_command = _wrap_command_with_launch_gate(run_command, trace_exec=True)
         elif cgroup_handle is not None:
             launch_gate_read_fd, launch_gate_write_fd = os.pipe()
-            run_command = _wrap_command_with_launch_gate(run_command, ready_fd=launch_gate_read_fd)
+            run_command = _wrap_command_with_launch_gate(
+                run_command, ready_fd=launch_gate_read_fd
+            )
             popen_extra["pass_fds"] = (launch_gate_read_fd,)
 
         # 5. Launch the agent.
+        _launch_monotonic = time.monotonic()
+        _launch_wall_clock = time.time()
+        exit_code: int | None = None
+        # Capture RUSAGE_CHILDREN baseline before launching so we can
+        # compute the launched process's resource-accounting delta
+        # (user/sys CPU time, peak RSS) after it exits.  Zero-privilege
+        # POSIX accounting — no polling, no daemon.
+        _rusage_before = _get_child_rusage()
         try:
             proc = subprocess.Popen(
                 run_command,
@@ -1125,7 +1785,9 @@ def run_governed(
                     proc.kill()
                 with suppress(Exception):
                     proc.wait(timeout=5)
-                raise KernelPolicyEnforcementError(f"BPF exec handoff failed closed: {exc}") from exc
+                raise KernelPolicyEnforcementError(
+                    f"BPF exec handoff failed closed: {exc}"
+                ) from exc
 
         if cgroup_handle is not None:
             try:
@@ -1137,7 +1799,9 @@ def run_governed(
                     proc.kill()
                     proc.wait()
                     bpf_exec_stopped = False
-                    raise KernelPolicyEnforcementError(f"BPF cgroup adoption failed closed: {exc}") from exc
+                    raise KernelPolicyEnforcementError(
+                        f"BPF cgroup adoption failed closed: {exc}"
+                    ) from exc
 
         correlation = _correlate_launch(
             session_id=session_id,
@@ -1180,9 +1844,12 @@ def run_governed(
                 enforce=enforce,
                 seccomp_plan=seccomp_plan,
                 control_plane_endpoint=(proxy_host, port)
-                if seccomp_plan.tier in {kc.ENFORCEMENT_TIER_BPF_LSM, kc.ENFORCEMENT_TIER_SECCOMP}
+                if seccomp_plan.tier
+                in {kc.ENFORCEMENT_TIER_BPF_LSM, kc.ENFORCEMENT_TIER_SECCOMP}
                 else None,
-                bootstrap_read_allow=BPF_BOOTSTRAP_READ_ALLOW if bpf_trace_handoff else (),
+                bootstrap_read_allow=BPF_BOOTSTRAP_READ_ALLOW
+                if bpf_trace_handoff
+                else (),
             )
         except KernelPolicyEnforcementError as exc:
             notes.append(f"ENFORCE abort: {exc}")
@@ -1202,7 +1869,9 @@ def run_governed(
                 proc.kill()
                 proc.wait()
                 bpf_exec_stopped = False
-                raise KernelPolicyEnforcementError(f"BPF exec release failed closed: {exc}") from exc
+                raise KernelPolicyEnforcementError(
+                    f"BPF exec release failed closed: {exc}"
+                ) from exc
             bpf_exec_stopped = False
 
         # 6. Wait for the agent to exit (bounded by the mission duration budget).
@@ -1215,7 +1884,9 @@ def run_governed(
             except subprocess.TimeoutExpired:
                 proc.kill()
                 exit_code = proc.wait()
-            notes.append(f"agent exceeded max-duration {max_duration_s}s and was terminated")
+            notes.append(
+                f"agent exceeded max-duration {max_duration_s}s and was terminated"
+            )
     finally:
         if bpf_exec_stopped and proc is not None:
             with suppress(OSError):
@@ -1228,9 +1899,23 @@ def run_governed(
         kernel_enforcement = _kernel_enforcement_claim(session_id, correlation)
         if registration_note := receipt_registrar.failure_note():
             notes.append(registration_note)
+        _rusage_after = _get_child_rusage()
+        _rusage_delta = _compute_rusage_delta(_rusage_before, _rusage_after)
+        _process_lifecycle = _build_process_lifecycle_evidence(
+            proc=proc,
+            command=command,
+            launch_monotonic=_launch_monotonic,
+            launch_wall_clock=_launch_wall_clock,
+            exit_code=exit_code if exit_code is not None else 127,
+            run_command=run_command,
+            cwd=str(work_dir),
+            duration_budget_s=max_duration_s,
+            rusage_delta=_rusage_delta,
+        )
         summary = proxy.end_session(session_id)
         attestation_token, _claims = proxy.issue_attestation_for_session(
-            session_id, proxy.receipt_private_key, kernel_enforcement=kernel_enforcement
+            session_id, proxy.receipt_private_key, kernel_enforcement=kernel_enforcement,
+            process_lifecycle=_process_lifecycle,
         )
         if daemon_registered and cgroup_handle is not None:
             try:
@@ -1238,7 +1923,9 @@ def run_governed(
                     session_id=session_id, trace_id=trace_id
                 )
             except (kc.DaemonUnavailable, kc.DaemonProtocolError):
-                notes.append("kernel daemon end_session unavailable during local cleanup")
+                notes.append(
+                    "kernel daemon end_session unavailable during local cleanup"
+                )
         if cgroup_handle is not None:
             cgroup_handle.cleanup()
         if seccomp_ready_file is not None:
@@ -1253,7 +1940,7 @@ def run_governed(
 
     receipts_path = proxy.receipts_log_path
     result = GovernanceRunResult(
-        exit_code=exit_code if proc is not None else 127,
+        exit_code=exit_code if exit_code is not None else 127,
         session_id=session_id,
         mission_id=mission_id,
         agent_id=agent_id,
@@ -1272,6 +1959,7 @@ def run_governed(
         receipt_count=_count_lines(receipts_path),
         correlation=correlation.to_dict(),
         kernel_policy=dict(kernel_policy),
+        process_lifecycle=_process_lifecycle,
         notes=notes,
     )
     return result
@@ -1295,10 +1983,38 @@ def _wait_for_health(proxy_url: str, api_token: str, timeout_s: float = 5.0) -> 
         except (urllib.error.URLError, OSError) as exc:
             last_error = exc
             time.sleep(0.02)
-    raise RuntimeError(f"embedded governance proxy did not become healthy: {last_error}")
+    raise RuntimeError(
+        f"embedded governance proxy did not become healthy: {last_error}"
+    )
 
 
 # ── human-readable summary + CLI glue ──────────────────────────────────────────
+
+
+def _scope_label(summary: dict[str, Any]) -> str:
+    """Render the session-level scope compliance status.
+
+    Reads ``scope_compliance`` from the governance summary dict produced by
+    ``proxy._build_summary()``.  Returns ``"full"`` when all tool calls were
+    within the configured mission scope, ``"violated"`` when any denial or
+    violation occurred, and ``"unknown"`` when the field is absent (e.g. the
+    summary was constructed from a minimal dict in tests).
+    """
+    raw = summary.get("scope_compliance")
+    if raw in ("full", "violated"):
+        return str(raw)
+    return "unknown"
+
+
+def _format_bytes(n: int) -> str:
+    """Format a byte count as a human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    return f"{n / (1024 * 1024 * 1024):.2f} GB"
 
 
 def format_summary(result: GovernanceRunResult) -> str:
@@ -1309,12 +2025,124 @@ def format_summary(result: GovernanceRunResult) -> str:
         f"  adapter       {result.adapter} (--via {result.via})",
         f"  tool calls    {result.total_events} evaluated "
         f"({result.permits} permit / {result.denials} deny)",
-        f"  receipts      {result.receipt_count} signed → {result.receipts_path}",
-        f"  attestation   {result.attestation_digest}",
-        f"  kernel link   {result.correlation.get('reason')}",
-        f"  kernel policy {result.kernel_policy.get('reason')}",
-        f"  agent exit    {result.exit_code}",
     ]
+    # When there are denials, show which tools were blocked so the user
+    # does not have to open receipts to find out.
+    denied_tools = result.summary.get("denied_tools") or []
+    if isinstance(denied_tools, list) and denied_tools:
+        # Truncate to a reasonable number for the summary line; the full
+        # list remains in --json output.
+        shown = denied_tools[:5]
+        suffix = f" (+{len(denied_tools) - 5} more)" if len(denied_tools) > 5 else ""
+        lines.append(f"  denied        {', '.join(shown)}{suffix}")
+    lines.append(f"  scope         {_scope_label(result.summary)}")
+    lines.append(f"  receipts      {result.receipt_count} signed → {result.receipts_path}")
+    lines.append(f"  attestation   {result.attestation_digest}")
+    # Only show kernel lines when kernel correlation is available or
+    # explicitly configured but failed. When the run simply did not use a
+    # kernel daemon (the common case), suppress these lines to reduce noise.
+    corr_available = result.correlation.get("available", False)
+    if corr_available:
+        corr_reason = result.correlation.get("reason") or "available"
+        lines.append(f"  kernel link   {corr_reason}")
+    kp_reason = result.kernel_policy.get("reason", "")
+    if result.kernel_policy.get("tier") or result.kernel_policy.get("wrapped"):
+        lines.append(f"  kernel policy {kp_reason}")
+    elif corr_available and kp_reason:
+        lines.append(f"  kernel policy {kp_reason}")
+    exit_hint = _exit_code_hint(result.exit_code)
+    if exit_hint:
+        lines.append(f"  agent exit    {result.exit_code} ({exit_hint})")
+    else:
+        lines.append(f"  agent exit    {result.exit_code}")
+    pl = result.process_lifecycle
+    if pl:
+        pid_text = str(pl.get("root_pid") or "unknown")
+        dur_text = f"{pl.get('wall_clock_s', 0):.3f}s"
+        tier_text = str(pl.get("capture_tier", "host-observer"))
+        signal_text = pl.get("exit_signal")
+        exit_line = f"exit={pl.get('exit_code')}"
+        if signal_text:
+            exit_line += f" ({signal_text})"
+        process_line = f"  process       pid={pid_text} {dur_text} {exit_line} [{tier_text}]"
+        budget_s = pl.get("duration_budget_s")
+        if isinstance(budget_s, (int, float)) and budget_s > 0:
+            wall = pl.get("wall_clock_s", 0)
+            if wall >= budget_s:
+                process_line += " budget exceeded"
+            else:
+                pct = (wall / budget_s) * 100
+                process_line += f" budget {wall:.1f}s/{budget_s:.0f}s ({pct:.0f}%)"
+        lines.append(process_line)
+        children = pl.get("children")
+        if isinstance(children, list) and children:
+            max_depth = max(
+                (c.get("depth", 0) for c in children if isinstance(c, dict)),
+                default=0,
+            )
+            lines.append(
+                f"  descendants   {len(children)} captured"
+                f" (max depth {max_depth})"
+            )
+            # Aggregate child resource usage from per-child cpu/rss fields.
+            child_cpu_u = sum(
+                c.get("cpu_user_s", 0)
+                for c in children
+                if isinstance(c, dict) and isinstance(c.get("cpu_user_s"), (int, float))
+            )
+            child_cpu_s = sum(
+                c.get("cpu_system_s", 0)
+                for c in children
+                if isinstance(c, dict) and isinstance(c.get("cpu_system_s"), (int, float))
+            )
+            child_rss_max = max(
+                (c.get("rss_bytes", 0) for c in children
+                 if isinstance(c, dict) and isinstance(c.get("rss_bytes"), (int, float))),
+                default=0,
+            )
+            if child_cpu_u or child_cpu_s:
+                child_cpu_total = child_cpu_u + child_cpu_s
+                lines.append(
+                    f"  child cpu     {child_cpu_total:.3f}s"
+                    f" (user {child_cpu_u:.3f}s / sys {child_cpu_s:.3f}s)"
+                )
+            if child_rss_max:
+                lines.append(f"  child max rss {_format_bytes(int(child_rss_max))}")
+        cpu_user = pl.get("cpu_user_s")
+        cpu_sys = pl.get("cpu_system_s")
+        peak_rss = pl.get("peak_rss_bytes")
+        if isinstance(cpu_user, (int, float)) or isinstance(cpu_sys, (int, float)):
+            cpu_total = float(cpu_user or 0) + float(cpu_sys or 0)
+            lines.append(
+                f"  cpu           {cpu_total:.3f}s"
+                f" (user {cpu_user or 0:.3f}s / sys {cpu_sys or 0:.3f}s)"
+            )
+        if isinstance(peak_rss, (int, float)) and peak_rss > 0:
+            lines.append(f"  peak rss      {_format_bytes(int(peak_rss))}")
+    delegation_count = int(result.summary.get("delegation_count", 0))
+    if delegation_count > 0:
+        children_spawned = int(result.summary.get("children_spawned", 0))
+        lines.append(
+            f"  delegations   {delegation_count} requested"
+            f" ({children_spawned} child sessions)"
+        )
+    unknowns = int(result.summary.get("unknowns", 0))
+    insufficient = int(result.summary.get("insufficient_evidence", 0))
+    violations = int(result.summary.get("violations", 0))
+    if unknowns or insufficient or violations:
+        parts: list[str] = []
+        if violations:
+            parts.append(f"{violations} violation")
+        if unknowns:
+            parts.append(f"{unknowns} unknown")
+        if insufficient:
+            parts.append(f"{insufficient} insufficient")
+        lines.append(
+            f"  verdicts      {', '.join(parts)}"
+        )
+    elapsed_s = result.summary.get("elapsed_s")
+    if isinstance(elapsed_s, (int, float)) and elapsed_s >= 0:
+        lines.append(f"  elapsed       {elapsed_s:.3f}s")
     for note in result.notes:
         lines.append(f"  note          {note}")
     lines.append("─────────────────────────────────────────────────────────")
@@ -1477,6 +2305,187 @@ def _print_run_governed_home_dangling_symlink_next_steps() -> None:
     _print_next_steps(run_governed_home_dangling_symlink_next_steps())
 
 
+def run_governed_home_dangling_symlink_parent_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    whose PARENT chain crosses a dangling symlink.
+
+    Distinct from ``run_home_dangling_symlink`` (which covers the LEAF) so
+    operators grepping logs for parent-path-confusion can find the specific
+    condition. Fires for inputs like ``--home <dangling-symlink>/child``:
+    the leaf ``child`` is a plain nonexistent path, so the direct-symlink
+    check passes; ``Path(...).resolve()`` then follows the symlink and
+    ``home.mkdir(parents=True)`` silently materialises the missing target.
+    """
+    return [
+        {
+            "condition": "run_home_dangling_symlink_parent",
+            "action": "remove_or_fix_dangling_symlink_parent",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "A parent directory in the supplied --home path is a dangling "
+                "symlink (a symlink whose target does not exist). Ardur "
+                "resolves the symlink chain and would silently write signing "
+                "keys, active_mission.jwt, state, and governance logs at the "
+                "resolved target rather than the path you typed. Remove the "
+                "dangling symlink or point it at a real directory before "
+                "retrying."
+            ),
+        },
+        {
+            "condition": "run_home_dangling_symlink_parent",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_dangling_symlink_parent_next_steps() -> None:
+    _print_next_steps(run_governed_home_dangling_symlink_parent_next_steps())
+
+
+def run_governed_home_parent_not_directory_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    whose PARENT chain crosses an existing non-directory.
+
+    Fires for inputs like ``--home <regular-file>/child``: the leaf
+    ``child`` is a plain nonexistent path, so the leaf checks pass, but
+    ``home.mkdir(parents=True)`` would raise ``FileNotFoundError`` /
+    ``NotADirectoryError``.
+    """
+    return [
+        {
+            "condition": "run_home_parent_not_directory",
+            "action": "move_aside_or_choose_directory_parent",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "A parent directory in the supplied --home path exists as a "
+                "regular file or other non-directory. Ardur cannot create "
+                "the home tree inside a file. Move the file aside or choose "
+                "a different parent directory before retrying."
+            ),
+        },
+        {
+            "condition": "run_home_parent_not_directory",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_parent_not_directory_next_steps() -> None:
+    _print_next_steps(run_governed_home_parent_not_directory_next_steps())
+
+
+def run_governed_home_empty_next_steps() -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints for a ``--home`` value
+    that is empty or whitespace-only.
+
+    ``Path("").resolve()`` resolves to CWD and ``Path("   ").resolve()``
+    resolves to a literal-whitespace-named directory, both of which silently
+    pollute the wrong location with signing keys, governance logs, and state.
+    The guard rejects empty/whitespace values before any ``Path()`` conversion.
+    """
+    return [
+        {
+            "condition": "run_home_empty",
+            "action": "provide_non_empty_home_path",
+            "command": "ardur run --home <ardur-home> --mission <mission> -- <command>",
+            "detail": (
+                "Pass a non-empty directory path after --home. Empty or "
+                "whitespace-only values silently resolve to the current "
+                "working directory (or a literal whitespace-named directory), "
+                "which would place signing keys, governance logs, and state "
+                "in the wrong location."
+            ),
+        },
+        {
+            "condition": "run_home_empty",
+            "action": "omit_home_for_ephemeral",
+            "command": "ardur run -- <command>",
+            "detail": (
+                "Omit --home to use an ephemeral Ardur home that is created "
+                "and cleaned up automatically."
+            ),
+        },
+    ]
+
+
+def _print_run_governed_home_empty_next_steps() -> None:
+    _print_next_steps(run_governed_home_empty_next_steps())
+
+
+def run_governed_command_not_found_next_steps(cmd_repr: str) -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints when the governed command
+    could not be found (``FileNotFoundError`` from ``subprocess.Popen``).
+
+    ``cmd_repr`` is the executable name/path that Popen tried to launch; it is
+    a local filesystem reference supplied by the operator, never a credential,
+    token, or secret.
+    """
+    safe = cmd_repr if cmd_repr and all(c not in cmd_repr for c in ("\n", "\r")) else "<command>"
+    return [
+        {
+            "condition": "run_command_not_found",
+            "action": "verify_command_name_and_path",
+            "command": f"ardur run --mission <mission> -- {safe} <args...>",
+            "detail": (
+                "The command could not be found. Check the spelling, confirm it is "
+                "installed, and verify it is on your PATH (for a bare name) or that "
+                "the full path exists (for an absolute path)."
+            ),
+        },
+        {
+            "condition": "run_command_not_found",
+            "action": "use_env_via_for_cooperating_agents",
+            "command": "ardur run --via env --mission <mission> -- <command>",
+            "detail": (
+                "If the agent is not Claude Code, --via env routes governance through "
+                "environment variables to the embedded proxy without depending on a "
+                "host-specific hook."
+            ),
+        },
+    ]
+
+
+def run_governed_command_not_executable_next_steps(cmd_repr: str) -> list[dict[str, str]]:
+    """Return deterministic stderr remediation hints when the governed command
+    exists but is not executable (``PermissionError`` from ``subprocess.Popen``).
+
+    ``cmd_repr`` is the executable name/path that Popen tried to launch; it is
+    a local filesystem reference supplied by the operator, never a credential,
+    token, or secret.
+    """
+    safe = cmd_repr if cmd_repr and all(c not in cmd_repr for c in ("\n", "\r")) else "<command>"
+    return [
+        {
+            "condition": "run_command_not_executable",
+            "action": "set_executable_bit",
+            "command": f"chmod +x {safe}",
+            "detail": (
+                "The file exists but does not have the executable bit set. Add the "
+                "executable permission (e.g. chmod +x) and retry."
+            ),
+        },
+        {
+            "condition": "run_command_not_executable",
+            "action": "invoke_via_interpreter",
+            "command": f"ardur run --mission <mission> -- python {safe} <args...>",
+            "detail": (
+                "If the file is a script, invoke it through its interpreter "
+                "(e.g. python, bash) so the interpreter is the governed process."
+            ),
+        },
+    ]
+
+
 def _run_governed_budget_failure(
     condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
 ) -> int:
@@ -1493,9 +2502,75 @@ def _run_governed_budget_failure(
         "detail": detail,
         "next_steps": next_steps,
     }
-    json.dump(response, sys.stdout, indent=2)
-    sys.stdout.write("\n")
+    # Budget validation failures go to stderr so stdout stays clean for
+    # child process output even on pre-execution errors.  This matches the
+    # ``ardur run --json`` contract: stdout = child, stderr = governance.
+    json.dump(response, sys.stderr, indent=2)
+    sys.stderr.write("\n")
     return 2
+
+
+def _run_governed_preexec_json_error(
+    condition: str, message: str, detail: str, next_steps: list[dict[str, str]]
+) -> None:
+    """Emit a structured JSON pre-execution error to stderr.
+
+    Used when ``--json`` is set and the governed command cannot be launched
+    (not found, not executable).  Output goes to stderr to keep the stdout =
+    child-process-output contract intact even on launch failures.
+    """
+    response: dict[str, object] = {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": next_steps,
+    }
+    json.dump(response, sys.stderr, indent=2)
+    sys.stderr.write("\n")
+
+
+def _run_output_write_error(args: Any, exc: object) -> None:
+    """Emit a structured ``--output`` write-failure error.
+
+    When ``--json`` is set, the error goes to stderr as structured JSON
+    matching the sibling-command pattern (``issue``, ``verify``, etc.).
+    Without ``--json``, a human-readable message with remediation guidance
+    is printed to stderr.  ``stdout`` is never touched so the
+    child-process-output contract is preserved.
+    """
+    condition = "run_output_write_failed"
+    detail = str(exc)
+    next_steps = [
+        {
+            "action": "rerun_with_writable_output",
+            "command": "ardur run --mission <mission> --output <writable-file-path> -- <command>",
+            "detail": (
+                "The --output path parent must be a real directory and the "
+                "file must not be a symlink. Choose a writable path."
+            ),
+        },
+    ]
+    if getattr(args, "json", False):
+        response: dict[str, object] = {
+            "ok": False,
+            "error": condition,
+            "error_code": condition,
+            "condition": condition,
+            "message": "Run governance output file could not be written.",
+            "detail": detail,
+            "next_steps": next_steps,
+        }
+        json.dump(response, sys.stderr, indent=2)
+        sys.stderr.write("\n")
+    else:
+        print(
+            f"ardur run --output: {detail}",
+            file=sys.stderr,
+        )
+        _print_next_steps(next_steps)
 
 
 def _run_max_duration_invalid_next_steps(condition: str) -> list[dict[str, str]]:
@@ -1515,8 +2590,34 @@ def _run_max_tool_calls_invalid_next_steps(condition: str) -> list[dict[str, str
         {
             "action": "provide_valid_max_tool_calls",
             "command": "ardur run --mission <mission> --max-tool-calls <zero-or-positive-count> -- <command>",
+            "detail": ("--max-tool-calls must be zero or a positive integer."),
+        },
+    ]
+
+
+def run_governed_value_error_next_steps() -> list[dict[str, str]]:
+    """Return deterministic remediation hints for a generic ``ValueError``
+    raised inside ``run_governed`` (e.g. invalid ``--resource-scope``,
+    unknown ``--via`` mode, or path-root validation failure).
+    """
+    return [
+        {
+            "condition": "run_governed_value_error",
+            "action": "check_resource_scope_and_via",
+            "command": "ardur run --mission <mission> --resource-scope <project-dir> -- <command>",
             "detail": (
-                "--max-tool-calls must be zero or a positive integer."
+                "Resource-scope entries must be non-empty path roots inside the "
+                "governed working directory, not glob patterns. If --via is set, "
+                "choose from auto, claude-code, env, or intercept."
+            ),
+        },
+        {
+            "condition": "run_governed_value_error",
+            "action": "use_default_resource_scope",
+            "command": "ardur run --mission <mission> -- <command>",
+            "detail": (
+                "Omit --resource-scope to use the current working directory as "
+                "the default governed scope."
             ),
         },
     ]
@@ -1527,16 +2628,33 @@ def run_governed_cli(args: Any) -> int:
     command = list(getattr(args, "command", None) or [])
     if command and command[0] == "--":
         command = command[1:]
-    if not command:
+    if not command or not command[0].strip():
         print("ardur run requires a command to govern after --", file=sys.stderr)
-        print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
+        print(
+            'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
+            file=sys.stderr,
+        )
+        _print_run_governed_missing_command_next_steps()
+        return 2
+    if _INVISIBLE_OR_WS_RE.match(command[0]):
+        print(
+            "ardur run requires a command to govern after --",
+            file=sys.stderr,
+        )
+        print(
+            'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
+            file=sys.stderr,
+        )
         _print_run_governed_missing_command_next_steps()
         return 2
 
     mission_arg = getattr(args, "mission", None)
     if isinstance(mission_arg, str) and not mission_arg.strip():
         print("ardur run --mission must be a non-empty string.", file=sys.stderr)
-        print("usage: ardur run --mission \"...\" --allowed-tools Read,Glob -- <agent-cmd...>", file=sys.stderr)
+        print(
+            'usage: ardur run --mission "..." --allowed-tools Read,Glob -- <agent-cmd...>',
+            file=sys.stderr,
+        )
         _print_run_governed_mission_invalid_next_steps()
         return 2
 
@@ -1554,16 +2672,79 @@ def run_governed_cli(args: Any) -> int:
     # and a symlink-to-existing-directory proceeds normally.
     home_arg = getattr(args, "home", None)
     if home_arg is not None:
+        if not str(home_arg).strip():
+            print(
+                "ardur run --home must be a non-empty path.",
+                file=sys.stderr,
+            )
+            print(
+                'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                file=sys.stderr,
+            )
+            _print_run_governed_home_empty_next_steps()
+            return 2
         try:
             expanded_home = Path(home_arg).expanduser()
         except (OSError, ValueError) as exc:
             print(f"ardur run: {exc}", file=sys.stderr)
             return 2
         if expanded_home.is_symlink() and not expanded_home.exists():
-            print("ardur run --home must not point to a dangling symlink.", file=sys.stderr)
-            print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+            print(
+                "ardur run --home must not point to a dangling symlink.",
+                file=sys.stderr,
+            )
+            print(
+                'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                file=sys.stderr,
+            )
             _print_run_governed_home_dangling_symlink_next_steps()
             return 2
+        # Walk every PARENT component of the un-resolved --home path and reject
+        # if any parent is a dangling symlink or an existing non-directory.
+        # Without this, ``--home <dangling-symlink>/child`` passes the leaf
+        # check above (``child`` is neither a symlink nor a file),
+        # ``Path(...).resolve()`` follows the symlink, and
+        # ``home.mkdir(parents=True)`` silently materialises the missing
+        # target — writing the Ed25519 private key, active_mission.jwt,
+        # state, and governance log at a location the operator did not type.
+        # The shared validator in ``personal_hub`` raises a HubError; we
+        # translate it into the ``run`` stderr + exit-2 contract so every
+        # fail-closed branch on this command shares one shape.
+        from .personal_hub import (
+            HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+            HOME_PARENT_NOT_DIRECTORY_CONDITION,
+            HubError,
+            validate_personal_home_path_components,
+        )
+
+        try:
+            validate_personal_home_path_components(home_arg)
+        except HubError as exc:
+            if exc.code == HOME_DANGLING_SYMLINK_PARENT_CONDITION:
+                print(
+                    "ardur run --home path has a parent component that is a "
+                    "dangling symlink.",
+                    file=sys.stderr,
+                )
+                print(
+                    'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                    file=sys.stderr,
+                )
+                _print_run_governed_home_dangling_symlink_parent_next_steps()
+                return 2
+            if exc.code == HOME_PARENT_NOT_DIRECTORY_CONDITION:
+                print(
+                    "ardur run --home path has a parent component that is an "
+                    "existing non-directory.",
+                    file=sys.stderr,
+                )
+                print(
+                    'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                    file=sys.stderr,
+                )
+                _print_run_governed_home_parent_not_directory_next_steps()
+                return 2
+            raise
         try:
             resolved_home = expanded_home.resolve()
         except (OSError, ValueError) as exc:
@@ -1571,7 +2752,10 @@ def run_governed_cli(args: Any) -> int:
             return 2
         if resolved_home.exists() and not resolved_home.is_dir():
             print("ardur run --home must point to a directory path.", file=sys.stderr)
-            print("usage: ardur run --home <ardur-home> --mission \"...\" -- <agent-cmd...>", file=sys.stderr)
+            print(
+                'usage: ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                file=sys.stderr,
+            )
             _print_run_governed_home_not_directory_next_steps()
             return 2
 
@@ -1630,8 +2814,12 @@ def run_governed_cli(args: Any) -> int:
             mission=getattr(args, "mission", None),
             allowed_tools=allowed,
             forbidden_tools=forbidden,
-            max_tool_calls=DEFAULT_MAX_TOOL_CALLS if max_tool_calls_arg is None else int(max_tool_calls_arg),
-            max_duration_s=DEFAULT_MAX_DURATION_S if max_duration_s_arg is None else int(max_duration_s_arg),
+            max_tool_calls=DEFAULT_MAX_TOOL_CALLS
+            if max_tool_calls_arg is None
+            else int(max_tool_calls_arg),
+            max_duration_s=DEFAULT_MAX_DURATION_S
+            if max_duration_s_arg is None
+            else int(max_duration_s_arg),
             home=getattr(args, "home", None),
             via=getattr(args, "via", None) or "auto",
             enable_kernel_correlation=not getattr(args, "no_kernel_correlation", False),
@@ -1640,17 +2828,149 @@ def run_governed_cli(args: Any) -> int:
             no_resource_scope=bool(getattr(args, "no_resource_scope", False)),
         )
     except NotImplementedError as exc:
-        print(f"ardur run: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_governed_not_implemented",
+                "Run governance feature is not available on this platform.",
+                str(exc),
+                run_governed_value_error_next_steps(),
+            )
+        else:
+            print(f"ardur run: {exc}", file=sys.stderr)
         return 2
     except KernelPolicyEnforcementError as exc:
-        print(f"ardur run: --enforce requires kernel-level policy enforcement: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_kernel_enforcement_unavailable",
+                "Run governance --enforce requires kernel-level policy enforcement.",
+                str(exc),
+                run_governed_value_error_next_steps(),
+            )
+        else:
+            print(
+                f"ardur run: --enforce requires kernel-level policy enforcement: {exc}",
+                file=sys.stderr,
+            )
         return 3
     except ValueError as exc:
-        print(f"ardur run: {exc}", file=sys.stderr)
+        # Surface a structured JSON error when --json is set, matching the
+        # FileNotFoundError/PermissionError handlers above.  Without --json,
+        # keep the human-readable stderr message.
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_governed_value_error",
+                "Run governance input validation failed.",
+                str(exc),
+                run_governed_value_error_next_steps(),
+            )
+        else:
+            print(f"ardur run: {exc}", file=sys.stderr)
+        return 2
+    except FileNotFoundError as exc:
+        # subprocess.Popen raises FileNotFoundError (Errno 2) when the
+        # governed executable does not exist on PATH or at the given path.
+        # Surface a clean, actionable error instead of a raw traceback.
+        cmd_repr = exc.filename or (command[0] if command else "<command>")
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_command_not_found",
+                "Run governance command not found.",
+                f"The governed command '{cmd_repr}' could not be found. Check the spelling, confirm it is installed, and verify it is on your PATH or the full path exists.",
+                run_governed_command_not_found_next_steps(cmd_repr),
+            )
+        else:
+            print(
+                f"ardur run: governed command not found: {cmd_repr}", file=sys.stderr
+            )
+            _print_next_steps(
+                run_governed_command_not_found_next_steps(cmd_repr)
+            )
+        return 2
+    except PermissionError as exc:
+        # subprocess.Popen raises PermissionError (Errno 13) when the target
+        # path exists but is not executable. Surface a clean, actionable error.
+        cmd_repr = exc.filename or (command[0] if command else "<command>")
+        if getattr(args, "json", False):
+            _run_governed_preexec_json_error(
+                "run_command_not_executable",
+                "Run governance command not executable.",
+                f"The governed command '{cmd_repr}' exists but is not executable.",
+                run_governed_command_not_executable_next_steps(cmd_repr),
+            )
+        else:
+            print(
+                f"ardur run: governed command not executable: {cmd_repr}",
+                file=sys.stderr,
+            )
+            _print_next_steps(
+                run_governed_command_not_executable_next_steps(cmd_repr)
+            )
         return 2
 
-    print(format_summary(result), file=sys.stderr)
-    return result.exit_code
+    # --redact-paths only affects the JSON output paths (--json and/or
+    # --output).  When it is set without either flag, surface the
+    # relationship to stderr so users do not believe local paths were
+    # redacted from the human-readable summary (they are not — the summary
+    # is not path-redacted).
+    output_path = getattr(args, "output", None)
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and output_path is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json",
+            file=sys.stderr,
+        )
+
+    # --output writes the governance result JSON to a file.  It is valid
+    # without --json so CI pipelines can capture a persistent artifact
+    # while still seeing the human-readable summary on stderr.  When both
+    # --json and --output are given, the JSON goes to stderr as usual AND
+    # the file copy is written.
+    output_digest: str | None = None
+    if output_path is not None:
+        redact = getattr(args, "redact_paths", False)
+        result_dict = result.to_result_dict(redact_paths=redact)
+        payload = json.dumps(result_dict, indent=2, sort_keys=True).encode("utf-8")
+        from .runtime_evidence import RuntimeEvidenceError, write_report
+
+        try:
+            write_report(output_path, payload)
+        except RuntimeEvidenceError as exc:
+            _run_output_write_error(args, exc)
+            return 2
+        output_digest = hashlib.sha256(payload).hexdigest()
+
+    if getattr(args, "json", False):
+        # JSON goes to stderr so the child process's stdout stays transparent.
+        # This lets consumers do: ardur run --json -- pytest  2>governance.json
+        redact = getattr(args, "redact_paths", False)
+        json_dict = result.to_result_dict(redact_paths=redact)
+        if output_path is not None and output_digest is not None:
+            json_dict["output_file"] = str(output_path)
+            json_dict["output_sha256"] = output_digest
+        print(
+            json.dumps(
+                json_dict,
+                indent=2,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+    elif output_path is not None and output_digest is not None:
+        # Human-readable summary to stderr + confirmation that file was written.
+        print(format_summary(result), file=sys.stderr)
+        print(
+            f"  output file   {output_path} (sha256:{output_digest[:16]})",
+            file=sys.stderr,
+        )
+    else:
+        print(format_summary(result), file=sys.stderr)
+    # Normalize signal-killed exit codes to the POSIX convention (128 +
+    # signal number) instead of returning the raw negative value from
+    # ``proc.wait()``.  Without this, ``sys.exit(-9)`` wraps to 247 instead
+    # of 137 (128 + 9), breaking shell ``$?`` and ``&&`` / ``||`` patterns.
+    rc = result.exit_code
+    if rc is not None and rc < 0:
+        return 128 + abs(rc)
+    return rc
 
 
 def _split_csv(value: Any) -> list[str]:

@@ -328,6 +328,7 @@ def test_rwt_phase1_harness_version_info_handles_missing_ardur_binary(tmp_path):
     ctx = SimpleNamespace(
         python_bin=sys.executable,
         ardur_bin=tmp_path / "venv" / "bin" / "ardur",
+        venv=tmp_path / "venv",
         repo=tmp_path,
         project=tmp_path,
         env={"PATH": os.environ.get("PATH", "")},
@@ -336,6 +337,9 @@ def test_rwt_phase1_harness_version_info_handles_missing_ardur_binary(tmp_path):
     versions = harness.version_info(ctx)
 
     assert versions["python"].startswith("Python ")
+    # When the harness venv has not been created (no install_ardur yet),
+    # versions.ardur must fall back to "missing" rather than probing the
+    # ambient interpreter.
     assert versions["ardur"] == "missing"
 
 

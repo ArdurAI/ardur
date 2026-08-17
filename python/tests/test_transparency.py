@@ -436,6 +436,7 @@ def test_rekor_cli_requires_existing_key_without_creating_one(
 ) -> None:
     token, _ = _signed_receipt()
     receipt_log = tmp_path / "receipts.jsonl"
+    receipt_log.write_text(token + "\n", encoding="utf-8")
     queue_receipt_anchor(token, receipt_log, backend_kind=BACKEND_REKOR_V1)
     missing_keys = tmp_path / "missing-keys"
 
@@ -468,6 +469,7 @@ def test_rekor_cli_rejects_loose_existing_private_key_before_transport(
 ) -> None:
     token, receipt_key = _signed_receipt()
     receipt_log = tmp_path / "receipts.jsonl"
+    receipt_log.write_text(token + "\n", encoding="utf-8")
     queue_receipt_anchor(token, receipt_log, backend_kind=BACKEND_REKOR_V1)
     keys_dir = tmp_path / "keys"
     keys_dir.mkdir()
@@ -508,6 +510,7 @@ def test_cli_drains_and_verifies_local_anchor_without_network(
 ) -> None:
     token, receipt_key = _signed_receipt(now=int(time.time()))
     receipt_log = tmp_path / "receipts.jsonl"
+    receipt_log.write_text(token + "\n", encoding="utf-8")
     queue_receipt_anchor(token, receipt_log, backend_kind=BACKEND_LOCAL_SIGNED)
 
     keys_dir = tmp_path / "receipt-keys"

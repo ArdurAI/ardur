@@ -115,7 +115,7 @@
     {
       "id": "phase2-daemon-kernel-boundary",
       "title": "Phase 2 daemon/kernel capture is a bounded development proof",
-      "body": "The current dev branch includes a gated Linux eBPF process-lifecycle proof harness that loads and attaches exec/exit tracepoint programs in a privileged Linux test environment, plus bounded Linux Slice 2 daemon installer/systemd/link-pinning development surfaces: `ardur-sensor` preflight/install/status/uninstall commands, fd-anchored root custody path/config creation, a systemd unit with `sd_notify`/watchdog/capability/path boundaries, and BPF tracepoint-link/ringbuf-map pinning for restart survival. The same boundary includes no-mutation daemon custody/preflight seams, peer-authorization and protocol/peer handshake contracts, SO_PEERCRED retrieval with daemon-observed process-start identity binding and PID-reuse mismatch rejection, accepted-connection protocol, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup and process-start-bound ownership checks, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots for internal daemon status/handoff code, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, and a no-privilege/no-execution launch-wrapper session-proof seam for deterministic argv/cwd digest evidence. This supports a local experimental boundary claim only: no production daemon readiness, no release package or cross-platform installer, no production live enforcement or persistent session-state manager, no client-visible protocol expansion from daemon-internal status snapshots, no daemon-created/assigned cgroups, no filesystem writes/cgroup writes/BPF map mutation from the handoff plan, no universal CLI capture, no file/network/privilege side-effect capture, no macOS/Windows kernel capture, and no unprivileged/no-install eBPF support.",
+      "body": "The current dev branch includes a gated Linux eBPF process-lifecycle proof harness that loads and attaches exec/exit tracepoint programs in a privileged Linux test environment, plus bounded Linux Slice 2 daemon installer/systemd/link-pinning development surfaces: `ardur-sensor` preflight/install/status/uninstall commands, fd-anchored root custody path/config creation, a systemd unit with `sd_notify`/watchdog/capability/path boundaries, and BPF tracepoint-link/ringbuf-map pinning for restart survival. The daemon enforcement path (`ardur-kernelcaptured`) includes BPF policy application with cgroup-scoped enforcement, seccomp-notify governance for syscall interception with sockaddr-based network policy, an agent-fingerprint registry for launcher-identity binding, lifecycle exec filtering, and a guard degradation path that records observability gaps when enforcement drops from BPF to seccomp or none. The same boundary includes no-mutation daemon custody/preflight seams with O_NOFOLLOW path-opening and restrictive umask on sensitive files, peer-authorization and protocol/peer handshake contracts, SO_PEERCRED retrieval with daemon-observed process-start identity binding and PID-reuse mismatch rejection, accepted-connection protocol, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup and process-start-bound ownership checks, a daemon evidence-log append-plan family for filesystem-anchored status evidence, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots for internal daemon status/handoff code, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, a no-privilege/no-execution launch-wrapper session-proof seam for deterministic argv/cwd digest evidence, an agent-recognition benchmark/evaluation harness with corpus and threshold data, tamper-audit and observability-gap evidence types, and a macOS Endpoint Security client stub. This supports a local experimental boundary claim only: no production daemon readiness, no release package or cross-platform installer, no production live enforcement or persistent session-state manager, no client-visible protocol expansion from daemon-internal status snapshots, no daemon-created/assigned cgroups, no filesystem writes/cgroup writes/BPF map mutation from the handoff plan, no universal CLI capture, no file/network/privilege side-effect capture, no macOS/Windows kernel capture, and no unprivileged/no-install eBPF support.",
       "evidence_level": "code-and-doc",
       "maturity": "in-progress",
       "claim_type": "runtime-boundary",
@@ -147,7 +147,22 @@
         "go/pkg/kernelcapture/daemon_session_handoff_plan_test.go",
         "go/pkg/kernelcapture/daemon_accept_loop_plan.go",
         "go/pkg/kernelcapture/launch_wrapper_session.go",
-        "go/pkg/kernelcapture/launch_wrapper_session_test.go"
+        "go/pkg/kernelcapture/launch_wrapper_session_test.go",
+        "go/cmd/ardur-kernelcaptured/main.go",
+        "go/cmd/ardur-kernelcaptured/daemon_enforce.go",
+        "go/cmd/ardur-kernelcaptured/daemon_guard_linux.go",
+        "go/pkg/kernelcapture/bpf_policy_apply.go",
+        "go/pkg/kernelcapture/bpf_policy_apply_linux.go",
+        "go/pkg/kernelcapture/seccomp_notify_linux.go",
+        "go/pkg/kernelcapture/seccomp_policy.go",
+        "go/pkg/kernelcapture/seccomp_sockaddr.go",
+        "go/pkg/kernelcapture/agent_fingerprint.go",
+        "go/pkg/kernelcapture/agent_recognition.go",
+        "go/pkg/kernelcapture/enforce_receipt_chain.go",
+        "go/pkg/kernelcapture/daemon_session_status_evidence_log_append_plan.go",
+        "go/pkg/kernelcapture/observability_gap.go",
+        "go/pkg/kernelcapture/tamper_audit.go",
+        "go/pkg/kernelcapture/es_client_darwin.go"
       ]
     },
     {

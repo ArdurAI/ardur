@@ -887,7 +887,7 @@ def test_extra_claims_cannot_replace_validated_risk_policy(
 def test_mission_declaration_loader_preserves_signed_risk_policy(
     delete_contract: ToolRiskContract,
 ) -> None:
-    from tests.conftest import v01_required_md_extras
+    from conftest import v01_required_md_extras
 
     private_key = ec.generate_private_key(ec.SECP256R1())
     mission = MissionPassport(

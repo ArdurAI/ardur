@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/ArdurAI/ardur/go/pkg/kernelcapture"
 )
@@ -70,7 +71,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func loadCorpus(path string) (*kernelcapture.AgentRecognitionCorpus, string, error) {
-	if path == "" {
+	if strings.TrimSpace(path) == "" {
 		return kernelcapture.EmbeddedAgentRecognitionCorpus()
 	}
 	input, err := os.Open(path)
@@ -82,7 +83,7 @@ func loadCorpus(path string) (*kernelcapture.AgentRecognitionCorpus, string, err
 }
 
 func loadThresholds(path string) (*kernelcapture.AgentRecognitionThresholds, error) {
-	if path == "" {
+	if strings.TrimSpace(path) == "" {
 		return kernelcapture.EmbeddedAgentRecognitionThresholds()
 	}
 	input, err := os.Open(path)

@@ -677,13 +677,11 @@ def _validated_argv(value: Any, label: str) -> tuple[str, ...]:
 
 def load_sensor_pair_config(path: str | Path) -> SensorPairConfig:
     config_path = Path(path).expanduser()
-    descriptor = -1
     try:
         descriptor = os.open(
             config_path,
             os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
-        info = os.fstat(descriptor)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise BenchmarkError(
@@ -694,6 +692,7 @@ def load_sensor_pair_config(path: str | Path) -> SensorPairConfig:
             "sensor_config_unreadable", "sensor config is not a readable regular file"
         ) from exc
     try:
+        info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise BenchmarkError(
                 "sensor_config_not_regular",
@@ -815,6 +814,7 @@ def _run_sensor_command(
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
+            # The child exited between wait completion and process-group cleanup.
             pass
         process.wait()
     if return_code != 0:
@@ -894,6 +894,7 @@ def _cpu_model() -> str:
                     if value:
                         return _host_text(value)
         except OSError:
+            # Processor metadata is optional and /proc may be unavailable.
             pass
     return _host_text(platform.processor())
 

@@ -2,7 +2,7 @@
 title: "IDM Extension Profile v0.1"
 description: "This document defines the **Pre-Execution Intent Declaration Message (IDM)**"
 source_path: "docs/specs/idm-extension-v0.1.md"
-source_sha256: "a8ddbd832fe499e4426c8fe4aff96b53eb9893378396d6fc1bab2832a24b5ab3"
+source_sha256: "9a4cb58c4b450baf31907241bee12d6f8af944a054816a8dbb35050890cbfe59"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -41,10 +41,11 @@ This document uses the key words **MUST**, **MUST NOT**, **SHOULD**,
 The Silence Theorem (see Workstream C.1 / `docs/paper/sections-3-4-formal-model-theorem.md`)
 establishes that Mission-Intent Compliance (MIC) is a hyperproperty over
 projected traces, and that projection-induced information loss makes sound and
-complete monitoring impossible in the general case. The tri-state verifier
+complete monitoring impossible in the general case. The verifier
 operationalizes this limit: when the observable projection lacks information
 required for a compliance verdict, the only honest result is
-`insufficient_evidence`.
+`insufficient_evidence` (transient/operational failure) or `unknown`
+(structural observation gap).
 
 IDM does **not** eliminate this impossibility. It is a **gray-box augmentation**
 of the projection: by declaring intent *before* execution, the agent supplies
@@ -168,7 +169,7 @@ optional claims in the ER for the final step of the subtask:
   maximal drift) computed from the metrics in §4.2
 - `idm_verdict`: `matched` or `drift_detected`
 
-These annotations are evidence-level metadata; they do not replace the tri-state
+These annotations are evidence-level metadata; they do not replace the
 `verdict` of the ER itself.
 
 ## 5. Composition with MIC-Evidence

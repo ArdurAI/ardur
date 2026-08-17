@@ -90,6 +90,28 @@ func TestRunRejectsUnknownThresholdFields(t *testing.T) {
 	}
 }
 
+// TestRunTreatsWhitespaceCorpusPathAsEmbedded mirrors the bare-=="" fix in
+// loadCorpus/loadThresholds: a whitespace-only path must fall back to the
+// embedded corpus/thresholds and produce the normal passing report, NOT
+// attempt to open a file literally named "   ".
+func TestRunTreatsWhitespaceCorpusPathAsEmbedded(t *testing.T) {
+	for _, name := range []string{"corpus", "thresholds"} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-" + name, "   "}, &stdout, &stderr); code != exitPassed {
+				t.Fatalf("run exit = %d for whitespace-only -%s, want %d; stderr=%q", code, name, exitPassed, stderr.String())
+			}
+			var report kernelcapture.AgentRecognitionEvaluationReport
+			if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+				t.Fatalf("whitespace -%s did not yield an embedded report: %v", name, err)
+			}
+			if !report.Gate.Passed {
+				t.Fatalf("whitespace -%s did not fall back to embedded (gate not passed): %+v", name, report.Gate)
+			}
+		})
+	}
+}
+
 func TestRunTreatsOutputFailureAsInvalidExecution(t *testing.T) {
 	var stderr bytes.Buffer
 	if code := run(nil, failingWriter{}, &stderr); code != exitInvalid {

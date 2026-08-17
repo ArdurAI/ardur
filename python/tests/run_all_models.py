@@ -27,8 +27,11 @@ def get_available_models() -> list[str]:
         return [m.strip() for m in sys.argv[2].split(",")]
 
     import urllib.request
+
     try:
-        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=5) as resp:
+        with urllib.request.urlopen(
+            "http://localhost:11434/api/tags", timeout=5
+        ) as resp:
             data = json.loads(resp.read().decode())
             return [m["name"] for m in data.get("models", [])]
     except Exception as exc:
@@ -50,7 +53,11 @@ def run_test(model: str) -> Path:
     env["ARDUR_OLLAMA_CLOUD_MODEL"] = model
 
     proc = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve().parent / "run_cloud_model_test.py"), model],
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parent / "run_cloud_model_test.py"),
+            model,
+        ],
         env=env,
         capture_output=False,
         text=True,
@@ -70,17 +77,42 @@ def write_summary(results: list[dict]) -> Path:
     # Build summary rows
     rows = []
     for r in results:
-        denials = len([e for e in r.get("errors", []) if e.get("decision")])
-        exceptions = len([e for e in r.get("errors", []) if "error" in e])
-        rows.append({
-            "model": r["model"],
-            "elapsed_m": round(r.get("total_elapsed_s", 0) / 60, 1),
-            "tool_calls": r.get("tool_calls_total", 0),
-            "files": len(r.get("files_created", [])),
-            "denials": denials,
-            "exceptions": exceptions,
-            "clean": denials == 0 and exceptions == 0,
-        })
+        errors = r.get("errors", [])
+        if "denials" in r:
+            denials = len(r["denials"])
+            exceptions = len(errors)
+        else:
+            # Compatibility with reports written before denials had a
+            # dedicated collection. Only an explicit, otherwise clean DENY is
+            # a denial; every unknown or malformed error entry fails closed.
+            denials = 0
+            exceptions = 0
+            for entry in errors:
+                if not isinstance(entry, dict):
+                    exceptions += 1
+                    continue
+                decision = entry.get("decision")
+                if isinstance(decision, dict):
+                    decision = decision.get("decision")
+                if (
+                    decision == "DENY"
+                    and "error" not in entry
+                    and entry.get("status", 200) == 200
+                ):
+                    denials += 1
+                else:
+                    exceptions += 1
+        rows.append(
+            {
+                "model": r["model"],
+                "elapsed_m": round(r.get("total_elapsed_s", 0) / 60, 1),
+                "tool_calls": r.get("tool_calls_total", 0),
+                "files": len(r.get("files_created", [])),
+                "denials": denials,
+                "exceptions": exceptions,
+                "clean": denials == 0 and exceptions == 0,
+            }
+        )
 
     # Markdown
     md = [
@@ -99,22 +131,30 @@ def write_summary(results: list[dict]) -> Path:
         )
 
     best = max(rows, key=lambda r: (r["files"], r["tool_calls"], not r["clean"]))
-    md.extend([
-        "",
-        f"**Best performer:** {best['model']} ({best['files']} files, {best['tool_calls']} tool calls)",
-        "",
-        "## Key Takeaway",
-        "",
-        f"Ardur governance proxy enforced policy across all models with zero unauthorized tool calls.",
-        f"Every tool invocation went through evaluate -> attest -> receipt.",
-    ])
+    md.extend(
+        [
+            "",
+            f"**Best performer:** {best['model']} ({best['files']} files, {best['tool_calls']} tool calls)",
+            "",
+            "## Key Takeaway",
+            "",
+            "Ardur governance proxy enforced policy across all models with zero unauthorized tool calls.",
+            "Every tool invocation went through evaluate -> attest -> receipt.",
+        ]
+    )
 
     summary_path.write_text("\n".join(md) + "\n")
 
-    json_path.write_text(json.dumps({
-        "run_date": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "models": rows,
-    }, indent=2) + "\n")
+    json_path.write_text(
+        json.dumps(
+            {
+                "run_date": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "models": rows,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     print(f"\nSummary written to {summary_path}")
     print(f"JSON data written to {json_path}")

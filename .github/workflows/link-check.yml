@@ -41,6 +41,8 @@ jobs:
             --cache
             --max-cache-age 7d
             --no-progress
+            --max-retries 3
+            --retry-wait-time 5
             --accept 200,206,429
             --exclude 'github\.com/.*/security/advisories/new(/.*)?$'
             --exclude 'developers\.redhat\.com'

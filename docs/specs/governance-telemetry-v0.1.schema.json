@@ -62,7 +62,8 @@
       "enum": [
         "PERMIT",
         "DENY",
-        "ERROR"
+        "ERROR",
+        "UNKNOWN"
       ]
     },
     "verdict": {
@@ -70,7 +71,8 @@
       "enum": [
         "compliant",
         "violation",
-        "insufficient_evidence"
+        "insufficient_evidence",
+        "unknown"
       ]
     },
     "reason_code": {

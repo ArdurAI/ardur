@@ -361,6 +361,33 @@ def test_sensor_config_rejects_symlink(tmp_path: Path) -> None:
     assert error.value.code == "sensor_config_not_regular"
 
 
+def test_sensor_config_closes_descriptor_when_fstat_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_sensor(tmp_path / "sensor.json")
+    closed: list[int] = []
+    inspected: list[int] = []
+    real_close = benchmark.os.close
+
+    def fail_fstat(descriptor: int) -> os.stat_result:
+        inspected.append(descriptor)
+        raise OSError("synthetic fstat failure")
+
+    def track_close(descriptor: int) -> None:
+        closed.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(benchmark.os, "fstat", fail_fstat)
+    monkeypatch.setattr(benchmark.os, "close", track_close)
+
+    with pytest.raises(benchmark.BenchmarkError) as error:
+        benchmark.load_sensor_pair_config(path)
+
+    assert error.value.code == "sensor_config_unreadable"
+    assert len(inspected) == 1
+    assert closed == inspected
+
+
 def test_sensor_config_rejects_excessive_json_depth(tmp_path: Path) -> None:
     path = tmp_path / "sensor.json"
     path.write_text('{"nested":' + "[" * 20 + "0" + "]" * 20 + "}", encoding="utf-8")

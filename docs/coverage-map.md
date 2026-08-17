@@ -6,7 +6,7 @@ This page is the canonical reference linked from the README, `STATUS.md`,
 plugin documentation, and every example. When the capture surface changes,
 this page changes; everywhere else just links to it.
 
-Last updated: 2026-07-09. Current shipping version: v0.1 (tool-call boundary). Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
+Last updated: 2026-08-08. Current shipping version: v0.1 (tool-call boundary). The `ardur run -- <cli>` host-observer lifecycle tier is now also shipping: root-process PID, command, `run_command` (actual argv when adapter wrapping differs), `cwd` (absolute working directory), `duration_budget_s` (caller-set time budget), started-at, wall-clock duration, exit code, and exit signal are captured for any CLI launch on macOS/Linux without any host plugin API dependency (`capture_tier=host-observer`). Descendant processes are now enumerated recursively (direct children, grandchildren, etc. — PID, command, started-at, wall-clock duration, depth, parent_pid; child exit codes best-effort). Full real-time exec/fork event capture remains a layer 2 gap requiring eBPF daemon correlation. Current dev branch additionally contains a bounded Linux eBPF/daemon-control proof harness with a capped in-memory daemon session registry seam, safe active-session lookup/handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention handler/sink proof, narrow local `session_status` client proof, no-write status evidence-log planning seam, in-memory JSONL evidence-log entry builder, injected in-memory append/rotation planner, injected filesystem append/rotation adapter with temp-dir test coverage, daemon-side `session_status` evidence-log append wiring through that injected filesystem, and a no-mutation session handoff plan seam; it is not part of the shipping v0.1 capture claim.
  - The handler also automatically removes in-memory evidence-log append state when sessions end or expire; it does not delete, rotate, archive, or rename evidence-log files.
 
 ## What Ardur captures today (v0.1)
@@ -24,6 +24,7 @@ Last updated: 2026-07-09. Current shipping version: v0.1 (tool-call boundary). C
 | Mission Passport | Full — issued JWT with allowed/forbidden tools, resource scope, budgets, biscuit attenuation chain | Signed by issuer; verified at session start |
 | Receipt chain integrity | Full — every receipt's `parent_receipt_hash` is SHA-256 of prior receipt's full JWT; ES256-signed | `receipt_id`, `parent_receipt_hash`, `parent_receipt_id`, `trace_id` |
 | Posture index | Derived local evidence only — summarizes local receipts/profile/redacted bundle without mutating them | `schema_version=ardur.posture_index.v0`, `positioning=derived_local_evidence`, chain status, verdict/boundary counts, coverage gaps |
+| `ardur run -- <cli>` host-observer lifecycle | **Root-process + recursive descendant lifecycle** — root PID, command, `run_command` (actual argv when adapter wrapping differs), `cwd` (absolute working directory), `duration_budget_s` (caller-set time budget), started-at, wall-clock duration, exit code, exit signal, and CPU/memory usage (`cpu_user_s`, `cpu_system_s` via POSIX getrusage delta; `peak_rss_bytes` platform-normalised to bytes), plus descendant processes recursively (direct children, grandchildren, etc. with PID, command, started-at, wall-clock duration, depth, parent_pid; child exit codes best-effort). Zero-privilege, no kernel daemon, works on macOS/Linux with any CLI. `capture_tier=host-observer`. Lifecycle evidence is cryptographically signed into the session-final attestation token as a `process_lifecycle` claim. | `process_lifecycle` object in governance result and attestation JWT: `root_pid`, `command`, `run_command` (when differing), `cwd` (when captured), `duration_budget_s` (when set), `started_at`, `wall_clock_s`, `exit_code`, `exit_signal`, `cpu_user_s` / `cpu_system_s` / `peak_rss_bytes` (when getrusage delta captured), `capture_tier`, `children` (list of descendant snapshots with depth + parent_pid when descendants exist) |
 
 ## What is *not automatically captured* today (v0.1)
 
@@ -33,7 +34,7 @@ Last updated: 2026-07-09. Current shipping version: v0.1 (tool-call boundary). C
 | **Subprocess trees spawned by `Bash`** — `Bash("./run.sh")` is one receipt; everything inside `run.sh` is invisible. | Same reason. | v0.5 / v1.0 |
 | **Network connections** initiated by tool-spawned processes (DNS, TCP, HTTP) | Hooks see `WebFetch`/`WebSearch`; they do not see network calls made by, say, `Bash("curl …")` | v0.5 / v1.0 |
 | **Filesystem deltas outside the typed file tools** — files changed by a Bash command, by an MCP server, or by a subagent's subprocess | Same boundary | v0.2 (snapshots) partial; v0.5 / v1.0 full |
-| **Provider-side reasoning, hidden state, server-side tool calls** | The LLM runs on Anthropic/OpenAI/etc. infrastructure. No local tool can see what happens inside the model or on the provider's servers. | **Out of scope by definition.** Labeled `insufficient_evidence` on receipts when relevant. |
+| **Provider-side reasoning, hidden state, server-side tool calls** | The LLM runs on Anthropic/OpenAI/etc. infrastructure. No local tool can see what happens inside the model or on the provider's servers. | **Out of scope by definition.** Labeled `unknown` on receipts when the verifier observed the call but cannot know what happened inside the provider. |
 | **Anything outside the active session** — actions in another terminal, after `claude` exits, or before `ardur start` runs | We instrument a specific process tree. | Cross-session correlation is a separate research question. |
 | **Out-of-scope filesystem** — paths outside the Mission Passport's `resource_scope` | Intentional — scope is the user's protected boundary | A user can widen scope in `instructions.md`; not captured by default |
 | **Posture index as asset inventory** — `ardur posture scan` does not discover unmanaged apps, credentials, cloud assets, or provider-side state. | It is a report over local Ardur evidence artifacts, not a scanner with new sensors. | Future adapters can feed more evidence; the posture index must continue to label unsupported boundaries as gaps. |
@@ -99,10 +100,27 @@ by the daemon.
 │   Linux cgroup process exec/exit       ← conditional │
 │   Other syscalls/network/macOS ESF     ← roadmap     │
 ├─────────────────────────────────────────────────────┤
+│ Layer 1.5 — Host-observer lifecycle                 │
+│   ardur run -- <cli> root + descendant tree PID/cmd │
+│   ↳ zero-privilege, no daemon — shipping            │
+├─────────────────────────────────────────────────────┤
 │ Layer 1 — Tool-call boundary           ← shipping   │
 │   Every Claude Code tool invocation, signed         │
 └─────────────────────────────────────────────────────┘
 ```
+
+Layer 1.5 (host-observer) captures the root process launched by
+`ardur run -- <cli>`: its PID, command, `run_command` (the actual argv when
+adapter wrapping transforms it), `cwd` (absolute working directory), started-at
+timestamp, wall-clock duration, exit code, and exit signal. It also enumerates
+descendant processes recursively (direct children, grandchildren, etc. — PID,
+command, started-at, wall-clock duration, depth, parent_pid; child exit codes
+are best-effort and may be null when a child exits between snapshot and
+inspection). This works on macOS and Linux without any host plugin API
+dependency or kernel daemon. It is `capture_tier=host-observer` and records a
+point-in-time snapshot of the root process and its descendant tree — not
+real-time exec/fork event streams, syscalls, file/network effects, or
+provider-side actions. Those remain layer 2 / layer 3 gaps.
 
 ## What "cryptographic provenance" precisely claims
 
@@ -133,9 +151,10 @@ Each receipt carries an `evidence_level` field. The values:
 | `attested` | Ardur signed an observation; the action's intent is captured |
 | `observed` | A local adapter saw browser/desktop/CLI state |
 | `self_signed` | Ardur signed its own observation (default for tool calls) |
-| `insufficient_evidence` | The relevant provider-side or kernel-level activity was not locally visible — labeled explicitly rather than implied |
+| `insufficient_evidence` | The verifier could not make a confident decision due to a transient operational failure (approval operator unavailable, state file corrupted, network error). Might be retried. |
+| `unknown` | The verifier observed the call but the evidence is structurally outside the capture boundary — the honest "I cannot know what happened" outcome, distinct from a retryable transient failure |
 
-The `insufficient_evidence` label is how we keep claims precise at the receipt level. If something happened that Ardur couldn't verify, the receipt says so.
+Both labels keep claims precise at the receipt level. `insufficient_evidence` records a retryable operational failure; `unknown` records a genuine observation gap where the activity is structurally outside Ardur's capture boundary. Both fail-closed as `DENY`. See [Security Model](security-model.md) for the full five-state Decision taxonomy.
 
 ## What v0.5 / v1.0 will add
 

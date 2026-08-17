@@ -103,15 +103,17 @@ Receivers MUST reject an ER EAT whose `eat_profile` differs.
 ### 3.4 Verdict as a Profile-Specific EAT Claim
 
 RFC 9711 does not define an attestation verdict claim suitable for MIC's
-tri-state semantics. This profile therefore defines `verdict` as a
+verdict semantics. This profile therefore defines `verdict` as a
 profile-specific EAT claim with the same string values as the base ER schema:
 
 - `compliant`
 - `violation`
 - `insufficient_evidence`
+- `unknown` (v0.2 extension: structural observation gap, distinct from
+  `insufficient_evidence`)
 
-Receivers MUST preserve the tri-state semantics and MUST NOT collapse
-`insufficient_evidence` into `compliant`.
+Receivers MUST preserve the verdict semantics and MUST NOT collapse
+`insufficient_evidence` or `unknown` into `compliant`.
 
 ## 4. Mapping `measurements` into `submods`
 

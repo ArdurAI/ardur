@@ -83,6 +83,36 @@ func TestNewAgentPassportReconciler_AcceptsEphemeralKeyWithOptIn(t *testing.T) {
 	}
 }
 
+// Whitespace-only --signing-key must be treated as empty so it falls into the
+// ephemeral-key path (or the refuse-without-opt-in path), not forwarded to
+// loadSigningKey where it produces a raw os.ReadFile("   ") error.
+func TestNewAgentPassportReconciler_WhitespaceKeyTreatedAsEmpty(t *testing.T) {
+	s := testScheme()
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithStatusSubresource(&vibapv1alpha1.AgentPassport{}).
+		Build()
+
+	// With allowEphemeralKey=true, whitespace path should NOT error —
+	// it should be treated as empty and fall into the ephemeral path.
+	r, err := NewAgentPassportReconciler(c, s, "   ", "https://test.vibap.io", true)
+	if err != nil {
+		t.Fatalf("whitespace signing-key path should be treated as empty (ephemeral path); got error: %v", err)
+	}
+	if r == nil {
+		t.Fatal("reconciler is nil despite no error")
+	}
+
+	// Without allowEphemeralKey, whitespace path should give the same
+	// "startup refused" error as an empty path, not a raw file error.
+	_, err = NewAgentPassportReconciler(c, s, "   ", "https://test.vibap.io", false)
+	if err == nil {
+		t.Fatal("expected startup refusal for whitespace-only --signing-key without --allow-ephemeral-key")
+	}
+	if !strings.Contains(err.Error(), "startup refused") {
+		t.Errorf("error should mention 'startup refused' (ephemeral path); got: %v", err)
+	}
+}
+
 
 func testPassport(name, ns string) *vibapv1alpha1.AgentPassport {
 	return &vibapv1alpha1.AgentPassport{

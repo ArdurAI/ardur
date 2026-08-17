@@ -70,7 +70,7 @@ const (
 // goroutine for it. Returns when ctx is cancelled.
 func runSeccompHandoffServer(ctx context.Context, socketPath string, d *daemon, log *slog.Logger) error {
 	_ = os.Remove(socketPath)
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return fmt.Errorf("create seccomp handoff socket directory: %w", err)
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})

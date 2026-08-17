@@ -2,7 +2,7 @@
 title: "Ardur Governance Telemetry v0.1"
 description: "Status: implementation profile."
 source_path: "docs/specs/governance-telemetry-v0.1.md"
-source_sha256: "0d65b0cf63f7d14513d6ac1287a0ad38215a8e20367b5856a54435cf9ee06270"
+source_sha256: "2d9a88b05e2a57bf25f9be8b341ed73c0290c23fbcfe2e1caa789ae3486c7358"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -33,7 +33,8 @@ The local event binds:
 
 - receipt ID and signed parent receipt hash;
 - trace, actor, verifier, and grant identifiers;
-- tri-state verdict and `PERMIT`, `DENY`, or `ERROR` projection;
+- verdict (`compliant`, `violation`, `insufficient_evidence`, or `unknown`)
+  and `PERMIT`, `DENY`, or `ERROR` projection;
 - signed policy backend, decision, and optional stable `rule_id`;
 - signed reason code, budget state, and risk classification;
 - signed invocation and arguments digests; and

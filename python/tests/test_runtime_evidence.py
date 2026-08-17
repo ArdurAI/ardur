@@ -794,6 +794,65 @@ def test_atomic_report_write_rejects_hostile_output_shapes(tmp_path: Path) -> No
     assert name_error.value.code == "output_name_invalid"
 
 
+def test_atomic_report_write_surfaces_private_temp_cleanup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "report.json"
+    parent_descriptors: list[int] = []
+    closed_descriptors: list[int] = []
+    real_open = runtime.os.open
+    real_close = runtime.os.close
+
+    def track_open(path: object, *args: object, **kwargs: object) -> int:
+        descriptor = real_open(path, *args, **kwargs)
+        if path == output.parent:
+            parent_descriptors.append(descriptor)
+        return descriptor
+
+    def track_close(descriptor: int) -> None:
+        closed_descriptors.append(descriptor)
+        real_close(descriptor)
+
+    def fail_replace(*_args: object, **_kwargs: object) -> None:
+        raise OSError("synthetic replace failure")
+
+    def fail_unlink(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(f"synthetic private path: {tmp_path}")
+
+    monkeypatch.setattr(runtime.os, "open", track_open)
+    monkeypatch.setattr(runtime.os, "close", track_close)
+    monkeypatch.setattr(runtime.os, "replace", fail_replace)
+    monkeypatch.setattr(runtime.os, "unlink", fail_unlink)
+
+    with pytest.raises(runtime.RuntimeEvidenceError) as error:
+        runtime.write_report(output, b"{}\n")
+
+    assert error.value.code == "output_cleanup_failed"
+    assert str(tmp_path) not in str(error.value)
+    assert len(parent_descriptors) == 1
+    assert parent_descriptors[0] in closed_descriptors
+
+
+def test_atomic_report_write_accepts_already_missing_private_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "report.json"
+
+    def fail_replace(*_args: object, **_kwargs: object) -> None:
+        raise OSError("synthetic replace failure")
+
+    def missing_unlink(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError
+
+    monkeypatch.setattr(runtime.os, "replace", fail_replace)
+    monkeypatch.setattr(runtime.os, "unlink", missing_unlink)
+
+    with pytest.raises(runtime.RuntimeEvidenceError) as error:
+        runtime.write_report(output, b"{}\n")
+
+    assert error.value.code == "output_write_failed"
+
+
 @pytest.mark.parametrize("window", [-1, 3601, True, 1.5])
 def test_invalid_correlation_window_is_rejected(tmp_path: Path, window: Any) -> None:
     path = tmp_path / "events.jsonl"
@@ -1072,7 +1131,7 @@ def test_cli_missing_public_key_failure_does_not_echo_paths(
     response = json.loads(captured.out)
     assert exit_code == 1
     assert captured.err == ""
-    assert response["error"] == "runtime_evidence_io_failed"
+    assert response["error"] == "receipt_public_key_invalid"
     assert str(tmp_path) not in captured.out
     assert "missing-public-key.pem" not in captured.out
 

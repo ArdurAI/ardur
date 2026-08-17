@@ -15,11 +15,14 @@ from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import Decision
 from vibap.receipt import verify_chain
 
-from tests.conftest import (
+from conftest import (
     v01_default_status_list_token,
     v01_default_status_url,
     v01_required_md_extras,
 )
+
+decode_aat_claims = aat_adapter_module.decode_aat_claims
+material_from_aat_grant = aat_adapter_module.material_from_aat_grant
 
 
 class _Response:
@@ -261,13 +264,17 @@ def test_aat_mission_digest_mismatch_fails_closed(
     )
 
     # require_pop=False isolates the test to mission_digest semantics —
-    # cnf carried by the factory is irrelevant here.
-    with pytest.raises(PermissionError, match="mission_digest"):
+    # cnf carried by the factory is irrelevant here. The external message is
+    # fixed-code sanitized; the chained cause retains the diagnostic detail.
+    with pytest.raises(PermissionError) as exc_info:
         proxy.start_session_from_aat(
             aat_token,
             signing_key=private_key,
             require_pop=False,
         )
+    assert str(exc_info.value) == "aat_mission_resolution_failed"
+    assert isinstance(exc_info.value.__cause__, mission_module.MissionBindingError)
+    assert "mission_digest" in str(exc_info.value.__cause__)
 
 
 def test_aat_unsupported_token_shape_fails_closed(proxy, private_key):
@@ -619,8 +626,6 @@ class TestAATProofOfPossession:
     def test_cnf_without_pop_inputs_raises_when_require_pop_true(
         self, proxy, private_key, tmp_path, monkeypatch
     ):
-        from vibap.aat_adapter import material_from_aat_grant
-
         # Mint an authoritative mission declaration so the adapter can resolve mission_ref.
         mission_id = "urn:mission:pop-test"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
@@ -658,8 +663,6 @@ class TestAATProofOfPossession:
         AAT. Since 2026-04-28 the default is require_pop=True; callers that
         legitimately need bearer mode must opt out *explicitly* so the
         security-relevant choice is visible at the call site."""
-        from vibap.aat_adapter import material_from_aat_grant
-
         mission_id = "urn:mission:pop-explicit-optout"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
         md_url = "https://tenuo.example/missions/pop-explicit-optout"
@@ -711,8 +714,6 @@ class TestAATProofOfPossession:
         is not None`` so any non-None cnf forces verify_pop, which
         rejects malformed shapes with PermissionError. This parametrized
         test covers every shape the round-4 audit listed."""
-        from vibap.aat_adapter import material_from_aat_grant
-
         mission_id = f"urn:mission:cnf-malformed-{type(malformed_cnf).__name__}"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
         md_url = f"https://tenuo.example/missions/cnf-malformed-{id(malformed_cnf)}"
@@ -769,8 +770,6 @@ class TestAATProofOfPossession:
         That made the cnf binding cosmetic — anyone who observed the AAT
         could replay it. The default is now True; this test proves it.
         """
-        from vibap.aat_adapter import material_from_aat_grant
-
         mission_id = "urn:mission:pop-default-fails-closed"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
         md_url = "https://tenuo.example/missions/pop-default-fails-closed"
@@ -866,8 +865,6 @@ class TestAATIatSkewGuard:
             private_key,
             algorithm=ALGORITHM,
         )
-        from vibap.aat_adapter import decode_aat_claims
-
         with pytest.raises(_jwt.InvalidTokenError, match="AAT iat"):
             decode_aat_claims(aat_token, public_key)
 
@@ -886,7 +883,6 @@ class TestAATPoPHappyPath:
         self, proxy, private_key, monkeypatch
     ):
         from cryptography.hazmat.primitives.asymmetric import ec
-        from vibap.aat_adapter import material_from_aat_grant
         from vibap.passport import compute_jwk_thumbprint, create_kb_jwt
 
         # Generate a holder keypair distinct from the issuer.
@@ -961,8 +957,6 @@ class TestAATPoPHappyPath:
     ):
         """An AAT without any cnf claim is bearer-mode and must be accepted
         even when require_pop=True — the flag only gates cnf-carrying AATs."""
-        from vibap.aat_adapter import material_from_aat_grant
-
         mission_id = "urn:mission:bearer-aat"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
         md_url = "https://tenuo.example/missions/bearer-aat"
