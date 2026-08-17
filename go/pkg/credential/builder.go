@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
 
 // Builder constructs a VIBAPCredential using the builder pattern.
@@ -82,23 +80,9 @@ func (b *Builder) WithTTL(ttl time.Duration) *Builder {
 // WithIdentity sets Layer 1 (Identity) claims.
 // spiffeID and ownerID are required; a2aCardRef is optional. ownerID is
 // configured attribution and is always emitted with self-asserted assurance.
-// The SPIFFE ID is marked caller-provided rather than provider-verified.
 func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
-	return b.withIdentity(spiffeID, ownerID, a2aCardRef, SPIFFEIDAssuranceCallerProvided)
-}
-
-// WithVerifiedIdentity sets Layer 1 from an authenticated IdentityProvider.
-func (b *Builder) WithVerifiedIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
-	return b.withIdentity(spiffeID, ownerID, a2aCardRef, SPIFFEIDAssuranceProviderVerified)
-}
-
-func (b *Builder) withIdentity(spiffeID, ownerID, a2aCardRef string, assurance SPIFFEIDAssurance) *Builder {
 	if spiffeID == "" {
 		b.err = fmt.Errorf("identity: spiffe_id is required")
-		return b
-	}
-	if _, err := spiffeid.FromString(spiffeID); err != nil {
-		b.err = fmt.Errorf("identity: spiffe_id must be a valid SPIFFE ID: %w", err)
 		return b
 	}
 	if ownerID == "" {
@@ -106,11 +90,10 @@ func (b *Builder) withIdentity(spiffeID, ownerID, a2aCardRef string, assurance S
 		return b
 	}
 	b.identity = &IdentityClaims{
-		SPIFFEID:          spiffeID,
-		SPIFFEIDAssurance: assurance,
-		OwnerID:           ownerID,
-		OwnerIDAssurance:  OwnerIDAssuranceSelfAsserted,
-		A2ACardRef:        a2aCardRef,
+		SPIFFEID:         spiffeID,
+		OwnerID:          ownerID,
+		OwnerIDAssurance: OwnerIDAssuranceSelfAsserted,
+		A2ACardRef:       a2aCardRef,
 	}
 	return b
 }

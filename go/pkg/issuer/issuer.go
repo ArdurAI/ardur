@@ -321,11 +321,7 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 			score.AuthorizationTier,
 		)
 	if !unverifiedIdentity {
-		if workloadIdentityFromSPIRE {
-			b = b.WithVerifiedIdentity(agentID, ownerID, a2aRef)
-		} else {
-			b = b.WithIdentity(agentID, ownerID, a2aRef)
-		}
+		b = b.WithIdentity(agentID, ownerID, a2aRef)
 	}
 
 	if req.TTL > 0 {

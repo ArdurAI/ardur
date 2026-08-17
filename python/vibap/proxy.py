@@ -6484,9 +6484,7 @@ def serve_proxy(
                     )
                     return
                 if path == "/.well-known/jwks.json":
-                    self._send_json(
-                        200, {"keys": [_public_key_to_jwk(proxy.public_key)]}
-                    )
+                    self._send_json(200, {"keys": [_public_key_to_jwk(proxy.public_key)]})
                     return
                 if not self._check_rate_limit():
                     return
@@ -6503,9 +6501,7 @@ def serve_proxy(
                     self.send_header("Referrer-Policy", "no-referrer")
                     self.send_header("Cache-Control", "no-store")
                     if tls_active:
-                        self.send_header(
-                            "Strict-Transport-Security", "max-age=31536000"
-                        )
+                        self.send_header("Strict-Transport-Security", "max-age=31536000")
                     self.end_headers()
                     self.wfile.write(body)
                     ardur_metrics.requests_total.inc(
@@ -6600,13 +6596,12 @@ def serve_proxy(
                             raise ValueError(
                                 "parent_token must be a string when token_type=aat"
                             )
-                        # PoP plumbing — defaults secure (require_pop=True). The
-                        # adapter only enforces PoP for AATs that actually carry
-                        # a `cnf` claim, so bearer-mode AATs continue to work
-                        # without any new fields. Callers who legitimately need
-                        # bearer acceptance of a cnf-bearing AAT must pass
-                        # "require_pop": false explicitly so the security
-                        # downgrade is visible in request logs.
+                        # PoP plumbing defaults secure (require_pop=True).
+                        # The proxy separately requires `cnf` unless its
+                        # constructor enables temporary bearer compatibility.
+                        # For a `cnf`-bearing AAT, callers that deliberately
+                        # bypass proof verification must pass "require_pop":
+                        # false so the downgrade is visible in request logs.
                         require_pop_field = payload.get("require_pop", True)
                         if not isinstance(require_pop_field, bool):
                             raise ValueError(
@@ -6907,7 +6902,9 @@ def serve_proxy(
                         # reached this site are sanitized at their sources, so
                         # str(exc) is safe to surface. Log full detail for
                         # operator triage.
-                        logger.debug("PermissionError in /delegate", exc_info=exc)
+                        logger.debug(
+                            "PermissionError in /delegate", exc_info=exc
+                        )
                         self._send_json(403, {"error": str(exc)})
                     else:
                         self._send_json(
@@ -7054,7 +7051,9 @@ def _proxy_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
         {
             "condition": condition,
             "action": "choose_valid_proxy_port",
-            "command": ("python -m vibap.proxy --host <loopback-host> --port <port>"),
+            "command": (
+                "python -m vibap.proxy --host <loopback-host> --port <port>"
+            ),
             "detail": (
                 "Use an integer TCP port from 0 through 65535. Use 0 when you "
                 "want the operating system to choose an available local port."
@@ -7151,7 +7150,9 @@ def _proxy_api_token_invalid_response() -> dict[str, object]:
         "next_steps": [
             {
                 "action": "pass_real_token",
-                "command": ("python -m vibap.proxy --api-token <your-secret-token>"),
+                "command": (
+                    "python -m vibap.proxy --api-token <your-secret-token>"
+                ),
                 "detail": "Provide a non-empty API token.",
             },
             {

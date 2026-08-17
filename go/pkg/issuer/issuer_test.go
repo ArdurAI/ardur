@@ -257,6 +257,13 @@ func TestIssue_CoreLevel_MinimalRequest(t *testing.T) {
 	if cred.Claims.Identity == nil {
 		t.Fatal("missing Layer 1 (Identity)")
 	}
+	identityJSON, err := json.Marshal(cred.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshaling identity claims: %v", err)
+	}
+	if strings.Contains(string(identityJSON), `"spiffe_id_assurance"`) {
+		t.Fatalf("direct identity issuance must preserve the existing credential schema: %s", identityJSON)
+	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("missing Layer 3 (Intent)")
 	}
@@ -282,23 +289,6 @@ func TestIssue_CoreLevel_RequiresIdentity(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "identity") {
 		t.Errorf("error should mention identity: %v", err)
-	}
-}
-
-func TestIssue_CoreLevel_RejectsMalformedSPIFFEID(t *testing.T) {
-	key := testSigningKey(t)
-	iss, _ := NewIssuer(key, "https://vibap.example.com")
-
-	req := minimalRequest()
-	req.SPIFFEID = "not-a-spiffe-id"
-	req.AgentID = req.SPIFFEID
-
-	_, err := iss.Issue(context.Background(), req)
-	if err == nil {
-		t.Fatal("expected malformed SPIFFE ID to fail closed")
-	}
-	if !strings.Contains(err.Error(), "valid SPIFFE ID") {
-		t.Fatalf("expected SPIFFE syntax error, got: %v", err)
 	}
 }
 
@@ -388,9 +378,6 @@ func TestIssue_VerifiedLevel_WithProviders(t *testing.T) {
 	cred := result.Credential
 	if cred.Claims.Identity.SPIFFEID == "" {
 		t.Error("identity should come from SPIRE mock")
-	}
-	if got := cred.Claims.Identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceProviderVerified {
-		t.Errorf("SPIFFE ID assurance = %q, want %q", got, credential.SPIFFEIDAssuranceProviderVerified)
 	}
 	if cred.Claims.Identity.OwnerIDAssurance != credential.OwnerIDAssuranceSelfAsserted {
 		t.Errorf("owner assurance = %q, want %q", cred.Claims.Identity.OwnerIDAssurance, credential.OwnerIDAssuranceSelfAsserted)

@@ -126,18 +126,6 @@ const (
 	OwnerIDAssuranceSelfAsserted OwnerIDAssurance = "self_asserted"
 )
 
-// SPIFFEIDAssurance records how the workload SPIFFE ID entered the credential.
-type SPIFFEIDAssurance string
-
-const (
-	// SPIFFEIDAssuranceCallerProvided means the issuer signed configured input
-	// but did not authenticate it against a workload identity provider.
-	SPIFFEIDAssuranceCallerProvided SPIFFEIDAssurance = "caller_provided"
-	// SPIFFEIDAssuranceProviderVerified means an IdentityProvider resolved the
-	// workload identity before issuance.
-	SPIFFEIDAssuranceProviderVerified SPIFFEIDAssurance = "identity_provider_verified"
-)
-
 // IdentityClaims represents Layer 1: Agent Identity.
 // Always disclosed — verifiers need to know who the agent is.
 //
@@ -146,9 +134,6 @@ const (
 type IdentityClaims struct {
 	// Per-instance SPIFFE ID: spiffe://ardur.dev/ns/{ns}/sa/{sa}/instance/{pod-uid}
 	SPIFFEID string `json:"spiffe_id"`
-	// Assurance for SPIFFEID. Verifiers must not treat caller-provided input as
-	// workload-provider-authenticated identity.
-	SPIFFEIDAssurance SPIFFEIDAssurance `json:"spiffe_id_assurance"`
 
 	// SPIFFE-formatted deploying human or service-account attribution.
 	// This value is not an authenticated dual-identity binding.

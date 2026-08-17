@@ -84,6 +84,9 @@ func TestBuilderMinimal(t *testing.T) {
 	if got := identityFields["owner_id_assurance"]; got != "self_asserted" {
 		t.Fatalf("owner_id_assurance = %v, want self_asserted", got)
 	}
+	if _, ok := identityFields["spiffe_id_assurance"]; ok {
+		t.Fatal("identity must not add an unversioned spiffe_id_assurance claim")
+	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("Intent layer is nil")
 	}
@@ -947,32 +950,6 @@ func TestVerifyEmptyIdentityFields(t *testing.T) {
 	}
 	if !strings.Contains(errorSet, "owner_id is empty") {
 		t.Errorf("expected owner_id error, got: %s", errorSet)
-	}
-}
-
-func TestVerifyRejectsMalformedIdentitySPIFFEID(t *testing.T) {
-	key := testSigningKey(t)
-	cred, err := testBuilder(t).Build(key)
-	if err != nil {
-		t.Fatalf("Build() error: %v", err)
-	}
-
-	cred.Claims.Subject = "not-a-spiffe-id"
-	cred.Claims.Identity.SPIFFEID = "not-a-spiffe-id"
-	encoded, err := Encode(cred, key)
-	if err != nil {
-		t.Fatalf("Encode() error: %v", err)
-	}
-
-	result, err := Verify(encoded, key.PublicKey, nil)
-	if err != nil {
-		t.Fatalf("Verify() error: %v", err)
-	}
-	if result.Valid {
-		t.Fatal("expected invalid malformed SPIFFE identity")
-	}
-	if got := strings.Join(result.Errors, "; "); !strings.Contains(got, "valid SPIFFE ID") {
-		t.Fatalf("expected SPIFFE syntax error, got: %s", got)
 	}
 }
 

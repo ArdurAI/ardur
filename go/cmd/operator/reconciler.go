@@ -54,12 +54,12 @@ type AgentPassportReconciler struct {
 
 // NewAgentPassportReconciler creates a reconciler with the signing key and issuer pipeline.
 //
-// FIX-R9-6 (round-9, 2026-04-29): when ``signingKeyPath`` is empty,
-// the constructor refuses to start unless ``allowEphemeralKey=true``
+// FIX-R9-6 (round-9, 2026-04-29): when signingKeyPath is empty,
+// the constructor refuses to start unless allowEphemeralKey=true
 // is passed explicitly. Round-8 audit (LOW-NEW-6) flagged that the
 // previous warn-only path silently issued credentials no consumer
 // could verify across pod restarts — same shape as the Authority's
-// ``--no-require-auth`` foot-gun, just with no opt-in flag making
+// --no-require-auth foot-gun, just with no opt-in flag making
 // the choice visible. Now ephemeral behaviour requires an opt-in.
 func NewAgentPassportReconciler(c client.Client, scheme *runtime.Scheme, signingKeyPath, issuerURI string, allowEphemeralKey bool) (*AgentPassportReconciler, error) {
 	var signingKey *credential.SigningKey
@@ -179,11 +179,6 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 
 	setCondition(ap, vibapv1alpha1.ConditionReady, metav1.ConditionFalse,
 		vibapv1alpha1.ReasonReconciling, "Issuing credential")
-	if ap.Spec.Identity.UseSpire {
-		err := fmt.Errorf("spec.identity.useSpire requires SPIRE integration, which is not implemented by this operator")
-		r.recordEvent(ap, corev1.EventTypeWarning, "SPIREUnavailable", err.Error())
-		return r.setFailed(ctx, ap, "SPIREUnavailable", err)
-	}
 
 	policyText := ap.Spec.Intent.InlinePolicy
 	if policyText == "" && ap.Spec.Intent.PolicyRef != nil {
@@ -207,9 +202,7 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 			vibapv1alpha1.ReasonMissingSPIFFEID,
 			"No SPIFFE ID was supplied; the credential omits spiffe_id and workload identity remains unverified")
 	} else {
-		setCondition(ap, vibapv1alpha1.ConditionIdentityUnverified, metav1.ConditionTrue,
-			vibapv1alpha1.ReasonCallerProvidedSPIFFEID,
-			"The SPIFFE ID was caller-provided and was not authenticated by the operator")
+		removeCondition(ap, vibapv1alpha1.ConditionIdentityUnverified)
 	}
 
 	if err := r.ensureAgentRegistered(ctx, agentID, ap.Spec.Trust); err != nil {
@@ -479,6 +472,15 @@ func setCondition(ap *vibapv1alpha1.AgentPassport, condType string, status metav
 		Message:            message,
 		ObservedGeneration: ap.Generation,
 	})
+}
+
+func removeCondition(ap *vibapv1alpha1.AgentPassport, condType string) {
+	for i, condition := range ap.Status.Conditions {
+		if condition.Type == condType {
+			ap.Status.Conditions = append(ap.Status.Conditions[:i], ap.Status.Conditions[i+1:]...)
+			return
+		}
+	}
 }
 
 func (r *AgentPassportReconciler) reconcileGovernance(ctx context.Context, ap *vibapv1alpha1.AgentPassport) error {
