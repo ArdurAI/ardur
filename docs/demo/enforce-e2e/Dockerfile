@@ -13,7 +13,7 @@
 # needed at build time. Stage 2 installs the Python `ardur` CLI. Run the
 # image privileged with --pid=host — see docs/demo/enforce-e2e.md.
 
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.26.6-bookworm AS build
 WORKDIR /src
 COPY go/go.mod go/go.sum ./go/
 RUN cd go && go mod download
