@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "3b25c1d64e0c285a89bf11e042e3c1b661e3134065de641c7c53866b2341d155"
+source_sha256: "fdf651980dd3f2b73c2d981e69f29519b01aec329d107e9156539a201d98db06"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -109,6 +109,15 @@ key, state, log, or session artifacts behind. Valid `--port 0` remains the
 ephemeral-port path, where the operating system chooses an available local port;
 it is not a standalone server-readiness claim.
 
+If the configured `--port` is valid but already occupied by another process at
+bind time, the command exits non-zero and writes parseable stdout JSON with
+`ok: false`, stable `condition`/`error`/`error_code` values of
+`start_port_in_use`, a message, a detail, and placeholder-only `next_steps`.
+The failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, and leaves no key, state, log, or session artifacts behind. Valid
+`--port 0` avoids this condition by letting the operating system choose an
+available local port.
+
 Invalid `--host` values fail closed after port range validation and before TLS,
 key, state, audit log, session, or proxy startup work begins. Host values must
 be plain bindable host names or IP addresses; empty or whitespace-only values,
@@ -175,9 +184,40 @@ Activate or deactivate the emergency kill switch on a running governance proxy.
 ardur kill-switch [--deactivate] [--proxy-url URL] [--api-token TOKEN]
 ```
 
+A whitespace-only `--api-token` fails closed after `--proxy-url` validation
+but before any network call. The token is sent verbatim as the bearer token
+for the loopback governance proxy admin endpoint; a whitespace-only value is
+truthy in the `args.api_token or os.environ.get("ARDUR_API_TOKEN", "")` chain
+and therefore shadows any configured `ARDUR_API_TOKEN`, but it resolves to an
+empty bearer after the proxy strips whitespace, yielding a confusing
+401/`Connection refused` instead of a clear rejection. It is therefore
+rejected explicitly before the network call. The failure exits non-zero and
+writes parseable stdout JSON with `ok: false`, stable
+`condition`/`error`/`error_code` values of `kill_switch_api_token_invalid`, a
+message, a detail, and placeholder-only `next_steps` such as
+`ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>` (supply an
+explicit token) and `ARDUR_API_TOKEN=<api-token> ardur kill-switch` (omit
+`--api-token` so Ardur reads the environment). The failure path keeps stderr
+empty, emits no traceback, and does not echo raw tokens or local paths. An
+unset `--api-token` (omitted) and an empty-string `--api-token ""` remain
+valid: in both cases Ardur falls through to `ARDUR_API_TOKEN`.
+
 If the local proxy cannot be reached, TLS/scheme setup looks wrong, or the
 proxy rejects the bearer token, the JSON output preserves `ok: false` and adds
-deterministic `next_steps`. The hints are local/no-key recovery guidance only:
+deterministic `next_steps`. The failure responses use structured
+`error_code`/`message`/`detail` fields — never raw Python exception strings.
+The possible `error`/`error_code`/`condition` values are:
+
+| Error code | Meaning |
+|---|---|
+| `proxy_url_invalid` | Proxy URL could not be parsed as a complete HTTP(S) endpoint. |
+| `proxy_unavailable` | Governance proxy did not respond. Ensure it is running on the configured loopback endpoint. |
+| `proxy_tls_error` | TLS handshake failed. Check certificate validity or use matching `--tls-cert`/`--tls-key` options. |
+| `proxy_auth_error` | Proxy rejected the API token. Supply a valid `--api-token` or `ARDUR_API_TOKEN`. |
+| `proxy_endpoint_error` | Proxy responded, but the kill-switch admin endpoint returned an error status. |
+| `kill_switch_request_failed` | Generic fallback for unrecognised request failures. |
+
+The hints are local/no-key recovery guidance only:
 start the loopback governance proxy, match the `<proxy-url>` scheme/host/port,
 supply or rotate `<api-token>`, then rerun `ardur kill-switch`. They use
 placeholders such as `<proxy-url>`, `<proxy-port>`, and `<api-token>` rather
@@ -196,6 +236,7 @@ ardur issue --agent-id ID --mission TEXT
             [--max-tool-calls N] [--max-duration-s N]
             [--delegation-allowed] [--max-delegation-depth N]
             [--ttl-s N] [--keys-dir DIR]
+            [--output FILE] [--redact-paths]
 ```
 
 Prints `{"token": "...", "claims": {...}}` to stdout. An absent or empty
@@ -243,8 +284,8 @@ ardur verify EVIDENCE.json
              --receiver-public-key FILE
              [--max-bundle-age-s SECONDS]
              [--freshness-clock-skew-s SECONDS]
-             [--html-report FILE] [--json]
-             [--unsafe-show-sensitive]
+             [--html-report FILE] [--output FILE] [--json]
+             [--redact-paths] [--unsafe-show-sensitive]
 
 ardur verify RECEIPTS.jsonl --receipt-public-key FILE --chain-only
 
@@ -259,6 +300,9 @@ ardur verify --receiver-envelope FILE --keys-dir DIR
              [--mcp-request FILE --mcp-response FILE]
              [--max-attestation-delay-s SECONDS]
              [--receiver-clock-skew-s SECONDS]
+
+ardur verify --attestation-token JWT [--keys-dir DIR]
+             [--output FILE] [--redact-paths]
 ```
 
 Full-bundle mode performs no network request and requires independent receipt,
@@ -288,9 +332,13 @@ windows during archival review.
 
 Reports are redacted by default. `--unsafe-show-sensitive` is an explicit
 local-only opt-in. `--html-report` writes an atomic mode-`0600`, no-JavaScript
-static report whose evidence-derived values are HTML-escaped. The dedicated
-`ardur-verify` console entry point is an alias for `ardur verify` and ships in
-the same wheel/sdist without requiring a running Ardur service.
+static report whose evidence-derived values are HTML-escaped. `--output`
+atomically writes the JSON explorer report to an owner-only file and prints a
+confirmation JSON with `report_sha256` to stdout, matching the `--output`
+contract on `evidence correlate`, `posture scan`/`report`, `preflight
+tool-server`, and `telemetry export`. The dedicated `ardur-verify` console
+entry point is an alias for `ardur verify` and ships in the same wheel/sdist
+without requiring a running Ardur service.
 
 Anchor mode performs no network request. It verifies the receipt JWS, exact
 receipt-digest binding, RFC 6962 inclusion path, signed checkpoint, and any
@@ -308,6 +356,31 @@ receiver signature and is reported at that lower tier. When exact MCP request
 and response JSON files are supplied, the verifier compares both receiver-
 signed digests and reports the two content bindings explicitly. A response file
 without its request fails closed.
+
+Attestation mode verifies a behavioral attestation JWT signed by the Ardur
+governance proxy. It confirms the token's cryptographic integrity using the
+session signing key, then returns all signed claims including the verdict
+breakdown (`unknowns`, `insufficient_evidence`, `violations`, `denied_tools`)
+when present. This allows an auditor to independently verify an attestation
+after issuance — previously attestation JWTs could only be inspected from the
+`ardur attest` output at issuance time. Supports `--output` for file-writing
+and `--redact-paths` for path-safe output.
+
+Attestation-token verification failures use attestation-specific error codes
+so that auditors see attestation-oriented messages rather than passport-oriented
+ones. A malformed, expired, or wrong-key token yields `ok: false` with
+`condition`/`error` `invalid_attestation_token` (no `error_code` field on this
+path) and `next_steps` pointing to `ardur verify --attestation-token` and
+`ardur attest`. A missing public key in the key directory yields
+`condition`/`error`/`error_code` `attestation_public_key_missing` with a
+message about the Behavioral Attestation public key. An unparseable or
+wrong-curve public key yields `attestation_public_key_invalid` (also with an
+`error_code` field). All failure paths keep stderr clean, emit no traceback,
+do not echo raw token material, and do not create keys. The passport-token
+failure path uses the analogous `invalid_passport_token` (no `error_code`),
+`passport_public_key_missing` (with `error_code`), and
+`passport_public_key_invalid` (with `error_code`) codes with `next_steps`
+pointing to `ardur verify --token` and `ardur issue`.
 
 Empty or whitespace-only `--keys-dir` fails closed before public-key loading,
 token verification, or any filesystem work. It exits non-zero and writes
@@ -347,7 +420,7 @@ ardur evidence correlate RECEIPTS.jsonl EVENTS.jsonl
                         [--correlation-window-s SECONDS]
                         [--verify-expiry]
                         [--format json|text]
-                        [--output FILE]
+                        [--output FILE] [--json] [--redact-paths]
 ```
 
 Receipt verification happens before event parsing. A bad receipt signature or
@@ -407,7 +480,7 @@ ardur telemetry export RECEIPTS.jsonl
                        [--output FILE]
                        [--otlp-endpoint URL]
                        [--timeout-s 10]
-                       [--verify-expiry]
+                       [--verify-expiry] [--json] [--redact-paths]
 ```
 
 The command verifies every signature, parent hash, trace/run lineage, and
@@ -466,9 +539,11 @@ Drain pending receipt sidecars outside the governance decision path.
 ```text
 ardur anchor --receipt-log FILE --backend c2sp-local-v1
              --local-log FILE --log-private-key FILE --origin NAME
+             [--output FILE] [--redact-paths]
 
 ardur anchor --receipt-log FILE --backend rekor-v1
              --keys-dir DIR [--rekor-url HTTPS_URL]
+             [--output FILE] [--redact-paths]
 ```
 
 Receipt sinks persist an idempotent pending sidecar next to each receipt log.
@@ -476,6 +551,13 @@ This command submits those sidecars and atomically moves successful proofs into
 the sibling `anchored/` directory. Backend failures leave the source bundle in
 `pending/`, return a non-zero exit code, and report a bounded error string for
 retry. They never alter the already-recorded PERMIT/DENY receipt.
+
+If `--receipt-log` points to a directory, a dangling symlink, or a nonexistent
+path, the command returns `ok: false` with stable
+`condition`/`error`/`error_code` values of `receipt_log_not_file`, a message, a
+detail, and placeholder-only `next_steps`, keep exit code non-zero, and leave
+stderr free of tracebacks. This check fires before the anchor store is computed
+so invalid paths never produce a misleading `processed: 0` success.
 
 The self-hosted backend requires a separately administered Ed25519 log key and
 emits C2SP signed checkpoints. The Rekor backend submits only the receipt digest,
@@ -564,6 +646,7 @@ chain.
 ```text
 ardur attest --session SESSION_ID
              [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
+             [--output FILE] [--redact-paths]
 ```
 
 Empty or whitespace-only path arguments (`--keys-dir`, `--state-dir`,
@@ -633,6 +716,13 @@ values, a message, a detail, and placeholder-only `next_steps`; stderr stays
 empty, no traceback is emitted, no raw local paths or malformed hosts are echoed,
 and no Personal Hub state or service artifacts are created.
 
+If the configured Hub `--port` is valid but already occupied by another process
+at bind time, the command exits non-zero and writes parseable stdout JSON with
+`ok: false`, stable `condition`/`error`/`error_code` values of
+`hub_port_in_use`, a message, a detail, and placeholder-only `next_steps`. The
+failure path keeps stderr empty, emits no traceback, does not echo raw local
+paths, and leaves no Personal Hub state or service artifacts behind.
+
 The Hub serves HTTPS by default. Without explicit TLS paths, it resolves or
 creates its managed local certificate and private key. `--tls-cert` and
 `--tls-key` select an explicit PEM pair and must be supplied together as
@@ -667,11 +757,20 @@ the plist.
 ```text
 ardur setup [--host HOST] [--port PORT] [--home DIR]
             [--rotate-token] [--extension-path DIR]
+            [--json] [--redact-paths] [--output FILE]
 ```
 
 `--rotate-token` forces a new token even if one already exists.
 `--extension-path` selects which browser-extension directory the setup output
 points users to (default: `examples/ardur-personal-extension`).
+
+`--redact-paths` replaces local absolute paths in the JSON output (notably the
+`home`, `config`, and `launch_agent` fields) with stable placeholders (`<home>`,
+`<config>`, `<launch-agent>`) so the result is safe to share in CI artifacts or
+bug reports.
+
+`--output` atomically writes the JSON response to an owner-only file instead of
+printing it to stdout, matching every other JSON-producing command.
 
 If `--home` points to an existing file instead of a directory, `ardur setup`
 fails closed before writing setup state, generating or printing a token, or
@@ -718,7 +817,7 @@ token, LaunchAgent, key, session, log, state, or service artifacts are created.
 Show Hub status — current sessions, latest receipt, adapter availability.
 
 ```text
-ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR]
+ardur status [--hub-url URL] [--hub-token TOKEN] [--home DIR] [--redact-paths] [--output FILE]
 ```
 
 When the local Hub cannot be reached, returns a local token/auth setup error, or
@@ -731,6 +830,11 @@ placeholders such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` and do not
 copy raw invalid file URLs, local paths, tokens, or provider data into shared
 logs. Healthy Hub responses preserve the existing response shape and omit
 actionable remediation.
+
+`--redact-paths` replaces local absolute paths in the JSON output (notably the
+`home` field returned by a healthy Hub) with stable placeholders (`<tmp>`,
+`<home>`, `<var-folders>`) so the output is safe to share in CI artifacts or
+bug reports without leaking the filesystem layout.
 
 A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
 before any network call. The token is trimmed internally; a whitespace-only
@@ -752,7 +856,7 @@ Health-check the local Ardur Personal setup: config presence, Hub
 reachability, key material, write permissions.
 
 ```text
-ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN]
+ardur doctor [--home DIR] [--hub-url URL] [--hub-token TOKEN] [--redact-paths] [--output FILE]
 ```
 
 The JSON output preserves the `ok` and `checks` fields and includes a
@@ -763,6 +867,9 @@ checking the loopback Hub, and re-running `ardur doctor`; they use placeholders
 such as `<ardur-home>`, `<hub-url>`, and `<hub-token>` rather than copying raw
 local paths, invalid file URLs, or tokens. When the core setup is healthy,
 `next_steps` is an empty array.
+
+`--redact-paths` replaces local absolute paths in the JSON output with stable
+placeholders so the output is safe to share in CI artifacts or bug reports.
 
 A whitespace-only `--hub-token` (for example `--hub-token "   "`) is rejected
 before any network call. The token is trimmed internally; a whitespace-only
@@ -785,13 +892,16 @@ plugin files, missing `claude` binary, missing or stale `active_mission.jwt`,
 and machine-readable `next_steps` remediation hints when a check fails.
 
 ```text
-ardur doctor-claude-code [--home DIR] [--plugin-dir DIR]
+ardur doctor-claude-code [--home DIR] [--plugin-dir DIR] [--redact-paths] [--output FILE]
 ```
 
 The command is local-only: it inspects files, PATH, and Claude Code plugin
 validation state, but does not run a live Claude prompt or call a provider API.
 Use failed `next_steps` entries to recover the setup, then re-run the doctor
 before claiming the local Claude Code path is ready.
+
+`--redact-paths` replaces local absolute paths in the JSON output with stable
+placeholders so the output is safe to share in CI artifacts or bug reports.
 
 If `--home` or `--plugin-dir` is supplied as an empty or whitespace-only string,
 `ardur doctor-claude-code` exits `1` before running any diagnostic check. The
@@ -811,6 +921,7 @@ Remove Ardur Personal launch files (the macOS LaunchAgent plist installed by
 
 ```text
 ardur uninstall [--home DIR] [--remove-data] [--dry-run]
+                [--json] [--redact-paths]
 ```
 
 `--remove-data` also deletes the local Ardur Personal evidence and key
@@ -819,6 +930,11 @@ material under the home directory.
 Use `--dry-run` to print deterministic JSON showing the local LaunchAgent and,
 when `--remove-data` is also set, the Ardur Personal home directory that would
 be removed. Dry-run mode does not delete launch files or data.
+
+`--redact-paths` replaces local absolute paths in the JSON output (notably the
+`would_remove` and `removed` path lists) with stable placeholders (`<home>`,
+`<launch-agent>`, `<ardur-home>`) so the result is safe to share in CI
+artifacts or bug reports.
 
 Dry-run JSON also includes a placeholder-safe `next_steps` array so users can
 interpret the preview before running a destructive command. The hints point to
@@ -856,6 +972,7 @@ ardur run [--home DIR]
           [--no-kernel-correlation]
           [--enforce]
           [--resource-scope PATH ... | --no-resource-scope]
+          [--json] [--redact-paths] [--output FILE]
           -- <command>
 ```
 
@@ -872,7 +989,31 @@ a scaffolded transparent-intercept path today; it fails closed rather than
 claiming universal CLI capture. `--no-kernel-correlation` disables the
 best-effort kernel/cgroup correlation attempt that may be available on suitable
 Linux hosts. `--enforce` aborts instead of degrading when kernel policy cannot
-be installed.
+be installed. `--json` emits the governance result as machine-readable JSON to
+stderr (session id, permits/denials, attestation digest, receipt paths) so
+programmatic consumers can parse governance outcomes without scraping the
+human-readable summary. stdout is reserved for the child process output so pipe
+chains like `ardur run --json -- pytest 2>governance.json` work cleanly. The
+JWT-like attestation token is omitted from JSON output; use `attestation_digest`
+instead. `--redact-paths` replaces local absolute paths in the JSON output
+(`home`, `passport_path`, `receipts_path`, `correlation.daemon_socket`,
+`correlation.cgroup_path`) with stable placeholders (`<tmp>`, `<home>`,
+`<var-folders>`, `<run-ardur>`, `<cgroup>`) so the result is safe to share in
+CI artifacts or bug reports without leaking the filesystem layout. It has no
+effect without `--json`; a warning is printed to stderr in that case. `--output`
+writes the governance result JSON to the given file path using the same atomic
+owner-only writer as other report-producing commands. It works with or without
+`--json`: without `--json`, the human-readable summary is shown on stderr and
+the JSON is written to the file; with `--json`, both stderr and the file receive
+JSON. When combined with `--redact-paths`, the file content has local paths
+replaced with stable placeholders. This completes the `--output` contract across
+ALL report-producing commands. If `--output` is supplied as an empty or
+whitespace-only string, `ardur run` exits non-zero without generating keys,
+creating a Mission Passport, or launching the governed command. Stdout receives
+parseable JSON with `ok: false`, stable `condition`/`error`/`error_code` values
+of `path_arg_invalid`, a message, a detail, and placeholder-only `next_steps`
+such as `ardur run --output <output> -- <command>`. Omitting `--output` is
+valid and writes no file.
 
 By default, a governed run scopes file access to the complete governed working
 directory tree. Repeat `--resource-scope PATH` to narrow that scope to one or
@@ -1221,6 +1362,7 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
                           [--forbid-rules FILE]
                           [--cedar-policy FILE]
                           [--cedar-entities FILE]
+                          [--output FILE]
 ```
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown
@@ -1465,7 +1607,8 @@ deny, and chain-verification outcomes.
 
 ```text
 ardur claude-code-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
-                         [--verify-expiry] [--json]
+                         [--verify-expiry] [--json] [--output FILE]
+                         [--redact-paths]
 ```
 
 `--verify-expiry` also enforces short receipt expiry windows during chain
@@ -1538,6 +1681,20 @@ failed. Validation runs before any fixture file is written, so a rejected input
 leaves no fixture artifacts behind. Valid directory inputs are created or reused
 as-is.
 
+Additionally, `--home` and `--chain-dir` are validated for dangling-symlink or
+non-directory parent components before `Path.resolve()` follows the link. A
+`--home` or `--chain-dir` value whose parent chain crosses a dangling symlink
+(a symlink whose target does not exist) returns
+`gemini_cli_fixture_home_dangling_symlink_parent` or
+`gemini_cli_fixture_chain_dir_dangling_symlink_parent` respectively. A
+`--home` or `--chain-dir` value whose parent chain crosses an existing
+non-directory returns `gemini_cli_fixture_home_parent_not_directory` or
+`gemini_cli_fixture_chain_dir_parent_not_directory` respectively. The check
+walks each parent of the un-resolved expanded path before `resolve()` or
+`mkdir(parents=True)` can silently materialise the missing target. A valid
+nonexistent path whose parents are all directories or symlinks to existing
+directories is still accepted.
+
 ### `ardur gemini-cli-hook`
 
 Run the local-only Gemini CLI pre-tool-call hook adapter. The hook reads one
@@ -1595,7 +1752,8 @@ and the explicit non-claims for provider-hidden reasoning/server-side tool calls
 
 ```text
 ardur gemini-cli-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
-                        [--verify-expiry] [--json]
+                        [--verify-expiry] [--json] [--output FILE]
+                        [--redact-paths]
 ```
 
 When no local Gemini CLI hook receipts are present, the JSON report includes a
@@ -1653,6 +1811,21 @@ failed. Validation runs before any fixture file is written, so a rejected input
 leaves no fixture artifacts behind. Valid directory inputs are created or reused
 as-is.
 
+Additionally, `--home` and `--chain-dir` are validated for dangling-symlink or
+non-directory parent components before `Path.resolve()` follows the link. A
+`--home` or `--chain-dir` value whose parent chain crosses a dangling symlink
+(a symlink whose target does not exist) returns
+`codex_app_server_fixture_home_dangling_symlink_parent` or
+`codex_app_server_fixture_chain_dir_dangling_symlink_parent` respectively. A
+`--home` or `--chain-dir` value whose parent chain crosses an existing
+non-directory returns
+`codex_app_server_fixture_home_parent_not_directory` or
+`codex_app_server_fixture_chain_dir_parent_not_directory` respectively. The
+check walks each parent of the un-resolved expanded path before `resolve()` or
+`mkdir(parents=True)` can silently materialise the missing target. A valid
+nonexistent path whose parents are all directories or symlinks to existing
+directories is still accepted.
+
 ### `ardur codex-app-server-event`
 
 Read one representative Codex app-server/host-event JSON object from stdin,
@@ -1703,7 +1876,8 @@ enforcement.
 
 ```text
 ardur codex-app-server-report [--home DIR] [--chain-dir DIR] [--keys-dir DIR]
-                              [--verify-expiry] [--json]
+                              [--verify-expiry] [--json] [--output FILE]
+                              [--redact-paths]
 ```
 
 When no local Codex app-server receipts are present, the JSON report includes a
@@ -1738,6 +1912,7 @@ ardur preflight tool-server --config FILE
     [--format json|markdown]
     [--output FILE]
     [--fail-on critical|high|medium|low|none]
+    [--json] [--redact-paths]
 ```
 
 The default JSON report is deterministic and conforms to
@@ -1807,6 +1982,7 @@ ardur posture scan --receipts DIR_OR_JSONL
                     [--evidence-bundle bundle.redacted.json]
                     [--verify-expiry]
                     [--format json|markdown]
+                    [--output FILE] [--json] [--redact-paths]
 ```
 
 The JSON output uses `positioning=derived_local_evidence`. This is an honest
@@ -1847,6 +2023,12 @@ reruns; they do not call live providers, prove provider-hidden actions, repair o
 reconstruct missing evidence, perform asset inventory, or claim kernel/process
 capture.
 
+When `--output FILE` is given, the scan result is written atomically to the
+file instead of stdout. Empty or whitespace-only output paths fail closed with
+`path_arg_invalid`, and directory paths are rejected before writing. The JSON
+status summary includes `report_sha256` for integrity verification. The `--json`
+flag is accepted as a no-op for CLI consistency.
+
 ### `ardur posture report`
 
 Render a posture JSON document from `ardur posture scan --format json` as a
@@ -1854,6 +2036,7 @@ concise Markdown report, or re-emit it as formatted JSON.
 
 ```text
 ardur posture report --input posture.json [--format markdown|json]
+                     [--output FILE] [--json] [--redact-paths]
 ```
 
 If `--input` is empty or whitespace-only, the command fails closed before path
@@ -1878,6 +2061,63 @@ the report path does not print local absolute paths, raw tokens, private keys, o
 provider credentials, and the hints do not call live providers, create missing
 evidence, reconstruct private keys, prove provider-hidden behavior, or claim
 kernel/process capture.
+
+When `--output FILE` is given, the report is written atomically to the file
+instead of stdout. Empty or whitespace-only output paths fail closed with
+`path_arg_invalid`, and directory paths are rejected before writing. The JSON
+status summary includes `report_sha256` for integrity verification. The `--json`
+flag is accepted as a no-op for CLI consistency.
+
+### `ardur latency-gate evaluate`
+
+Load latency report JSON files from a directory, evaluate them against the
+deterministic multi-report gate (ADR-027), and emit a structured verdict.
+
+```text
+ardur latency-gate evaluate --reports <reports-dir>
+    [--threshold-ms 10.0] [--min-runs 3] [--percentile 95]
+    [--format json|text]
+```
+
+The `--format` flag controls output format. `--output-format` is accepted as a
+backward-compatible alias for `--format`.
+
+The command reads every `*.json` file in `--reports`, parses each as a
+machine-readable latency report (produced by the benchmark harness), and runs
+the `GateProtocol` evaluator. The verdict is one of `pass`, `fail`, or
+`inconclusive`. A `fail` is always emitted when any report has a functional
+failure (the hook command exited non-zero or timed out), regardless of
+latency. An `inconclusive` verdict is returned when fewer than `--min-runs`
+valid reports are available.
+
+**JSON output** (`--format json`, default) prints a top-level envelope
+with `ok`, `verdict`, `decision` (the canonical gate output including
+per-report results and aggregate p95), and `invalid_files` (files the loader
+rejected, with reasons). Exit code is `0` on pass, `1` on fail, and `2` on
+inconclusive.
+
+**Text output** (`--format text`) prints a human-readable summary with
+the verdict, aggregate p95, per-report one-liners, and the rationale.
+
+If `--reports` is empty or whitespace-only, `--threshold-ms` is not a positive
+finite number, `--min-runs` is less than 1, or `--percentile` is outside
+1..100, the command fails closed with exit code `1` and prints a JSON response
+with `ok: false`, `error_code`, `condition`, `message`, `detail`, and
+placeholder-only `next_steps` (`latency_gate_reports_empty`,
+`latency_gate_threshold_ms_invalid`, `latency_gate_min_runs_invalid`,
+`latency_gate_percentile_invalid`).
+
+If `--reports` does not exist, is not a directory, or report loading fails,
+the command fails closed with exit code `1`
+(`latency_gate_reports_dir_not_found`,
+`latency_gate_reports_not_directory`, `latency_gate_load_failed`).
+
+If gate evaluation or output formatting fails, the command fails closed with
+exit code `1` (`latency_gate_protocol_invalid`,
+`latency_gate_output_format_invalid`).
+
+The `next_steps` hints are placeholder-only — they do not print local
+absolute paths, raw tokens, private keys, or provider credentials.
 
 ## Where to look next
 

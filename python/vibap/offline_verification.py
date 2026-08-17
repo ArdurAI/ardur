@@ -264,7 +264,20 @@ def _verdict_label(verdict: str) -> str:
         "compliant": "PERMIT",
         "violation": "DENY",
         "insufficient_evidence": "ERROR",
+        "unknown": "UNKNOWN",
     }[verdict]
+
+
+def _default_reason_code(verdict: str) -> str:
+    """Return a verdict-appropriate reason code when no explicit code is set."""
+    if verdict == "compliant":
+        return "policy_permit"
+    if verdict == "unknown":
+        return "observation_gap"
+    if verdict == "violation":
+        return "policy_denied"
+    # insufficient_evidence or any future verdict
+    return "insufficient_evidence"
 
 
 def _budget_narrowing(
@@ -385,11 +398,7 @@ def _timeline_item(
         "verdict": claims["verdict"],
         "decision": _verdict_label(str(claims["verdict"])),
         "reason_code": claims.get("internal_denial_code")
-        or (
-            "policy_permit"
-            if claims["verdict"] == "compliant"
-            else "insufficient_evidence"
-        ),
+        or _default_reason_code(claims["verdict"]),
         "actor": claims["actor"],
         "verifier_id": claims["verifier_id"],
         "grant_id": claims["grant_id"],
@@ -781,6 +790,7 @@ def verify_offline_input(
             "permit_count": sum(item["decision"] == "PERMIT" for item in timeline),
             "deny_count": sum(item["decision"] == "DENY" for item in timeline),
             "error_count": sum(item["decision"] == "ERROR" for item in timeline),
+            "unknown_count": sum(item["decision"] == "UNKNOWN" for item in timeline),
             "anchored_count": sum(
                 item["evidence"]["transparency"]["valid"] for item in timeline
             ),
@@ -843,6 +853,11 @@ def render_cli_report(report: Mapping[str, Any]) -> str:
         (
             f"Receipts: {summary['receipt_count']} | PERMIT: {summary['permit_count']} | "
             f"DENY: {summary['deny_count']} | ERROR: {summary['error_count']}"
+            + (
+                f" | UNKNOWN: {summary['unknown_count']}"
+                if summary.get("unknown_count", 0)
+                else ""
+            )
         ),
         f"Source SHA-256: {_display(report['source']['sha256'])}",
         "Trust roots:",

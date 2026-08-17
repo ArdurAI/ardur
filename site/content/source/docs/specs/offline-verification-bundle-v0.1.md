@@ -2,7 +2,7 @@
 title: "Offline Verification Bundle v0.1"
 description: "Status: implemented public profile for independently runnable Ardur receipt"
 source_path: "docs/specs/offline-verification-bundle-v0.1.md"
-source_sha256: "c20b82ec81133d8a0d278d1d8fb840928385a25f08ccc38fc9265bce9b0bf732"
+source_sha256: "9276cddacb6769763990586cc12a41ca60ea2e4ba934dff1c9f1e1eb6582dc15"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -162,7 +162,8 @@ claimed signer identity.
 
 The verifier emits a chronological timeline with:
 
-- `PERMIT`, `DENY`, or `ERROR` derived from the signed tri-state verdict;
+- `PERMIT`, `DENY`, or `ERROR` derived from the signed verdict
+  (`compliant` / `violation` / `insufficient_evidence` / `unknown`);
 - actor, grant, tool, action class, target, resource family, and side-effect
   class;
 - signed policy-engine decisions and reasons;

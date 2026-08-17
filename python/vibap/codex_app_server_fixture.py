@@ -346,6 +346,45 @@ def _validate_fixture_path_not_file(path: Path, *, label: str, condition: str) -
         )
 
 
+def _validate_fixture_path_parents_not_dangling(
+    path: Path,
+    *,
+    dangling_condition: str,
+    not_dir_condition: str,
+) -> None:
+    """Reject a fixture path whose parent chain crosses a dangling symlink or
+    an existing non-directory, BEFORE ``Path.resolve()`` / ``mkdir(parents=True)``
+    follows the link and silently materialises the missing target.
+
+    Mirrors ``personal_hub.validate_personal_home_path_components``: walk each
+    *parent* component of the un-resolved expanded path and reject when any
+    parent is a dangling symlink (``parent.is_symlink() and not
+    parent.exists()``) or an existing non-directory (regular file, socket,
+    block device, etc.).
+
+    Operating on the un-resolved path is essential because ``.resolve()``
+    collapses the symlink chain before the leaf-only check in
+    ``_validate_fixture_path_not_file`` can see it.
+
+    The direct dangling-symlink leaf case is still rejected by
+    ``_validate_fixture_path_not_file``; this helper deliberately does not
+    duplicate that so callers keep firing the leaf-specific condition.
+    """
+    for parent in path.parents:
+        is_symlink = parent.is_symlink()
+        exists = parent.exists()
+        if is_symlink and not exists:
+            raise FixturePathError(
+                "home parent component is a dangling symlink",
+                condition=dangling_condition,
+            )
+        if exists and not parent.is_dir():
+            raise FixturePathError(
+                "home parent component is not a directory",
+                condition=not_dir_condition,
+            )
+
+
 def _fixture_path_failure_response(*, condition: str, label: str, arg_name: str) -> dict[str, Any]:
     is_empty = condition.endswith("_empty")
     if is_empty:
@@ -463,6 +502,18 @@ def build_local_fixture(
         )
     project_raw = Path(project_raw_value).expanduser()
     ardur_chain_raw = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser()
+    # Validate parent components for dangling symlinks / non-directory parents
+    # BEFORE the leaf-only check and resolve() collapse the symlink chain.
+    _validate_fixture_path_parents_not_dangling(
+        codex_home_raw,
+        dangling_condition="codex_app_server_fixture_home_dangling_symlink_parent",
+        not_dir_condition="codex_app_server_fixture_home_parent_not_directory",
+    )
+    _validate_fixture_path_parents_not_dangling(
+        ardur_chain_raw,
+        dangling_condition="codex_app_server_fixture_chain_dir_dangling_symlink_parent",
+        not_dir_condition="codex_app_server_fixture_chain_dir_parent_not_directory",
+    )
     # Validate raw paths for dangling symlinks before resolve() follows them.
     _validate_fixture_path_not_file(codex_home_raw, label="home", condition="codex_app_server_fixture_home_not_directory")
     _validate_fixture_path_not_file(ardur_chain_raw, label="chain dir", condition="codex_app_server_fixture_chain_dir_not_directory")
@@ -1102,6 +1153,8 @@ def _status_from_verdict(verdict: str) -> str:
         return "allow"
     if verdict == "insufficient_evidence":
         return "unknown"
+    if verdict == "unknown":
+        return "unknown"
     return "deny"
 
 
@@ -1251,7 +1304,7 @@ def build_shareable_report(
                     "chain": str(path),
                     "valid": False,
                     "error": type(exc).__name__,
-                    "message": str(exc),
+                    "message": type(exc).__name__,
                     "receipt_count": 0,
                     "token_count": len(tokens),
                 }

@@ -16,7 +16,8 @@ The local event binds:
 
 - receipt ID and signed parent receipt hash;
 - trace, actor, verifier, and grant identifiers;
-- tri-state verdict and `PERMIT`, `DENY`, or `ERROR` projection;
+- verdict (`compliant`, `violation`, `insufficient_evidence`, or `unknown`)
+  and `PERMIT`, `DENY`, or `ERROR` projection;
 - signed policy backend, decision, and optional stable `rule_id`;
 - signed reason code, budget state, and risk classification;
 - signed invocation and arguments digests; and

@@ -75,7 +75,8 @@ protocol or preregistration digest. URI reachability alone is insufficient.
    out. Capture and annotation times must fall between registration and seal.
 6. `auditbench-score score` accepts only matching pilot mode and registration
    assurance, preregistered SUT identifiers, exact
-   split coverage, tri-state verdicts, a matching seal digest, and results
+   split coverage, verdicts (`compliant` / `violation` / `insufficient_evidence`
+   / `unknown`), a matching seal digest, and results
    created no earlier than the seal time. The report binds the exact SUT result
    artifact digest as well as the study seal digest.
 

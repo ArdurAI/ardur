@@ -84,7 +84,8 @@
     "decision_projection": {
       "compliant": "PERMIT",
       "violation": "DENY",
-      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence"
+      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence",
+      "unknown": "DENY with metadata.x-ardur.verdict=unknown"
     }
   },
   "security_requirements": {
@@ -710,7 +711,7 @@
       "source_path": "verdict",
       "classification": "mapped",
       "drp_path": "actionLog.decision",
-      "rationale": "Map compliant to PERMIT and violation or insufficient_evidence to DENY; retain tri-state detail in the extension."
+      "rationale": "Map compliant to PERMIT and violation, insufficient_evidence, or unknown to DENY; retain verdict detail in the extension."
     },
     {
       "source_surface": "execution_receipt_v0.2",

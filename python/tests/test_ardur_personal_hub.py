@@ -2624,10 +2624,12 @@ def test_run_native_host_binary_framing_unsupported_message_type_is_structured(t
     assert "Traceback" not in encoded
 
 
+@pytest.mark.parametrize("command", ([], [""], ["   "], ["\t\n"]))
 def test_run_under_hub_missing_command_reports_placeholder_next_steps(
     tmp_path,
     capsys,
     monkeypatch,
+    command,
 ):
     sentinel = tmp_path / "child-ran.txt"
 
@@ -2643,7 +2645,7 @@ def test_run_under_hub_missing_command_reports_placeholder_next_steps(
 
     exit_code = run_under_hub(
         Namespace(
-            command=[],
+            command=command,
             hub_url="http://127.0.0.1:8765",
             hub_token="example-hub-token-placeholder",
             home=tmp_path,

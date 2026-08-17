@@ -258,8 +258,11 @@ func TestCorrelateEventAfterDaemonRestartForcesCoverageUnknown(t *testing.T) {
 	if receipt.CoverageStatus != "unknown" {
 		t.Fatalf("coverage_status = %q, want unknown", receipt.CoverageStatus)
 	}
-	if receipt.Verdict != "insufficient_evidence" {
-		t.Fatalf("verdict = %q, want insufficient_evidence", receipt.Verdict)
+	if receipt.Verdict != "unknown" {
+		t.Fatalf("verdict = %q, want unknown", receipt.Verdict)
+	}
+	if receipt.PublicDenialReason != "unknown" {
+		t.Fatalf("public_denial_reason = %q, want unknown", receipt.PublicDenialReason)
 	}
 	if receipt.InternalDenialCode != "kernel.daemon_restart_gap" {
 		t.Fatalf("internal_denial_code = %q, want kernel.daemon_restart_gap", receipt.InternalDenialCode)
@@ -292,8 +295,11 @@ func TestCorrelateDecodedRingbufSampleUsesMonotonicRestartGap(t *testing.T) {
 	if receipt.CoverageStatus != "unknown" {
 		t.Fatalf("coverage_status = %q, want unknown", receipt.CoverageStatus)
 	}
-	if receipt.Verdict != "insufficient_evidence" {
-		t.Fatalf("verdict = %q, want insufficient_evidence", receipt.Verdict)
+	if receipt.Verdict != "unknown" {
+		t.Fatalf("verdict = %q, want unknown", receipt.Verdict)
+	}
+	if receipt.PublicDenialReason != "unknown" {
+		t.Fatalf("public_denial_reason = %q, want unknown", receipt.PublicDenialReason)
 	}
 	if receipt.InternalDenialCode != "kernel.daemon_restart_gap" {
 		t.Fatalf("internal_denial_code = %q, want kernel.daemon_restart_gap", receipt.InternalDenialCode)

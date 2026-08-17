@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "1d68be99f194c7b0d584e540a289b352044e0365ab2730fd3e809dea7143e9ac"
+source_sha256: "c0b3756ad80c35c6b5578c903198c48a158c9251287cdf72c29f444259466678"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -127,6 +127,26 @@ See [`Tool-Server Preflight v0.1`](/__ardur_internal__/source/docs/specs/tool-se
 | `fast_hmac` | internal low-risk actions only |
 | `standard_jws` | default receipt path for ordinary governed actions |
 | `strong_eat_tee` | required for high-risk delegated or side-effecting actions |
+
+## Decision taxonomy
+
+The reference proxy returns one of five governance decisions for every
+evaluated tool call. Only `PERMIT` allows execution; all others block
+the call (fail-closed discipline).
+
+| Decision | Meaning | Fail-closed? |
+|---|---|---|
+| `PERMIT` | Tool call is within declared scope, budget, and delegation policy. | N/A (allows execution) |
+| `DENY` | Tool call violates a mission-declared boundary (tool, resource, budget, or delegation). | Yes |
+| `VIOLATION` | A governance invariant is broken (mission tampering, passport revoked, memory integrity failure, delegation splice). More severe than `DENY` — indicates compromised credentials. | Yes |
+| `INSUFFICIENT_EVIDENCE` | The verifier cannot make a confident decision due to a transient operational failure (approval operator unavailable, state file corrupted, network error). Might be retried. | Yes |
+| `UNKNOWN` | The verifier observed the call but the evidence is structurally outside the capture boundary (visibility is not "full", tool-call descriptor is incomplete). The honest "I cannot know what happened" outcome. | Yes |
+
+The distinction between `INSUFFICIENT_EVIDENCE` and `UNKNOWN` matters for
+audit trails: `INSUFFICIENT_EVIDENCE` records a retryable operational
+failure, while `UNKNOWN` records a genuine observation gap. Both
+fail-closed as `DENY`. Public receipt verdicts map `INSUFFICIENT_EVIDENCE`
+to `insufficient_evidence` and `UNKNOWN` to `unknown`.
 
 ## Required posture
 

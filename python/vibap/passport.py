@@ -459,6 +459,11 @@ def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
         target.mkdir(parents=True, exist_ok=True)
     except (FileExistsError, NotADirectoryError) as exc:
         raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise KeyDirectoryError(
+            f"Cannot create key directory: {exc.strerror or type(exc).__name__}",
+            condition="keys_dir_unreachable",
+        ) from exc
     if not target.is_dir():
         raise KeyDirectoryError()
     return target

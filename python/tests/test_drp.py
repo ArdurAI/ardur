@@ -5,6 +5,8 @@ import copy
 import hashlib
 import json
 import shutil
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1039,3 +1041,125 @@ def test_drp_fixture_output_existing_empty_dir_behavior_preserved(
     assert captured.err == ""
     assert report["ok"] is True
     assert (existing_dir / "ardur-drp-profile-v0.1-report.json").is_file()
+
+
+def test_drp_fixture_oserror_does_not_leak_path(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """OSError from fixture generation must not leak raw path/errno into JSON."""
+    leak_path = str(tmp_path / "leaked-readonly" / "test.json")
+
+    def raise_oserror(output: object) -> dict:
+        raise OSError(13, "Permission denied", leak_path)
+
+    monkeypatch.setattr(
+        "vibap.drp_fixture.run_drp_profile_fixture",
+        raise_oserror,
+    )
+
+    code = cli_main(
+        ["drp-profile-fixture", "--output", str(tmp_path)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_failed"
+    assert "[Errno" not in captured.out
+    assert "[Errno" not in json.dumps(report)
+    assert leak_path not in captured.out
+    assert leak_path not in json.dumps(report)
+    assert "/var/folders" not in json.dumps(report)
+
+
+def test_drp_fixture_typeerror_does_not_leak_internals(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TypeError from fixture generation must not leak raw exception text."""
+    sentinel = "cannot unpack non-iterable NoneType object"
+
+    def raise_typeerror(output: object) -> dict:
+        raise TypeError(sentinel)
+
+    monkeypatch.setattr(
+        "vibap.drp_fixture.run_drp_profile_fixture",
+        raise_typeerror,
+    )
+
+    code = cli_main(
+        ["drp-profile-fixture", "--output", str(tmp_path)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_failed"
+    assert sentinel not in json.dumps(report)
+    assert "NoneType" not in json.dumps(report)
+
+
+def test_drp_fixture_valueerror_does_not_leak_internals(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ValueError from fixture generation must not leak raw exception text."""
+    sentinel = "invalid literal for int() with base 10: 'secret-data'"
+
+    def raise_valueerror(output: object) -> dict:
+        raise ValueError(sentinel)
+
+    monkeypatch.setattr(
+        "vibap.drp_fixture.run_drp_profile_fixture",
+        raise_valueerror,
+    )
+
+    code = cli_main(
+        ["drp-profile-fixture", "--output", str(tmp_path)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert captured.err == ""
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_failed"
+    assert sentinel not in json.dumps(report)
+    assert "secret-data" not in json.dumps(report)
+
+
+def test_module_main_oserror_does_not_leak_path(tmp_path: Path) -> None:
+    """``python -m vibap.drp_fixture`` OSError sanitization.
+
+    Regression for the module-level ``__main__`` entrypoint: an ``OSError``
+    raised during fixture generation (here: ``mkdir`` blocked by a regular
+    file on the parent path) must be reported as a constant safe message and
+    must never leak ``[Errno ...]`` / raw filesystem paths / ``Traceback``
+    into stdout or stderr.
+    """
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    bad_output = str(blocker / "sub" / "dir")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "vibap.drp_fixture", "--output", bad_output],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+    assert "Traceback" not in result.stdout
+    assert "Traceback" not in result.stderr
+    report = json.loads(result.stdout)
+    assert report["ok"] is False
+    assert report["error"] == "drp_profile_fixture_failed"
+    assert report["message"] == "Filesystem error writing fixture output."
+    combined = result.stdout + result.stderr
+    assert "/var/folders" not in combined
+    assert "/tmp/" not in combined
+    assert "Errno" not in combined
+    assert str(tmp_path) not in combined
+    assert str(bad_output) not in combined

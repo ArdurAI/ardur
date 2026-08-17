@@ -145,7 +145,8 @@ claimed signer identity.
 
 The verifier emits a chronological timeline with:
 
-- `PERMIT`, `DENY`, or `ERROR` derived from the signed tri-state verdict;
+- `PERMIT`, `DENY`, or `ERROR` derived from the signed verdict
+  (`compliant` / `violation` / `insufficient_evidence` / `unknown`);
 - actor, grant, tool, action class, target, resource family, and side-effect
   class;
 - signed policy-engine decisions and reasons;

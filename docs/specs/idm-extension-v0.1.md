@@ -24,10 +24,11 @@ This document uses the key words **MUST**, **MUST NOT**, **SHOULD**,
 The Silence Theorem (see Workstream C.1 / `docs/paper/sections-3-4-formal-model-theorem.md`)
 establishes that Mission-Intent Compliance (MIC) is a hyperproperty over
 projected traces, and that projection-induced information loss makes sound and
-complete monitoring impossible in the general case. The tri-state verifier
+complete monitoring impossible in the general case. The verifier
 operationalizes this limit: when the observable projection lacks information
 required for a compliance verdict, the only honest result is
-`insufficient_evidence`.
+`insufficient_evidence` (transient/operational failure) or `unknown`
+(structural observation gap).
 
 IDM does **not** eliminate this impossibility. It is a **gray-box augmentation**
 of the projection: by declaring intent *before* execution, the agent supplies
@@ -151,7 +152,7 @@ optional claims in the ER for the final step of the subtask:
   maximal drift) computed from the metrics in §4.2
 - `idm_verdict`: `matched` or `drift_detected`
 
-These annotations are evidence-level metadata; they do not replace the tri-state
+These annotations are evidence-level metadata; they do not replace the
 `verdict` of the ER itself.
 
 ## 5. Composition with MIC-Evidence

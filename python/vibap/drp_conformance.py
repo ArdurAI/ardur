@@ -382,8 +382,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
     except (OSError, TypeError, ValueError) as exc:
+        # Inline a local classifier (mirrors ``vibap.cli._classify_fixture_error``)
+        # to avoid a cross-module import cycle. Never leak ``str(exc)``: raw
+        # ``OSError`` text carries filesystem paths / errno details and
+        # ``TypeError`` / ``ValueError`` text carries Python internals.
+        if isinstance(exc, OSError):
+            safe_message = "Filesystem error reading conformance input."
+        else:
+            safe_message = "Invalid input type or value for conformance evaluation."
         print(
-            json.dumps({"ok": False, "error": str(exc)}, sort_keys=True),
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "drp_conformance_failed",
+                    "message": safe_message,
+                },
+                sort_keys=True,
+            ),
             file=sys.stderr,
         )
         return 2

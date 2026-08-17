@@ -91,7 +91,7 @@ def test_matching_spiffe_id_signed_by_untrusted_key_is_rejected(
     proxy = _proxy(tmp_path, public_key, session_keys_dir, issuer_public_key)
 
     with pytest.raises(
-        PermissionError, match="JWT-SVID verification failed"
+        PermissionError, match="peer_jwt_svid_verification_failed"
     ) as raised:
         proxy.start_session_from_biscuit(
             biscuit_token,
@@ -99,7 +99,9 @@ def test_matching_spiffe_id_signed_by_untrusted_key_is_rejected(
             peer_jwt_svid=_rogue_jwt_svid(_HOLDER_SPIFFE_ID),
         )
 
-    assert "JWT-SVID validation failed" in str(raised.value)
+    assert str(raised.value) == "peer_jwt_svid_verification_failed"
+    assert "JWT-SVID validation failed" in str(raised.value.__cause__)
+    assert "JWT-SVID validation failed" not in str(raised.value)
     assert "audience/shape" not in str(raised.value)
 
     assert proxy.sessions == {}

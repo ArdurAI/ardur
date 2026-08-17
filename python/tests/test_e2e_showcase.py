@@ -217,17 +217,33 @@ def _print_header(pytestconfig):
 # ---------------------------------------------------------------------------
 
 
-def _ollama_available() -> bool:
-    if not API_KEY or not CLOUD_MODEL:
-        return False
-    try:
-        # Import the optional dependency instead of checking only its module
-        # spec so broken installations are treated as unavailable.
-        import ollama  # noqa: F401
+def _preflight_ollama() -> tuple[bool, str]:
+    """Verify Ollama showcase prerequisites without exposing secrets.
 
-        return True
-    except ImportError:
-        return False
+    Returns ``(ok, reason)``. ``reason`` is a short, redacted diagnostic
+    (presence booleans, import status) and NEVER contains the API key value.
+    Used both by the module-level skip marker and the fail-closed collection
+    hook in ``conftest.py`` so the two code paths cannot drift.
+    """
+    api_key = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
+    cloud_model = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+    if not api_key:
+        return False, "ARDUR_OLLAMA_API_KEY unset/empty"
+    if not cloud_model:
+        return False, "ARDUR_OLLAMA_CLOUD_MODEL unset/empty"
+    try:
+        import ollama  # noqa: F401
+    except ImportError as exc:
+        # Name the missing import (redacted: no secret material in the
+        # exception text). This distinguishes "ollama extra not installed"
+        # from a broken installation.
+        return False, f"ollama client import failed: {type(exc).__name__}"
+    return True, ""
+
+
+def _ollama_available() -> bool:
+    ok, _reason = _preflight_ollama()
+    return ok
 
 
 ollama_required = pytest.mark.skipif(
@@ -237,6 +253,20 @@ ollama_required = pytest.mark.skipif(
         "(set ARDUR_OLLAMA_API_KEY and ARDUR_OLLAMA_CLOUD_MODEL)"
     ),
 )
+
+
+def _ollama_showcase_skip_reasons() -> tuple[str, ...]:
+    """Marker reason substrings that identify the showcase ``skipif``.
+
+    ``conftest.py``'s fail-closed collection hook uses this to detect items
+    that carry the showcase skip without importing the test module (which
+    would re-trigger env reads). Kept here next to the marker so the two
+    definitions do not drift.
+    """
+    return (
+        "ARDUR_OLLAMA_API_KEY",
+        "ARDUR_OLLAMA_CLOUD_MODEL",
+    )
 
 
 # ---------------------------------------------------------------------------

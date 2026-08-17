@@ -1131,7 +1131,7 @@ def test_cli_missing_public_key_failure_does_not_echo_paths(
     response = json.loads(captured.out)
     assert exit_code == 1
     assert captured.err == ""
-    assert response["error"] == "runtime_evidence_io_failed"
+    assert response["error"] == "receipt_public_key_invalid"
     assert str(tmp_path) not in captured.out
     assert "missing-public-key.pem" not in captured.out
 

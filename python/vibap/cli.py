@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -47,17 +48,22 @@ from .passport import (
     load_mission_file,
     verify_passport,
 )
+from .attestation import verify_attestation
 from .package_assets import claude_code_plugin_dir
 from .personal_hub import (
     DEFAULT_HUB_HOST,
     DEFAULT_HUB_PORT,
     DEFAULT_HUB_URL,
+    HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+    HOME_PARENT_NOT_DIRECTORY_CONDITION,
     HUB_TLS_MATERIAL_INVALID_CONDITION,
     HubError,
     HubTLSConfigurationError,
     SETUP_HOME_INVALID_CONDITION,
     desktop_observe,
     doctor_personal,
+    home_dangling_symlink_parent_failure_response,
+    home_parent_not_directory_failure_response,
     hub_request,
     run_under_hub,
     serve_hub,
@@ -65,6 +71,7 @@ from .personal_hub import (
     setup_personal,
     status_response_with_next_steps,
     uninstall_personal,
+    validate_personal_home_path_components,
 )
 from .personal_firewall import (
     MAX_DEMO_SECONDS as PERSONAL_FIREWALL_MAX_DEMO_SECONDS,
@@ -72,6 +79,16 @@ from .personal_firewall import (
     run_personal_firewall_demo,
 )
 from .claude_code_report import build_claude_code_report
+from .latency_gate import (
+    LatencyGateError,
+    GateProtocol,
+)
+from .latency_gate_cli import (
+    LatencyGateCliError,
+    format_gate_output,
+    load_reports_from_directory,
+    run_gate,
+)
 from .claude_code_hook import main as claude_code_hook_main
 from .gemini_cli_hook import (
     FixtureProjectDirError as GeminiFixtureProjectDirError,
@@ -112,7 +129,7 @@ from .proxy import (
     TLSConfigurationError,
     serve_proxy,
 )
-from .run_bridge import VALID_VIA_MODES, run_governed_cli
+from .run_bridge import VALID_VIA_MODES, _redact_local_path, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
 from .tool_preflight import (
     FAIL_ON_CHOICES,
@@ -139,6 +156,116 @@ def _print_json(payload: dict) -> None:
     # while setup/hub recovery paths return non-secret condition codes.
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
+
+
+def _write_json_report_to_file(path: str | Path, report: object) -> bytes:
+    """Serialize *report* to canonical JSON and atomically write it to *path*.
+
+    Reuses the no-follow atomic writer from ``runtime_evidence`` so that the
+    same safe-replace semantics (owner-only regular file, directory-handle
+    rename, no symlink follow) apply to every report-producing command.
+    Returns the serialized bytes so callers can compute a digest.
+
+    Raises ``ValueError`` with a safe message (no local path) when the atomic
+    writer rejects the target shape.
+    """
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    payload = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
+    try:
+        write_report(path, payload)
+    except RuntimeEvidenceError as exc:
+        raise ValueError(exc.code) from exc
+    return payload
+
+
+def _handle_output_and_redact(
+    args: argparse.Namespace,
+    response: dict[str, Any],
+    *,
+    command: str,
+    exit_code: int | None = None,
+) -> int:
+    """Apply ``--redact-paths`` and ``--output`` to *response*, then emit.
+
+    Shared terminal logic for commands whose JSON response is the final
+    output.  When ``--redact-paths`` is set, local absolute paths in
+    *response* are recursively replaced.  When ``--output`` is set, the
+    (possibly redacted) response is atomically written to an owner-only
+    file and a success confirmation is printed instead.  When neither is
+    set, *response* is printed directly to stdout via :func:`_print_json`.
+
+    If *exit_code* is ``None`` (default), returns ``0`` on success.  When
+    the caller provides an explicit *exit_code*, that value is returned
+    after successful output so commands like ``anchor`` can propagate
+    their ``ok``-based exit status even when writing to a file.
+    """
+
+    redact = getattr(args, "redact_paths", False)
+    output = getattr(args, "output", None)
+    if redact and not getattr(args, "json", False) and output is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if redact:
+        response = _redact_paths_deep(response)
+    if output is not None:
+        try:
+            payload = _write_json_report_to_file(output, response)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    **_output_write_error_response(command, exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": f"{command}_report_written",
+                "output": str(output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return exit_code if exit_code is not None else 0
+    _print_json(response)
+    return exit_code if exit_code is not None else 0
+
+
+def _output_write_error_response(command: str, exc: Exception) -> dict[str, Any]:
+    """Build an enriched structured-error dict for a ``--output`` write failure.
+
+    Shared by inline verify handlers and report handlers so every command
+    that catches ``ValueError`` from ``_write_json_report_to_file`` emits the
+    same structured shape as ``_handle_output_and_redact``.
+    """
+    _condition = f"{command}_output_write_failed"
+    return {
+        "error": _condition,
+        "error_code": _condition,
+        "condition": _condition,
+        "message": (
+            f"Writing the --output file for ardur {command.replace('_', '-')} "
+            "failed because the path is invalid or not writable."
+        ),
+        "detail": str(exc),
+        "next_steps": [
+            {
+                "action": "choose_writable_output_path",
+                "command": (
+                    f"ardur {command.replace('_', '-')} "
+                    "--output <writable-file-path>"
+                ),
+                "detail": (
+                    "Provide a writable file path (not an existing "
+                    "directory or protected location) for the JSON report."
+                ),
+            },
+        ],
+    }
 
 
 def _hub_path_error_code() -> str:
@@ -182,6 +309,106 @@ def _path_not_directory_next_steps(condition: str) -> list[dict[str, str]]:
     ]
 
 
+def _offline_verification_next_steps(error_code: str) -> list[dict[str, str]]:
+    """Return actionable next steps for offline verification error codes."""
+    if error_code == "input_missing":
+        return [
+            {
+                "condition": "input_missing",
+                "action": "check_journal_path",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal file was not found at the given path. "
+                    "Verify the file path and ensure the journal exists."
+                ),
+            },
+        ]
+    if error_code == "input_not_file":
+        return [
+            {
+                "condition": "input_not_file",
+                "action": "use_regular_file",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal path must be a regular file, not a directory or special file. "
+                    "Pass the path to a regular journal file."
+                ),
+            },
+        ]
+    if error_code == "malformed_json":
+        return [
+            {
+                "condition": "malformed_json",
+                "action": "validate_journal_json",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal contains malformed JSON. Validate the JSON syntax "
+                    "and ensure each line is a valid compact JWS or JSON object."
+                ),
+            },
+        ]
+    if error_code == "input_symlink":
+        return [
+            {
+                "condition": "input_symlink",
+                "action": "use_regular_file",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal path must not be a symlink. "
+                    "Pass the path to the actual regular file."
+                ),
+            },
+        ]
+    if error_code == "input_size_invalid" or error_code == "input_too_large":
+        return [
+            {
+                "condition": error_code,
+                "action": "check_journal_size",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal file size is outside the allowed range. "
+                    "Ensure the file is between 1 byte and 64 MiB."
+                ),
+            },
+        ]
+    if error_code == "duplicate_json_key":
+        return [
+            {
+                "condition": "duplicate_json_key",
+                "action": "validate_journal_json",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "The journal contains duplicate JSON object keys. "
+                    "Remove duplicate keys and retry."
+                ),
+            },
+        ]
+    if error_code == "journal_entry_invalid" or error_code == "journal_token_invalid":
+        return [
+            {
+                "condition": error_code,
+                "action": "validate_journal_entries",
+                "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+                "detail": (
+                    "One or more journal entries are not valid compact JWS tokens. "
+                    "Check the journal format and ensure each line is a valid receipt."
+                ),
+            },
+        ]
+    # Generic fallback for unknown error codes
+    return [
+        {
+            "condition": error_code,
+            "action": "check_input_files",
+            "command": "ardur verify --receipt-public-key <key.pem> <journal.jsonl>",
+            "detail": (
+                "Offline verification failed. Check that your journal file, "
+                "receipt public key, and any optional key files are valid and accessible."
+            ),
+        },
+    ]
+
+
 def _path_not_directory_response() -> dict:
     condition = _path_not_directory_condition()
     return {
@@ -201,6 +428,12 @@ def _path_not_directory_response() -> dict:
 def _path_failure_exit_code(exc: HubError) -> int:
     if exc.code == SETUP_HOME_INVALID_CONDITION:
         _print_json(setup_home_invalid_failure_response())
+        return 1
+    if exc.code == HOME_DANGLING_SYMLINK_PARENT_CONDITION:
+        _print_json(home_dangling_symlink_parent_failure_response())
+        return 1
+    if exc.code == HOME_PARENT_NOT_DIRECTORY_CONDITION:
+        _print_json(home_parent_not_directory_failure_response())
         return 1
     if exc.code != _hub_path_error_code():
         raise exc
@@ -562,6 +795,85 @@ def _start_port_failure_exit_code(port: int) -> int | None:
     return 1
 
 
+def _start_port_in_use_condition() -> str:
+    return "start_port_in_use"
+
+
+def _start_port_in_use_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_available_start_port",
+            "command": (
+                "ardur start --mission <mission.json> --keys-dir <keys-dir> "
+                "--state-dir <state-dir> --log-path <audit-log> "
+                "--host <loopback-host> --port <available-port>"
+            ),
+            "detail": (
+                "The configured port is already in use by another process. "
+                "Choose a different port or pass --port 0 to let the operating "
+                "system choose an available local port."
+            ),
+        },
+    ]
+
+
+def _start_port_in_use_response() -> dict:
+    condition = _start_port_in_use_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start port is already in use by another process.",
+        "detail": (
+            "Stop the process occupying the port or choose a different --port. "
+            "Use --port 0 for an ephemeral port."
+        ),
+        "next_steps": _start_port_in_use_next_steps(condition),
+    }
+
+
+def _start_oserror_condition() -> str:
+    return "start_oserror"
+
+
+def _start_oserror_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "check_start_permissions",
+            "command": "ardur start --mission <mission.json> --keys-dir <keys-dir>",
+            "detail": (
+                "If the error is EACCES or EPERM, verify the user has permission "
+                "to bind the requested host and port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_ephemeral_port",
+            "command": "ardur start --mission <mission.json> --keys-dir <keys-dir> --port 0",
+            "detail": "Use --port 0 for an ephemeral port to avoid conflicts.",
+        },
+    ]
+
+
+def _start_oserror_response(exc: OSError) -> dict:
+    import errno as _errno
+
+    condition = _start_oserror_condition()
+    detail = f"OSError errno {_errno.errorcode.get(exc.errno or 0, exc.errno)}: {exc.strerror or str(exc)}"
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur start failed with an unexpected OSError.",
+        "detail": detail,
+        "next_steps": _start_oserror_next_steps(condition),
+    }
+
+
 def _start_host_failure_condition() -> str:
     return "start_host_invalid"
 
@@ -710,6 +1022,81 @@ def _hub_port_failure_exit_code(port: int) -> int | None:
     return 1
 
 
+def _hub_port_in_use_condition() -> str:
+    return "hub_port_in_use"
+
+
+def _hub_port_in_use_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_available_hub_port",
+            "command": "ardur hub --host <loopback-host> --port <available-port> --home <ardur-home>",
+            "detail": (
+                "The configured port is already in use by another process. "
+                "Choose a different port or pass --port 0 to let the operating "
+                "system choose an available local port."
+            ),
+        },
+    ]
+
+
+def _hub_port_in_use_response() -> dict:
+    condition = _hub_port_in_use_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur hub port is already in use by another process.",
+        "detail": (
+            "Stop the process occupying the port or choose a different --port. "
+            "Use --port 0 for an ephemeral port."
+        ),
+        "next_steps": _hub_port_in_use_next_steps(condition),
+    }
+
+
+def _hub_oserror_condition() -> str:
+    return "hub_oserror"
+
+
+def _hub_oserror_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "check_hub_permissions",
+            "command": "ardur hub",
+            "detail": (
+                "If the error is EACCES or EPERM, verify the user has permission "
+                "to bind the requested host and port."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "retry_with_ephemeral_port",
+            "command": "ardur hub --port 0",
+            "detail": "Use --port 0 for an ephemeral port to avoid conflicts.",
+        },
+    ]
+
+
+def _hub_oserror_response(exc: OSError) -> dict:
+    import errno as _errno
+
+    condition = _hub_oserror_condition()
+    detail = f"OSError errno {_errno.errorcode.get(exc.errno or 0, exc.errno)}: {exc.strerror or str(exc)}"
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur hub failed with an unexpected OSError.",
+        "detail": detail,
+        "next_steps": _hub_oserror_next_steps(condition),
+    }
+
+
 def _hub_host_failure_condition() -> str:
     return "hub_host_invalid"
 
@@ -813,7 +1200,7 @@ def _hub_tls_material_failure_next_steps(condition: str) -> list[dict[str, str]]
     ]
 
 
-def _hub_tls_material_failure_response() -> dict:
+def _hub_tls_material_failure_response(detail: str | None = None) -> dict:
     condition = HUB_TLS_MATERIAL_INVALID_CONDITION
     return {
         "ok": False,
@@ -821,7 +1208,8 @@ def _hub_tls_material_failure_response() -> dict:
         "error_code": condition,
         "condition": condition,
         "message": "Ardur Personal Hub TLS material is invalid.",
-        "detail": (
+        "detail": detail
+        or (
             "TLS remains enabled unless --no-tls is explicitly supplied. Explicit "
             "certificate and key values must identify a usable matching pair."
         ),
@@ -866,7 +1254,7 @@ def _start_tls_material_failure_next_steps(condition: str) -> list[dict[str, str
     ]
 
 
-def _start_tls_material_failure_response() -> dict:
+def _start_tls_material_failure_response(detail: str | None = None) -> dict:
     condition = _start_tls_material_failure_condition()
     return {
         "ok": False,
@@ -874,7 +1262,8 @@ def _start_tls_material_failure_response() -> dict:
         "error_code": condition,
         "condition": condition,
         "message": "Ardur start TLS material is invalid.",
-        "detail": (
+        "detail": detail
+        or (
             "TLS stays enabled unless --no-tls is explicitly supplied. When explicit "
             "--tls-cert and --tls-key values are used, both must point to existing files "
             "before Ardur starts the local governance proxy."
@@ -1291,8 +1680,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             tls_key=args.tls_key,
             no_tls=args.no_tls,
         )
-    except TLSConfigurationError:
-        _print_json(_start_tls_material_failure_response())
+    except TLSConfigurationError as exc:
+        _print_json(_start_tls_material_failure_response(detail=str(exc)))
+        return 1
+    except OSError as exc:
+        import errno
+
+        if exc.errno == errno.EADDRINUSE:
+            _print_json(_start_port_in_use_response())
+            return 1
+        _print_json(_start_oserror_response(exc))
         return 1
     return 0
 
@@ -1558,45 +1955,99 @@ def cmd_issue(args: argparse.Namespace) -> int:
         response["warnings"] = [
             "resource_scope explicitly permits all resources via the sole '**' pattern"
         ]
-    _print_json(response)
-    return 0
+    return _handle_output_and_redact(args, response, command="issue")
 
 
-def _verify_failure_next_steps() -> list[dict[str, str]]:
+def _verify_failure_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+    if label == "Mission Passport":
+        condition = "invalid_passport_token"
+        return [
+            {
+                "condition": condition,
+                "action": "verify_a_fresh_passport_token",
+                "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+                "detail": (
+                    "Use a Mission Passport JWT issued by this Ardur key directory. "
+                    "Keep raw tokens out of shared logs and reports."
+                ),
+            },
+            {
+                "condition": condition,
+                "action": "issue_a_new_passport_if_needed",
+                "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
+                "detail": "Issue a fresh local Mission Passport when the old token is malformed, expired, or signed by a different key.",
+            },
+        ]
+    condition = "invalid_attestation_token"
     return [
         {
-            "condition": "invalid_passport_token",
-            "action": "verify_a_fresh_passport_token",
-            "command": "ardur verify --token <token> --keys-dir <keys-dir>",
+            "condition": condition,
+            "action": "verify_a_fresh_attestation_token",
+            "command": "ardur verify --attestation-token <token> --keys-dir <keys-dir>",
             "detail": (
-                "Use a Mission Passport JWT issued by this Ardur key directory. "
-                "Keep raw tokens out of shared logs and reports."
+                "Use a Behavioral Attestation JWT issued by this Ardur key "
+                "directory. Keep raw tokens out of shared logs and reports."
             ),
         },
         {
-            "condition": "invalid_passport_token",
-            "action": "issue_a_new_passport_if_needed",
-            "command": "ardur issue --agent-id <agent-id> --mission <mission> --keys-dir <keys-dir>",
-            "detail": "Issue a fresh local Mission Passport when the old token is malformed, expired, or signed by a different key.",
+            "condition": condition,
+            "action": "issue_a_new_attestation_if_needed",
+            "command": "ardur attest --session <session-id> --keys-dir <keys-dir>",
+            "detail": (
+                "Issue a fresh local Behavioral Attestation when the old token "
+                "is malformed, expired, or signed by a different key."
+            ),
         },
     ]
 
 
-def _verify_failure_response(exc: Exception) -> dict:
-    detail = str(exc).strip() or exc.__class__.__name__
+def _verify_failure_response(
+    exc: Exception, label: str = "Mission Passport"
+) -> dict:
+    detail = _safe_exception_message(exc)
+    is_attestation = label != "Mission Passport"
+    error_code = (
+        "invalid_attestation_token" if is_attestation else "invalid_passport_token"
+    )
     return {
         "ok": False,
         "valid": False,
-        "error": "invalid_passport_token",
-        "condition": "invalid_passport_token",
-        "message": "Mission Passport token could not be verified.",
+        "error": error_code,
+        "condition": error_code,
+        "message": f"{label} token could not be verified.",
         "detail": detail,
-        "next_steps": _verify_failure_next_steps(),
+        "next_steps": _verify_failure_next_steps(label=label),
     }
 
 
-def _verify_public_key_missing_next_steps() -> list[dict[str, str]]:
-    condition = "passport_public_key_missing"
+def _verify_public_key_missing_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+    condition = (
+        "attestation_public_key_missing"
+        if label != "Mission Passport"
+        else "passport_public_key_missing"
+    )
+    if label != "Mission Passport":
+        return [
+            {
+                "condition": condition,
+                "action": "verify_with_issuing_key_directory",
+                "command": "ardur verify --attestation-token <token> --keys-dir <keys-dir>",
+                "detail": (
+                    "Use the key directory that issued this Behavioral "
+                    "Attestation. Keep raw tokens, private keys, and local "
+                    "paths out of shared logs."
+                ),
+            },
+            {
+                "condition": condition,
+                "action": "issue_a_new_attestation_if_needed",
+                "command": "ardur attest --session <session-id> --keys-dir <keys-dir>",
+                "detail": (
+                    "Issue a fresh local Behavioral Attestation when the "
+                    "original public key is unavailable."
+                ),
+            },
+        ]
     return [
         {
             "condition": condition,
@@ -1618,7 +2069,22 @@ def _verify_public_key_missing_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _verify_public_key_missing_response() -> dict:
+def _verify_public_key_missing_response(label: str = "Mission Passport") -> dict:
+    if label != "Mission Passport":
+        condition = "attestation_public_key_missing"
+        return {
+            "ok": False,
+            "valid": False,
+            "error": condition,
+            "error_code": condition,
+            "condition": condition,
+            "message": "Behavioral Attestation public key is required for verification.",
+            "detail": (
+                "The selected key directory does not contain passport_public.pem. "
+                "Verification is read-only and will not create signing keys."
+            ),
+            "next_steps": _verify_public_key_missing_next_steps(label=label),
+        }
     condition = "passport_public_key_missing"
     return {
         "ok": False,
@@ -1635,8 +2101,34 @@ def _verify_public_key_missing_response() -> dict:
     }
 
 
-def _verify_public_key_invalid_next_steps() -> list[dict[str, str]]:
-    condition = "passport_public_key_invalid"
+def _verify_public_key_invalid_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+    condition = (
+        "attestation_public_key_invalid"
+        if label != "Mission Passport"
+        else "passport_public_key_invalid"
+    )
+    if label != "Mission Passport":
+        return [
+            {
+                "condition": condition,
+                "action": "restore_issuing_public_key",
+                "command": "ardur verify --attestation-token <token> --keys-dir <keys-dir>",
+                "detail": (
+                    "Replace passport_public.pem with the EC public key that "
+                    "issued this Behavioral Attestation, then retry verification. "
+                    "Keep raw tokens, private keys, and local paths out of shared logs."
+                ),
+            },
+            {
+                "condition": condition,
+                "action": "issue_a_new_attestation_if_needed",
+                "command": "ardur attest --session <session-id> --keys-dir <keys-dir>",
+                "detail": (
+                    "Issue a fresh local Behavioral Attestation only after "
+                    "choosing a key directory with valid key material."
+                ),
+            },
+        ]
     return [
         {
             "condition": condition,
@@ -1660,7 +2152,22 @@ def _verify_public_key_invalid_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _verify_public_key_invalid_response() -> dict:
+def _verify_public_key_invalid_response(label: str = "Mission Passport") -> dict:
+    if label != "Mission Passport":
+        condition = "attestation_public_key_invalid"
+        return {
+            "ok": False,
+            "valid": False,
+            "error": condition,
+            "error_code": condition,
+            "condition": condition,
+            "message": "Behavioral Attestation public key could not be loaded for verification.",
+            "detail": (
+                "passport_public.pem exists but is not a readable EC public key. "
+                "Verification is read-only and will not repair, overwrite, or create signing keys."
+            ),
+            "next_steps": _verify_public_key_invalid_next_steps(label=label),
+        }
     condition = "passport_public_key_invalid"
     return {
         "ok": False,
@@ -1677,7 +2184,9 @@ def _verify_public_key_invalid_response() -> dict:
     }
 
 
-def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
+def _verify_malformed_token_failure_exit_code(
+    token: str, label: str = "Mission Passport"
+) -> int | None:
     try:
         jwt.get_unverified_header(token)
         jwt.decode(
@@ -1694,11 +2203,70 @@ def _verify_malformed_token_failure_exit_code(token: str) -> int | None:
     except jwt.PyJWTError:
         _print_json(
             _verify_failure_response(
-                jwt.DecodeError("Mission Passport token is malformed.")
+                jwt.DecodeError(f"{label} token is malformed."),
+                label=label,
             )
         )
         return 1
     return None
+
+
+def _cmd_verify_attestation(args: argparse.Namespace) -> int:
+    """Verify a behavioral attestation JWT and display its signed claims."""
+    malformed_token_failure = _verify_malformed_token_failure_exit_code(
+        args.attestation_token, label="Behavioral attestation"
+    )
+    if malformed_token_failure is not None:
+        return malformed_token_failure
+    keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
+    if keys_dir_failure is not None:
+        return keys_dir_failure
+    try:
+        public_key = load_existing_public_key(keys_dir=args.keys_dir)
+    except KeyDirectoryError as exc:
+        _print_json(_keys_dir_failure_response(exc))
+        return 1
+    except FileNotFoundError:
+        _print_json(_verify_public_key_missing_response(label="Behavioral attestation"))
+        return 1
+    except ValueError:
+        _print_json(_verify_public_key_invalid_response(label="Behavioral attestation"))
+        return 1
+    try:
+        claims = verify_attestation(args.attestation_token, public_key)
+    except (jwt.PyJWTError, PermissionError, ValueError) as exc:
+        _print_json(_verify_failure_response(exc, label="Behavioral attestation"))
+        return 1
+    token_report = {"valid": True, "claims": claims}
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        token_report = _redact_paths_deep(token_report)
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, token_report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    **_output_write_error_response("verify", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
+    _print_json(token_report)
+    return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -1711,6 +2279,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         for value in (
             args.journal,
             args.token,
+            args.attestation_token,
             args.anchor_bundle,
             args.receiver_envelope,
         )
@@ -1722,7 +2291,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "error": "verify_input_invalid",
                 "message": (
                     "Choose exactly one verification input: a positional journal, "
-                    "--token, --anchor-bundle, or --receiver-envelope."
+                    "--token, --attestation-token, --anchor-bundle, or --receiver-envelope."
                 ),
             }
         )
@@ -1752,6 +2321,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
         return _cmd_verify_anchor(args)
     if args.receiver_envelope is not None:
         return _cmd_verify_receiver_attestation(args)
+    if args.attestation_token is not None:
+        return _cmd_verify_attestation(args)
     keys_dir_failure = _keys_dir_failure_exit_code(args.keys_dir)
     if keys_dir_failure is not None:
         return keys_dir_failure
@@ -1774,7 +2345,35 @@ def cmd_verify(args: argparse.Namespace) -> int:
     except (jwt.PyJWTError, PermissionError, ValueError) as exc:
         _print_json(_verify_failure_response(exc))
         return 1
-    _print_json({"valid": True, "claims": claims})
+    token_report = {"valid": True, "claims": claims}
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        token_report = _redact_paths_deep(token_report)
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, token_report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    **_output_write_error_response("verify", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
+    _print_json(token_report)
     return 0
 
 
@@ -1786,8 +2385,15 @@ def _load_transparency_public_key(path: Path):  # type: ignore[no-untyped-def]
         raise ValueError("transparency log public key path must not be a symlink")
     if not path.is_file():
         raise FileNotFoundError("transparency log public key was not found")
-    with path.open("rb") as handle:
-        data = handle.read(64 * 1024 + 1)
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(64 * 1024 + 1)
+    except PermissionError as exc:
+        raise PermissionError(
+            "transparency log public key could not be read (permission denied)"
+        ) from exc
+    except OSError as exc:
+        raise OSError("transparency log public key could not be read") from exc
     if not data or len(data) > 64 * 1024:
         raise ValueError(
             "transparency log public key is empty or exceeds the size limit"
@@ -1850,10 +2456,30 @@ def _cmd_verify_anchor(args: argparse.Namespace) -> int:
             {
                 "valid": False,
                 "error": "anchor_verification_failed",
-                "message": str(exc),
+                "message": _safe_exception_message(exc),
             }
         )
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    **_output_write_error_response("verify", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     _print_json(report)
     return 0
 
@@ -1870,11 +2496,19 @@ def _load_p256_public_key(path: Path, *, label: str):  # type: ignore[no-untyped
         raise ValueError(f"{label} path must not be a symlink")
     if not path.is_file():
         raise FileNotFoundError(f"{label} was not found")
-    with path.open("rb") as handle:
-        data = handle.read(64 * 1024 + 1)
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(64 * 1024 + 1)
+    except PermissionError as exc:
+        raise PermissionError(f"{label} could not be read (permission denied)") from exc
+    except OSError as exc:
+        raise OSError(f"{label} could not be read") from exc
     if not data or len(data) > 64 * 1024:
         raise ValueError(f"{label} is empty or exceeds the size limit")
-    key = serialization.load_pem_public_key(data)
+    try:
+        key = serialization.load_pem_public_key(data)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"{label} is not a valid PEM public key") from exc
     if not isinstance(key, ec.EllipticCurvePublicKey) or not isinstance(
         key.curve, ec.SECP256R1
     ):
@@ -1955,6 +2589,16 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receipt_public_key_invalid",
+                "message": str(exc),
+            }
+        )
+        return 1
+    try:
         log_public_key = (
             _load_transparency_public_key(args.transparency_log_key)
             if args.transparency_log_key is not None
@@ -1990,16 +2634,42 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
         TypeError,
         ValueError,
     ) as exc:
+        error_code = getattr(exc, "code", "offline_verification_failed")
+        safe_message = _safe_exception_message(exc)
         response: dict[str, object] = {
             "valid": False,
-            "error": getattr(exc, "code", "offline_verification_failed"),
-            "message": str(exc),
+            "error": error_code,
+            "error_code": error_code,
+            "condition": error_code,
+            "message": safe_message,
+            "detail": safe_message,
+            "next_steps": _offline_verification_next_steps(error_code),
         }
         index = getattr(exc, "index", None)
         if index is not None:
             response["receipt_index"] = index
         _print_json(response)
         return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    **_output_write_error_response("verify", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
     else:
@@ -2043,6 +2713,17 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+        _print_json(
+            {
+                "ok": False,
+                "valid": False,
+                "error": "receipt_public_key_invalid",
+                "message": str(exc),
+            }
+        )
+        return 1
+    try:
         receipt_report = verify_offline_path(
             args.journal,
             receipt_public_key=receipt_public_key,
@@ -2060,6 +2741,13 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             event_batch,
             correlation_window_s=args.correlation_window_s,
         )
+        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "evidence_output", None) is None:
+            print(
+                "ardur: warning: --redact-paths has no effect without --json or --output",
+                file=sys.stderr,
+            )
+        if getattr(args, "redact_paths", False):
+            report = _redact_paths_deep(report)
         payload = (
             canonical_report_bytes(report)
             if args.report_format == "json"
@@ -2087,14 +2775,18 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
         RuntimeEvidenceError,
         OfflineVerificationError,
         KeyDirectoryError,
-        TypeError,
-        ValueError,
     ) as exc:
+        error_code = getattr(exc, "code", "runtime_evidence_correlation_failed")
+        safe_message = _safe_exception_message(exc)
         response: dict[str, object] = {
             "ok": False,
             "valid": False,
-            "error": getattr(exc, "code", "runtime_evidence_correlation_failed"),
-            "message": str(exc),
+            "error": error_code,
+            "error_code": error_code,
+            "condition": error_code,
+            "message": safe_message,
+            "detail": safe_message,
+            "next_steps": _offline_verification_next_steps(error_code),
         }
         line = getattr(exc, "line", None)
         if line is not None:
@@ -2104,13 +2796,34 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             response["receipt_index"] = index
         _print_json(response)
         return 1
+    except (TypeError, ValueError) as exc:
+        error_code = "runtime_evidence_correlation_failed"
+        safe_message = _safe_exception_message(exc)
+        response: dict[str, object] = {
+            "ok": False,
+            "valid": False,
+            "error": error_code,
+            "error_code": error_code,
+            "condition": error_code,
+            "message": safe_message,
+            "detail": safe_message,
+            "next_steps": _offline_verification_next_steps(error_code),
+        }
+        _print_json(response)
+        return 1
     except OSError:
+        error_code = "runtime_evidence_io_failed"
+        safe_message = "runtime evidence correlation could not access a required local file safely"
         _print_json(
             {
                 "ok": False,
                 "valid": False,
-                "error": "runtime_evidence_io_failed",
-                "message": "runtime evidence correlation could not access a required local file safely",
+                "error": error_code,
+                "error_code": error_code,
+                "condition": error_code,
+                "message": safe_message,
+                "detail": safe_message,
+                "next_steps": _offline_verification_next_steps(error_code),
             }
         )
         return 1
@@ -2183,10 +2896,6 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
         ReceiverAttestationError,
         ReceiverAttestationVerificationError,
         KeyDirectoryError,
-        FileNotFoundError,
-        PermissionError,
-        OSError,
-        ValueError,
     ) as exc:
         _print_json(
             {
@@ -2196,6 +2905,44 @@ def _cmd_verify_receiver_attestation(args: argparse.Namespace) -> int:
             }
         )
         return 1
+    except (FileNotFoundError, PermissionError) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_verification_failed",
+                "message": _safe_exception_message(exc),
+            }
+        )
+        return 1
+    except (OSError, ValueError) as exc:
+        _print_json(
+            {
+                "valid": False,
+                "error": "receiver_attestation_verification_failed",
+                "message": _safe_exception_message(exc),
+            }
+        )
+        return 1
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "valid": False,
+                    **_output_write_error_response("verify", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "valid": True,
+                "condition": "verify_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     _print_json(report)
     return 0
 
@@ -2234,12 +2981,12 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
-    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError):
+    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
         _print_json(
             {
                 "ok": False,
                 "error": "receipt_public_key_invalid",
-                "message": "The trusted receipt public key could not be loaded.",
+                "message": str(exc),
             }
         )
         return 1
@@ -2250,6 +2997,13 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             receipt_public_key=receipt_public_key,
             verify_expiry=args.verify_expiry,
         )
+        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "telemetry_output", None) is None:
+            print(
+                "ardur: warning: --redact-paths has no effect without --json or --output",
+                file=sys.stderr,
+            )
+        if getattr(args, "redact_paths", False):
+            events = _redact_paths_deep(events)
         payloads = otlp_payloads(events)
         artifact = (
             jsonl_bytes(events)
@@ -2268,7 +3022,19 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             else []
         )
     except TelemetryExportError as exc:
-        _print_json({"ok": False, "error": exc.code, "message": str(exc)})
+        error_code = exc.code
+        safe_message = _safe_exception_message(exc)
+        _print_json(
+            {
+                "ok": False,
+                "error": error_code,
+                "error_code": error_code,
+                "condition": error_code,
+                "message": safe_message,
+                "detail": safe_message,
+                "next_steps": _offline_verification_next_steps(error_code),
+            }
+        )
         return 1
 
     if args.telemetry_output is None and args.otlp_endpoint is None:
@@ -2318,6 +3084,33 @@ def cmd_anchor(args: argparse.Namespace) -> int:
     if path_failure is not None:
         _print_json(path_failure)
         return 1
+    receipt_log_path = Path(args.receipt_log).expanduser()
+    if not receipt_log_path.is_file():
+        _print_json(
+            {
+                "ok": False,
+                "error": "receipt_log_not_file",
+                "error_code": "receipt_log_not_file",
+                "condition": "receipt_log_not_file",
+                "message": "ardur --receipt-log must point to an existing receipts JSONL file.",
+                "detail": "The --receipt-log path does not exist or is not a regular file. Directories, dangling symlinks, and device paths are rejected before anchoring.",
+                "next_steps": [
+                    {
+                        "condition": "receipt_log_not_file",
+                        "action": "pass_receipt_jsonl_file",
+                        "command": "ardur anchor --receipt-log <receipts.jsonl> --backend <backend> ...",
+                        "detail": "Pass the path to your signed receipt JSONL file (typically named receipts.jsonl in the Ardur home or claude-code-hook chain directory), not the parent directory.",
+                    },
+                    {
+                        "condition": "receipt_log_not_file",
+                        "action": "find_receipts_file",
+                        "command": "find <ardur-home> -name 'receipts.jsonl' -type f",
+                        "detail": "Locate the receipt journal file produced by ardur run, ardur hub, or the claude-code-hook before anchoring.",
+                    },
+                ],
+            }
+        )
+        return 1
     store = anchor_store_for_receipt_log(args.receipt_log)
     try:
         receipt_private_key = None
@@ -2362,7 +3155,7 @@ def cmd_anchor(args: argparse.Namespace) -> int:
             {
                 "ok": False,
                 "error": "anchor_submission_failed",
-                "message": str(exc),
+                "message": _safe_exception_message(exc),
             }
         )
         return 1
@@ -2382,8 +3175,9 @@ def cmd_anchor(args: argparse.Namespace) -> int:
             for result in results
         ],
     }
-    _print_json(output)
-    return 0 if output["ok"] else 1
+    return _handle_output_and_redact(
+        args, output, command="anchor", exit_code=0 if output["ok"] else 1
+    )
 
 
 def _attest_failure_condition(exc: Exception) -> tuple[str, str]:
@@ -2534,8 +3328,8 @@ def cmd_attest(args: argparse.Namespace) -> int:
     except (ValueError, PermissionError, jwt.PyJWTError) as exc:
         _print_json(_attest_failure_response(exc))
         return 1
-    _print_json({"token": token, "claims": claims})
-    return 0
+    response = {"token": token, "claims": claims}
+    return _handle_output_and_redact(args, response, command="attest")
 
 
 def cmd_claude_code_hook(args: argparse.Namespace) -> int:
@@ -2570,6 +3364,13 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
                 "claude_code_report_keys_dir_empty",
                 False,
             ),
+            (
+                "output",
+                "--output",
+                "output",
+                "claude_code_report_output_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -2585,6 +3386,33 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        report = _redact_paths_deep(report)
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    **_output_write_error_response("claude_code_report", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "claude_code_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
         return 0
@@ -2799,6 +3627,100 @@ def _offline_verification_fixture_output_invalid_response(condition: str) -> dic
     }
 
 
+def _classify_fixture_error(
+    exc: BaseException, error_code: str
+) -> tuple[str, str]:
+    """Map a raw ``OSError``/``TypeError``/``ValueError`` to a safe message.
+
+    Returns ``(error_code, safe_message)`` so the JSON response never leaks
+    raw Python internals (e.g. ``[Errno 13] Permission denied:
+    '/var/folders/...'``) or local filesystem paths into the ``message``
+    field. ``error_code`` is kept command-specific by the caller.
+    """
+    if isinstance(exc, OSError):
+        return error_code, "Filesystem error writing fixture output."
+    return error_code, "Invalid input type or value for fixture generation."
+
+
+def _safe_exception_message(exc: BaseException) -> str:
+    """Return a user-safe representation of ``exc`` for JSON output.
+
+    Domain exception types (``TransparencyError``, ``AnchorVerificationError``,
+    ``KeyDirectoryError``, ``OfflineVerificationError``, ``TelemetryExportError``,
+    ``RuntimeEvidenceError``, ``jwt.InvalidTokenError``, etc.) carry
+    intentionally-safe, user-facing messages and are preserved verbatim.
+    ``FileNotFoundError`` / ``PermissionError`` from the passport module are
+    re-raised with safe messages and also preserved. Generic Python built-ins
+    (``OSError``, bare ``TypeError``/``ValueError``) can carry filesystem
+    paths, errno details, or Python internals in ``str(exc)``, so only the
+    class name is returned.
+
+    Heuristic: if the exception text contains ``[Errno`` (the raw OSError
+    format), it is treated as unsafe regardless of type.
+    """
+    text = str(exc)
+    # Raw OSError errno pattern: always sanitize.
+    if "[Errno" in text:
+        return type(exc).__name__
+    # Domain exception types with safe, intentional messages.
+    from vibap.transparency import TransparencyError
+
+    if isinstance(exc, TransparencyError):
+        return text
+    try:
+        from vibap.offline_verification import OfflineVerificationError
+
+        if isinstance(exc, OfflineVerificationError):
+            return text
+    except ImportError:  # noqa: BLE001 - offline_verification optional in minimal installs
+        pass
+    try:
+        from vibap.receipt_telemetry import TelemetryExportError
+
+        if isinstance(exc, TelemetryExportError):
+            return text
+    except ImportError:  # noqa: BLE001 - receipt_telemetry optional in minimal installs
+        pass
+    try:
+        from vibap.runtime_evidence import RuntimeEvidenceError
+
+        # RuntimeEvidenceError carries safe, hardcoded user-facing messages
+        # (e.g. "runtime evidence input is empty", "line N is malformed JSON")
+        # with no filesystem paths, errno patterns, or Python internals.
+        if isinstance(exc, RuntimeEvidenceError):
+            return text
+    except ImportError:  # noqa: BLE001 - runtime_evidence optional in minimal installs
+        pass
+    try:
+        from vibap.passport import KeyDirectoryError
+
+        if isinstance(exc, KeyDirectoryError):
+            return text
+    except ImportError:  # noqa: BLE001 - passport optional in minimal installs
+        pass
+    try:
+        import jwt
+
+        # PyJWT InvalidTokenError subclasses (ExpiredSignatureError,
+        # ImmatureSignatureError, InvalidSignatureError, DecodeError,
+        # InvalidAudienceError, InvalidIssuerError, MissingRequiredClaimError,
+        # etc.) carry intentionally-safe, user-facing messages with no paths,
+        # credentials, or Python internals.  InvalidKeyError and
+        # PyJWKClientConnectionError can surface endpoint/key material and are
+        # intentionally NOT included — only InvalidTokenError is safe.
+        if isinstance(exc, jwt.InvalidTokenError):
+            return text
+    except ImportError:  # noqa: BLE001 - PyJWT optional in minimal installs
+        pass
+    # FileNotFoundError / PermissionError re-raised by the passport module
+    # carry intentional messages (no errno pattern). Other OSError subclasses
+    # are sanitized to class name.
+    if isinstance(exc, (FileNotFoundError, PermissionError)):
+        return text
+    # Everything else: use class name only to avoid leaking internals.
+    return type(exc).__name__
+
+
 def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
     from .receiver_attestation_fixture import (
         ReceiverAttestationFixtureOutputError,
@@ -2813,11 +3735,14 @@ def cmd_receiver_attestation_fixture(args: argparse.Namespace) -> int:
         )
         return 1
     except (OSError, TypeError, ValueError) as exc:
+        error_code, safe_message = _classify_fixture_error(
+            exc, "receiver_attestation_fixture_failed"
+        )
         _print_json(
             {
                 "ok": False,
-                "error": "receiver_attestation_fixture_failed",
-                "message": str(exc),
+                "error": error_code,
+                "message": safe_message,
             }
         )
         return 1
@@ -2834,11 +3759,14 @@ def cmd_drp_profile_fixture(args: argparse.Namespace) -> int:
         _print_json(_drp_profile_fixture_output_invalid_response(exc.condition))
         return 1
     except (OSError, TypeError, ValueError) as exc:
+        error_code, safe_message = _classify_fixture_error(
+            exc, "drp_profile_fixture_failed"
+        )
         _print_json(
             {
                 "ok": False,
-                "error": "drp_profile_fixture_failed",
-                "message": str(exc),
+                "error": error_code,
+                "message": safe_message,
             }
         )
         return 1
@@ -2860,11 +3788,14 @@ def cmd_offline_verification_fixture(args: argparse.Namespace) -> int:
         )
         return 1
     except (OSError, TypeError, ValueError) as exc:
+        error_code, safe_message = _classify_fixture_error(
+            exc, "offline_verification_fixture_failed"
+        )
         _print_json(
             {
                 "ok": False,
-                "error": "offline_verification_fixture_failed",
-                "message": str(exc),
+                "error": error_code,
+                "message": safe_message,
             }
         )
         return 1
@@ -2884,6 +3815,52 @@ def cmd_gemini_cli_hook(args: argparse.Namespace) -> int:
     return gemini_cli_hook_main(argv)
 
 
+def _gemini_fixture_path_error_label_arg(condition: str) -> tuple[str, str]:
+    """Resolve (label, arg_name) for a Gemini fixture path-error condition.
+
+    An earlier implementation derived both from the condition string via
+    suffix stripping (``.replace("_not_directory", "")`` etc.), which broke
+    for the ``_dangling_symlink_parent`` / ``_parent_not_directory`` suffixes
+    (they contain underscores that produced wrong arg names like
+    ``--home-dangling-symlink-parent``). An explicit table is robust to new
+    parent-component conditions while preserving the existing leaf responses.
+    """
+    table = {
+        "gemini_cli_fixture_home_empty": ("home", "--home"),
+        "gemini_cli_fixture_home_not_directory": ("home", "--home"),
+        "gemini_cli_fixture_home_dangling_symlink_parent": ("home", "--home"),
+        "gemini_cli_fixture_home_parent_not_directory": ("home", "--home"),
+        "gemini_cli_fixture_chain_dir_empty": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_not_directory": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_dangling_symlink_parent": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_parent_not_directory": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_keys_dir_empty": ("keys dir", "--keys-dir"),
+        "gemini_cli_fixture_keys_dir_not_directory": ("keys dir", "--keys-dir"),
+    }
+    return table.get(condition, ("path", "--path"))
+
+
+def _codex_fixture_path_error_label_arg(condition: str) -> tuple[str, str]:
+    """Resolve (label, arg_name) for a Codex app-server fixture path-error condition.
+
+    See ``_gemini_fixture_path_error_label_arg`` for why an explicit table is
+    used instead of condition-string suffix stripping.
+    """
+    table = {
+        "codex_app_server_fixture_home_empty": ("home", "--home"),
+        "codex_app_server_fixture_home_not_directory": ("home", "--home"),
+        "codex_app_server_fixture_home_dangling_symlink_parent": ("home", "--home"),
+        "codex_app_server_fixture_home_parent_not_directory": ("home", "--home"),
+        "codex_app_server_fixture_chain_dir_empty": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_not_directory": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_dangling_symlink_parent": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_parent_not_directory": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_keys_dir_empty": ("keys dir", "--keys-dir"),
+        "codex_app_server_fixture_keys_dir_not_directory": ("keys dir", "--keys-dir"),
+    }
+    return table.get(condition, ("path", "--path"))
+
+
 def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
     try:
         fixture = build_gemini_local_fixture(
@@ -2896,15 +3873,12 @@ def cmd_gemini_cli_fixture(args: argparse.Namespace) -> int:
         _print_json(gemini_fixture_project_dir_failure_response(exc.condition))
         return 1
     except GeminiFixturePathError as exc:
+        label, arg_name = _gemini_fixture_path_error_label_arg(exc.condition)
         _print_json(
             gemini_fixture_path_failure_response(
                 condition=exc.condition,
-                label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
-                arg_name="--"
-                + exc.condition.replace("gemini_cli_fixture_", "")
-                .replace("_not_directory", "")
-                .replace("_empty", "")
-                .replace("_", "-"),
+                label=label,
+                arg_name=arg_name,
             )
         )
         return 1
@@ -3015,6 +3989,13 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
                 "gemini_cli_report_keys_dir_empty",
                 False,
             ),
+            (
+                "output",
+                "--output",
+                "output",
+                "gemini_cli_report_output_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -3030,6 +4011,33 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        report = _redact_paths_deep(report)
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    **_output_write_error_response("gemini_cli_report", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "gemini_cli_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
         return 0
@@ -3128,15 +4136,12 @@ def cmd_codex_app_server_fixture(args: argparse.Namespace) -> int:
         _print_json(codex_fixture_project_dir_failure_response(exc.condition))
         return 1
     except CodexFixturePathError as exc:
+        label, arg_name = _codex_fixture_path_error_label_arg(exc.condition)
         _print_json(
             codex_fixture_path_failure_response(
                 condition=exc.condition,
-                label=exc.detail.split(" is ")[0] if " is " in exc.detail else "path",
-                arg_name="--"
-                + exc.condition.replace("codex_app_server_fixture_", "")
-                .replace("_not_directory", "")
-                .replace("_empty", "")
-                .replace("_", "-"),
+                label=label,
+                arg_name=arg_name,
             )
         )
         return 1
@@ -3174,6 +4179,13 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
                 "codex_app_server_report_keys_dir_empty",
                 False,
             ),
+            (
+                "output",
+                "--output",
+                "output",
+                "codex_app_server_report_output_empty",
+                False,
+            ),
         ),
     )
     if path_failure is not None:
@@ -3189,6 +4201,33 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        report = _redact_paths_deep(report)
+    if getattr(args, "output", None) is not None:
+        try:
+            payload = _write_json_report_to_file(args.output, report)
+        except ValueError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    **_output_write_error_response("codex_app_server_report", exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "codex_app_server_report_written",
+                "output": str(args.output),
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+        return 0
     if args.json:
         _print_json(report)
         return 0
@@ -3217,10 +4256,57 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
     except PostureInputError as exc:
         _print_json(posture_input_failure_response(exc.condition))
         return 1
-    if args.format == "json":
-        _print_json(posture)
-        return 0
-    print(format_posture_report(posture))
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "posture_scan_output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        posture = _redact_paths_deep(posture)
+
+    payload = (
+        (json.dumps(posture, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if args.format == "json" or getattr(args, "json", False)
+        else format_posture_report(posture).encode("utf-8")
+    )
+    if args.posture_scan_output is not None:
+        if not str(args.posture_scan_output).strip():
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "path_arg_invalid",
+                    "condition": "path_arg_invalid",
+                    "message": "ardur --output must be a non-empty path after trimming whitespace.",
+                }
+            )
+            return 1
+        try:
+            write_report(args.posture_scan_output, payload)
+        except RuntimeEvidenceError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": exc.code,
+                    "condition": exc.code,
+                    "message": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "posture_scan_report_written",
+                "format": args.format,
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    elif args.format == "json" or getattr(args, "json", False):
+        sys.stdout.buffer.write(payload)
+    else:
+        sys.stdout.write(payload.decode("utf-8"))
     return 0
 
 
@@ -3236,6 +4322,13 @@ def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
 
     try:
         report = scan_tool_server_config(args.config)
+        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+            print(
+                "ardur: warning: --redact-paths has no effect without --json or --output",
+                file=sys.stderr,
+            )
+        if getattr(args, "redact_paths", False):
+            report = _redact_paths_deep(report)
         payload = (
             json.dumps(report, indent=2, sort_keys=True) + "\n"
             if args.format == "json"
@@ -3275,7 +4368,9 @@ def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
     else:
         print(f"Error: {response['message']}")
         print(f"Condition: {response['condition']}")
-    return 1
+    # When --fail-on is set, config parse errors are also failures that should
+    # trigger the exit-2 threshold so CI pipelines don't miss broken configs.
+    return 2 if args.fail_on != "none" else 1
 
 
 def _posture_report_input_next_steps(condition: str) -> list[dict[str, str]]:
@@ -3353,17 +4448,64 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
         ValueError,
     ) as exc:
         response = _posture_report_input_failure_response(exc)
-        if args.format == "json":
+        if args.format == "json" or getattr(args, "json", False):
             _print_json(response)
         else:
             print(f"Error: {response['message']}")
             print(f"Detail: {response['detail']}")
             _print_report_next_steps(response)
         return 1
-    if args.format == "json":
-        _print_json(posture)
-        return 0
-    print(format_posture_report(posture))
+
+    from .runtime_evidence import RuntimeEvidenceError, write_report
+
+    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "posture_report_output", None) is None:
+        print(
+            "ardur: warning: --redact-paths has no effect without --json or --output",
+            file=sys.stderr,
+        )
+    if getattr(args, "redact_paths", False):
+        posture = _redact_paths_deep(posture)
+
+    payload = (
+        (json.dumps(posture, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if args.format == "json" or getattr(args, "json", False)
+        else format_posture_report(posture).encode("utf-8")
+    )
+    if args.posture_report_output is not None:
+        if not str(args.posture_report_output).strip():
+            _print_json(
+                {
+                    "ok": False,
+                    "error": "path_arg_invalid",
+                    "condition": "path_arg_invalid",
+                    "message": "ardur --output must be a non-empty path after trimming whitespace.",
+                }
+            )
+            return 1
+        try:
+            write_report(args.posture_report_output, payload)
+        except RuntimeEvidenceError as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "error": exc.code,
+                    "condition": exc.code,
+                    "message": str(exc),
+                }
+            )
+            return 1
+        _print_json(
+            {
+                "ok": True,
+                "condition": "posture_report_written",
+                "format": args.format,
+                "report_sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    elif args.format == "json" or getattr(args, "json", False):
+        sys.stdout.buffer.write(payload)
+    else:
+        sys.stdout.write(payload.decode("utf-8"))
     return 0
 
 
@@ -3387,11 +4529,19 @@ def cmd_hub(args: argparse.Namespace) -> int:
             tls_key=args.tls_key,
             no_tls=args.no_tls,
         )
-    except HubTLSConfigurationError:
-        _print_json(_hub_tls_material_failure_response())
+    except HubTLSConfigurationError as exc:
+        _print_json(_hub_tls_material_failure_response(detail=str(exc)))
         return 1
     except HubError as exc:
         return _path_failure_exit_code(exc)
+    except OSError as exc:
+        import errno
+
+        if exc.errno == errno.EADDRINUSE:
+            _print_json(_hub_port_in_use_response())
+            return 1
+        _print_json(_hub_oserror_response(exc))
+        return 1
     return 0
 
 
@@ -3419,17 +4569,24 @@ def _kill_switch_invalid_proxy_url_next_steps() -> list[dict[str, str]]:
     ]
 
 
-def _kill_switch_next_steps_for_failure(
+def _kill_switch_error_flags(
     error: str,
     *,
     status: int | None = None,
-) -> list[dict[str, str]]:
-    """Return placeholder-only remediation hints for kill-switch setup failures."""
+) -> dict[str, bool]:
+    """Classify a raw kill-switch error string into boolean failure flags.
+
+    Shared by ``_kill_switch_next_steps_for_failure`` (remediation hints) and
+    ``_kill_switch_classify_error`` (structured ``error_code``/``message``).
+    Centralizing the classification here prevents the raw Python exception
+    string (e.g. ``<urlopen error [Errno 61] Connection refused>``) from
+    leaking into the ``error`` field of the JSON response.
+    """
     normalized_error = error.strip().lower().replace("_", " ")
     status_text = str(status or "").strip()
 
     if normalized_error == "proxy url invalid":
-        return _kill_switch_invalid_proxy_url_next_steps()
+        return {"proxy_url_invalid": True}
 
     proxy_unavailable = any(
         marker in normalized_error
@@ -3464,6 +4621,30 @@ def _kill_switch_next_steps_for_failure(
         or "api token" in normalized_error
     )
     endpoint_problem = status_text in {"404", "405"} or "not found" in normalized_error
+
+    return {
+        "proxy_unavailable": proxy_unavailable,
+        "tls_problem": tls_problem,
+        "token_problem": token_problem,
+        "endpoint_problem": endpoint_problem,
+    }
+
+
+def _kill_switch_next_steps_for_failure(
+    error: str,
+    *,
+    status: int | None = None,
+) -> list[dict[str, str]]:
+    """Return placeholder-only remediation hints for kill-switch setup failures."""
+    flags = _kill_switch_error_flags(error, status=status)
+
+    if flags.get("proxy_url_invalid"):
+        return _kill_switch_invalid_proxy_url_next_steps()
+
+    proxy_unavailable = flags["proxy_unavailable"]
+    tls_problem = flags["tls_problem"]
+    token_problem = flags["token_problem"]
+    endpoint_problem = flags["endpoint_problem"]
 
     if (
         not proxy_unavailable
@@ -3528,8 +4709,72 @@ def _kill_switch_next_steps_for_failure(
     return steps
 
 
+def _kill_switch_classify_error(
+    error: str,
+    *,
+    status: int | None = None,
+) -> tuple[str, str, str]:
+    """Map a raw kill-switch error string to (error_code, message, detail).
+
+    Returns a structured triple so the JSON response never leaks raw Python
+    internals (e.g. ``<urlopen error [Errno 61] Connection refused>``) into the
+    ``error`` field. Falls back to a generic ``kill_switch_request_failed``
+    code when no known failure class is recognised.
+    """
+    flags = _kill_switch_error_flags(error, status=status)
+
+    if flags.get("proxy_url_invalid"):
+        return (
+            "proxy_url_invalid",
+            "Ardur governance proxy URL is invalid.",
+            "The proxy URL could not be parsed as a complete HTTP or HTTPS endpoint.",
+        )
+
+    if flags["proxy_unavailable"]:
+        return (
+            "proxy_unavailable",
+            "Ardur governance proxy is unreachable.",
+            "The governance proxy did not respond. Ensure it is running on the configured loopback endpoint.",
+        )
+
+    if flags["tls_problem"]:
+        return (
+            "proxy_tls_error",
+            "Ardur governance proxy TLS handshake failed.",
+            "The proxy endpoint rejected the TLS connection. Check certificate validity or use matching --tls-cert/--tls-key options.",
+        )
+
+    if flags["token_problem"]:
+        return (
+            "proxy_auth_error",
+            "Ardur governance proxy rejected the API token.",
+            "The proxy returned an authentication error. Supply a valid --api-token or ARDUR_API_TOKEN.",
+        )
+
+    if flags["endpoint_problem"]:
+        return (
+            "proxy_endpoint_error",
+            "Ardur governance proxy kill-switch endpoint was not found.",
+            "The proxy responded, but the kill-switch admin endpoint returned an error status.",
+        )
+
+    return (
+        "kill_switch_request_failed",
+        "Ardur kill-switch request failed.",
+        "The kill-switch request could not be completed. Check local proxy setup and retry.",
+    )
+
+
 def _kill_switch_failure_response(error: str, *, status: int | None = None) -> dict:
-    response: dict = {"ok": False, "error": error}
+    error_code, message, detail = _kill_switch_classify_error(error, status=status)
+    response: dict = {
+        "ok": False,
+        "error": error_code,
+        "error_code": error_code,
+        "condition": error_code,
+        "message": message,
+        "detail": detail,
+    }
     if status is not None:
         response["status"] = status
     steps = _kill_switch_next_steps_for_failure(error, status=status)
@@ -3551,6 +4796,79 @@ def _kill_switch_invalid_proxy_url_response() -> dict:
         ),
         "next_steps": _kill_switch_invalid_proxy_url_next_steps(),
     }
+
+
+def _kill_switch_api_token_invalid_response() -> dict:
+    """Failure response for a whitespace-only --api-token on kill-switch.
+
+    ``--api-token`` is sent verbatim as the bearer token for the loopback
+    governance proxy admin endpoint. A whitespace-only argument is truthy
+    in the ``args.api_token or os.environ.get(...)`` chain and therefore
+    shadows any configured ``ARDUR_API_TOKEN``, but it resolves to an empty
+    bearer token after the proxy strips whitespace, yielding a confusing
+    401/``Connection refused`` instead of a clear CLI-layer rejection.
+
+    Reject it here, before any network call, with the same structured shape
+    the sibling ``start --api-token`` and ``status/doctor/desktop-observe
+    --hub-token`` guards use. An unset ``--api-token`` (None) and an empty
+    string ``""`` (falsy, falls through to ``ARDUR_API_TOKEN``) remain
+    valid: only whitespace-only strings are rejected, matching the
+    silent-empty-token bug class already closed for ``start --api-token``
+    and ``kill-switch --proxy-url``.
+    """
+    return {
+        "ok": False,
+        "error": "kill_switch_api_token_invalid",
+        "error_code": "kill_switch_api_token_invalid",
+        "condition": "kill_switch_api_token_invalid",
+        "message": (
+            "ardur kill-switch --api-token must be a non-empty token after "
+            "trimming whitespace."
+        ),
+        "detail": (
+            "An empty or whitespace-only --api-token was provided on kill-switch. "
+            "Pass an explicit bearer token with --api-token, set ARDUR_API_TOKEN, "
+            "or omit --api-token to fall through to ARDUR_API_TOKEN."
+        ),
+        "next_steps": [
+            {
+                "condition": "kill_switch_api_token_invalid",
+                "action": "supply_proxy_api_token",
+                "command": (
+                    "ardur kill-switch --proxy-url <proxy-url> --api-token <api-token>"
+                ),
+                "detail": (
+                    "Pass the configured proxy API token with "
+                    "--api-token <api-token>. Do not paste the raw token into "
+                    "shared logs."
+                ),
+            },
+            {
+                "condition": "kill_switch_api_token_invalid",
+                "action": "set_api_token_env_or_omit_flag",
+                "command": "ARDUR_API_TOKEN=<api-token> ardur kill-switch",
+                "detail": (
+                    "Omit --api-token so ardur reads ARDUR_API_TOKEN, or export "
+                    "ARDUR_API_TOKEN explicitly. An unset or empty --api-token "
+                    "intentionally falls through to the environment."
+                ),
+            },
+        ],
+    }
+
+
+def _kill_switch_api_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict | None:
+    """Return the api-token-invalid response when --api-token is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to ``ARDUR_API_TOKEN``), or a real token.
+    """
+    value = getattr(args, "api_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _kill_switch_api_token_invalid_response()
+    return None
 
 
 def _validated_kill_switch_proxy_base_url(proxy_url: str) -> str | None:
@@ -3619,6 +4937,10 @@ def cmd_kill_switch(args: argparse.Namespace) -> int:
     if proxy_base_url is None:
         _print_json(_kill_switch_invalid_proxy_url_response())
         return 1
+    api_token_failure = _kill_switch_api_token_invalid_failure(args)
+    if api_token_failure is not None:
+        _print_json(api_token_failure)
+        return 1
     api_token = args.api_token or os.environ.get("ARDUR_API_TOKEN", "")
     payload = json.dumps({"deactivate": args.deactivate}).encode("utf-8")
     headers = {
@@ -3658,8 +4980,101 @@ def cmd_setup(args: argparse.Namespace) -> int:
         response = setup_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="setup",
+        exit_code=0 if response.get("ok") else 1,
+    )
+
+
+def _redact_paths_in_response(response: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of *response* with local absolute paths replaced.
+
+    Used by ``status``, ``doctor``, and ``doctor-claude-code`` when
+    ``--redact-paths`` is set so the JSON output is safe to share in CI
+    artifacts or bug reports without leaking the filesystem layout.
+
+    Recurses into nested dicts and lists via :func:`_redact_paths_deep`
+    so that paths inside ``checks[].detail``, ``next_steps[].command``,
+    and other nested fields are caught — not just top-level ``home``.
+    """
+    return _redact_paths_deep(response)
+
+
+def _redact_paths_deep(obj: Any) -> Any:
+    """Recursively redact local absolute paths in *obj*.
+
+    Walks dicts, lists, and strings.  Every string value is passed through
+    :func:`_redact_local_path` for prefix-based root replacement, and any
+    remaining local-path roots that appear *inside* the string (e.g. in
+    ``run_command`` fields like ``VIBAP_HOME=/private/tmp/...``) are replaced
+    by a follow-up regex pass.
+
+    Used by ``protect claude-code --json --redact-paths`` because the success
+    response contains 10+ path-bearing fields across nested structures
+    (``home``, ``active_passport``, ``plugin_dir``, ``run_command``,
+    ``claims.resource_scope[]``, ``claims.cwd``, etc.) that the shallow
+    :func:`_redact_paths_in_response` does not reach.
+    """
+    if isinstance(obj, str):
+        return _redact_local_path_string(obj)
+    if isinstance(obj, dict):
+        return {key: _redact_paths_deep(val) for key, val in obj.items()}
+    if isinstance(obj, list):
+        return [_redact_paths_deep(item) for item in obj]
+    return obj
+
+
+def _redact_local_path_string(value: str) -> str:
+    """Redact local path roots, ``file://`` URIs, and absolute paths from *value*.
+
+    Uses a three-step approach for comprehensive coverage:
+
+    1. :func:`_redact_local_path` replaces known prefix roots (``/tmp/``,
+       ``/Users/``, ``/private/var/folders/``, etc.) anchored at the start.
+
+    2. A non-anchored regex pass catches the same roots when they appear
+       embedded in strings (e.g. ``VIBAP_HOME=/private/tmp/...``) and
+       replaces them with the same stable placeholders.
+
+    3. :func:`redact_local_path_text` from :mod:`shareable_redaction` catches
+       what steps 1+2 miss: ``file://`` URIs, percent-encoded separators,
+       and arbitrary local absolute paths under unknown roots
+       (e.g. ``/opt/…``).
+
+    This unification closes a path-leak vector where the previous hand-rolled
+    regex pass only covered a fixed list of roots and missed ``file://`` URIs
+    and absolute paths under unknown roots.
+    """
+    import tempfile
+
+    result = _redact_local_path(value)
+    if result is None:
+        return value
+    # Step 2: replace remaining local-path roots that appear inside the
+    # string (not just at the start).  Ordered from most-specific to
+    # least-specific so longer roots match before shorter substrings.
+    temp_root = tempfile.gettempdir()
+    home = os.path.expanduser("~")
+    embedded_roots = [
+        (re.escape("/private/var/folders/"), "<var-folders>/"),
+        (re.escape("/var/folders/"), "<var-folders>/"),
+        (re.escape("/private/tmp/"), "<tmp>/"),
+        (re.escape("/tmp/"), "<tmp>/"),
+        (re.escape(home + "/"), "<home>/"),
+        (
+            re.escape(temp_root + "/") if temp_root.endswith("/") else re.escape(temp_root),
+            "<tmp>",
+        ),
+        (re.escape("/run/ardur/"), "<run-ardur>/"),
+        (re.escape("/sys/fs/cgroup/"), "<cgroup>/"),
+    ]
+    for pattern, replacement in embedded_roots:
+        result = re.sub(pattern, replacement, result)
+    # Step 3: catch file:// URIs, percent-encoded separators, and arbitrary
+    # local absolute paths under unknown roots.
+    return redact_local_path_text(result)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -3675,8 +5090,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         home=args.home,
     )
     response = status_response_with_next_steps(response)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="status",
+        exit_code=0 if response.get("ok") else 1,
+    )
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -3688,8 +5107,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         response = doctor_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="doctor",
+        exit_code=0 if response.get("ok") else 1,
+    )
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
@@ -3697,8 +5120,10 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         response = uninstall_personal(args)
     except HubError as exc:
         return _path_failure_exit_code(exc)
+    if getattr(args, "redact_paths", False):
+        response = _redact_paths_deep(response)
     _print_json(response)
-    return 0
+    return 0 if response.get("ok", True) else 1
 
 
 def _run_has_governance_intent(args: argparse.Namespace) -> bool:
@@ -3729,6 +5154,10 @@ def _run_has_governance_intent(args: argparse.Namespace) -> bool:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    path_failure = _path_arg_invalid_failure(args)
+    if path_failure is not None:
+        _print_json(path_failure)
+        return 1
     if _run_has_governance_intent(args):
         return run_governed_cli(args)
     # Legacy Hub-streaming path: reject whitespace-only --hub-token before the
@@ -3904,7 +5333,7 @@ def cmd_personal_firewall_demo(args: argparse.Namespace) -> int:
         return 1
     if args.json:
         _print_json(result)
-    return 0
+    return 0 if result.get("ok", True) else 1
 
 
 CLAUDE_CODE_PROTECT_MODES = {
@@ -4811,6 +6240,107 @@ def _protect_claude_code_home_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_home_parent_dangling_symlink_response() -> dict[str, object]:
+    """Structured response when a PARENT component of ``--home`` is a dangling
+    symlink.
+
+    Distinct from ``protect_home_invalid`` (which covers the LEAF) so that
+    operators searching logs for parent-path-confusion can grep for the
+    specific ``home_dangling_symlink_parent`` condition. Fires for inputs
+    like ``--home <dangling-symlink>/child`` where the leaf ``child`` is a
+    plain nonexistent path: the existing leaf checks pass, but
+    ``Path(...).resolve()`` would follow the symlink and
+    ``home.mkdir(parents=True)`` would silently materialise the missing
+    target. ``next_steps`` use placeholder-only commands and details with no
+    local paths or tokens. Placed before any ``home.mkdir`` /
+    ``generate_keypair`` / ``issue_passport`` / artifact write so no Ardur
+    state is created for an invalid home value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+        "error_code": HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+        "condition": HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+        "message": (
+            "ardur protect claude-code --home path has a parent component "
+            "that is a dangling symlink."
+        ),
+        "detail": (
+            "A parent directory in the supplied --home path is a dangling "
+            "symlink (a symlink whose target does not exist). Without this "
+            "check Ardur resolves the symlink chain, materialises the missing "
+            "target, and writes the Ed25519 private key, active_mission.jwt, "
+            "state, governance log, and plugin config at a location you did "
+            "not type. Remove the dangling symlink or repoint it at a real "
+            "directory before retrying."
+        ),
+        "next_steps": [
+            {
+                "action": "remove_or_fix_dangling_symlink_parent",
+                "command": "ardur protect claude-code --home <ardur-home> --scope <your-project>",
+                "detail": (
+                    "Remove the dangling symlink in the parent chain or point "
+                    "it at a real directory, then retry."
+                ),
+            },
+            {
+                "action": "omit_home",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --home to use the default Ardur home directory.",
+            },
+        ],
+    }
+
+
+def _protect_claude_code_home_parent_not_directory_response() -> dict[str, object]:
+    """Structured response when a PARENT component of ``--home`` is an existing
+    non-directory (regular file, socket, etc.).
+
+    Distinct from ``protect_home_invalid`` (which covers the LEAF) so that
+    operators searching logs for parent-path-confusion can grep for the
+    specific ``home_parent_not_directory`` condition. Fires for inputs like
+    ``--home <regular-file>/child``: the existing leaf checks pass because
+    ``child`` is a plain nonexistent path, but ``home.mkdir(parents=True)``
+    would raise ``FileNotFoundError`` / ``NotADirectoryError``. Placed before
+    any ``home.mkdir`` / ``generate_keypair`` / ``issue_passport`` /
+    artifact write so no Ardur state is created for an invalid home value.
+    """
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": HOME_PARENT_NOT_DIRECTORY_CONDITION,
+        "error_code": HOME_PARENT_NOT_DIRECTORY_CONDITION,
+        "condition": HOME_PARENT_NOT_DIRECTORY_CONDITION,
+        "message": (
+            "ardur protect claude-code --home path has a parent component "
+            "that is an existing non-directory."
+        ),
+        "detail": (
+            "A parent directory in the supplied --home path already exists "
+            "as a regular file or other non-directory. Ardur cannot create "
+            "the home tree (keys, active_mission.jwt, state, governance log, "
+            "plugin config) inside a file. Move the file aside or choose a "
+            "different parent directory before retrying."
+        ),
+        "next_steps": [
+            {
+                "action": "move_aside_or_choose_directory_parent",
+                "command": "ardur protect claude-code --home <ardur-home> --scope <your-project>",
+                "detail": (
+                    "Move the existing file in the parent chain aside or "
+                    "choose a different parent directory, then retry."
+                ),
+            },
+            {
+                "action": "omit_home",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit --home to use the default Ardur home directory.",
+            },
+        ],
+    }
+
+
 def _protect_claude_code_keys_dir_invalid_response() -> dict[str, object]:
     """Structured response for empty/whitespace-only, dangling-symlink, or regular-file ``--keys-dir``.
 
@@ -5099,6 +6629,23 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         return _protect_claude_code_scope_invalid_response()
     if scope_path.exists() and scope_path.is_file():
         return _protect_claude_code_scope_invalid_response()
+    # Reject --scope whose parent chain crosses a dangling symlink or an
+    # existing non-directory, before any key generation, JWT issuance, or
+    # plugin/hook artifact creation.  Mirrors the ``--home`` and
+    # ``--keys-dir`` parent-component walks from ad96e40 and f167304.  A
+    # dangling parent symlink is invisible to the leaf-only checks above:
+    # ``Path(<dangling>/scope)`` is not itself a symlink, and
+    # ``Path.resolve()`` follows the symlink chain to the missing target
+    # before the check can see it.  Without this walk Ardur silently
+    # resolves the scope through the dangling parent, bakes the resolved
+    # path into the JWT ``resource_scope``, and configures protection for
+    # a directory that does not exist.  Non-symlink nonexistent parents
+    # and real directory parents pass through.
+    for parent in scope_path.parents:
+        if parent.is_symlink() and not parent.exists():
+            return _protect_claude_code_scope_invalid_response()
+        if parent.exists() and not parent.is_dir():
+            return _protect_claude_code_scope_invalid_response()
     # Reject empty/whitespace-only --agent-id and explicitly-provided
     # empty/whitespace-only --mission before any key generation, Mission
     # Passport JWT issuance, or plugin/hook artifact creation. ``--agent-id``
@@ -5140,6 +6687,26 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
             return _protect_claude_code_home_invalid_response()
         if home_path.exists() and home_path.is_file():
             return _protect_claude_code_home_invalid_response()
+        # Walk every PARENT component of the un-resolved --home path and
+        # reject if any parent is a dangling symlink or an existing
+        # non-directory. Without this, ``--home <dangling-symlink>/child``
+        # passes the leaf checks above (``child`` is neither a symlink nor a
+        # file), ``Path(...).resolve()`` follows the symlink, and
+        # ``home.mkdir(parents=True, exist_ok=True)`` silently materialises
+        # the missing target — writing the Ed25519 private key,
+        # active_mission.jwt, and plugin config at a location the operator
+        # did not type. The shared validator raises a HubError carrying the
+        # structured-response condition; we translate it into the
+        # ``protect claude-code`` envelope so every fail-closed branch on
+        # this command shares one response shape.
+        try:
+            validate_personal_home_path_components(args.home)
+        except HubError as exc:
+            if exc.code == HOME_DANGLING_SYMLINK_PARENT_CONDITION:
+                return _protect_claude_code_home_parent_dangling_symlink_response()
+            if exc.code == HOME_PARENT_NOT_DIRECTORY_CONDITION:
+                return _protect_claude_code_home_parent_not_directory_response()
+            raise
     # Reject empty/whitespace-only --keys-dir before any directory creation or
     # key generation. ``--keys-dir`` is ``type=str`` so an empty or
     # whitespace-only value survives here as-is (previously ``type=Path``
@@ -5166,6 +6733,23 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
             return _protect_claude_code_keys_dir_invalid_response()
         if keys_dir_path.exists() and keys_dir_path.is_file():
             return _protect_claude_code_keys_dir_invalid_response()
+        # Reject --keys-dir whose parent chain crosses a dangling symlink or
+        # an existing non-directory, before any key generation or mkdir.
+        # Mirrors the ``--home`` parent-component walk from ad96e40.  A
+        # dangling parent symlink (e.g. ``--keys-dir <dangling>/keys``) is
+        # invisible to the leaf-only checks above: ``Path(<dangling>/keys)``
+        # is not itself a symlink, and ``Path.resolve()`` follows the symlink
+        # chain to the missing target before the check can see it.  Without
+        # this walk Ardur silently materialises the missing target via
+        # ``mkdir(parents=True)`` inside ``resolve_keys_dir()`` and writes the
+        # Ed25519 private key (``passport_private.pem``) at a location the
+        # user did not type.  Non-symlink nonexistent parents and real
+        # directory parents pass through.
+        for parent in keys_dir_path.parents:
+            if parent.is_symlink() and not parent.exists():
+                return _protect_claude_code_keys_dir_invalid_response()
+            if parent.exists() and not parent.is_dir():
+                return _protect_claude_code_keys_dir_invalid_response()
     # Reject negative --max-tool-calls before any key generation or directory
     # creation. ``--max-tool-calls`` is ``type=int`` with a default of 250,
     # so only an explicitly-passed negative value reaches here. A negative
@@ -5304,9 +6888,13 @@ def cmd_protect_claude_code(args: argparse.Namespace) -> int:
         return 1
     result = protect_claude_code(args)
     ok = bool(result.get("ok"))
-    if args.json:
-        _print_json(result)
-        return 0 if ok else 1
+    if args.json or getattr(args, "output", None) is not None:
+        return _handle_output_and_redact(
+            args,
+            result,
+            command="protect_claude_code",
+            exit_code=0 if ok else 1,
+        )
     if not ok:
         print("Ardur Claude Code protection was not configured.")
         message = result.get("message")
@@ -5484,12 +7072,255 @@ def cmd_doctor_claude_code(args: argparse.Namespace) -> int:
         _print_json(path_failure)
         return 1
     response = claude_code_doctor(plugin_dir=args.plugin_dir, home=args.home)
-    _print_json(response)
-    return 0 if response.get("ok") else 1
+    return _handle_output_and_redact(
+        args,
+        response,
+        command="doctor_claude_code",
+        exit_code=0 if response.get("ok") else 1,
+    )
+
+
+def _latency_gate_value_failure(
+    *,
+    condition: str,
+    message: str,
+    detail: str,
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": message,
+        "detail": detail,
+        "next_steps": [
+            {
+                "condition": condition,
+                "action": "rerun_latency_gate_evaluate",
+                "command": (
+                    "ardur latency-gate evaluate --reports <reports-dir> "
+                    "[--threshold-ms N] [--min-runs N] [--percentile 95] "
+                    "[--format json|text]"
+                ),
+                "detail": (
+                    "Provide a directory of latency report JSON files and "
+                    "valid positive numeric thresholds. Keep raw local paths "
+                    "and tokens out of shared logs."
+                ),
+            }
+        ],
+    }
+
+
+def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
+    """Load latency reports, run the gate, and print the decision."""
+
+    # ``--reports`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
+    # only values survive parsing and can be rejected explicitly below.
+    # ``type=Path`` normalizes ``""`` to ``PosixPath('.')`` (the CWD) which
+    # silently masks the empty-argument defect. Same pitfall pattern as
+    # --home/--plugin-dir/--keys-dir in other commands.
+    reports_value = getattr(args, "reports", None)
+    if not isinstance(reports_value, str) or not reports_value.strip():
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_reports_empty",
+            message="latency-gate evaluate --reports must be a non-empty path after trimming whitespace.",
+            detail=(
+                "The --reports argument is empty or whitespace-only. "
+                "Pass an explicit directory of latency report JSON files."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    threshold_ms = float(args.threshold_ms)
+    if not math.isfinite(threshold_ms) or threshold_ms <= 0:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_threshold_ms_invalid",
+            message="latency-gate evaluate --threshold-ms must be finite and > 0.",
+            detail=(
+                f"--threshold-ms must be a positive finite number; got {args.threshold_ms!r}."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    min_runs = int(args.min_runs)
+    if min_runs < 1:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_min_runs_invalid",
+            message="latency-gate evaluate --min-runs must be >= 1.",
+            detail=(
+                f"--min-runs must be a positive integer; got {args.min_runs!r}."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    percentile = int(args.percentile)
+    if not (1 <= percentile <= 100):
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_percentile_invalid",
+            message="latency-gate evaluate --percentile must be in 1..100 inclusive.",
+            detail=(
+                f"--percentile must be an integer from 1 to 100; got {args.percentile!r}."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    report_dir = Path(reports_value)
+    if not report_dir.exists():
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_reports_dir_not_found",
+            message="latency-gate evaluate --reports directory does not exist.",
+            detail=(
+                "The --reports path does not exist on disk. "
+                "Point --reports at a directory of latency report JSON files."
+            ),
+        )
+        _print_json(failure)
+        return 1
+    if not report_dir.is_dir():
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_reports_not_directory",
+            message="latency-gate evaluate --reports path is not a directory.",
+            detail=(
+                "The --reports path exists but is not a directory. "
+                "Point --reports at a directory of latency report JSON files."
+            ),
+        )
+        _print_json(failure)
+        return 1
+
+    try:
+        valid_reports, invalid_reports = load_reports_from_directory(report_dir)
+    except LatencyGateCliError as exc:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_load_failed",
+            message=str(exc),
+            detail="Report loading failed before the evaluator could run.",
+        )
+        _print_json(failure)
+        return 1
+
+    try:
+        protocol = GateProtocol(
+            min_independent_runs=min_runs,
+            threshold_ms=threshold_ms,
+            percentile=percentile,
+        )
+        decision = run_gate(valid_reports, protocol)
+    except (LatencyGateError, LatencyGateCliError) as exc:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_protocol_invalid",
+            message=str(exc),
+            detail="Gate protocol construction or evaluation failed.",
+        )
+        _print_json(failure)
+        return 1
+
+    output_format = args.format
+    try:
+        rendered = format_gate_output(decision, output_format)
+    except LatencyGateCliError as exc:
+        failure = _latency_gate_value_failure(
+            condition="latency_gate_output_format_invalid",
+            message=str(exc),
+            detail="Output formatting failed.",
+        )
+        _print_json(failure)
+        return 1
+
+    # Emit a structured top-level envelope so CI can branch on ``ok`` and
+    # ``verdict`` without parsing the decision body. The ``decision`` body
+    # is the canonical gate output; ``invalid_files`` surfaces loader-level
+    # rejections separately so reviewers can see why individual files were
+    # dropped without re-scanning the directory.
+    if output_format == "json":
+        import json as _json
+
+        body = _json.loads(rendered)
+        envelope = {
+            "ok": True,
+            "verdict": decision.verdict,
+            "decision": body,
+            "invalid_files": invalid_reports,
+        }
+        # Determine exit code from verdict (0=pass, 1=fail, 2=inconclusive)
+        # BEFORE calling _handle_output_and_redact so the file write path
+        # preserves the verdict-based exit code.
+        if decision.verdict == "pass":
+            verdict_exit = 0
+        elif decision.verdict == "fail":
+            verdict_exit = 1
+        else:
+            verdict_exit = 2
+        return _handle_output_and_redact(
+            args, envelope, command="latency_gate_evaluate", exit_code=verdict_exit
+        )
+    else:
+        sys.stdout.write(rendered)
+        if invalid_reports:
+            sys.stdout.write("\nInvalid report files (not evaluated):\n")
+            for entry in invalid_reports:
+                sys.stdout.write(
+                    f"  {entry['filename']}: {entry['reason']}\n"
+                )
+
+    # Exit code: 0 for PASS, 1 for FAIL, 2 for INCONCLUSIVE. This lets CI
+    # distinguish "passed the gate" from "failed the gate" from "could not
+    # decide" without parsing JSON. All three are successful tool runs (the
+    # gate ran correctly); only the verdict differs.
+    if decision.verdict == "pass":
+        return 0
+    if decision.verdict == "fail":
+        return 1
+    return 2
+
+
+class _JsonAwareArgumentParser(argparse.ArgumentParser):
+    """Argparse parser that honours the ``--json`` contract on argparse errors.
+
+    When ``--json`` is present anywhere in the raw argv, argparse-level
+    errors (missing required arguments, ambiguous options, etc.) emit a
+    structured JSON payload to stderr instead of the human-readable usage
+    block, so JSON consumers always receive machine-readable output.
+
+    Non-JSON behaviour is byte-identical to ``argparse.ArgumentParser``:
+    usage text to stderr and ``SystemExit(2)``.
+
+    The ``--json`` flag is detected from the argv passed to ``parse_args``
+    (or ``sys.argv`` when none is supplied). Subparsers inherit this class
+    automatically via argparse's ``parser_class`` default of ``type(self)``,
+    so a missing required argument on any subcommand (for example
+    ``ardur evidence correlate --json`` without ``--source-format``) is
+    routed through the same JSON path.
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        # argparse routes every parse error through ``error()``. Reconstruct
+        # the argv actually being parsed (argv passed to ``parse_args`` when
+        # provided, otherwise the live ``sys.argv``), so the detection works
+        # under both interactive invocation and programmatic ``main(argv)``.
+        raw_argv = getattr(self, "_raw_argv", None)
+        if raw_argv is None:
+            raw_argv = sys.argv[1:]
+        if "--json" in raw_argv:
+            payload = {
+                "ok": False,
+                "error": "argument_error",
+                "error_code": "argument_error",
+                "condition": "argument_error",
+                "message": message,
+            }
+            sys.stderr.write(json.dumps(payload, indent=2) + "\n")
+            raise SystemExit(1)
+        super().error(message)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _JsonAwareArgumentParser(
         prog="ardur",
         description="Ardur governance proxy and mission-passport tooling",
     )
@@ -5565,11 +7396,27 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument(
         "--keys-dir", type=str, help="directory containing VIBAP signing keys"
     )
+    issue.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    issue.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON response to an owner-only file",
+    )
+    issue.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
     issue.set_defaults(func=cmd_issue)
 
     verify = subparsers.add_parser(
         "verify",
-        help="verify an offline receipt journal, mission passport, receipt anchor, or receiver attestation",
+        help="verify an offline receipt journal, mission passport, behavioral attestation, receipt anchor, or receiver attestation",
     )
     verify.add_argument(
         "journal",
@@ -5579,6 +7426,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_input = verify.add_mutually_exclusive_group(required=False)
     verify_input.add_argument("--token", help="passport token to verify")
+    verify_input.add_argument(
+        "--attestation-token",
+        type=str,
+        help="behavioral attestation JWT to verify",
+    )
     verify_input.add_argument(
         "--anchor-bundle",
         type=str,
@@ -5664,6 +7516,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="write a private static HTML explorer report",
     )
     verify.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON explorer report to an owner-only file",
+    )
+    verify.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    verify.add_argument(
         "--unsafe-show-sensitive",
         action="store_true",
         help="disable default report redaction for explicit local inspection",
@@ -5733,6 +7595,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="atomically write an owner-only report instead of printing it",
     )
+    evidence_correlate.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    evidence_correlate.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     evidence_correlate.set_defaults(func=cmd_evidence_correlate)
 
     telemetry = subparsers.add_parser(
@@ -5776,6 +7649,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically write an owner-only local artifact instead of stdout",
     )
     telemetry_export.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    telemetry_export.add_argument(
         "--otlp-endpoint",
         help="OTLP/HTTP base URL; remote endpoints require HTTPS",
     )
@@ -5789,6 +7667,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--verify-expiry",
         action="store_true",
         help="also enforce short receipt expiry windows during export",
+    )
+    telemetry_export.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     telemetry_export.set_defaults(func=cmd_telemetry_export)
 
@@ -5829,6 +7713,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-insecure-loopback",
         action="store_true",
         help=argparse.SUPPRESS,
+    )
+    anchor.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    anchor.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON response to an owner-only file",
+    )
+    anchor.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
     )
     anchor.set_defaults(func=cmd_anchor)
 
@@ -5881,6 +7781,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--state-dir", type=str, help="directory containing persisted sessions"
     )
     attest.add_argument("--log-path", type=str, help="JSONL audit log path")
+    attest.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    attest.add_argument(
+        "--output",
+        type=str,
+        help="atomically write the JSON response to an owner-only file",
+    )
+    attest.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
     attest.set_defaults(func=cmd_attest)
 
     cc_hook = subparsers.add_parser(
@@ -5917,6 +7833,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cc_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
+    )
+    cc_report.add_argument(
+        "--output", type=str, help="write the JSON report to a file"
+    )
+    cc_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output with stable placeholders",
     )
     cc_report.set_defaults(func=cmd_claude_code_report)
 
@@ -5973,6 +7897,14 @@ def build_parser() -> argparse.ArgumentParser:
     gemini_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
     )
+    gemini_report.add_argument(
+        "--output", type=str, help="write the JSON report to a file"
+    )
+    gemini_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output with stable placeholders",
+    )
     gemini_report.set_defaults(func=cmd_gemini_cli_report)
 
     codex_event = subparsers.add_parser(
@@ -6026,6 +7958,14 @@ def build_parser() -> argparse.ArgumentParser:
     codex_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
     )
+    codex_report.add_argument(
+        "--output", type=str, help="write the JSON report to a file"
+    )
+    codex_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output with stable placeholders",
+    )
     codex_report.set_defaults(func=cmd_codex_app_server_report)
 
     posture = subparsers.add_parser(
@@ -6067,6 +8007,23 @@ def build_parser() -> argparse.ArgumentParser:
         default="json",
         help="output format (default: json)",
     )
+    posture_scan.add_argument(
+        "--output",
+        dest="posture_scan_output",
+        type=str,
+        help="atomically write an owner-only report instead of printing it",
+    )
+    posture_scan.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    posture_scan.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     posture_scan.set_defaults(func=cmd_posture_scan)
 
     posture_report = posture_subparsers.add_parser(
@@ -6084,6 +8041,23 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["markdown", "json"],
         default="markdown",
         help="output format (default: markdown)",
+    )
+    posture_report.add_argument(
+        "--output",
+        dest="posture_report_output",
+        type=str,
+        help="atomically write an owner-only report instead of printing it",
+    )
+    posture_report.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    posture_report.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output; equivalent to --format json "
+        "(accepted for consistency with other commands)",
     )
     posture_report.set_defaults(func=cmd_posture_report)
 
@@ -6116,10 +8090,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="atomically write an owner-only report instead of printing it",
     )
     tool_server_preflight.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in the JSON/file output",
+    )
+    tool_server_preflight.add_argument(
         "--fail-on",
         choices=FAIL_ON_CHOICES,
         default="none",
-        help="return exit 2 when this severity or higher is present (default: none)",
+        help=(
+            "return exit 2 when this severity or higher is present "
+            "(default: none); also applies to config parse errors, so "
+            "CI pipelines catch broken configs at the same threshold"
+        ),
+    )
+    tool_server_preflight.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
     )
     tool_server_preflight.set_defaults(func=cmd_tool_server_preflight)
 
@@ -6149,6 +8138,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(Path("examples/ardur-personal-extension")),
         help="browser extension directory to show in setup output",
     )
+    setup.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    setup.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
+    )
+    setup.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
+    )
     setup.set_defaults(func=cmd_setup)
 
     status = subparsers.add_parser("status", help="show Ardur Personal Hub status")
@@ -6157,6 +8165,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
     )
     status.add_argument("--home", type=str, help="Ardur Personal home directory")
+    status.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    status.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
+    )
+    status.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
+    )
     status.set_defaults(func=cmd_status)
 
     doctor = subparsers.add_parser("doctor", help="check local Ardur Personal setup")
@@ -6164,6 +8191,25 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--hub-url", default=DEFAULT_HUB_URL, help="Hub base URL")
     doctor.add_argument(
         "--hub-token", default=None, help="Hub bearer token (defaults to config/env)"
+    )
+    doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    doctor.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
+    )
+    doctor.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
     )
     doctor.set_defaults(func=cmd_doctor)
 
@@ -6178,6 +8224,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=str(_default_claude_plugin_dir()),
         help="Claude Code plugin directory",
+    )
+    doctor_cc.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    doctor_cc.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
+    )
+    doctor_cc.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing it to stdout",
     )
     doctor_cc.set_defaults(func=cmd_doctor_claude_code)
 
@@ -6197,6 +8262,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="proxy bearer token (defaults to ARDUR_API_TOKEN env)",
     )
+    kill_switch.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
     kill_switch.set_defaults(func=cmd_kill_switch)
 
     uninstall = subparsers.add_parser(
@@ -6212,6 +8283,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="preview uninstall removals without deleting launch files or local data",
+    )
+    uninstall.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output is always JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    uninstall.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports",
     )
     uninstall.set_defaults(func=cmd_uninstall)
 
@@ -6296,6 +8379,27 @@ def build_parser() -> argparse.ArgumentParser:
         "enforceable on that tier",
     )
     run.add_argument(
+        "--json",
+        action="store_true",
+        help="emit governance run result as JSON to stderr instead of human-readable "
+        "summary; stdout stays reserved for the child process output",
+    )
+    run.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in --json output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports "
+        "(governance path only; requires --json)",
+    )
+    run.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="write the governance run result JSON to this file "
+        "(works with or without --json; useful for CI pipelines that need "
+        "a persistent artifact)",
+    )
+    run.add_argument(
         "command", nargs=argparse.REMAINDER, help="command to run after --"
     )
     run.set_defaults(func=cmd_run)
@@ -6378,7 +8482,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="existing directory that receives temporary demo state",
     )
-    personal_firewall_demo.add_argument("--json", action="store_true")
+    personal_firewall_demo.add_argument(
+        "--json",
+        action="store_true",
+        help="print machine-readable demo details",
+    )
     personal_firewall_demo.set_defaults(func=cmd_personal_firewall_demo)
 
     profile = subparsers.add_parser(
@@ -6434,6 +8542,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     protect_cc.add_argument(
         "--json", action="store_true", help="print machine-readable setup details"
+    )
+    protect_cc.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in --json output with stable placeholders "
+        "so the result is safe to share in CI artifacts or bug reports "
+        "(requires --json)",
     )
     # ``--home`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-only
     # values survive to the handler instead of being normalized to
@@ -6496,7 +8611,83 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="Cedar entities JSON file (used with --cedar-policy)",
     )
+    protect_cc.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the JSON response to an owner-only file "
+        "instead of printing human-readable or JSON output to stdout",
+    )
     protect_cc.set_defaults(func=cmd_protect_claude_code)
+
+    latency_gate = subparsers.add_parser(
+        "latency-gate",
+        help="evaluate a directory of latency reports against the deterministic gate",
+    )
+    latency_gate_subparsers = latency_gate.add_subparsers(
+        dest="latency_gate_command", required=True
+    )
+    latency_gate_evaluate = latency_gate_subparsers.add_parser(
+        "evaluate",
+        help="load latency reports from a directory and emit a gate decision",
+    )
+    # ``--reports`` uses ``type=str`` (not ``type=Path``) so empty/whitespace-
+    # only values survive parsing and can be rejected explicitly in the
+    # handler. ``type=Path`` normalizes ``""`` to ``PosixPath('.')`` (the CWD)
+    # which silently masks the empty-argument defect.
+    latency_gate_evaluate.add_argument(
+        "--reports",
+        type=str,
+        required=True,
+        help="directory of latency report JSON files to evaluate",
+    )
+    latency_gate_evaluate.add_argument(
+        "--threshold-ms",
+        type=float,
+        default=10.0,
+        help="maximum allowed aggregate p95 latency in ms (default: 10.0)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--min-runs",
+        type=int,
+        default=3,
+        help="minimum number of valid reports for a non-INCONCLUSIVE verdict (default: 3)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--percentile",
+        type=int,
+        default=95,
+        help="percentile rank for the statistical rule, 1..100 (default: 95)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--format",
+        "--output-format",
+        dest="format",
+        choices=("json", "text"),
+        default="json",
+        help="output format (default: json)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--json",
+        action="store_true",
+        help="explicitly request JSON output (output defaults to JSON; "
+        "this flag is accepted for consistency with other commands)",
+    )
+    latency_gate_evaluate.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="replace local absolute paths in JSON/file output with "
+        "stable placeholders so the result is safe to share in "
+        "CI artifacts or bug reports",
+    )
+    latency_gate_evaluate.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="atomically write the gate decision JSON to an owner-only "
+        "file instead of printing it to stdout",
+    )
+    latency_gate_evaluate.set_defaults(func=cmd_latency_gate_evaluate)
 
     return parser
 
@@ -6510,7 +8701,21 @@ def verify_main(argv: Sequence[str] | None = None) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    # ``_JsonAwareArgumentParser.error()`` detects ``--json`` from
+    # ``_raw_argv`` when set, falling back to ``sys.argv[1:]``. Subparsers do
+    # not share the top-level parser's ``_raw_argv``, so for programmatic
+    # ``main(argv)`` calls we temporarily mirror ``argv`` into ``sys.argv``.
+    # This lets a subparser's ``error()`` (fired by a missing required
+    # subcommand argument) honour the ``--json`` contract identically to
+    # interactive invocation.
+    parser._raw_argv = raw_argv  # type: ignore[attr-defined]
+    saved_argv = sys.argv
+    sys.argv = ["ardur", *raw_argv]
+    try:
+        args = parser.parse_args(raw_argv)
+    finally:
+        sys.argv = saved_argv
     if getattr(args, "command", None) and args.command[0] == "--":
         args.command = args.command[1:]
     return args.func(args)

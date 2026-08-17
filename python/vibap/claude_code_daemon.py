@@ -1314,7 +1314,13 @@ def serve_pre_tool_use_daemon(
                     request = _read_json_line(conn)
                     response = _handle_daemon_request(request, default_keys_dir=keys_dir)
                 except Exception as exc:  # noqa: BLE001 - daemon boundary
-                    response = {"ok": False, "error": f"daemon request failed: {type(exc).__name__}: {exc}"}
+                    # Never leak raw exception text (paths, errno, Python
+                    # internals) to hook clients over the Unix socket.
+                    if isinstance(exc, OSError):
+                        safe_error = "daemon request failed: filesystem error"
+                    else:
+                        safe_error = "daemon request failed: internal error"
+                    response = {"ok": False, "error": safe_error}
                 try:
                     _write_json_line(conn, response)
                 except OSError:

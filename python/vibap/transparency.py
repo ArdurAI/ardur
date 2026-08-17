@@ -227,7 +227,12 @@ def load_anchor_bundle(path: str | Path) -> dict[str, Any]:
             raise TransparencyError("anchor bundle is empty or exceeds the size limit")
         payload = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise TransparencyError(f"anchor bundle could not be read: {exc}") from exc
+        # Never embed raw ``str(exc)`` in the TransparencyError message:
+        # ``OSError`` carries filesystem paths / errno, ``JSONDecodeError``
+        # carries file offsets. Propagate only the error class for diagnostics.
+        raise TransparencyError(
+            f"anchor bundle could not be read: {type(exc).__name__}"
+        ) from exc
     if not isinstance(payload, dict):
         raise TransparencyError("anchor bundle must be a JSON object")
     validate_anchor_bundle(payload)
@@ -659,6 +664,40 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _classify_rekor_transport_error(
+    exc: BaseException,
+) -> TransparencyError:
+    """Map raw urllib/socket errors to clean structured TransparencyError.
+
+    Same defect class as ``cli._kill_switch_classify_error``: the default
+    ``str(exc)`` for ``URLError`` includes ``<urlopen error [Errno 61]
+    Connection refused>`` (raw CPython urllib internals).  Consumers of
+    ``cmd_anchor`` and ``drain_anchor_store`` surface ``str(exc)`` directly
+    in JSON ``message`` / ``error`` fields, so we must replace the raw
+    representation with a stable, human-readable classification that does not
+    leak errno strings, socket paths, or internal exception class names.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return TransparencyError(
+            f"Rekor submission failed: HTTP {exc.code} {exc.reason}"
+        )
+    if isinstance(exc, TimeoutError):
+        return TransparencyError("Rekor submission timed out")
+    # urllib.error.URLError wraps the real socket error in ``.reason``.
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, OSError):
+        if reason.errno is not None:
+            return TransparencyError(
+                f"Rekor submission failed: network error ({reason.errno})"
+            )
+        return TransparencyError("Rekor submission failed: network error")
+    if isinstance(reason, str) and reason.strip():
+        return TransparencyError(
+            f"Rekor submission failed: {reason.strip()}"
+        )
+    return TransparencyError("Rekor submission failed: network error")
+
+
 def _default_rekor_transport(
     url: str, payload: bytes, timeout: float, max_bytes: int
 ) -> bytes:
@@ -673,7 +712,7 @@ def _default_rekor_transport(
         with opener.open(request, timeout=timeout) as response:
             data = response.read(max_bytes + 1)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-        raise TransparencyError(f"Rekor submission failed: {exc}") from exc
+        raise _classify_rekor_transport_error(exc) from exc
     if len(data) > max_bytes:
         raise TransparencyError("Rekor response exceeds the size limit")
     return data
@@ -727,7 +766,7 @@ class RekorV1Backend:
             )
         except jwt.PyJWTError as exc:
             raise TransparencyError(
-                f"refusing to submit an invalid receipt: {exc}"
+                f"refusing to submit an invalid receipt: {type(exc).__name__}"
             ) from exc
         digest = bytes.fromhex(digest_hex)
         detached_signature = receipt_private_key.sign(
@@ -955,7 +994,7 @@ def verify_anchor_bundle(
         )
     except jwt.PyJWTError as exc:
         raise AnchorVerificationError(
-            f"receipt signature/schema verification failed: {exc}"
+            f"receipt signature/schema verification failed: {type(exc).__name__}"
         ) from exc
     backend = bundle.get("backend")
     evidence = bundle.get("evidence")
@@ -1109,12 +1148,14 @@ def drain_anchor_store(
                 )
             )
         except (OSError, TransparencyError) as exc:
+            # Use exception class name only to avoid leaking filesystem
+            # paths / errno from ``OSError`` or ``TransparencyError`` text.
             results.append(
                 AnchorDrainResult(
                     anchor_id=pending_path.stem,
                     status="pending",
                     path=pending_path,
-                    error=str(exc)[:500],
+                    error=type(exc).__name__,
                 )
             )
     return results
