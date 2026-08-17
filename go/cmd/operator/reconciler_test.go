@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	vibapv1alpha1 "github.com/ArdurAI/ardur/go/pkg/api/v1alpha1"
+	"github.com/ArdurAI/ardur/go/pkg/credential"
 )
 
 func testScheme() *runtime.Scheme {
@@ -37,8 +39,8 @@ func testReconciler(objects ...runtime.Object) (*AgentPassportReconciler, error)
 
 // FIX-R10-1 (round-10, 2026-04-29): negative-path regression for the
 // FIX-R9-6 ephemeral-key opt-in gate. Round-9 audit (MED-NEW-1) caught
-// that all existing reconciler tests pass ``allowEphemeralKey=true``
-// — a revert that removed the refusal branch (``if !allowEphemeralKey``)
+// that all existing reconciler tests pass allowEphemeralKey=true
+// — a revert that removed the refusal branch (if !allowEphemeralKey)
 // would not be caught by any test. This test pins production fail-
 // closed: with no signing-key path AND no ephemeral opt-in, the
 // constructor returns an error containing the operator-friendly
@@ -112,7 +114,6 @@ func TestNewAgentPassportReconciler_WhitespaceKeyTreatedAsEmpty(t *testing.T) {
 		t.Errorf("error should mention 'startup refused' (ephemeral path); got: %v", err)
 	}
 }
-
 
 func testPassport(name, ns string) *vibapv1alpha1.AgentPassport {
 	return &vibapv1alpha1.AgentPassport{
@@ -204,6 +205,103 @@ func TestReconcile_NewPassport(t *testing.T) {
 	}
 	if !hasFinalizer {
 		t.Error("expected finalizer to be present")
+	}
+}
+
+func TestReconcile_MissingSPIFFEIDOmitsClaimAndReportsUnverifiedIdentity(t *testing.T) {
+	ap := testPassport("missing-spiffe", "default")
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	_ = reconcileUntilStable(t, r, nn, 5)
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting updated passport: %v", err)
+	}
+	decoded, err := credential.Decode(updated.Status.Credential)
+	if err != nil {
+		t.Fatalf("decoding issued credential: %v", err)
+	}
+	if decoded.Claims.Identity != nil {
+		t.Fatalf("credential must omit identity when spec.identity.spiffeID is empty: %+v", decoded.Claims.Identity)
+	}
+	claimsJSON, err := json.Marshal(decoded.Claims)
+	if err != nil {
+		t.Fatalf("marshaling credential claims: %v", err)
+	}
+	if strings.Contains(string(claimsJSON), "\"identity\"") {
+		t.Fatalf("credential must omit identity when spec.identity.spiffeID is empty: %s", claimsJSON)
+	}
+	if strings.Contains(string(claimsJSON), "spiffe://") {
+		t.Fatalf("credential must not fabricate a SPIFFE URI when spec.identity.spiffeID is empty: %s", claimsJSON)
+	}
+
+	found := false
+	for _, condition := range updated.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionIdentityUnverified &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.Reason == vibapv1alpha1.ReasonMissingSPIFFEID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected IdentityUnverified=True with reason MissingSPIFFEID; conditions=%+v", updated.Status.Conditions)
+	}
+}
+
+func TestReconcile_ExplicitSPIFFEIDIsPreserved(t *testing.T) {
+	ap := testPassport("explicit-spiffe", "default")
+	const explicitSPIFFEID = "spiffe://example.test/agent/explicit"
+	ap.Spec.Identity.SPIFFEID = explicitSPIFFEID
+	ap.Status.Conditions = []metav1.Condition{{
+		Type:   vibapv1alpha1.ConditionIdentityUnverified,
+		Status: metav1.ConditionTrue,
+		Reason: vibapv1alpha1.ReasonMissingSPIFFEID,
+	}}
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	_ = reconcileUntilStable(t, r, nn, 5)
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting updated passport: %v", err)
+	}
+	decoded, err := credential.Decode(updated.Status.Credential)
+	if err != nil {
+		t.Fatalf("decoding issued credential: %v", err)
+	}
+	if decoded.Claims.Identity == nil {
+		t.Fatal("explicit SPIFFE ID credential is missing identity claims")
+	}
+	if got := decoded.Claims.Identity.SPIFFEID; got != explicitSPIFFEID {
+		t.Fatalf("spiffe_id = %q, want %q", got, explicitSPIFFEID)
+	}
+	identityJSON, err := json.Marshal(decoded.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshaling identity claims: %v", err)
+	}
+	if strings.Contains(string(identityJSON), `"spiffe_id_assurance"`) {
+		t.Fatalf("explicit SPIFFE ID must preserve the existing credential schema: %s", identityJSON)
+	}
+	if got := decoded.Claims.Identity.OwnerIDAssurance; got != credential.OwnerIDAssuranceSelfAsserted {
+		t.Fatalf("owner_id_assurance = %q, want %q", got, credential.OwnerIDAssuranceSelfAsserted)
+	}
+	if got := decoded.Claims.Subject; got != explicitSPIFFEID {
+		t.Fatalf("subject = %q, want %q", got, explicitSPIFFEID)
+	}
+	for _, condition := range updated.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionIdentityUnverified {
+			t.Fatalf("explicit SPIFFE ID path must preserve existing status behavior; conditions=%+v", updated.Status.Conditions)
+		}
 	}
 }
 

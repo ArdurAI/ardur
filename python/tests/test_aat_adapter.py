@@ -12,7 +12,7 @@ import pytest
 import vibap.aat_adapter as aat_adapter_module
 import vibap.mission as mission_module
 from vibap.passport import ALGORITHM, MissionPassport, issue_passport
-from vibap.proxy import Decision
+from vibap.proxy import Decision, GovernanceProxy
 from vibap.receipt import verify_chain
 
 from conftest import (
@@ -137,6 +137,8 @@ def _issue_aat(
     par_hash: str | None = None,
     dg_profile: str | None = None,
     include_sub: bool = True,
+    audience: str | None = "ardur-proxy",
+    include_cnf: bool = True,
 ) -> str:
     now = int(time.time())
     claims: dict[str, Any] = {
@@ -153,8 +155,11 @@ def _issue_aat(
                 "max_tool_calls": max_tool_calls,
             }
         ],
-        "cnf": {"jwk": {"kid": "holder-key"}},
     }
+    if audience is not None:
+        claims["aud"] = audience
+    if include_cnf:
+        claims["cnf"] = {"jwk": {"kid": "holder-key"}}
     if include_sub:
         claims["sub"] = "aat-agent"
     if aat_type is not None:
@@ -166,6 +171,89 @@ def _issue_aat(
     if mission_ref is not None:
         claims["mission_ref"] = mission_ref
     return jwt.encode(claims, private_key, algorithm=ALGORITHM)
+
+
+def test_aat_wrong_audience_fails_closed(private_key, public_key):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        audience="another-service",
+    )
+
+    with pytest.raises(jwt.InvalidAudienceError):
+        decode_aat_claims(aat_token, public_key)
+
+
+def test_aat_missing_audience_fails_closed(private_key, public_key):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        audience=None,
+    )
+
+    with pytest.raises(jwt.MissingRequiredClaimError, match="aud"):
+        decode_aat_claims(aat_token, public_key)
+
+
+def test_proxy_aat_expected_audience_is_configurable(
+    tmp_path,
+    public_key,
+    session_keys_dir,
+    private_key,
+):
+    proxy = GovernanceProxy(
+        log_path=tmp_path / "custom-audience.jsonl",
+        state_dir=tmp_path / "custom-audience-state",
+        keys_dir=session_keys_dir,
+        public_key=public_key,
+        aat_expected_audience="custom-proxy",
+    )
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        audience="ardur-proxy",
+    )
+
+    with pytest.raises(jwt.InvalidAudienceError):
+        proxy.start_session_from_aat(
+            aat_token,
+            signing_key=private_key,
+            require_pop=False,
+        )
+
+
+def test_aat_without_cnf_fails_closed_by_default(private_key, public_key):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        include_cnf=False,
+    )
+
+    with pytest.raises(PermissionError, match="missing cnf"):
+        decode_aat_claims(aat_token, public_key)
+
+
+def test_aat_without_cnf_requires_explicit_compatibility_opt_out(
+    private_key,
+    public_key,
+):
+    aat_token = _issue_aat(
+        private_key,
+        mission_ref={"uri": "https://issuer.example/md/unused.jwt"},
+        tools=["read"],
+        include_cnf=False,
+    )
+
+    claims = decode_aat_claims(
+        aat_token,
+        public_key,
+        allow_aat_without_cnf=True,
+    )
+    assert claims["sub"] == "aat-agent"
 
 
 def _receipt_entries(path: Path) -> list[dict[str, object]]:
@@ -700,6 +788,7 @@ class TestAATProofOfPossession:
             False,  # bool (also a non-dict shape)
             [],  # empty list
             ["jkt", "thumb"],  # list with content
+            {},  # empty object
             0,  # zero
             "thumbprint-as-string",  # well-formed-looking string
         ],
@@ -729,6 +818,7 @@ class TestAATProofOfPossession:
         aat_claims = {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": str(uuid.uuid4()),
@@ -752,6 +842,8 @@ class TestAATProofOfPossession:
             "cnf": malformed_cnf,
         }
         aat_token = jwt.encode(aat_claims, private_key, algorithm=ALGORITHM)
+        with pytest.raises(PermissionError, match="cnf"):
+            decode_aat_claims(aat_token, proxy.public_key)
         cache = mission_module.MissionCache()
         # The default require_pop=True must reject ANY non-None cnf —
         # even one that's the wrong shape — so an attacker can't bypass
@@ -843,6 +935,7 @@ class TestAATIatSkewGuard:
             {
                 "iss": "https://tenuo.example/issuer",
                 "sub": "aat-agent",
+                "aud": "ardur-proxy",
                 "iat": far_future,
                 "exp": far_future + 300,
                 "jti": str(uuid.uuid4()),
@@ -861,6 +954,7 @@ class TestAATIatSkewGuard:
                     "mission_id": "urn:test:future",
                     "mission_digest": "sha-256:" + ("0" * 64),
                 },
+                "cnf": {"jwk": {"kid": "holder-key"}},
             },
             private_key,
             algorithm=ALGORITHM,
@@ -906,6 +1000,7 @@ class TestAATPoPHappyPath:
         aat_claims = {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": grant_id,
@@ -952,11 +1047,10 @@ class TestAATPoPHappyPath:
         # (test_cnf_aat_without_pop_inputs_fails_closed_by_default)
         # is the catch that ensures verify_pop is actually being called.
 
-    def test_bearer_aat_no_cnf_accepted_with_require_pop_true(
+    def test_bearer_aat_no_cnf_requires_explicit_compatibility_opt_out(
         self, proxy, private_key, tmp_path, monkeypatch
     ):
-        """An AAT without any cnf claim is bearer-mode and must be accepted
-        even when require_pop=True — the flag only gates cnf-carrying AATs."""
+        """Bearer-style AAT acceptance requires a constructor-level opt-out."""
         mission_id = "urn:mission:bearer-aat"
         md_jwt = _issue_md(private_key, mission_id=mission_id)
         md_url = "https://tenuo.example/missions/bearer-aat"
@@ -973,6 +1067,7 @@ class TestAATPoPHappyPath:
         claims = {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": grant_id,
@@ -997,14 +1092,26 @@ class TestAATPoPHappyPath:
         aat_token = jwt.encode(claims, private_key, algorithm=ALGORITHM)
 
         cache = mission_module.MissionCache()
-        material = material_from_aat_grant(
-            aat_token,
-            proxy.public_key,
-            cache,
-            require_pop=True,  # still accepted because no cnf in the AAT
+        with pytest.raises(PermissionError, match="missing cnf"):
+            material_from_aat_grant(
+                aat_token,
+                proxy.public_key,
+                cache,
+            )
+
+        compatibility_proxy = GovernanceProxy(
+            log_path=tmp_path / "bearer-compatibility.jsonl",
+            state_dir=tmp_path / "bearer-compatibility-state",
+            public_key=proxy.public_key,
+            private_key=proxy.receipt_private_key,
+            allow_aat_without_cnf=True,
         )
-        assert "aat_cnf" not in material.extra_claims
-        assert material.grant_id == grant_id
+        session = compatibility_proxy.start_session_from_aat(
+            aat_token,
+            signing_key=private_key,
+        )
+        assert session.jti == grant_id
+        assert "aat_cnf" not in session.passport_claims
 
 
 # ---------------------------------------------------------------------------
@@ -1084,6 +1191,7 @@ class TestAATAdapterEndToEnd:
         aat_claims = {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-e2e-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": aat_jti,
@@ -1102,6 +1210,7 @@ class TestAATAdapterEndToEnd:
                 "mission_id": mission_id,
                 "mission_digest": md.payload_digest,
             },
+            "cnf": {"jwk": {"kid": "holder-key"}},
         }
         aat_token = jwt.encode(aat_claims, private_key, algorithm=ALGORITHM)
 
@@ -1185,6 +1294,7 @@ class TestAATAdapterEndToEnd:
             {
                 "iss": "https://tenuo.example/issuer",
                 "sub": "aat-multi-agent",
+                "aud": "ardur-proxy",
                 "iat": now,
                 "exp": now + 300,
                 "jti": str(uuid.uuid4()),
@@ -1207,6 +1317,7 @@ class TestAATAdapterEndToEnd:
                     "mission_id": mission_id,
                     "mission_digest": md.payload_digest,
                 },
+                "cnf": {"jwk": {"kid": "holder-key"}},
             },
             private_key,
             algorithm=ALGORITHM,

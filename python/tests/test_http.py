@@ -1319,6 +1319,7 @@ def _issue_aat_http_token(
         {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-http-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": grant_id or str(uuid.uuid4()),

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -252,8 +253,8 @@ func (b *Builder) Build(key *SigningKey) (*VIBAPCredential, error) {
 	if key == nil {
 		return nil, fmt.Errorf("signing key is required")
 	}
-	if b.identity == nil {
-		return nil, fmt.Errorf("identity layer (Layer 1) is required")
+	if b.identity == nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(b.subject)), "spiffe://") {
+		return nil, fmt.Errorf("SPIFFE-formatted subject requires identity layer")
 	}
 	if b.intent == nil {
 		return nil, fmt.Errorf("intent layer (Layer 3) is required")
