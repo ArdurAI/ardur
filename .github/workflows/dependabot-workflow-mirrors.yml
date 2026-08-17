@@ -1,0 +1,86 @@
+name: dependabot-workflow-mirrors
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+    paths:
+      - ".github/workflows/*.yml"
+
+# The workflow prepares a narrow generated-artifact commit, then explicitly
+# dispatches protected checks because pushes made with GITHUB_TOKEN do not
+# create normal push or pull_request workflow runs.
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: dependabot-workflow-mirrors-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/github_actions/')
+    runs-on: ubuntu-latest
+    steps:
+      # pull_request_target is privileged, so start from the trusted base. The
+      # helper reads workflow blobs from the bot commit as data; it never runs
+      # code from the pull-request checkout before creating the mirror commit.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: "0"
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Prepare the generated workflow mirrors
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/sync-dependabot-workflow-mirrors.py \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA"
+
+      - name: Commit and push only generated mirrors
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then
+            echo "Workflow mirrors are already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(ci): sync workflow mirrors"
+          git push origin "HEAD:refs/heads/$HEAD_REF"
+
+      # workflow_dispatch is the documented GITHUB_TOKEN recursion exception.
+      # Re-run exactly the protected checks on the new head; no release or
+      # publishing workflow is dispatched.
+      - name: Dispatch protected checks on the mirror commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          REQUIRED_WORKFLOWS: |
+            codeql.yml
+            hugo-site.yml
+            link-check.yml
+            secret-scan.yml
+            tests.yml
+            validate-formats.yml
+        run: |
+          set -euo pipefail
+          expected_sha="$(git rev-parse HEAD)"
+          while IFS= read -r workflow; do
+            if [ -n "$workflow" ]; then
+              remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | cut -f1)"
+              if [ "$remote_sha" != "$expected_sha" ]; then
+                echo "::error::Dependabot branch moved before protected checks were dispatched."
+                exit 1
+              fi
+              gh workflow run "$workflow" --ref "$HEAD_REF"
+            fi
+          done <<< "$REQUIRED_WORKFLOWS"
