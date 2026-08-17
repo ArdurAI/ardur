@@ -18,11 +18,27 @@
 # Keep the tag for readable dependency updates while the immutable multi-arch
 # index digest prevents a registry tag re-push from changing published builds.
 # biscuit-python 0.4.0 embeds PyO3 0.24.1, whose supported ceiling is 3.13.
-FROM python:3.13.14-slim-trixie@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
+FROM python:3.13.14-slim-trixie@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
+ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
+ARG BSDUTILS_VERSION=1:2.41.5-0+deb13u1
+ARG LOGIN_VERSION=1:4.16.0-2+really2.41.5-0+deb13u1
+
+# Remove this targeted upgrade once the base includes the CVE-2026-53615 fix.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        bsdutils=${BSDUTILS_VERSION} \
+        libblkid1=${UTIL_LINUX_VERSION} \
+        liblastlog2-2=${UTIL_LINUX_VERSION} \
+        libmount1=${UTIL_LINUX_VERSION} \
+        libsmartcols1=${UTIL_LINUX_VERSION} \
+        libuuid1=${UTIL_LINUX_VERSION} \
+        login=${LOGIN_VERSION} \
+        mount=${UTIL_LINUX_VERSION} \
+        util-linux=${UTIL_LINUX_VERSION} \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # uid 1000 matches the SPIRE workload registration shipped in
