@@ -12,7 +12,7 @@
 //  7. Log issuance to transparency log (pkg/transparency)
 //
 // Each provider is optional. The Issuer supports three compliance levels:
-//   - Level 1 (Core): Layers 1 + 3 + 5 only (identity + intent + trust)
+//   - Level 1 (Core): Layers 3 + 5, with optional caller-provided Layer 1
 //   - Level 2 (Verified): All layers with external verification
 //   - Level 3 (Enforced): All layers with kernel-level enforcement
 package issuer
@@ -20,6 +20,7 @@ package issuer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/credential"
@@ -136,6 +137,9 @@ type IssueRequest struct {
 	SPIFFEID   string // Direct SPIFFE ID (used if no IdentityProvider)
 	OwnerID    string // Direct self-asserted owner attribution (used if no IdentityProvider)
 	A2ACardRef string
+	// AllowUnverifiedIdentity explicitly permits issuance without SPIFFEID. The
+	// credential then uses AgentID as a non-SPIFFE subject and omits Layer 1.
+	AllowUnverifiedIdentity bool
 
 	// Layer 2: Provenance (optional)
 	ImageRef       string // OCI image reference for verification
@@ -187,6 +191,7 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 
 		// Track what was actually verified for compliance level
 		workloadIdentityFromSPIRE bool
+		unverifiedIdentity        bool
 		provenanceVerified        bool
 		policyCompiled            bool
 		profileRetrieved          bool
@@ -204,10 +209,24 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 		a2aRef = identity.A2ACardRef
 		workloadIdentityFromSPIRE = true
 	} else {
-		if req.SPIFFEID == "" || req.OwnerID == "" {
-			return nil, fmt.Errorf("layer 1 (identity): SPIFFEID and OwnerID required when no IdentityProvider")
+		if req.SPIFFEID == "" {
+			if !req.AllowUnverifiedIdentity {
+				return nil, fmt.Errorf("layer 1 (identity): SPIFFEID required unless AllowUnverifiedIdentity is explicitly enabled")
+			}
+			if req.AgentID == "" {
+				return nil, fmt.Errorf("layer 1 (identity): AgentID required when SPIFFEID is omitted")
+			}
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(req.AgentID)), "spiffe://") {
+				return nil, fmt.Errorf("layer 1 (identity): unverified AgentID must not be SPIFFE-formatted")
+			}
+			agentID = req.AgentID
+			unverifiedIdentity = true
+		} else {
+			if req.OwnerID == "" {
+				return nil, fmt.Errorf("layer 1 (identity): OwnerID required when no IdentityProvider")
+			}
+			agentID = req.SPIFFEID
 		}
-		agentID = req.SPIFFEID
 		ownerID = req.OwnerID
 		a2aRef = req.A2ACardRef
 	}
@@ -293,7 +312,6 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 
 	// --- Build Credential ---
 	b := credential.NewBuilder(iss.issuerURI, agentID).
-		WithIdentity(agentID, ownerID, a2aRef).
 		WithIntent(agentChecksum, engineName, policyHash, req.PermittedActions).
 		WithTrust(
 			score.StaticCapability,
@@ -302,6 +320,9 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 			"",
 			score.AuthorizationTier,
 		)
+	if !unverifiedIdentity {
+		b = b.WithIdentity(agentID, ownerID, a2aRef)
+	}
 
 	if req.TTL > 0 {
 		b = b.WithTTL(req.TTL)

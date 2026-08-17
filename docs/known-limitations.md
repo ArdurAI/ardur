@@ -297,12 +297,12 @@ error.
 
 `vibap.aat_adapter.material_from_aat_grant` and
 `vibap.proxy.GovernanceProxy.start_session_from_aat`
-default to `require_pop=True`. A cnf-bearing AAT presented without
-`holder_public_key` + `kb_jwt` now fails closed. Bearer-mode AATs
-(no `cnf` claim) continue to be accepted; library callers that
-legitimately need bearer-style acceptance of a cnf-bearing AAT MUST
-opt out explicitly with `require_pop=False` so the security choice is
-visible at the call site.
+default to `require_pop=True`. A `cnf`-bearing AAT presented without
+`holder_public_key` + `kb_jwt` fails closed. AATs without `cnf` are also
+rejected by default; temporary bearer compatibility requires constructing the
+proxy with `allow_aat_without_cnf=True`. For a present `cnf`, callers that need
+to bypass PoP verification must still opt out explicitly with
+`require_pop=False` so the security choice is visible at the call site.
 
 The HTTP `/sessions` endpoint plumbs `require_pop`,
 `holder_public_key_pem`, and `kb_jwt` through the request body, with
