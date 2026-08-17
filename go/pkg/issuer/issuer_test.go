@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -284,6 +285,62 @@ func TestIssue_CoreLevel_RequiresIdentity(t *testing.T) {
 	}
 }
 
+func TestIssue_CoreLevel_RejectsMalformedSPIFFEID(t *testing.T) {
+	key := testSigningKey(t)
+	iss, _ := NewIssuer(key, "https://vibap.example.com")
+
+	req := minimalRequest()
+	req.SPIFFEID = "not-a-spiffe-id"
+	req.AgentID = req.SPIFFEID
+
+	_, err := iss.Issue(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected malformed SPIFFE ID to fail closed")
+	}
+	if !strings.Contains(err.Error(), "valid SPIFFE ID") {
+		t.Fatalf("expected SPIFFE syntax error, got: %v", err)
+	}
+}
+
+func TestIssue_CoreLevel_ExplicitlyAllowsUnverifiedIdentityWithoutSPIFFE(t *testing.T) {
+	key := testSigningKey(t)
+	iss, _ := NewIssuer(key, "https://vibap.example.com")
+
+	req := minimalRequest()
+	req.SPIFFEID = ""
+	req.OwnerID = ""
+	req.AgentID = "default/test-agent"
+	req.AllowUnverifiedIdentity = true
+
+	result, err := iss.Issue(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Issue failed for explicit unverified-identity request: %v", err)
+	}
+	if result.Credential.Claims.Identity != nil {
+		t.Fatalf("core credential must omit identity claims: %+v", result.Credential.Claims.Identity)
+	}
+	if got := result.Credential.Claims.Subject; got != req.AgentID {
+		t.Fatalf("subject = %q, want fallback agent ID %q", got, req.AgentID)
+	}
+	claimsJSON, err := json.Marshal(result.Credential.Claims)
+	if err != nil {
+		t.Fatalf("marshaling credential claims: %v", err)
+	}
+	if strings.Contains(string(claimsJSON), "\"identity\"") {
+		t.Fatalf("core credential must omit identity claim: %s", claimsJSON)
+	}
+
+	verification, err := credential.Verify(result.Encoded, key.PublicKey, &credential.VerifyOptions{
+		SkipStatusCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("verifying issued credential: %v", err)
+	}
+	if !verification.Valid {
+		t.Fatalf("issued unverified credential must remain structurally valid: %v", verification.Errors)
+	}
+}
+
 func TestIssue_CoreLevel_RequiresPolicy(t *testing.T) {
 	key := testSigningKey(t)
 	iss, _ := NewIssuer(key, "https://vibap.example.com")
@@ -331,6 +388,9 @@ func TestIssue_VerifiedLevel_WithProviders(t *testing.T) {
 	cred := result.Credential
 	if cred.Claims.Identity.SPIFFEID == "" {
 		t.Error("identity should come from SPIRE mock")
+	}
+	if got := cred.Claims.Identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceProviderVerified {
+		t.Errorf("SPIFFE ID assurance = %q, want %q", got, credential.SPIFFEIDAssuranceProviderVerified)
 	}
 	if cred.Claims.Identity.OwnerIDAssurance != credential.OwnerIDAssuranceSelfAsserted {
 		t.Errorf("owner assurance = %q, want %q", cred.Claims.Identity.OwnerIDAssurance, credential.OwnerIDAssuranceSelfAsserted)

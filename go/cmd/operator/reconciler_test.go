@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	vibapv1alpha1 "github.com/ArdurAI/ardur/go/pkg/api/v1alpha1"
+	"github.com/ArdurAI/ardur/go/pkg/credential"
 )
 
 func testScheme() *runtime.Scheme {
@@ -204,6 +206,123 @@ func TestReconcile_NewPassport(t *testing.T) {
 	}
 	if !hasFinalizer {
 		t.Error("expected finalizer to be present")
+	}
+}
+
+func TestReconcile_MissingSPIFFEIDOmitsClaimAndReportsUnverifiedIdentity(t *testing.T) {
+	ap := testPassport("missing-spiffe", "default")
+	ap.Spec.Identity.OwnerID = ""
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	_ = reconcileUntilStable(t, r, nn, 5)
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting updated passport: %v", err)
+	}
+	decoded, err := credential.Decode(updated.Status.Credential)
+	if err != nil {
+		t.Fatalf("decoding issued credential: %v", err)
+	}
+	if decoded.Claims.Identity != nil {
+		t.Fatalf("credential must omit identity when spec.identity.spiffeID is empty: %+v", decoded.Claims.Identity)
+	}
+	claimsJSON, err := json.Marshal(decoded.Claims)
+	if err != nil {
+		t.Fatalf("marshaling credential claims: %v", err)
+	}
+	if strings.Contains(string(claimsJSON), "\"identity\"") {
+		t.Fatalf("credential must omit identity when spec.identity.spiffeID is empty: %s", claimsJSON)
+	}
+	if strings.Contains(string(claimsJSON), "spiffe://") {
+		t.Fatalf("credential must not fabricate a SPIFFE URI when spec.identity.spiffeID is empty: %s", claimsJSON)
+	}
+
+	found := false
+	for _, condition := range updated.Status.Conditions {
+		if condition.Type == "IdentityUnverified" &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.Reason == "MissingSPIFFEID" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected IdentityUnverified=True with reason MissingSPIFFEID; conditions=%+v", updated.Status.Conditions)
+	}
+}
+
+func TestReconcile_ExplicitSPIFFEIDIsPreserved(t *testing.T) {
+	ap := testPassport("explicit-spiffe", "default")
+	const explicitSPIFFEID = "spiffe://example.test/agent/explicit"
+	ap.Spec.Identity.SPIFFEID = explicitSPIFFEID
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	_ = reconcileUntilStable(t, r, nn, 5)
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting updated passport: %v", err)
+	}
+	decoded, err := credential.Decode(updated.Status.Credential)
+	if err != nil {
+		t.Fatalf("decoding issued credential: %v", err)
+	}
+	if decoded.Claims.Identity == nil {
+		t.Fatal("explicit SPIFFE ID credential is missing identity claims")
+	}
+	if got := decoded.Claims.Identity.SPIFFEID; got != explicitSPIFFEID {
+		t.Fatalf("spiffe_id = %q, want %q", got, explicitSPIFFEID)
+	}
+	identityJSON, err := json.Marshal(decoded.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshaling identity claims: %v", err)
+	}
+	if !strings.Contains(string(identityJSON), `"spiffe_id_assurance":"caller_provided"`) {
+		t.Fatalf("caller-provided identity assurance is not explicit: %s", identityJSON)
+	}
+	if got := decoded.Claims.Subject; got != explicitSPIFFEID {
+		t.Fatalf("subject = %q, want %q", got, explicitSPIFFEID)
+	}
+}
+
+func TestReconcile_UseSpireFailsClosed(t *testing.T) {
+	ap := testPassport("spire-requested", "default")
+	ap.Spec.Identity.UseSpire = true
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	_ = reconcileUntilStable(t, r, nn, 5)
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting updated passport: %v", err)
+	}
+	if updated.Status.Credential != "" {
+		t.Fatal("useSpire=true must not issue without SPIRE integration")
+	}
+	found := false
+	for _, condition := range updated.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionReady &&
+			condition.Status == metav1.ConditionFalse &&
+			strings.Contains(condition.Message, "useSpire") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected Ready=False with useSpire diagnostic; conditions=%+v", updated.Status.Conditions)
 	}
 }
 

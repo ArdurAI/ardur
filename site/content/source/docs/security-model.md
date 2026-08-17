@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "c0b3756ad80c35c6b5578c903198c48a158c9251287cdf72c29f444259466678"
+source_sha256: "0a694f8537518015a4a9ba4a42712656b57d7197031a291be8da71d147838a4f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -37,7 +37,12 @@ enforcement, and verifiable evidence.
   requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
-- KB-JWT nonce replay store and AAT proof-of-possession default-on
+- present workload identity claims carry signed `spiffe_id_assurance`; configured
+  input is `caller_provided`, while IdentityProvider output is
+  `identity_provider_verified`, and missing or unknown assurance fails closed
+- KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
+  proof-of-possession by default; bearer compatibility requires an explicit
+  constructor opt-out
 - per-session and per-mission revocation via signed status lists
 - receipt chains emit and verify (hash-linked, JWS-signed)
 - declared-telemetry absence yields `insufficient_evidence`, not a

@@ -48,6 +48,7 @@ from .risk_budget import (
 )
 from .aat_adapter import (
     AAT_CREDENTIAL_FORMAT,
+    AAT_DEFAULT_AUDIENCE,
     decode_aat_claims,
     material_from_aat_grant,
 )
@@ -2174,6 +2175,8 @@ class GovernanceProxy:
         biscuit_issuer_public_key: Any | None = None,
         biscuit_peer_trust_bundle: Any | None = None,
         biscuit_svid_audience: str = "ardur-proxy",
+        aat_expected_audience: str = AAT_DEFAULT_AUDIENCE,
+        allow_aat_without_cnf: bool = False,
     ) -> None:
         # policy_store: optional PolicyStore (see vibap.policy_store).
         # When provided, the proxy resolves additional_policies from
@@ -2217,6 +2220,17 @@ class GovernanceProxy:
         self.risk_budget_ledger = risk_budget_ledger or FileRiskBudgetLedger(
             self.state_dir
         )
+        if (
+            not isinstance(aat_expected_audience, str)
+            or not aat_expected_audience.strip()
+        ):
+            raise ValueError("aat_expected_audience must be a non-empty server value")
+        if len(aat_expected_audience.encode("utf-8")) > 256:
+            raise ValueError("aat_expected_audience exceeds 256 bytes")
+        if not isinstance(allow_aat_without_cnf, bool):
+            raise TypeError("allow_aat_without_cnf must be a boolean")
+        self._aat_expected_audience = aat_expected_audience.strip()
+        self._allow_aat_without_cnf = allow_aat_without_cnf
         self._biscuit_issuer_public_key = biscuit_issuer_public_key
         if (
             not isinstance(biscuit_svid_audience, str)
@@ -3210,18 +3224,19 @@ class GovernanceProxy:
         maps it to an internal passport token with the same ``jti`` so receipts
         and delegated children keep the AAT grant id as their lineage anchor.
 
-        Proof-of-possession (default ``True`` since 2026-04-28): if the AAT
-        carries a ``cnf`` claim, the caller MUST supply ``holder_public_key``
-        + ``kb_jwt`` so the adapter can verify the presenter holds the matching
-        private key (RFC 7800 confirmation-bound AAT semantics). Bearer AATs
-        (no ``cnf``) bypass PoP regardless of the flag. Library callers that
-        legitimately need bearer-style acceptance of a cnf-bearing AAT MUST
-        opt out with ``require_pop=False`` so the security-relevant choice is
-        visible at the call site. See :func:`material_from_aat_grant` for the
-        H2 remediation rationale and the 2026-04-28 default flip.
+        The configured AAT audience must match. A ``cnf`` claim is required
+        unless this proxy was constructed with the temporary
+        ``allow_aat_without_cnf=True`` compatibility opt-out. When ``cnf`` is
+        present and ``require_pop=True``, the caller must supply
+        ``holder_public_key`` and ``kb_jwt`` to prove possession.
         """
         parent_claims = (
-            decode_aat_claims(parent_aat_token, self.public_key)
+            decode_aat_claims(
+                parent_aat_token,
+                self.public_key,
+                expected_audience=self._aat_expected_audience,
+                allow_aat_without_cnf=self._allow_aat_without_cnf,
+            )
             if parent_aat_token is not None
             else None
         )
@@ -3234,6 +3249,8 @@ class GovernanceProxy:
             holder_public_key=holder_public_key,
             kb_jwt=kb_jwt,
             require_pop=require_pop,
+            expected_audience=self._aat_expected_audience,
+            allow_aat_without_cnf=self._allow_aat_without_cnf,
         )
         internal_token = issue_passport(
             material.mission,
@@ -5441,7 +5458,12 @@ class GovernanceProxy:
             # AAT grant" — without ``from``, an expired passport appears as an
             # AAT validation failure in the audit log, misleading responders.
             try:
-                aat_claims = decode_aat_claims(parent_token, self.public_key)
+                aat_claims = decode_aat_claims(
+                    parent_token,
+                    self.public_key,
+                    expected_audience=self._aat_expected_audience,
+                    allow_aat_without_cnf=self._allow_aat_without_cnf,
+                )
             except jwt.PyJWTError:
                 # Token is unparseable as either format. Re-raise PyJWTError so
                 # the outer HTTP handler responds 401 (not 403).
@@ -6462,7 +6484,9 @@ def serve_proxy(
                     )
                     return
                 if path == "/.well-known/jwks.json":
-                    self._send_json(200, {"keys": [_public_key_to_jwk(proxy.public_key)]})
+                    self._send_json(
+                        200, {"keys": [_public_key_to_jwk(proxy.public_key)]}
+                    )
                     return
                 if not self._check_rate_limit():
                     return
@@ -6479,7 +6503,9 @@ def serve_proxy(
                     self.send_header("Referrer-Policy", "no-referrer")
                     self.send_header("Cache-Control", "no-store")
                     if tls_active:
-                        self.send_header("Strict-Transport-Security", "max-age=31536000")
+                        self.send_header(
+                            "Strict-Transport-Security", "max-age=31536000"
+                        )
                     self.end_headers()
                     self.wfile.write(body)
                     ardur_metrics.requests_total.inc(
@@ -6881,9 +6907,7 @@ def serve_proxy(
                         # reached this site are sanitized at their sources, so
                         # str(exc) is safe to surface. Log full detail for
                         # operator triage.
-                        logger.debug(
-                            "PermissionError in /delegate", exc_info=exc
-                        )
+                        logger.debug("PermissionError in /delegate", exc_info=exc)
                         self._send_json(403, {"error": str(exc)})
                     else:
                         self._send_json(
@@ -7030,9 +7054,7 @@ def _proxy_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
         {
             "condition": condition,
             "action": "choose_valid_proxy_port",
-            "command": (
-                "python -m vibap.proxy --host <loopback-host> --port <port>"
-            ),
+            "command": ("python -m vibap.proxy --host <loopback-host> --port <port>"),
             "detail": (
                 "Use an integer TCP port from 0 through 65535. Use 0 when you "
                 "want the operating system to choose an available local port."
@@ -7129,9 +7151,7 @@ def _proxy_api_token_invalid_response() -> dict[str, object]:
         "next_steps": [
             {
                 "action": "pass_real_token",
-                "command": (
-                    "python -m vibap.proxy --api-token <your-secret-token>"
-                ),
+                "command": ("python -m vibap.proxy --api-token <your-secret-token>"),
                 "detail": "Provide a non-empty API token.",
             },
             {

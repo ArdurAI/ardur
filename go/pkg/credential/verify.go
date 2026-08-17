@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
 
 // VerifyOptions configures credential verification behavior.
@@ -141,17 +143,33 @@ func Verify(raw string, issuerPubKey ed25519.PublicKey, opts *VerifyOptions) (*V
 			skewSec, cred.Claims.IssuedAt, now.Unix(), skewSec))
 	}
 
-	// Step 7: Verify required VIBAP layers are present
+	// Step 7: Verify required VIBAP layers and identity/core subject boundaries.
+	subject := strings.TrimSpace(cred.Claims.Subject)
+	if subject == "" {
+		result.Valid = false
+		result.Errors = append(result.Errors, "credential subject is empty")
+	}
 	if cred.Claims.Identity == nil {
+		if strings.HasPrefix(strings.ToLower(subject), "spiffe://") {
+			result.Valid = false
+			result.Errors = append(result.Errors, "core credential subject must not be SPIFFE-formatted when identity is omitted")
+		}
+	} else if cred.Claims.Identity.SPIFFEID == "" {
 		result.Valid = false
-		result.Errors = append(result.Errors, "missing required Layer 1 (Identity)")
-	} else if cred.Claims.Identity.SPIFFEID != cred.Claims.Subject {
-		// The credential subject (sub) MUST match the identity layer's spiffe_id.
-		// Divergence would allow a credential issued for agent A to claim identity of agent B.
-		result.Valid = false
-		result.Errors = append(result.Errors, fmt.Sprintf(
-			"subject/identity mismatch: sub=%q but identity.spiffe_id=%q",
-			cred.Claims.Subject, cred.Claims.Identity.SPIFFEID))
+		result.Errors = append(result.Errors, "identity layer: spiffe_id is empty")
+	} else {
+		if _, err := spiffeid.FromString(cred.Claims.Identity.SPIFFEID); err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf("identity layer: spiffe_id is not a valid SPIFFE ID: %v", err))
+		}
+		if cred.Claims.Identity.SPIFFEID != cred.Claims.Subject {
+			// The credential subject (sub) MUST match the identity layer's spiffe_id.
+			// Divergence would allow a credential issued for agent A to claim identity of agent B.
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"subject/identity mismatch: sub=%q but identity.spiffe_id=%q",
+				cred.Claims.Subject, cred.Claims.Identity.SPIFFEID))
+		}
 	}
 	if cred.Claims.Intent == nil {
 		result.Valid = false
@@ -230,10 +248,6 @@ func Verify(raw string, issuerPubKey ed25519.PublicKey, opts *VerifyOptions) (*V
 
 	// Step 10: Verify identity layer specifics
 	if cred.Claims.Identity != nil {
-		if cred.Claims.Identity.SPIFFEID == "" {
-			result.Valid = false
-			result.Errors = append(result.Errors, "identity layer: spiffe_id is empty")
-		}
 		if cred.Claims.Identity.OwnerID == "" {
 			result.Valid = false
 			result.Errors = append(result.Errors, "identity layer: owner_id is empty")
@@ -244,6 +258,15 @@ func Verify(raw string, issuerPubKey ed25519.PublicKey, opts *VerifyOptions) (*V
 				"identity layer: unsupported owner_id_assurance %q; only %q is implemented",
 				cred.Claims.Identity.OwnerIDAssurance,
 				OwnerIDAssuranceSelfAsserted,
+			))
+		}
+		switch cred.Claims.Identity.SPIFFEIDAssurance {
+		case SPIFFEIDAssuranceCallerProvided, SPIFFEIDAssuranceProviderVerified:
+		default:
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"identity layer: unsupported spiffe_id_assurance %q",
+				cred.Claims.Identity.SPIFFEIDAssurance,
 			))
 		}
 	}

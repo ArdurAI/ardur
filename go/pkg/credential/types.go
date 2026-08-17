@@ -40,7 +40,7 @@ type Claims struct {
 	// Standard JWT claims
 	JWTID     string `json:"jti,omitempty"` // Unique credential identifier (prevents replay)
 	Issuer    string `json:"iss"`           // VIBAP Authority identifier
-	Subject   string `json:"sub"`           // Agent SPIFFE ID
+	Subject   string `json:"sub"`           // Agent identifier; SPIFFE ID when one is present
 	IssuedAt  int64  `json:"iat"`           // Unix timestamp of issuance
 	ExpiresAt int64  `json:"exp"`           // Unix timestamp of expiration
 	NotBefore int64  `json:"nbf,omitempty"` // Unix timestamp, not valid before
@@ -55,7 +55,7 @@ type Claims struct {
 	SD          []string `json:"_sd,omitempty"`     // Array of disclosure hashes
 
 	// VIBAP credential layers
-	Identity   *IdentityClaims   `json:"identity,omitempty"`   // Layer 1 — always disclosed
+	Identity   *IdentityClaims   `json:"identity,omitempty"`   // Layer 1 — optional; always disclosed when present
 	Provenance *ProvenanceClaims `json:"provenance,omitempty"` // Layer 2 — selectively disclosable
 	Intent     *IntentClaims     `json:"intent,omitempty"`     // Layer 3 — always disclosed
 	Baseline   *BaselineClaims   `json:"baseline,omitempty"`   // Layer 4 — selectively disclosable
@@ -126,6 +126,18 @@ const (
 	OwnerIDAssuranceSelfAsserted OwnerIDAssurance = "self_asserted"
 )
 
+// SPIFFEIDAssurance records how the workload SPIFFE ID entered the credential.
+type SPIFFEIDAssurance string
+
+const (
+	// SPIFFEIDAssuranceCallerProvided means the issuer signed configured input
+	// but did not authenticate it against a workload identity provider.
+	SPIFFEIDAssuranceCallerProvided SPIFFEIDAssurance = "caller_provided"
+	// SPIFFEIDAssuranceProviderVerified means an IdentityProvider resolved the
+	// workload identity before issuance.
+	SPIFFEIDAssuranceProviderVerified SPIFFEIDAssurance = "identity_provider_verified"
+)
+
 // IdentityClaims represents Layer 1: Agent Identity.
 // Always disclosed — verifiers need to know who the agent is.
 //
@@ -134,6 +146,9 @@ const (
 type IdentityClaims struct {
 	// Per-instance SPIFFE ID: spiffe://ardur.dev/ns/{ns}/sa/{sa}/instance/{pod-uid}
 	SPIFFEID string `json:"spiffe_id"`
+	// Assurance for SPIFFEID. Verifiers must not treat caller-provided input as
+	// workload-provider-authenticated identity.
+	SPIFFEIDAssurance SPIFFEIDAssurance `json:"spiffe_id_assurance"`
 
 	// SPIFFE-formatted deploying human or service-account attribution.
 	// This value is not an authenticated dual-identity binding.

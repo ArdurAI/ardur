@@ -179,6 +179,11 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 
 	setCondition(ap, vibapv1alpha1.ConditionReady, metav1.ConditionFalse,
 		vibapv1alpha1.ReasonReconciling, "Issuing credential")
+	if ap.Spec.Identity.UseSpire {
+		err := fmt.Errorf("spec.identity.useSpire requires SPIRE integration, which is not implemented by this operator")
+		r.recordEvent(ap, corev1.EventTypeWarning, "SPIREUnavailable", err.Error())
+		return r.setFailed(ctx, ap, "SPIREUnavailable", err)
+	}
 
 	policyText := ap.Spec.Intent.InlinePolicy
 	if policyText == "" && ap.Spec.Intent.PolicyRef != nil {
@@ -194,9 +199,17 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 		return r.setFailed(ctx, ap, "PolicyMissing", err)
 	}
 
-	agentID := ap.Spec.Identity.SPIFFEID
-	if agentID == "" {
-		agentID = fmt.Sprintf("spiffe://ardur.dev/ns/%s/agent/%s", ap.Namespace, ap.Name)
+	spiffeID := ap.Spec.Identity.SPIFFEID
+	agentID := spiffeID
+	if spiffeID == "" {
+		agentID = fmt.Sprintf("%s/%s", ap.Namespace, ap.Name)
+		setCondition(ap, vibapv1alpha1.ConditionIdentityUnverified, metav1.ConditionTrue,
+			vibapv1alpha1.ReasonMissingSPIFFEID,
+			"No SPIFFE ID was supplied; the credential omits spiffe_id and workload identity remains unverified")
+	} else {
+		setCondition(ap, vibapv1alpha1.ConditionIdentityUnverified, metav1.ConditionTrue,
+			vibapv1alpha1.ReasonCallerProvidedSPIFFEID,
+			"The SPIFFE ID was caller-provided and was not authenticated by the operator")
 	}
 
 	if err := r.ensureAgentRegistered(ctx, agentID, ap.Spec.Trust); err != nil {
@@ -209,17 +222,18 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 	}
 
 	issueReq := issuer.IssueRequest{
-		SPIFFEID:          agentID,
-		OwnerID:           ap.Spec.Identity.OwnerID,
-		A2ACardRef:        ap.Spec.Identity.A2ACardRef,
-		PolicyText:        policyText,
-		SystemPrompt:      ap.Spec.Intent.SystemPrompt,
-		ToolManifest:      ap.Spec.Intent.ToolManifest,
-		PermittedActions:  ap.Spec.Intent.PermittedActions,
-		AgentID:           agentID,
-		TTL:               ttl,
-		SelectiveDisclose: ap.Spec.Credential.SelectiveDisclosure,
-		StatusURI:         ap.Spec.Credential.StatusListURI,
+		SPIFFEID:                spiffeID,
+		OwnerID:                 ap.Spec.Identity.OwnerID,
+		A2ACardRef:              ap.Spec.Identity.A2ACardRef,
+		AllowUnverifiedIdentity: spiffeID == "",
+		PolicyText:              policyText,
+		SystemPrompt:            ap.Spec.Intent.SystemPrompt,
+		ToolManifest:            ap.Spec.Intent.ToolManifest,
+		PermittedActions:        ap.Spec.Intent.PermittedActions,
+		AgentID:                 agentID,
+		TTL:                     ttl,
+		SelectiveDisclose:       ap.Spec.Credential.SelectiveDisclosure,
+		StatusURI:               ap.Spec.Credential.StatusListURI,
 	}
 
 	if ap.Spec.Provenance != nil {

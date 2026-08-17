@@ -46,6 +46,7 @@ AAT_SUPPORTED_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
 AAT_DRAFT01_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
 AAT_UNSUPPORTED_REVISION = AAT_DRAFT01_REVISION
 AAT_DG_PROFILE_V02 = "ardur.dg.aat-draft-01.v0.2"
+AAT_DEFAULT_AUDIENCE = "ardur-proxy"
 
 
 @dataclass(frozen=True)
@@ -60,14 +61,22 @@ class AATSessionMaterial:
 def decode_aat_claims(
     token: str,
     public_key: ec.EllipticCurvePublicKey,
+    *,
+    expected_audience: str = AAT_DEFAULT_AUDIENCE,
+    allow_aat_without_cnf: bool = False,
 ) -> dict[str, Any]:
+    if not isinstance(expected_audience, str) or not expected_audience.strip():
+        raise ValueError("expected_audience must be a non-empty string")
+    if not isinstance(allow_aat_without_cnf, bool):
+        raise TypeError("allow_aat_without_cnf must be a boolean")
     claims = jwt.decode(
         token,
         public_key,
         algorithms=[ALGORITHM],
+        audience=expected_audience.strip(),
         options={
-            "require": ["jti", "iss", "iat", "exp"],
-            "verify_aud": False,
+            "require": ["jti", "iss", "iat", "exp", "aud"],
+            "verify_aud": True,
             # Bounded-iat check below; PyJWT's default check uses zero
             # leeway and would clash with cross-node clock drift.
             "verify_iat": False,
@@ -103,6 +112,17 @@ def decode_aat_claims(
         raise PermissionError("AAT grant missing mission_ref")
     if "authorization_details" not in claims:
         raise PermissionError("AAT grant missing authorization_details")
+    cnf = claims.get("cnf")
+    if cnf is None:
+        if not allow_aat_without_cnf:
+            raise PermissionError(
+                "AAT grant missing cnf; set allow_aat_without_cnf=True only for "
+                "temporary bearer-token compatibility"
+            )
+    elif not isinstance(cnf, dict) or not cnf or not ({"jkt", "jwk"} & cnf.keys()):
+        raise PermissionError(
+            "AAT grant cnf must be a non-empty JSON object containing jkt or jwk"
+        )
     return claims
 
 
@@ -117,32 +137,32 @@ def material_from_aat_grant(
     holder_public_key: ec.EllipticCurvePublicKey | None = None,
     kb_jwt: str | None = None,
     require_pop: bool = True,
+    expected_audience: str = AAT_DEFAULT_AUDIENCE,
+    allow_aat_without_cnf: bool = False,
 ) -> AATSessionMaterial:
     """Build session material from a verified AAT grant.
 
     Proof-of-possession (H2 from the 2026-04-21 review; default flipped
     fail-closed in the 2026-04-28 hardening pass):
 
-    - When ``require_pop=True`` (the default) AND the AAT carries a ``cnf``
-      claim (confirmation key), the presenter MUST demonstrate possession of
-      the matching private key by supplying ``holder_public_key`` and a fresh
-      ``kb_jwt`` (RFC 7800 key-binding). This mirrors the enforcement the
-      non-AAT passport path performs in :meth:`GovernanceProxy.start_session`.
-    - When the AAT has no ``cnf`` (pure bearer mode), PoP is skipped
-      regardless of ``require_pop`` — the flag only gates *cnf-bearing* AATs.
-    - **The default changed to ``require_pop=True`` on 2026-04-28** so that
-      callers do not accidentally accept replayable confirmation-bound AATs.
-      Library callers that legitimately need bearer-style acceptance (e.g.
-      tests, demos that don't have key-binding infrastructure) MUST opt out
-      explicitly with ``require_pop=False``. This makes the security-relevant
-      decision visible in every call site grep, instead of buried in a
-      default-argument flag.
+    - A ``cnf`` claim is required by default. Temporary bearer-token
+      compatibility requires the explicit ``allow_aat_without_cnf=True`` opt-out.
+    - When ``require_pop=True`` (the default), a ``cnf``-bearing presenter MUST
+      supply ``holder_public_key`` and a fresh ``kb_jwt`` so possession of the
+      matching private key is verified. ``require_pop=False`` remains the
+      explicit compatibility opt-out for skipping verification of a present
+      confirmation binding.
     - Prior to this change, ``cnf`` was structurally copied into
       ``extra_claims["aat_cnf"]`` but never verified by default — a captured
       AAT could be replayed by anyone who observed it, violating the paper's
       claim that confirmation-bound credentials are holder-restricted.
     """
-    claims = decode_aat_claims(token, public_key)
+    claims = decode_aat_claims(
+        token,
+        public_key,
+        expected_audience=expected_audience,
+        allow_aat_without_cnf=allow_aat_without_cnf,
+    )
     # Round-4 hardening (FIX-R4-5, 2026-04-28): mirror the GovernanceProxy
     # passport path's robust cnf check. Previously the gate at
     # ``isinstance(cnf, dict) and require_pop`` silently routed cnf=""/0/
@@ -232,7 +252,7 @@ def material_from_aat_grant(
         "mission_digest": declaration.payload_digest,
         "external_grant_token_hash": hashlib.sha256(token.encode("utf-8")).hexdigest(),
     }
-    if "cnf" in claims:
+    if claims.get("cnf") is not None:
         extra_claims["aat_cnf"] = copy.deepcopy(claims["cnf"])
     return AATSessionMaterial(
         grant_id=str(claims["jti"]),

@@ -20,7 +20,12 @@ enforcement, and verifiable evidence.
   requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
-- KB-JWT nonce replay store and AAT proof-of-possession default-on
+- present workload identity claims carry signed `spiffe_id_assurance`; configured
+  input is `caller_provided`, while IdentityProvider output is
+  `identity_provider_verified`, and missing or unknown assurance fails closed
+- KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
+  proof-of-possession by default; bearer compatibility requires an explicit
+  constructor opt-out
 - per-session and per-mission revocation via signed status lists
 - receipt chains emit and verify (hash-linked, JWS-signed)
 - declared-telemetry absence yields `insufficient_evidence`, not a

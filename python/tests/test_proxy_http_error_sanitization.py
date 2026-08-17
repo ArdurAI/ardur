@@ -135,6 +135,7 @@ def _issue_aat_like_token(
         {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-error-sanitization-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": str(uuid.uuid4()),
@@ -150,6 +151,7 @@ def _issue_aat_like_token(
                     "max_tool_calls": 2,
                 }
             ],
+            "cnf": {"jwk": {"kid": "holder-key"}},
         },
         private_key,
         algorithm=ALGORITHM,
@@ -311,9 +313,7 @@ class TestPythonInternalLeakSanitization:
         def _raising_evaluate(self, *args, **kwargs):
             raise TypeError(leak_sentinel)
 
-        monkeypatch.setattr(
-            GovernanceProxy, "evaluate_tool_call", _raising_evaluate
-        )
+        monkeypatch.setattr(GovernanceProxy, "evaluate_tool_call", _raising_evaluate)
 
         status, body = _post(
             base + "/evaluate",
@@ -336,9 +336,7 @@ class TestPythonInternalLeakSanitization:
         def _raising_evaluate(self, *args, **kwargs):
             raise AttributeError(leak_sentinel)
 
-        monkeypatch.setattr(
-            GovernanceProxy, "evaluate_tool_call", _raising_evaluate
-        )
+        monkeypatch.setattr(GovernanceProxy, "evaluate_tool_call", _raising_evaluate)
 
         status, body = _post(
             base + "/evaluate",
@@ -387,9 +385,7 @@ class TestControlledErrorMessagePreservation:
         # The catch-level preservation is covered by test_http.py's existing
         # PoP / ended / scope-escalation / budget assertions.
 
-    def test_lineage_budget_conflict_message_preserved(
-        self, http_proxy, private_key
-    ):
+    def test_lineage_budget_conflict_message_preserved(self, http_proxy, private_key):
         """LineageBudgetConflictError messages are controlled strings; the
         409 response must still carry the authored message."""
         base, _ = http_proxy
@@ -449,9 +445,7 @@ class TestStatusCodeUnchanged:
         status, _ = _post(base + "/issue", {"mission": None})
         assert status == 400
 
-    def test_lineage_conflict_still_returns_409(
-        self, http_proxy, private_key
-    ):
+    def test_lineage_conflict_still_returns_409(self, http_proxy, private_key):
         base, _ = http_proxy
         parent_mission = MissionPassport(
             agent_id="parent",
