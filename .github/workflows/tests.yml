@@ -51,8 +51,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          # Must match the `go` directive in go/go.mod (currently 1.26.5).
-          go-version: '1.26.5'
+          # Must match the `go` directive in go/go.mod (currently 1.26.6).
+          go-version: '1.26.6'
           cache: true
           cache-dependency-path: go/go.sum
 
@@ -160,9 +160,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          # Must match the `go` directive in go/go.mod (currently 1.26.5).
+          # Must match the `go` directive in go/go.mod (currently 1.26.6).
           # If you bump go.mod, bump this string in the same PR.
-          go-version: '1.26.5'
+          go-version: '1.26.6'
           cache: true
           cache-dependency-path: go/go.sum
 
@@ -208,8 +208,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          # Must match the `go` directive in go/go.mod (currently 1.26.5).
-          go-version: '1.26.5'
+          # Must match the `go` directive in go/go.mod (currently 1.26.6).
+          go-version: '1.26.6'
           cache: true
           cache-dependency-path: go/go.sum
 
