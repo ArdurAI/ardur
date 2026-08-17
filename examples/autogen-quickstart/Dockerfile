@@ -21,7 +21,7 @@
 FROM ghcr.io/spiffe/spire-agent:1.15.2@sha256:1d042e4040466686e0ee46f74981ff2167c86adfadca19b3835946f4d6047536 AS spire
 
 # biscuit-python 0.4.0 embeds PyO3 0.24.1, whose supported ceiling is 3.13.
-FROM python:3.13.14-slim-trixie@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
+FROM python:3.14.7-slim-trixie@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
