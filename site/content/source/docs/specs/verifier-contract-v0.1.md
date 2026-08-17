@@ -2,7 +2,7 @@
 title: "Verifier Contract v0.1"
 description: "This document defines the **stateful verifier contract** for the"
 source_path: "docs/specs/verifier-contract-v0.1.md"
-source_sha256: "2db668f7b41073f192ad87c0cd20f3f3b8b863102b7e026c0449b0b4f34a89e8"
+source_sha256: "90873cbd871b68026b4fab3910e1e687be6d01ea057f3e0352b4947304de9778"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -781,12 +781,13 @@ checks") is closed by either implementing the check or surfacing the gap.
 The reference proxy implements the full Delegation-Core, MIC-State, and
 MIC-Evidence conformance profiles as of the 2026-05-14 hardening round:
 
-- Mission, DG, and AAT verification (signature, audience, expiry,
-  revocation through status-list lookup; FIX-3 ensures the loader fails
-  closed on missing required v0.1 members);
+- Mission, DG, and AAT verification (signature, required audience matching the
+  configured proxy audience, expiry, revocation through status-list lookup;
+  FIX-3 ensures the loader fails closed on missing required v0.1 members);
 - Tool / forbidden-tool / resource-scope / max-tool-calls budget gates;
-- Per-session jti single-use and replay defenses, KB-JWT nonce store,
-  AAT proof-of-possession (FIX-2 default-secure since 2026-04-28);
+- Per-session jti single-use and replay defenses, KB-JWT nonce store, and AAT
+  proof-of-possession with `cnf` required by default; bearer compatibility is
+  available only through an explicit constructor opt-out;
 - Verdict (`compliant` / `violation` / `insufficient_evidence` / `unknown`)
   on declared-telemetry absence and on policy violations;
 - Receipt chain emission with hash-linked entries and JWS signing;

@@ -135,6 +135,7 @@ def _issue_aat_like_token(
         {
             "iss": "https://tenuo.example/issuer",
             "sub": "aat-error-sanitization-agent",
+            "aud": "ardur-proxy",
             "iat": now,
             "exp": now + 300,
             "jti": str(uuid.uuid4()),
@@ -150,6 +151,7 @@ def _issue_aat_like_token(
                     "max_tool_calls": 2,
                 }
             ],
+            "cnf": {"jwk": {"kid": "holder-key"}},
         },
         private_key,
         algorithm=ALGORITHM,

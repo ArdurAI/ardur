@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -256,6 +257,13 @@ func TestIssue_CoreLevel_MinimalRequest(t *testing.T) {
 	if cred.Claims.Identity == nil {
 		t.Fatal("missing Layer 1 (Identity)")
 	}
+	identityJSON, err := json.Marshal(cred.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshaling identity claims: %v", err)
+	}
+	if strings.Contains(string(identityJSON), `"spiffe_id_assurance"`) {
+		t.Fatalf("direct identity issuance must preserve the existing credential schema: %s", identityJSON)
+	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("missing Layer 3 (Intent)")
 	}
@@ -281,6 +289,45 @@ func TestIssue_CoreLevel_RequiresIdentity(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "identity") {
 		t.Errorf("error should mention identity: %v", err)
+	}
+}
+
+func TestIssue_CoreLevel_ExplicitlyAllowsUnverifiedIdentityWithoutSPIFFE(t *testing.T) {
+	key := testSigningKey(t)
+	iss, _ := NewIssuer(key, "https://vibap.example.com")
+
+	req := minimalRequest()
+	req.SPIFFEID = ""
+	req.OwnerID = ""
+	req.AgentID = "default/test-agent"
+	req.AllowUnverifiedIdentity = true
+
+	result, err := iss.Issue(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Issue failed for explicit unverified-identity request: %v", err)
+	}
+	if result.Credential.Claims.Identity != nil {
+		t.Fatalf("core credential must omit identity claims: %+v", result.Credential.Claims.Identity)
+	}
+	if got := result.Credential.Claims.Subject; got != req.AgentID {
+		t.Fatalf("subject = %q, want fallback agent ID %q", got, req.AgentID)
+	}
+	claimsJSON, err := json.Marshal(result.Credential.Claims)
+	if err != nil {
+		t.Fatalf("marshaling credential claims: %v", err)
+	}
+	if strings.Contains(string(claimsJSON), "\"identity\"") {
+		t.Fatalf("core credential must omit identity claim: %s", claimsJSON)
+	}
+
+	verification, err := credential.Verify(result.Encoded, key.PublicKey, &credential.VerifyOptions{
+		SkipStatusCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("verifying issued credential: %v", err)
+	}
+	if !verification.Valid {
+		t.Fatalf("issued unverified credential must remain structurally valid: %v", verification.Errors)
 	}
 }
 

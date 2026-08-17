@@ -40,7 +40,7 @@ type Claims struct {
 	// Standard JWT claims
 	JWTID     string `json:"jti,omitempty"` // Unique credential identifier (prevents replay)
 	Issuer    string `json:"iss"`           // VIBAP Authority identifier
-	Subject   string `json:"sub"`           // Agent SPIFFE ID
+	Subject   string `json:"sub"`           // Agent identifier; SPIFFE ID when one is present
 	IssuedAt  int64  `json:"iat"`           // Unix timestamp of issuance
 	ExpiresAt int64  `json:"exp"`           // Unix timestamp of expiration
 	NotBefore int64  `json:"nbf,omitempty"` // Unix timestamp, not valid before
@@ -55,7 +55,7 @@ type Claims struct {
 	SD          []string `json:"_sd,omitempty"`     // Array of disclosure hashes
 
 	// VIBAP credential layers
-	Identity   *IdentityClaims   `json:"identity,omitempty"`   // Layer 1 — always disclosed
+	Identity   *IdentityClaims   `json:"identity,omitempty"`   // Layer 1 — optional; always disclosed when present
 	Provenance *ProvenanceClaims `json:"provenance,omitempty"` // Layer 2 — selectively disclosable
 	Intent     *IntentClaims     `json:"intent,omitempty"`     // Layer 3 — always disclosed
 	Baseline   *BaselineClaims   `json:"baseline,omitempty"`   // Layer 4 — selectively disclosable
