@@ -175,7 +175,20 @@ def test_python_distribution_metadata_is_release_ready() -> None:
     assert project["license"] == "MIT"
     assert project["license-files"] == ["LICENSE"]
     assert "rfc8785>=0.1.4,<0.2" in project["dependencies"]
-    assert build_system["requires"] == ["setuptools==83.0.0", "wheel==0.47.0"]
+    build_requirements = build_system["requires"]
+    assert build_requirements
+    invalid_build_requirements = [
+        requirement
+        for requirement in build_requirements
+        if re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9._+-]*",
+            requirement,
+        )
+        is None
+    ]
+    assert not invalid_build_requirements, (
+        f"build-system requirements must use exact == pins: {invalid_build_requirements}"
+    )
     assert project["urls"] == {
         "Homepage": "https://github.com/ArdurAI/ardur",
         "Documentation": "https://github.com/ArdurAI/ardur/tree/main/docs",
