@@ -1,6 +1,6 @@
 module github.com/ArdurAI/ardur/go
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/cedar-policy/cedar-go v1.8.0

@@ -102,7 +102,7 @@ The full, current list lives in
 
 | Toolchain | Version | Source of truth |
 | --- | --- | --- |
-| Go | `1.26.5` | `go/go.mod` (`go` directive) |
+| Go | `1.26.6` | `go/go.mod` (`go` directive) |
 | Python | `>=3.10` | `python/pyproject.toml` |
 | ruff | `v0.13.0` | `.pre-commit-config.yaml` |
 
