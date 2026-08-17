@@ -317,7 +317,7 @@ def _jwt_svid_jwks(jwks: dict) -> dict:
     jwt_svid_keys = [
         dict(key)
         for key in keys
-        if isinstance(key, dict) and key.get("use") == "jwt-svid"
+        if isinstance(key, dict) and ("use" not in key or key["use"] == "jwt-svid")
     ]
     if not jwt_svid_keys:
         raise ValueError("Trust bundle JWKS does not contain JWT-SVID signing keys")

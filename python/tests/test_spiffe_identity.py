@@ -37,7 +37,7 @@ _SPIFFE_ID = "spiffe://example.org/workload-test"
 
 
 class TestVerifyJwtSvidHappyPath:
-    def test_fresh_token_valid_audience_returns_claims(self):
+    def test_federation_bundle_with_labelled_keys_verifies(self):
         """Round-5 happy path: a freshly-minted SVID with valid audience
         flows through ``verify_jwt_svid`` cleanly. Without this test, a
         regression that breaks the entire verifier (e.g. accidentally
@@ -45,11 +45,36 @@ class TestVerifyJwtSvidHappyPath:
         now = int(time.time())
         bundle = make_mock_svid_bundle(_SPIFFE_ID, iat=now, exp=now + 600)
         trust = make_mock_trust_bundle(_SPIFFE_ID)
+        for key in trust.jwks["keys"]:
+            if key.get("use") != "jwt-svid":
+                key["use"] = "x509-svid"
+        assert {key["use"] for key in trust.jwks["keys"]} == {
+            "jwt-svid",
+            "x509-svid",
+        }
         claims = verify_jwt_svid(bundle.jwt_svid_token, trust, _AUDIENCE)
         assert isinstance(claims, SvidClaims)
         assert claims.spiffe_id == _SPIFFE_ID
         assert _AUDIENCE in claims.audience
         assert claims.iat == now
+
+    def test_workload_api_bundle_without_use_verifies(self):
+        now = int(time.time())
+        bundle = make_mock_svid_bundle(_SPIFFE_ID, iat=now, exp=now + 600)
+        trust = make_mock_trust_bundle(_SPIFFE_ID)
+        labelled_key = next(
+            key for key in trust.jwks["keys"] if key.get("use") == "jwt-svid"
+        )
+        workload_api_key = {
+            field: labelled_key[field] for field in ("kty", "kid", "crv", "x", "y")
+        }
+        assert "use" not in workload_api_key
+        trust.jwks = {"keys": [workload_api_key]}
+        assert bundle.jwt_svid_token is not None
+
+        claims = verify_jwt_svid(bundle.jwt_svid_token, trust, _AUDIENCE)
+
+        assert claims.spiffe_id == _SPIFFE_ID
 
 
 class TestVerifyJwtSvidIatGate:
@@ -115,12 +140,55 @@ class TestVerifyJwtSvidInputValidation:
         with pytest.raises(ValueError):
             verify_jwt_svid(bundle.jwt_svid_token, trust, "wrong-audience")
 
+    def test_tampered_signature_rejected(self):
+        now = int(time.time())
+        bundle = make_mock_svid_bundle(_SPIFFE_ID, iat=now, exp=now + 600)
+        trust = make_mock_trust_bundle(_SPIFFE_ID)
+        assert bundle.jwt_svid_token is not None
+        header, payload, signature = bundle.jwt_svid_token.split(".")
+        replacement = "A" if signature[0] != "A" else "B"
+        tampered_token = f"{header}.{payload}.{replacement}{signature[1:]}"
+
+        with pytest.raises(ValueError, match="JWT-SVID validation failed"):
+            verify_jwt_svid(tampered_token, trust, _AUDIENCE)
+
+    def test_unknown_trust_domain_rejected(self):
+        unknown_spiffe_id = "spiffe://unknown.example/workload-test"
+        now = int(time.time())
+        bundle = make_mock_svid_bundle(
+            unknown_spiffe_id,
+            iat=now,
+            exp=now + 600,
+        )
+        trust = make_mock_trust_bundle(_SPIFFE_ID)
+        assert bundle.jwt_svid_token is not None
+
+        with pytest.raises(
+            ValueError,
+            match="No trust bundle available for trust domain 'unknown.example'",
+        ):
+            verify_jwt_svid(bundle.jwt_svid_token, trust, _AUDIENCE)
+
     def test_non_jwt_svid_bundle_keys_are_rejected(self):
         now = int(time.time())
         bundle = make_mock_svid_bundle(_SPIFFE_ID, iat=now, exp=now + 600)
         trust = make_mock_trust_bundle(_SPIFFE_ID)
         for key in trust.jwks["keys"]:
             key["use"] = "sig"
+
+        with pytest.raises(ValueError, match="does not contain JWT-SVID"):
+            verify_jwt_svid(bundle.jwt_svid_token, trust, _AUDIENCE)
+
+    def test_x509_svid_only_bundle_keys_are_rejected(self):
+        now = int(time.time())
+        bundle = make_mock_svid_bundle(_SPIFFE_ID, iat=now, exp=now + 600)
+        trust = make_mock_trust_bundle(_SPIFFE_ID)
+        jwt_key = next(
+            dict(key) for key in trust.jwks["keys"] if key.get("use") == "jwt-svid"
+        )
+        jwt_key["use"] = "x509-svid"
+        trust.jwks = {"keys": [jwt_key]}
+        assert bundle.jwt_svid_token is not None
 
         with pytest.raises(ValueError, match="does not contain JWT-SVID"):
             verify_jwt_svid(bundle.jwt_svid_token, trust, _AUDIENCE)
