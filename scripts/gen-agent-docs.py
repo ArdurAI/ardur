@@ -48,7 +48,7 @@ def _fail(message: str) -> None:
 
 
 def read_go_version() -> str:
-    """Return the `go` directive from go/go.mod (e.g. "1.26.5")."""
+    """Return the `go` directive from go/go.mod (e.g. "1.26.6")."""
     text = (REPO_ROOT / "go" / "go.mod").read_text(encoding="utf-8")
     match = re.search(r"^go\s+(\S+)\s*$", text, re.MULTILINE)
     if not match:
