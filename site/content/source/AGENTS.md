@@ -2,7 +2,7 @@
 title: "Ardur Agent Instructions"
 description: "The canonical entry point for coding agents working in this repository. These"
 source_path: "AGENTS.md"
-source_sha256: "58dc104d3f677c47289b5c24c73811902b8e5ac5ecc01ef3ccbac208074d0e29"
+source_sha256: "0d86b0b1882a5b96b867f787f0e3cad0cad3d59beda0a061010dc5bf2ae2ef07"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -119,7 +119,7 @@ The full, current list lives in
 
 | Toolchain | Version | Source of truth |
 | --- | --- | --- |
-| Go | `1.26.5` | `go/go.mod` (`go` directive) |
+| Go | `1.26.6` | `go/go.mod` (`go` directive) |
 | Python | `>=3.10` | `python/pyproject.toml` |
 | ruff | `v0.13.0` | `.pre-commit-config.yaml` |
 
