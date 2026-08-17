@@ -2,7 +2,7 @@
 title: "Reproducing AuditBench Harness Fixtures"
 description: "This document describes how to reproduce the deterministic AuditBench harness"
 source_path: "REPRODUCE.md"
-source_sha256: "dc0e4bbc322e20664bc83fa6d6460719d81ee9bc6f5c9d729f73802d22e4e3dc"
+source_sha256: "98a233cc33bdb726e6cebf7088d4bae6294830ef36afab6b865ca56c1eb2cd34"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -54,7 +54,7 @@ rather than trivially agreeing.
 
 ## Reproducing the results
 
-**Prerequisites**: Go ≥ 1.26.5, `make`.
+**Prerequisites**: Go ≥ 1.26.6, `make`.
 
 ```sh
 # 1. Clone (or pull) the repository
