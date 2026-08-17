@@ -13,7 +13,7 @@
 
 ## 1. Scope
 
-This document defines the **stateful tri-state verifier contract** for the
+This document defines the **stateful verifier contract** for the
 MCEP (Mission-Controlled Execution Protocol) runtime-governance protocol.
 
 The verifier is the component that composes:
@@ -26,7 +26,7 @@ The verifier is the component that composes:
 This document standardizes:
 
 1. the verifier interface;
-2. the tri-state verdict codomain;
+2. the verdict codomain;
 3. the verifier-side lineage state model;
 4. the minimum typed projection required for an honest `compliant` verdict;
 5. the `enforce` and `attest` execution modes;
@@ -88,7 +88,8 @@ The function arguments have the following meanings:
 
 The return tuple has the following meanings:
 
-- `Verdict`: one of `compliant`, `violation`, or `insufficient_evidence`.
+- `Verdict`: one of `compliant`, `violation`, `insufficient_evidence`, or
+  `unknown` (see §4).
 - `StateDelta`: the verifier-local mutation to apply to `LineageState`.
 - `ExecutionReceipt`: an ER claims set conforming to A.3.
 
@@ -125,8 +126,21 @@ An implementation MUST emit an ER even when `StateDelta = {}`.
 `Verdict` is a closed enum:
 
 ```text
-Verdict in { compliant, violation, insufficient_evidence }
+Verdict in { compliant, violation, insufficient_evidence, unknown }
 ```
+
+> **v0.2 extension note.** The original v0.1 codomain was tri-state:
+> `{ compliant, violation, insufficient_evidence }`. The `unknown` value was
+> added by the v0.2 runtime to distinguish a **structural observation gap**
+> (the verifier observed the call but the evidence is outside the capture
+> boundary — `unknown`) from a **transient operational failure** (the verifier
+> could not evaluate because required evidence was missing, hidden, or
+> inconsistent — `insufficient_evidence`). The reference proxy maps
+> `visibility != "full"` to `unknown` and hidden-hop / missing-receipt
+> conditions to `insufficient_evidence`. Receivers and conformance
+> implementations MUST accept `unknown` as a valid verdict value. See
+> [`docs/security-model.md`](../security-model.md) for the full five-state
+> Decision taxonomy.
 
 The meanings are:
 
@@ -136,13 +150,20 @@ The meanings are:
   the observed step violates policy, integrity, revocation, or budget rules.
 - `insufficient_evidence`: the verifier could not honestly determine
   compliance because required evidence was missing, hidden, ablated, revoked
-  out from under the observation, or structurally inconsistent.
+  out from under the observation, or structurally inconsistent (a transient or
+  operational failure that might be retried).
+- `unknown`: the verifier observed the call but the evidence is structurally
+  outside the capture boundary — the honest "I cannot know what happened"
+  outcome. Unlike `insufficient_evidence` (which records a retryable failure),
+  `unknown` records a genuine observation gap that no amount of retry will
+  resolve.
 
-The verifier MUST NOT collapse `insufficient_evidence` into `compliant`.
+The verifier MUST NOT collapse `insufficient_evidence` or `unknown` into
+`compliant`.
 
-The verifier MUST NOT treat `insufficient_evidence` as a synonym for
-`violation`. `insufficient_evidence` is an honesty outcome about the
-projection, not proof of malicious action.
+The verifier MUST NOT treat `insufficient_evidence` or `unknown` as a synonym
+for `violation`. Both are honesty outcomes about the projection, not proof of
+malicious action.
 
 ## 5. LineageState
 
@@ -749,7 +770,7 @@ MIC-Evidence conformance profiles as of the 2026-05-14 hardening round:
 - Tool / forbidden-tool / resource-scope / max-tool-calls budget gates;
 - Per-session jti single-use and replay defenses, KB-JWT nonce store,
   AAT proof-of-possession (FIX-2 default-secure since 2026-04-28);
-- Tri-state verdict (`compliant` / `violation` / `insufficient_evidence`)
+- Verdict (`compliant` / `violation` / `insufficient_evidence` / `unknown`)
   on declared-telemetry absence and on policy violations;
 - Receipt chain emission with hash-linked entries and JWS signing;
 - Approval-rate-limit enforcement when the MD declares approval policy;

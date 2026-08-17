@@ -111,6 +111,26 @@ See [`Tool-Server Preflight v0.1`](specs/tool-server-preflight-v0.1.md).
 | `standard_jws` | default receipt path for ordinary governed actions |
 | `strong_eat_tee` | required for high-risk delegated or side-effecting actions |
 
+## Decision taxonomy
+
+The reference proxy returns one of five governance decisions for every
+evaluated tool call. Only `PERMIT` allows execution; all others block
+the call (fail-closed discipline).
+
+| Decision | Meaning | Fail-closed? |
+|---|---|---|
+| `PERMIT` | Tool call is within declared scope, budget, and delegation policy. | N/A (allows execution) |
+| `DENY` | Tool call violates a mission-declared boundary (tool, resource, budget, or delegation). | Yes |
+| `VIOLATION` | A governance invariant is broken (mission tampering, passport revoked, memory integrity failure, delegation splice). More severe than `DENY` — indicates compromised credentials. | Yes |
+| `INSUFFICIENT_EVIDENCE` | The verifier cannot make a confident decision due to a transient operational failure (approval operator unavailable, state file corrupted, network error). Might be retried. | Yes |
+| `UNKNOWN` | The verifier observed the call but the evidence is structurally outside the capture boundary (visibility is not "full", tool-call descriptor is incomplete). The honest "I cannot know what happened" outcome. | Yes |
+
+The distinction between `INSUFFICIENT_EVIDENCE` and `UNKNOWN` matters for
+audit trails: `INSUFFICIENT_EVIDENCE` records a retryable operational
+failure, while `UNKNOWN` records a genuine observation gap. Both
+fail-closed as `DENY`. Public receipt verdicts map `INSUFFICIENT_EVIDENCE`
+to `insufficient_evidence` and `UNKNOWN` to `unknown`.
+
 ## Required posture
 
 When Ardur lacks evidence, it must deny or return `unknown` rather than

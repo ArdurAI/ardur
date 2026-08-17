@@ -838,7 +838,7 @@ def load_receiver_envelope(path: str | Path) -> dict[str, Any]:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ReceiverAttestationError(
-            f"receiver-attestation envelope could not be read: {exc}"
+            f"receiver-attestation envelope could not be read ({type(exc).__name__})"
         ) from exc
     if not isinstance(payload, dict):
         raise ReceiverAttestationError(
@@ -863,7 +863,9 @@ def load_json_document(path: str | Path, *, label: str) -> dict[str, Any]:
     except ReceiverAttestationError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ReceiverAttestationError(f"{label} could not be read: {exc}") from exc
+        raise ReceiverAttestationError(
+            f"{label} could not be read ({type(exc).__name__})"
+        ) from exc
     if not isinstance(payload, dict):
         raise ReceiverAttestationError(f"{label} must be a JSON object")
     return payload

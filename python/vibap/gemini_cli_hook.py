@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .claude_code_hook import MissionLoadError, load_active_passport
+from .claude_code_hook import HOOK_INPUT_MAX_CHARS, MissionLoadError, load_active_passport
 from .denial import DenialReason
 from .passport import DEFAULT_HOME, _ensure_default_home_dir, load_private_key, load_public_key, resolve_keys_dir
 from .receipt import build_receipt, sign_receipt, verify_chain
@@ -298,6 +298,45 @@ def _validate_fixture_path_not_file(path: Path, *, label: str, condition: str) -
         )
 
 
+def _validate_fixture_path_parents_not_dangling(
+    path: Path,
+    *,
+    dangling_condition: str,
+    not_dir_condition: str,
+) -> None:
+    """Reject a fixture path whose parent chain crosses a dangling symlink or
+    an existing non-directory, BEFORE ``Path.resolve()`` / ``mkdir(parents=True)``
+    follows the link and silently materialises the missing target.
+
+    Mirrors ``personal_hub.validate_personal_home_path_components``: walk each
+    *parent* component of the un-resolved expanded path and reject when any
+    parent is a dangling symlink (``parent.is_symlink() and not
+    parent.exists()``) or an existing non-directory (regular file, socket,
+    block device, etc.).
+
+    Operating on the un-resolved path is essential because ``.resolve()``
+    collapses the symlink chain before the leaf-only check in
+    ``_validate_fixture_path_not_file`` can see it.
+
+    The direct dangling-symlink leaf case is still rejected by
+    ``_validate_fixture_path_not_file``; this helper deliberately does not
+    duplicate that so callers keep firing the leaf-specific condition.
+    """
+    for parent in path.parents:
+        is_symlink = parent.is_symlink()
+        exists = parent.exists()
+        if is_symlink and not exists:
+            raise FixturePathError(
+                "home parent component is a dangling symlink",
+                condition=dangling_condition,
+            )
+        if exists and not parent.is_dir():
+            raise FixturePathError(
+                "home parent component is not a directory",
+                condition=not_dir_condition,
+            )
+
+
 def _fixture_path_failure_response(*, condition: str, label: str, arg_name: str) -> dict[str, Any]:
     is_empty = condition.endswith("_empty")
     if is_empty:
@@ -415,6 +454,18 @@ def build_local_fixture(
         )
     project_raw = Path(project_raw_value).expanduser()
     ardur_chain_raw = Path(chain_dir or DEFAULT_CHAIN_DIR).expanduser()
+    # Validate parent components for dangling symlinks / non-directory parents
+    # BEFORE the leaf-only check and resolve() collapse the symlink chain.
+    _validate_fixture_path_parents_not_dangling(
+        gemini_home_raw,
+        dangling_condition="gemini_cli_fixture_home_dangling_symlink_parent",
+        not_dir_condition="gemini_cli_fixture_home_parent_not_directory",
+    )
+    _validate_fixture_path_parents_not_dangling(
+        ardur_chain_raw,
+        dangling_condition="gemini_cli_fixture_chain_dir_dangling_symlink_parent",
+        not_dir_condition="gemini_cli_fixture_chain_dir_parent_not_directory",
+    )
     # Validate raw paths for dangling symlinks before resolve() follows them.
     _validate_fixture_path_not_file(gemini_home_raw, label="home", condition="gemini_cli_fixture_home_not_directory")
     _validate_fixture_path_not_file(ardur_chain_raw, label="chain dir", condition="gemini_cli_fixture_chain_dir_not_directory")
@@ -979,6 +1030,8 @@ def _status_from_verdict(verdict: str) -> str:
         return "allow"
     if verdict == "insufficient_evidence":
         return "unknown"
+    if verdict == "unknown":
+        return "unknown"
     return "deny"
 
 
@@ -1125,6 +1178,7 @@ def _gemini_cli_hook_input_next_steps(condition: str) -> list[dict[str, str]]:
 
 
 def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
+    msg = str(exc)
     if isinstance(exc, json.JSONDecodeError):
         condition = "gemini_cli_hook_input_malformed"
         message = "Gemini CLI hook input is not valid JSON."
@@ -1132,6 +1186,10 @@ def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
             "Input must be a valid JSON object; "
             f"parsing failed at line {exc.lineno}, column {exc.colno}."
         )
+    elif "exceeds" in msg and "character limit" in msg:
+        condition = "gemini_cli_hook_input_oversize"
+        message = "Gemini CLI hook input exceeds the size limit."
+        detail = msg
     else:
         condition = "gemini_cli_hook_input_not_object"
         message = "Gemini CLI hook input must be a JSON object."
@@ -1150,13 +1208,33 @@ def _gemini_cli_hook_input_failure_response(exc: Exception) -> dict[str, Any]:
 
 
 def _load_json_stdin() -> dict[str, Any]:
-    raw = sys.stdin.read()
+    raw = sys.stdin.read(HOOK_INPUT_MAX_CHARS + 1)
+    if len(raw) > HOOK_INPUT_MAX_CHARS:
+        raise ValueError(
+            f"Gemini hook input exceeds {HOOK_INPUT_MAX_CHARS} character limit"
+        )
     if not raw.strip():
         return {}
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):
         raise ValueError("Gemini hook payload must be a JSON object")
     return parsed
+
+
+def _gemini_fail_safe_block() -> dict[str, Any]:
+    """Return a protocol-valid block response when the hook cannot process input.
+
+    Gemini CLI hooks cannot block the host the way Claude Code PreToolUse can,
+    but emitting a ``block: True`` response with valid JSON (instead of a raw
+    traceback / non-JSON crash) keeps downstream consumers parseable and fails
+    closed for local wrappers that honour the ``block`` field.
+    """
+    return {
+        "status": "deny",
+        "block": True,
+        "message": "ardur: blocked - hook input could not be processed safely",
+        "claim_boundary": "visible Gemini CLI hook/tool-boundary evidence only",
+    }
 
 
 def _print_json(payload: Mapping[str, Any]) -> None:
@@ -1181,7 +1259,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (json.JSONDecodeError, ValueError) as exc:
             _print_json(_gemini_cli_hook_input_failure_response(exc))
             return 1
-        output = handle_pre_tool_call(hook_input, keys_dir=args.keys_dir)
+        try:
+            output = handle_pre_tool_call(hook_input, keys_dir=args.keys_dir)
+        except Exception as exc:  # noqa: BLE001 - fail safe without leaking stack
+            sys.stderr.write(f"ardur: gemini hook handler crashed: {exc}\n")
+            output = _gemini_fail_safe_block()
         _print_json(output)
         return 2 if output.get("block") else 0
     if phase == "fixture":

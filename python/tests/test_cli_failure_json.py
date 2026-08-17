@@ -1495,6 +1495,91 @@ def test_start_invalid_tls_material_returns_safe_json_before_side_effects(
     assert all("<" in step["command"] and ">" in step["command"] for step in payload["next_steps"])
 
 
+def test_start_tls_error_preserves_domain_message(tmp_path, capsys, monkeypatch):
+    """``TLSConfigurationError`` carries a domain message; the JSON response
+    must include it in ``detail`` rather than discarding it for a fixed string."""
+    keys_dir = tmp_path / "keys"
+    state_dir = tmp_path / "state"
+    audit_log = tmp_path / "audit.jsonl"
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_text("not a certificate", encoding="utf-8")
+    key_path.write_text("not a private key", encoding="utf-8")
+
+    def raise_tls_error(*_args, **_kwargs):
+        raise cli.TLSConfigurationError(
+            "TLS configuration is unavailable; verify the certificate and key"
+        )
+
+    monkeypatch.setattr(cli, "serve_proxy", raise_tls_error)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "start",
+            "--keys-dir", str(keys_dir),
+            "--state-dir", str(state_dir),
+            "--log-path", str(audit_log),
+            "--host", "127.0.0.1",
+            "--port", "0",
+            "--require-auth",
+            "--tls-cert", str(cert_path),
+            "--tls-key", str(key_path),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "start_tls_material_invalid"
+    # The domain error message from TLSConfigurationError must appear in detail.
+    assert "TLS configuration is unavailable" in payload["detail"]
+    # The generic fallback text must NOT be the only content.
+    assert payload["detail"] != (
+        "TLS stays enabled unless --no-tls is explicitly supplied. When explicit "
+        "--tls-cert and --tls-key values are used, both must point to existing files "
+        "before Ardur starts the local governance proxy."
+    )
+
+
+def test_hub_tls_error_preserves_domain_message(tmp_path, capsys, monkeypatch):
+    """``HubTLSConfigurationError`` carries a domain message; the JSON response
+    must include it in ``detail`` rather than discarding it for a fixed string."""
+    home = tmp_path / "ardur_home"
+    home.mkdir()
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_text("not a certificate", encoding="utf-8")
+    key_path.write_text("not a private key", encoding="utf-8")
+
+    def raise_hub_tls_error(*_args, **_kwargs):
+        raise cli.HubTLSConfigurationError()
+
+    monkeypatch.setattr(cli, "serve_hub", raise_hub_tls_error)
+
+    rc, payload = _run_cli_and_read_json(
+        [
+            "hub",
+            "--home", str(home),
+            "--host", "127.0.0.1",
+            "--port", "0",
+            "--tls-cert", str(cert_path),
+            "--tls-key", str(key_path),
+        ],
+        capsys,
+    )
+
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "hub_tls_material_invalid"
+    # The domain error message from HubTLSConfigurationError must appear in detail.
+    assert "TLS configuration is unavailable" in payload["detail"]
+    # The generic fallback text must NOT be the only content.
+    assert payload["detail"] != (
+        "TLS remains enabled unless --no-tls is explicitly supplied. Explicit "
+        "certificate and key values must identify a usable matching pair."
+    )
+
+
 @pytest.mark.parametrize(
     ("budget_args", "condition"),
     [
@@ -1651,6 +1736,84 @@ def test_issue_valid_identity_still_succeeds(tmp_path, capsys):
     assert payload["claims"]["mission"] == "test mission"
     assert (keys_dir / "passport_private.pem").exists()
     assert (keys_dir / "passport_public.pem").exists()
+
+
+@pytest.mark.parametrize(
+    ("flag", "values", "field_name"),
+    [
+        ("--allowed-tools", ["", "valid_tool"], "allowed_tools"),
+        ("--allowed-tools", ["   "], "allowed_tools"),
+        ("--forbidden-tools", [""], "forbidden_tools"),
+        ("--forbidden-tools", ["   ", "Bash"], "forbidden_tools"),
+        ("--resource-scope", [""], "resource_scope"),
+        ("--resource-scope", ["   "], "resource_scope"),
+    ],
+)
+def test_issue_empty_or_whitespace_nargs_list_returns_safe_json_failure(
+    tmp_path, capsys, flag, values, field_name
+):
+    keys_dir = tmp_path / "keys"
+    cli_args = [
+        "issue",
+        "--agent-id",
+        "test-agent",
+        "--mission",
+        "test mission",
+        "--keys-dir",
+        str(keys_dir),
+        flag,
+        *values,
+    ]
+    rc, payload = _run_cli_and_read_json(cli_args, capsys)
+
+    rendered = json.dumps(payload, sort_keys=True)
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["condition"] == "issue_tool_list_invalid"
+    assert payload["error"] == "issue_tool_list_invalid"
+    assert payload["error_code"] == "issue_tool_list_invalid"
+    assert payload["detail"]
+    assert field_name in payload["detail"]
+    assert payload["next_steps"]
+    assert "token" not in payload
+    assert "claims" not in payload
+    assert "Traceback" not in rendered
+    assert str(tmp_path) not in rendered
+    # No signing keys may be created when validation rejects the input.
+    assert not keys_dir.exists() or not any(keys_dir.iterdir())
+    assert all(
+        "<" in step["command"] and ">" in step["command"]
+        for step in payload["next_steps"]
+    )
+
+
+def test_issue_valid_nargs_list_still_succeeds(tmp_path, capsys):
+    keys_dir = tmp_path / "keys"
+    rc, payload = _run_cli_and_read_json(
+        [
+            "issue",
+            "--agent-id",
+            "test-agent",
+            "--mission",
+            "test mission",
+            "--allowed-tools",
+            "Read",
+            "Write",
+            "--forbidden-tools",
+            "Bash",
+            "--resource-scope",
+            "file://**",
+            "--keys-dir",
+            str(keys_dir),
+        ],
+        capsys,
+    )
+
+    assert rc == 0
+    assert "token" in payload
+    assert payload["claims"]["allowed_tools"] == ["Read", "Write"]
+    assert payload["claims"]["forbidden_tools"] == ["Bash"]
+    assert payload["claims"]["resource_scope"] == ["file://**"]
 
 
 def test_issue_zero_tool_call_budget_remains_valid(tmp_path, capsys):

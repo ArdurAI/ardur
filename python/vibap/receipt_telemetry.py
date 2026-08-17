@@ -325,6 +325,7 @@ def otlp_payloads(
             "PERMIT": (9, "INFO"),
             "DENY": (13, "WARN"),
             "ERROR": (17, "ERROR"),
+            "UNKNOWN": (17, "ERROR"),
         }[str(event["decision"])]
         logs.append(
             {

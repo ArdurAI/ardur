@@ -26,6 +26,7 @@ EXPECTED_RUNTIME_PACKAGES = {
     "cryptography",
     "jsonschema",
     "jsonschema-specifications",
+    "psutil",
     "pycparser",
     "pyjwt",
     "referencing",

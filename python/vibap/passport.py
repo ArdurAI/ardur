@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -24,6 +25,17 @@ DEFAULT_AUDIENCE = "vibap-proxy"
 DELEGATION_CHAIN_CLAIM = "delegation_chain"
 MAX_DELEGATION_DEPTH = 16
 UNRESTRICTED_RESOURCE_SCOPE_PATTERN = "**"
+_DELEGATED_MIC_CLAIMS = (
+    "conformance_profile",
+    "receipt_policy",
+    "tool_manifest_digest",
+)
+_SUPPORTED_CONFORMANCE_PROFILES = frozenset(
+    {"Delegation-Core", "MIC-State", "MIC-Evidence"}
+)
+_SUPPORTED_RECEIPT_LEVELS = frozenset(
+    {"minimal", "counter_signed", "transparency_logged"}
+)
 
 
 def resource_scope_is_explicitly_unrestricted(scope: list[str]) -> bool:
@@ -447,6 +459,11 @@ def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
         target.mkdir(parents=True, exist_ok=True)
     except (FileExistsError, NotADirectoryError) as exc:
         raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise KeyDirectoryError(
+            f"Cannot create key directory: {exc.strerror or type(exc).__name__}",
+            condition="keys_dir_unreachable",
+        ) from exc
     if not target.is_dir():
         raise KeyDirectoryError()
     return target
@@ -909,6 +926,84 @@ def _token_sha256(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _inherited_mic_conformance_claims(
+    parent_claims: Mapping[str, Any],
+    *,
+    credential_label: str = "parent",
+) -> dict[str, Any]:
+    """Return the validated, closed MIC claim bundle for a child passport.
+
+    Conformance profiles and receipt levels are ordered, non-weakening policy
+    claims.  ``derive_child_passport`` has no child override surface, so exact
+    inheritance is the only safe behavior.  Copying a reviewed allowlist also
+    prevents issuer-controlled extras from colliding with child lineage or
+    budget claims.
+    """
+
+    # Older passports may carry receipt or digest metadata without declaring a
+    # conformance profile.  They remain legacy credentials: do not activate
+    # MIC validation or copy any part of a bundle until a profile is explicit.
+    if "conformance_profile" not in parent_claims:
+        return {}
+
+    present = {claim for claim in _DELEGATED_MIC_CLAIMS if claim in parent_claims}
+    expected = set(_DELEGATED_MIC_CLAIMS)
+    if present != expected:
+        missing = sorted(expected - present)
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle is incomplete; "
+            f"missing {missing}"
+        )
+
+    profile = parent_claims["conformance_profile"]
+    if not isinstance(profile, str) or profile not in _SUPPORTED_CONFORMANCE_PROFILES:
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has an unsupported "
+            "conformance_profile"
+        )
+
+    receipt_policy = parent_claims["receipt_policy"]
+    if not isinstance(receipt_policy, dict) or set(receipt_policy) != {"level"}:
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has a malformed "
+            "receipt_policy"
+        )
+    receipt_level = receipt_policy.get("level")
+    if (
+        not isinstance(receipt_level, str)
+        or receipt_level not in _SUPPORTED_RECEIPT_LEVELS
+    ):
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has an unsupported "
+            "receipt level"
+        )
+    if profile == "MIC-Evidence" and receipt_level == "minimal":
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle weakens MIC-Evidence "
+            "with a minimal receipt level"
+        )
+
+    manifest_digest = parent_claims["tool_manifest_digest"]
+    digest_prefix = "sha-256:"
+    digest_hex = (
+        manifest_digest[len(digest_prefix) :]
+        if isinstance(manifest_digest, str)
+        and manifest_digest.startswith(digest_prefix)
+        else ""
+    )
+    if len(digest_hex) != 64 or any(
+        character not in "0123456789abcdef" for character in digest_hex
+    ):
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has a malformed "
+            "tool_manifest_digest"
+        )
+
+    return {
+        claim: copy.deepcopy(parent_claims[claim]) for claim in _DELEGATED_MIC_CLAIMS
+    }
+
+
 def _require_nonempty_str(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise PermissionError(f"delegated passport has malformed {field}")
@@ -1057,6 +1152,9 @@ def verify_passport(
                     raise PermissionError(
                         "delegation chain ancestor parent hash is not trusted"
                     )
+            # The cold lineage indexes anchor hashes and parent edges, but do
+            # not persist ancestor policy claims.  MIC bundle equality can
+            # only be enforced below when the signed parent token is present.
             return claims
         parent_claims = _decode_passport(parent_token, public_key, audience=audience)
         if str(parent_claims["jti"]) != str(parent_jti):
@@ -1071,6 +1169,17 @@ def verify_passport(
             raise PermissionError(
                 "delegation chain does not match supplied parent lineage"
             )
+
+        parent_mic_claims = _inherited_mic_conformance_claims(parent_claims)
+        if parent_mic_claims:
+            child_mic_claims = _inherited_mic_conformance_claims(
+                claims,
+                credential_label="child",
+            )
+            if child_mic_claims != parent_mic_claims:
+                raise PermissionError(
+                    "child MIC conformance claim bundle does not match parent"
+                )
 
     return claims
 
@@ -1119,6 +1228,9 @@ def derive_child_passport(
              ``cwd escalation`` reason.
       - risk_budget: a governed parent policy is inherited or explicitly
                      attenuated; an ungoverned parent cannot introduce one.
+      - MIC conformance: an explicit, complete profile / receipt-policy /
+                         manifest-digest bundle is validated and inherited
+                         exactly; partial or malformed bundles fail closed.
     """
     # Signature-and-claims decode only. The full chain-anchor verification
     # (``verify_passport`` with ``parent_token=grandparent_token``) is the
@@ -1313,6 +1425,7 @@ def derive_child_passport(
         private_key,
         ttl_s=requested_ttl,
         extra_claims={
+            **_inherited_mic_conformance_claims(parent),
             "parent_token_hash": _token_sha256(parent_token),
             DELEGATION_CHAIN_CLAIM: child_chain,
             "reserved_budget_share": int(child_budget),

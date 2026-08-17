@@ -4,6 +4,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,6 +42,11 @@ func main() {
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	if !validateWebhookPort(webhookPort) {
+		fmt.Fprintf(os.Stderr, "webhook-port must be between 1 and 65535, got %d\n", webhookPort)
+		os.Exit(2)
+	}
 
 	logger := zap.New(zap.UseFlagOptions(&opts))
 	ctrl.SetLogger(logger)
@@ -88,4 +94,14 @@ func main() {
 		setupLog.Error(err, "webhook server exited with error")
 		os.Exit(1)
 	}
+}
+
+// validateWebhookPort reports whether port is a valid TCP port number
+// (1-65535) that can be safely passed to webhook.NewServer. The default
+// --webhook-port value of 9443 is valid. Values outside this range would
+// otherwise reach webhook.Options.Port and produce a confusing bind-time
+// failure far from the actual misuse; mirroring ardur-seccomp-smoke's
+// lifecycle-stress-iterations < 1 convention, we reject them at parse time.
+func validateWebhookPort(port int) bool {
+	return port >= 1 && port <= 65535
 }

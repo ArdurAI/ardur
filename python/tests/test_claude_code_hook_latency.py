@@ -16,6 +16,12 @@ from pathlib import Path
 
 import pytest
 
+from vibap.latency_report import (
+    FunctionalFailure,
+    build_report,
+    functional_failure_from_subprocess,
+    write_report_atomic,
+)
 from vibap.passport import MissionPassport, generate_keypair, issue_passport
 
 
@@ -23,6 +29,57 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("ARDUR_RUN_LATENCY_BENCH") != "1",
     reason="set ARDUR_RUN_LATENCY_BENCH=1 to run latency benchmarks",
 )
+
+
+def _is_ci_environment() -> bool:
+    """Detect GitHub Actions / generic CI shared runners.
+
+    The p95<10ms hot-path and p95<20ms native-client gates are local-evidence
+    thresholds measured on Apple Silicon macOS. On CI shared runners (2-core
+    ubuntu-latest) the same paths run materially slower under CPU contention
+    (Ed25519 signing alone jumps from ~2ms to ~33ms p95). CI runs use wider
+    regression gates so the informational benchmark job stops flapping without
+    loosening the local-evidence claim boundary.
+    """
+    return os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
+
+
+def _hot_path_p95_gate_ms() -> float:
+    """In-process daemon compute p95 gate: <10ms locally, <50ms on CI.
+
+    Local Apple Silicon baseline is ~2-3ms p95; the <10ms claim is defensible
+    there. CI baseline is ~33ms p95 under CPU contention; 50ms catches a 1.5x
+    regression without flapping on shared-runner jitter.
+    """
+    return 50.0 if _is_ci_environment() else 10.0
+
+
+def _native_client_p95_gate_ms() -> float:
+    """Native client -> daemon round-trip p95 gate: <20ms locally, <60ms on CI.
+
+    Local Apple Silicon baseline is ~6-17ms p95. CI shared runners are slower
+    and can hit EAGAIN under the 100ms socket timeout; the CI gate is widened
+    to 60ms to catch a 2x regression once the timeout is relaxed.
+    """
+    return 60.0 if _is_ci_environment() else 20.0
+
+
+def _daemon_timeout_ms_env() -> str:
+    """SO_RCVTIMEO for the native daemon client.
+
+    100ms is correct locally (p95 ~6-17ms). On CI shared runners the daemon
+    thread cannot always process the request within 100ms under CPU contention,
+    producing EAGAIN (exit 11, stage=response-read errno=11). 1000ms on CI is a
+    safety bound only; it does not change the measured latency.
+    """
+    return "1000" if _is_ci_environment() else "100"
+
+
+if _is_ci_environment():
+    print(
+        "CI environment detected: using wider p95 gates "
+        "(local-evidence claim boundary unchanged)"
+    )
 
 
 def _benchmark_iterations() -> int:
@@ -45,6 +102,37 @@ def _nearest_rank(values: list[float], percentile: int) -> float:
     ordered = sorted(values)
     rank = math.ceil((percentile / 100) * len(ordered))
     return ordered[min(max(rank - 1, 0), len(ordered) - 1)]
+
+
+def _emit_latency_report(
+    *,
+    benchmark_name: str,
+    samples_ms: list[float],
+    threshold_ms: float | None,
+    threshold_result: str,
+    functional_failures: list[FunctionalFailure] | None = None,
+) -> None:
+    """Build and atomically persist a latency evidence report.
+
+    The report directory is resolved by :func:`vibap.latency_report.default_report_dir`
+    (``$RUNNER_TEMP/ardur-latency-reports`` on CI). Failures to write the
+    report are surfaced loudly rather than silently swallowed, because a
+    missing report must be visible (criterion #10).
+    """
+
+    report = build_report(
+        benchmark_name=benchmark_name,
+        samples_ms=samples_ms,
+        threshold_ms=threshold_ms,
+        threshold_result=threshold_result,
+        functional_failures=functional_failures,
+    )
+    path = write_report_atomic(report)
+    print(
+        f"ardur-latency-report: wrote {benchmark_name} -> {path} "
+        f"(n={report.sample_count}, p95={report.p95_ms}, "
+        f"threshold={threshold_result})"
+    )
 
 
 def _issue_benchmark_passport(keys_dir: Path) -> str:
@@ -94,6 +182,7 @@ def test_claude_code_hook_subprocess_cold_path_latency_baseline(tmp_path: Path) 
 
     durations_ms: list[float] = []
     returncodes: list[int] = []
+    functional_failures: list[FunctionalFailure] = []
     for i in range(iterations):
         started = time.perf_counter()
         result = subprocess.run(
@@ -115,12 +204,42 @@ def test_claude_code_hook_subprocess_cold_path_latency_baseline(tmp_path: Path) 
         returncodes.append(result.returncode)
 
         # Baseline current hook behavior without forcing a new exit-code
-        # contract in this latency-only test.
-        assert result.returncode in {0, 1}, result.stderr
+        # contract in this latency-only test. A returncode outside {0, 1} is
+        # a FUNCTIONAL failure (separate from any threshold violation): emit
+        # a partial-evidence report with the functional failure recorded,
+        # then surface a distinct functional-failure message before any
+        # threshold check.
+        if result.returncode not in {0, 1}:
+            functional_failures.append(
+                functional_failure_from_subprocess(
+                    stage="measured",
+                    returncode=result.returncode,
+                    stderr_text=result.stderr,
+                )
+            )
 
     median_ms = statistics.median(durations_ms)
     p95_ms = _nearest_rank(durations_ms, 95)
     p99_ms = _nearest_rank(durations_ms, 99)
+    # Always emit a report (partial if functional failures occurred) so the
+    # CI artifact carries the raw sample distribution even when the path
+    # fails. Threshold is informational for this cold-path baseline; we do
+    # not gate release claims on subprocess cold-start latency.
+    _emit_latency_report(
+        benchmark_name="claude_code_hook_subprocess_cold_path",
+        samples_ms=durations_ms,
+        threshold_ms=None,
+        threshold_result="telemetry_only",
+        functional_failures=functional_failures or None,
+    )
+    # Functional failures get their own distinct pytest message, separate
+    # from any threshold-violation message, so a reviewer can tell which
+    # class of failure occurred.
+    if functional_failures:
+        pytest.fail(
+            f"claude_code_hook subprocess cold path: {len(functional_failures)} "
+            f"functional failures (returncodes={returncodes}); see latency report"
+        )
     print(
         "claude_code_hook subprocess cold path: "
         f"n={iterations} median={median_ms:.2f}ms "
@@ -138,9 +257,15 @@ def test_claude_code_native_daemon_client_latency_target(
     This is the low-overhead path installed by ``ardur protect claude-code``:
     native Unix-socket client -> daemon.  Measured reality on Apple Silicon
     macOS: p95 ~15-17ms end-to-end for the full client-to-daemon round-trip
-    (subprocess exec + Unix-socket send/recv + response parse).  The gate
-    below is set at p95<20ms to accommodate that measured baseline while
-    still catching regressions.
+    (subprocess exec + Unix-socket send/recv + response parse).  The local
+    gate is p95<20ms to accommodate that measured baseline while still
+    catching regressions.
+
+    On CI shared runners (``CI=true`` / ``GITHUB_ACTIONS=true``) the same path
+    runs slower under CPU contention and can hit EAGAIN under the 100ms socket
+    timeout. CI runs widen the gate to p95<60ms and relax the safety timeout
+    to 1000ms so the daemon thread has room to respond. The p95<20ms
+    local-evidence threshold is unchanged on non-CI runs.
 
     The in-process hot-path target (``test_claude_code_daemon_hot_path_latency_target``)
     is the <10ms claim; it measures only compute inside the daemon with no
@@ -162,11 +287,12 @@ def test_claude_code_native_daemon_client_latency_target(
     socket_parent = Path(f"/tmp/ardur-wrapper-daemon-bench-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
+    timeout_ms_env = _daemon_timeout_ms_env()
     env.update(
         {
             "ARDUR_CC_HOOK_DAEMON": "1",
             "ARDUR_CC_HOOK_DAEMON_SOCKET": str(socket_path),
-            "ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS": "100",
+            "ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS": timeout_ms_env,
             "ARDUR_HOOK_PYTHON": sys.executable,
             "ARDUR_CC_HOOK_NATIVE_PRE_TOOL_USE": str(native_pre_tool_use_command),
             "ARDUR_CC_HOOK_STRICT_NATIVE": "1",
@@ -206,6 +332,7 @@ def test_claude_code_native_daemon_client_latency_target(
             failures.append(exc)
 
     thread = threading.Thread(target=_serve, daemon=True)
+    functional_failures: list[FunctionalFailure] = []
     try:
         thread.start()
         for _ in range(100):
@@ -218,21 +345,29 @@ def test_claude_code_native_daemon_client_latency_target(
         # first-call loader/cache noise in the measured steady-state p95 gate.
         for warmup_idx in range(5):
             warmup = subprocess.run(
-                [str(native_pre_tool_use_command), str(socket_path), "100"],
+                [str(native_pre_tool_use_command), str(socket_path), timeout_ms_env],
                 input=_hook_input(-(warmup_idx + 1)).encode("utf-8"),
                 capture_output=True,
                 text=False,
                 env=env,
                 check=False,
             )
-            assert warmup.returncode == 0, warmup.stderr.decode("utf-8", errors="replace")
+            if warmup.returncode != 0:
+                functional_failures.append(
+                    functional_failure_from_subprocess(
+                        stage="warmup",
+                        returncode=warmup.returncode,
+                        stderr_text=warmup.stderr.decode("utf-8", errors="replace"),
+                    )
+                )
+                break
             assert json.loads(warmup.stdout.decode("utf-8")).get("continue") is True
 
         durations_ms: list[float] = []
         for i in range(iterations):
             started = time.perf_counter()
             result = subprocess.run(
-                [str(native_pre_tool_use_command), str(socket_path), "100"],
+                [str(native_pre_tool_use_command), str(socket_path), timeout_ms_env],
                 input=_hook_input(i).encode("utf-8"),
                 capture_output=True,
                 text=False,
@@ -240,7 +375,15 @@ def test_claude_code_native_daemon_client_latency_target(
                 check=False,
             )
             durations_ms.append((time.perf_counter() - started) * 1000.0)
-            assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+            if result.returncode != 0:
+                functional_failures.append(
+                    functional_failure_from_subprocess(
+                        stage="measured",
+                        returncode=result.returncode,
+                        stderr_text=result.stderr.decode("utf-8", errors="replace"),
+                    )
+                )
+                break
             output = json.loads(result.stdout.decode("utf-8"))
             assert output.get("continue") is True
 
@@ -252,17 +395,49 @@ def test_claude_code_native_daemon_client_latency_target(
         median_ms = statistics.median(durations_ms)
         p95_ms = _nearest_rank(durations_ms, 95)
         p99_ms = _nearest_rank(durations_ms, 99)
+        native_client_gate_ms = _native_client_p95_gate_ms()
+        # Threshold result is computed before emitting the report so the
+        # report records both the gate value and the outcome. A functional
+        # failure produces threshold_result="telemetry_only" because the
+        # measured samples are incomplete; the threshold assertion below is
+        # skipped when functional failures occurred, since the
+        # functional-failure message is the primary signal.
+        if functional_failures:
+            threshold_result = "telemetry_only"
+        elif p95_ms < native_client_gate_ms:
+            threshold_result = "pass"
+        else:
+            threshold_result = "fail"
+        _emit_latency_report(
+            benchmark_name="claude_code_native_daemon_client",
+            samples_ms=durations_ms,
+            threshold_ms=native_client_gate_ms,
+            threshold_result=threshold_result,
+            functional_failures=functional_failures or None,
+        )
         print(
             "claude_code_hook native daemon-client path: "
-            f"n={iterations} median={median_ms:.2f}ms "
+            f"n={len(durations_ms)} median={median_ms:.2f}ms "
             f"p95={p95_ms:.2f}ms p99={p99_ms:.2f}ms"
         )
+        # Functional failures get a distinct message before any threshold
+        # check. The report has already been persisted with partial evidence.
+        if functional_failures:
+            pytest.fail(
+                f"claude_code_hook native daemon-client path: "
+                f"{len(functional_failures)} functional failures; see latency report"
+            )
+        # Threshold-violation message is separate from functional failures.
         # Measured on Apple Silicon macOS: p95 ~15-17ms for the full
-        # native client -> daemon round-trip.  Gate at <20ms to catch
+        # native client -> daemon round-trip.  Local gate at <20ms to catch
         # regressions while reflecting the real per-platform baseline.
-        # The <10ms claim applies only to in-process compute (see
-        # test_claude_code_daemon_hot_path_latency_target).
-        assert p95_ms < 20
+        # CI shared runners widen to <60ms under CPU contention (see
+        # _native_client_p95_gate_ms). The <10ms claim applies only to
+        # in-process compute (test_claude_code_daemon_hot_path_latency_target).
+        assert p95_ms < native_client_gate_ms, (
+            f"threshold violation: p95={p95_ms:.2f}ms >= gate={native_client_gate_ms}ms "
+            f"(distinct from functional failures; see latency report)"
+        )
     finally:
         if socket_path.exists():
             socket_path.unlink()
@@ -280,8 +455,10 @@ def test_claude_code_hook_wrapper_daemon_client_latency_telemetry(
     hook output. Its latency is useful telemetry, but enforcing a strict p95
     gate here would rig the release claim against /bin/bash startup and
     workstation scheduler tails rather than the Ardur native hot path.  The
-    native daemon-client gate (p95<20ms, measured ~15-17ms on Apple Silicon
-    macOS) is the release signal; the shell path is reporting only.
+    native daemon-client gate (p95<20ms locally, measured ~15-17ms on Apple
+    Silicon macOS) is the release signal; the shell path is reporting only.
+    On CI the daemon socket timeout is relaxed (see _daemon_timeout_ms_env)
+    so the wrapper can reach the daemon thread under CPU contention.
     """
     repo_root = Path(__file__).resolve().parents[2]
     wrapper = repo_root / "plugins" / "claude-code" / "hooks" / "pre_tool_use"
@@ -304,7 +481,7 @@ def test_claude_code_hook_wrapper_daemon_client_latency_telemetry(
         {
             "ARDUR_CC_HOOK_DAEMON": "1",
             "ARDUR_CC_HOOK_DAEMON_SOCKET": str(socket_path),
-            "ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS": "100",
+            "ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS": _daemon_timeout_ms_env(),
             "ARDUR_HOOK_PYTHON": sys.executable,
             "ARDUR_CC_HOOK_NATIVE_PRE_TOOL_USE": str(native_pre_tool_use_command),
             "ARDUR_CC_HOOK_STRICT_NATIVE": "1",
@@ -341,6 +518,7 @@ def test_claude_code_hook_wrapper_daemon_client_latency_telemetry(
             failures.append(exc)
 
     thread = threading.Thread(target=_serve, daemon=True)
+    functional_failures: list[FunctionalFailure] = []
     try:
         thread.start()
         for _ in range(100):
@@ -358,7 +536,15 @@ def test_claude_code_hook_wrapper_daemon_client_latency_telemetry(
                 env=env,
                 check=False,
             )
-            assert warmup.returncode == 0, warmup.stderr.decode("utf-8", errors="replace")
+            if warmup.returncode != 0:
+                functional_failures.append(
+                    functional_failure_from_subprocess(
+                        stage="warmup",
+                        returncode=warmup.returncode,
+                        stderr_text=warmup.stderr.decode("utf-8", errors="replace"),
+                    )
+                )
+                break
             assert json.loads(warmup.stdout.decode("utf-8")).get("continue") is True
 
         durations_ms: list[float] = []
@@ -373,7 +559,15 @@ def test_claude_code_hook_wrapper_daemon_client_latency_telemetry(
                 check=False,
             )
             durations_ms.append((time.perf_counter() - started) * 1000.0)
-            assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+            if result.returncode != 0:
+                functional_failures.append(
+                    functional_failure_from_subprocess(
+                        stage="measured",
+                        returncode=result.returncode,
+                        stderr_text=result.stderr.decode("utf-8", errors="replace"),
+                    )
+                )
+                break
             output = json.loads(result.stdout.decode("utf-8"))
             assert output.get("continue") is True
 
@@ -385,11 +579,27 @@ def test_claude_code_hook_wrapper_daemon_client_latency_telemetry(
         median_ms = statistics.median(durations_ms)
         p95_ms = _nearest_rank(durations_ms, 95)
         p99_ms = _nearest_rank(durations_ms, 99)
+        # Telemetry-only: no threshold gate on the shell-wrapper path because
+        # /bin/bash startup and scheduler tails are outside Ardur's native hot
+        # path. The report still records the raw distribution for cross-runner
+        # comparison and partial evidence when functional failures occur.
+        _emit_latency_report(
+            benchmark_name="claude_code_hook_wrapper_daemon_client",
+            samples_ms=durations_ms,
+            threshold_ms=None,
+            threshold_result="telemetry_only",
+            functional_failures=functional_failures or None,
+        )
         print(
             "claude_code_hook wrapper daemon-client telemetry: "
-            f"n={iterations} median={median_ms:.2f}ms "
+            f"n={len(durations_ms)} median={median_ms:.2f}ms "
             f"p95={p95_ms:.2f}ms p99={p99_ms:.2f}ms"
         )
+        if functional_failures:
+            pytest.fail(
+                f"claude_code_hook wrapper daemon-client telemetry: "
+                f"{len(functional_failures)} functional failures; see latency report"
+            )
     finally:
         if socket_path.exists():
             socket_path.unlink()
@@ -409,13 +619,20 @@ def test_claude_code_daemon_hot_path_latency_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gate the in-process compute path inside the daemon (p95<10ms).
+    """Gate the in-process compute path inside the daemon (p95<10ms locally).
 
     This measures pure in-process compute: passport validation, scope check,
     and receipt emission with no subprocess exec or Unix-socket IPC overhead.
-    The <10ms claim is defensible for this path.  The full client-to-daemon
-    round-trip (native binary + socket) targets p95<20ms and is gated by
+    The <10ms claim is defensible for this path on Apple Silicon macOS, where
+    the local baseline is ~2-3ms p95. The full client-to-daemon round-trip
+    (native binary + socket) targets p95<20ms locally and is gated by
     ``test_claude_code_native_daemon_client_latency_target``.
+
+    On CI shared runners (``CI=true`` / ``GITHUB_ACTIONS=true``) Ed25519
+    signing under CPU contention runs materially slower (CI baseline ~33ms
+    p95 vs ~2ms locally). CI runs widen the gate to p95<50ms so the
+    informational benchmark job stops flapping; the p95<10ms local-evidence
+    claim is unchanged on non-CI runs.
     """
     daemon_path = Path(__file__).resolve().parents[1] / "vibap" / "claude_code_daemon.py"
     if not daemon_path.exists():
@@ -435,21 +652,74 @@ def test_claude_code_daemon_hot_path_latency_target(
         monkeypatch.setenv(name, env[name])
 
     iterations = _benchmark_iterations()
-    samples_ms = _coerce_duration_samples_ms(
-        benchmark(
-            hook_input=json.loads(_hook_input(0)),
-            keys_dir=keys_dir,
-            iterations=iterations,
+    functional_failures: list[FunctionalFailure] = []
+    try:
+        samples_ms = _coerce_duration_samples_ms(
+            benchmark(
+                hook_input=json.loads(_hook_input(0)),
+                keys_dir=keys_dir,
+                iterations=iterations,
+            )
         )
-    )
-    assert len(samples_ms) >= iterations
+    except Exception as exc:
+        # In-process benchmark raised: record as a functional failure with a
+        # sanitized message and emit a partial report with zero samples so
+        # the artifact is still produced.
+        functional_failures.append(
+            FunctionalFailure(
+                stage="measured",
+                message=f"in-process benchmark raised: {type(exc).__name__}",
+            )
+        )
+        samples_ms = []
 
-    median_ms = statistics.median(samples_ms)
-    p95_ms = _nearest_rank(samples_ms, 95)
-    p99_ms = _nearest_rank(samples_ms, 99)
+    if len(samples_ms) < iterations:
+        # The benchmark returned fewer samples than requested without raising.
+        # Treat that as a functional failure so the partial report records it.
+        functional_failures.append(
+            FunctionalFailure(
+                stage="measured",
+                message=f"benchmark returned {len(samples_ms)} samples, expected >= {iterations}",
+            )
+        )
+
+    median_ms = statistics.median(samples_ms) if samples_ms else 0.0
+    p95_ms = _nearest_rank(samples_ms, 95) if samples_ms else None
+    p99_ms = _nearest_rank(samples_ms, 99) if samples_ms else None
+    hot_path_gate_ms = _hot_path_p95_gate_ms()
+    # Threshold result is computed before emitting the report so the report
+    # carries both the gate and the outcome. Functional failures produce
+    # telemetry_only; the threshold assertion below is skipped when functional
+    # failures occurred.
+    if functional_failures:
+        threshold_result = "telemetry_only"
+    elif p95_ms is not None and p95_ms < hot_path_gate_ms:
+        threshold_result = "pass"
+    else:
+        threshold_result = "fail"
+    _emit_latency_report(
+        benchmark_name="claude_code_daemon_hot_path",
+        samples_ms=samples_ms,
+        threshold_ms=hot_path_gate_ms,
+        threshold_result=threshold_result,
+        functional_failures=functional_failures or None,
+    )
     print(
         "claude_code_daemon hot path: "
         f"n={len(samples_ms)} median={median_ms:.2f}ms "
         f"p95={p95_ms:.2f}ms p99={p99_ms:.2f}ms"
     )
-    assert p95_ms < 10
+    if functional_failures:
+        pytest.fail(
+            f"claude_code_daemon hot path: "
+            f"{len(functional_failures)} functional failures; see latency report"
+        )
+    # Threshold-violation message is separate from functional failures.
+    # Local gate: p95<10ms (Apple Silicon baseline ~2-3ms). CI shared runners
+    # widen to p95<50ms (see _hot_path_p95_gate_ms) because Ed25519 signing
+    # under CPU contention is materially slower there; the p95<10ms claim
+    # remains a local-evidence threshold.
+    assert p95_ms is not None and p95_ms < hot_path_gate_ms, (
+        f"threshold violation: p95={p95_ms}ms >= gate={hot_path_gate_ms}ms "
+        f"(distinct from functional failures; see latency report)"
+    )

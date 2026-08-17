@@ -25,7 +25,7 @@
     },
     "legacy_python_passport": {
       "contract": "python/vibap/passport.py",
-      "scope": "JWT mission-passport claims emitted by issue_passport plus derive_child_passport lineage extensions, including explicit inventory of runtime-only claims that the current DRP profile must reject."
+      "scope": "JWT mission-passport claims emitted by issue_passport plus derive_child_passport lineage and MIC conformance extensions, including explicit inventory of runtime-only claims that the current DRP profile must reject."
     },
     "execution_receipt_v0.2": {
       "contract": "docs/specs/execution-receipt-v0.2.schema.json",
@@ -84,7 +84,8 @@
     "decision_projection": {
       "compliant": "PERMIT",
       "violation": "DENY",
-      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence"
+      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence",
+      "unknown": "DENY with metadata.x-ardur.verdict=unknown"
     }
   },
   "security_requirements": {
@@ -97,6 +98,7 @@
     "widening_rejected": "Tools, resources, argument constraints, budgets, time, and delegation depth MUST never widen.",
     "unknown_critical_extension_rejected": "A verifier that does not understand every path listed in metadata.x-ardur.critical MUST DENY and MUST NOT downgrade to base DRP authorization.",
     "unprojected_risk_budget_rejected": "A source credential carrying risk_budget MUST NOT be emitted or verified by this profile because typed contract and multi-scope ledger semantics are not implemented; dropping the claim is forbidden.",
+    "unprojected_mic_policy_bundle_rejected": "A source credential carrying conformance_profile or receipt_policy MUST NOT be emitted by this profile; the entire MIC bundle MUST be rejected and tool_manifest_digest MUST NOT be partially projected.",
     "tri_state_extension": "Ardur insufficient_evidence MUST project to DRP DENY while remaining distinguishable in the signed extension.",
     "no_redelegation": "redelegation.mode=none MUST prohibit creation of any sub-receipt.",
     "bounded_redelegation": "redelegation.mode=bounded MUST require depth below maxDepth and child maxDepth no greater than the parent.",
@@ -558,6 +560,27 @@
       "rationale": "Signed child budget reservation."
     },
     {
+      "source_surface": "legacy_python_passport",
+      "source_path": "conformance_profile",
+      "classification": "out_of_scope",
+      "drp_path": null,
+      "rationale": "The current DRP profile cannot preserve the MIC enforcement and evidence tier. Any source carrying this policy claim must fail closed; the MIC bundle must never be partially projected."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "receipt_policy",
+      "classification": "out_of_scope",
+      "drp_path": null,
+      "rationale": "The current DRP profile cannot preserve the MIC receipt-evidence requirement. Any source carrying this policy claim must fail closed; the MIC bundle must never be partially projected."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "tool_manifest_digest",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.toolManifestDigest",
+      "rationale": "Normalize the legacy sha-256:<64-lowercase-hex> tag to the DRP extension's sha256:<64-lowercase-hex> tag while preserving the exact trusted tool-manifest digest."
+    },
+    {
       "source_surface": "execution_receipt_v0.2",
       "source_path": "schema_version",
       "classification": "extension",
@@ -688,7 +711,7 @@
       "source_path": "verdict",
       "classification": "mapped",
       "drp_path": "actionLog.decision",
-      "rationale": "Map compliant to PERMIT and violation or insufficient_evidence to DENY; retain tri-state detail in the extension."
+      "rationale": "Map compliant to PERMIT and violation, insufficient_evidence, or unknown to DENY; retain verdict detail in the extension."
     },
     {
       "source_surface": "execution_receipt_v0.2",

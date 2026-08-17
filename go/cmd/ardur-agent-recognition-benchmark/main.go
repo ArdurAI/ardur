@@ -69,7 +69,7 @@ func run(args []string, stdout io.Writer) int {
 	}
 	var budget *kernelcapture.AgentRecognitionBenchmarkBudget
 	var budgetSHA256 string
-	if *budgetPath != "" {
+	if strings.TrimSpace(*budgetPath) != "" {
 		budget, budgetSHA256, err = kernelcapture.LoadAgentRecognitionBenchmarkBudget(*budgetPath)
 		if err != nil {
 			writeSummary(stdout, commandSummary{Condition: "agent_recognition_benchmark_failed", ErrorCode: "budget_invalid"})

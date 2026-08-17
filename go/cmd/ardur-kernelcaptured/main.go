@@ -2213,7 +2213,7 @@ func prevalidateKernelReceiptPathNotSymlink(fsys evidenceFS, path string, label 
 }
 
 func (osEvidenceFS) AppendFile(path string, data []byte, perm fs.FileMode) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, perm)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND|evidenceOpenNoFollow, perm)
 	if err != nil {
 		return err
 	}
@@ -2258,6 +2258,19 @@ func splitCommaSeparatedValues(raw string) []string {
 	return values
 }
 
+// validateDaemonPathFlags checks that all four required path flags are
+// non-empty after trimming. It returns a non-empty error message (for stderr)
+// when any path is missing, or an empty string when all are valid. Extracted
+// from main() so the whitespace guard can be unit tested independently of the
+// daemon's socket/process/eBPF initialization.
+func validateDaemonPathFlags(socket, seccompSocket, evidenceDir, stateDir string) string {
+	if strings.TrimSpace(socket) == "" || strings.TrimSpace(seccompSocket) == "" ||
+		strings.TrimSpace(evidenceDir) == "" || strings.TrimSpace(stateDir) == "" {
+		return "--socket, --seccomp-socket, --evidence-dir, and --state-dir must be non-empty paths after trimming whitespace"
+	}
+	return ""
+}
+
 func main() {
 	var (
 		socketPath               = flag.String("socket", defaultSocketPath, "Unix-domain control socket path")
@@ -2284,6 +2297,30 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Trim whitespace from path flags so a whitespace-only value produces a
+	// clear "empty path" error rather than a confusing OS-level failure.
+	socket := strings.TrimSpace(*socketPath)
+	seccompSocket := strings.TrimSpace(*seccompSocketPath)
+	evidenceDirectory := strings.TrimSpace(*evidenceDir)
+	stateDirectory := strings.TrimSpace(*stateDir)
+	if msg := validateDaemonPathFlags(socket, seccompSocket, evidenceDirectory, stateDirectory); msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+		os.Exit(2)
+	}
+
+	// Guard non-positive durations: time.NewTicker panics on <=0, and a
+	// negative guard-ready-timeout resolves immediately (silent fallback
+	// to seccomp before the BPF-LSM load can report). Reject both at
+	// startup with a clear error instead of a confusing runtime failure.
+	if *pruneEvery <= 0 {
+		fmt.Fprintln(os.Stderr, "--prune-interval must be a positive duration")
+		os.Exit(2)
+	}
+	if *guardReadyTimeout < 0 {
+		fmt.Fprintln(os.Stderr, "--guard-ready-timeout must not be negative")
+		os.Exit(2)
+	}
+
 	level := slog.LevelInfo
 	if *debug {
 		level = slog.LevelDebug
@@ -2291,15 +2328,23 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	log.Info("ardur-kernelcaptured starting",
-		"socket", *socketPath,
-		"evidence_dir", *evidenceDir,
-		"state_dir", *stateDir,
+		"socket", socket,
+		"evidence_dir", evidenceDirectory,
+		"state_dir", stateDirectory,
 		"no_ringbuf", *noRingbuf,
 		"platform", platformName(),
 	)
 
+	// Set a restrictive umask so all daemon-created files (evidence logs,
+	// socket dirs, bootstrap files, state) are owner-only regardless of the
+	// inherited process umask. This is defense-in-depth: MkdirAll/AppendFile
+	// already request restrictive modes, but umask masking could loosen them
+	// (e.g. systemd units with UMask=0000). Umask is process-global and
+	// inherited by all goroutines. No-op on platforms without umask.
+	setRestrictiveUmask()
+
 	ownerUID := uint32(os.Getuid())
-	d, err := newDaemon(log, *socketPath, *evidenceDir, *stateDir, ownerUID)
+	d, err := newDaemon(log, socket, evidenceDirectory, stateDirectory, ownerUID)
 	if err != nil {
 		log.Error("init daemon", "error", err)
 		os.Exit(1)
@@ -2343,13 +2388,15 @@ func main() {
 		}
 	}
 
-	// Ensure socket directory exists.
-	if mkErr := os.MkdirAll(filepath.Dir(*socketPath), 0o755); mkErr != nil {
-		log.Error("create socket directory", "path", filepath.Dir(*socketPath), "error", mkErr)
+	// Ensure socket directory exists. Mode 0o700 restricts listing/access to
+	// the owner (root in production); a tighter directory narrows symlink-race
+	// windows for stale-socket removal and the socket bind itself.
+	if mkErr := os.MkdirAll(filepath.Dir(socket), 0o700); mkErr != nil {
+		log.Error("create socket directory", "path", filepath.Dir(socket), "error", mkErr)
 		os.Exit(1)
 	}
 	// Remove stale socket file from a previous run.
-	_ = os.Remove(*socketPath)
+	_ = os.Remove(socket)
 
 	svr, err := kernelcapture.ListenDaemonUnixSocketServer(
 		kernelcapture.DaemonUnixSocketServerConfig{
@@ -2361,7 +2408,7 @@ func main() {
 		},
 	)
 	if err != nil {
-		log.Error("bind control socket", "socket", *socketPath, "error", err)
+		log.Error("bind control socket", "socket", socket, "error", err)
 		os.Exit(1)
 	}
 	d.setControlHandlerDrain(svr.HandlersDrained(), svr.ServeDone())
@@ -2469,12 +2516,12 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := runSeccompHandoffServer(ctx, *seccompSocketPath, d, log); err != nil && ctx.Err() == nil {
+				if err := runSeccompHandoffServer(ctx, seccompSocket, d, log); err != nil && ctx.Err() == nil {
 					log.Error("seccomp handoff server stopped", "error", err)
 				}
 			}()
 		}
-		log.Info("enforcement tier selected", "tier", d.getActiveTier(), "seccomp_socket", *seccompSocketPath)
+		log.Info("enforcement tier selected", "tier", d.getActiveTier(), "seccomp_socket", seccompSocket)
 	} else {
 		log.Info("eBPF ringbuf consumers disabled (--no-ringbuf); enforcement tiers unavailable")
 	}

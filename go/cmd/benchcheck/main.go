@@ -49,6 +49,13 @@ func main() {
 	quiet := flag.Bool("quiet", false, "suppress result table on stdout")
 	flag.Parse()
 
+	outputDir := strings.TrimSpace(*outDir)
+	if outputDir == "" {
+		fmt.Fprintln(os.Stderr, "benchcheck: -out must be a non-empty path after trimming whitespace")
+		flag.Usage()
+		os.Exit(2)
+	}
+
 	packDir := flag.Arg(0)
 	if shouldUseDefaultPackDir(packDir) {
 		packDir = defaultPackDir()
@@ -69,12 +76,12 @@ func main() {
 		printTable(results, skipped)
 	}
 
-	if err := writeResults(*outDir, results, skipped, packDir); err != nil {
+	if err := writeResults(outputDir, results, skipped, packDir); err != nil {
 		fmt.Fprintf(os.Stderr, "benchcheck: write results: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Results written to %s\n", *outDir)
+	fmt.Printf("Results written to %s\n", outputDir)
 }
 
 // shouldUseDefaultPackDir reports whether the positional pack-dir argument

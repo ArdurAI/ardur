@@ -1584,3 +1584,37 @@ func TestOsEvidenceFS_AppendFile(t *testing.T) {
 		t.Errorf("file contents: got %q, want %q", data, "line1\nline2\n")
 	}
 }
+
+// TestOsEvidenceFS_AppendFileRejectsTrailingSymlink verifies that the OS-level
+// OpenFile call rejects a trailing symlink via O_NOFOLLOW. This is a
+// defense-in-depth regression test: prevalidation (Lstat) already rejects
+// symlinks, but O_NOFOLLOW closes the Lstat→OpenFile TOCTOU window at the
+// kernel level. Without O_NOFOLLOW, AppendFile would follow the symlink and
+// write to the target.
+func TestOsEvidenceFS_AppendFileRejectsTrailingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	fsys := osEvidenceFS{}
+	target := filepath.Join(dir, "target.jsonl")
+	linkPath := filepath.Join(dir, "link.jsonl")
+
+	if err := os.WriteFile(target, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, linkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	err := fsys.AppendFile(linkPath, []byte("injected\n"), 0o600)
+	if err == nil {
+		t.Fatal("AppendFile via trailing symlink should fail with O_NOFOLLOW")
+	}
+
+	// The symlink target must not be modified.
+	data, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read target: %v", readErr)
+	}
+	if string(data) != "original\n" {
+		t.Fatalf("symlink target was modified: got %q want %q", data, "original\n")
+	}
+}

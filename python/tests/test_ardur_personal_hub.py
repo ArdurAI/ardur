@@ -1200,6 +1200,50 @@ def test_doctor_reports_hub_next_steps_when_configured_hub_is_unavailable(tmp_pa
     assert str(tmp_path) not in next_steps_json
 
 
+def test_doctor_shows_resolved_hub_url_when_default_passed(tmp_path, monkeypatch):
+    """doctor hub check detail must show the configured URL, not the default.
+
+    The ``--hub-url`` CLI argument defaults to the plain-HTTP
+    :data:`DEFAULT_HUB_URL`; ``hub_request`` resolves the real URL from the
+    Personal home config internally, and the doctor display must mirror that
+    so an HTTPS Hub serving on a custom port is reported correctly.
+    """
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_URL", raising=False)
+    configured_url = "https://127.0.0.1:18443"
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "ardur.personal.config.v0.1",
+                "home": str(tmp_path),
+                "hub_url": configured_url,
+                "hub_token": "test-token-placeholder",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+
+    result = personal_hub.doctor_personal(
+        Namespace(
+            home=tmp_path,
+            hub_url=personal_hub.DEFAULT_HUB_URL,
+            hub_token=None,
+        )
+    )
+
+    assert result["ok"] is True
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+    assert checks_by_name["hub"]["ok"] is True
+    # The detail must reflect the configured TLS URL, not the plain-HTTP default.
+    assert checks_by_name["hub"]["detail"] == configured_url
+    assert checks_by_name["hub"]["detail"] != personal_hub.DEFAULT_HUB_URL
+
+
 @pytest.mark.parametrize(
     "hub_url",
     [
@@ -2580,10 +2624,12 @@ def test_run_native_host_binary_framing_unsupported_message_type_is_structured(t
     assert "Traceback" not in encoded
 
 
+@pytest.mark.parametrize("command", ([], [""], ["   "], ["\t\n"]))
 def test_run_under_hub_missing_command_reports_placeholder_next_steps(
     tmp_path,
     capsys,
     monkeypatch,
+    command,
 ):
     sentinel = tmp_path / "child-ran.txt"
 
@@ -2599,7 +2645,7 @@ def test_run_under_hub_missing_command_reports_placeholder_next_steps(
 
     exit_code = run_under_hub(
         Namespace(
-            command=[],
+            command=command,
             hub_url="http://127.0.0.1:8765",
             hub_token="example-hub-token-placeholder",
             home=tmp_path,

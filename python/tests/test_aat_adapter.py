@@ -15,7 +15,7 @@ from vibap.passport import ALGORITHM, MissionPassport, issue_passport
 from vibap.proxy import Decision
 from vibap.receipt import verify_chain
 
-from tests.conftest import (
+from conftest import (
     v01_default_status_list_token,
     v01_default_status_url,
     v01_required_md_extras,
@@ -264,13 +264,17 @@ def test_aat_mission_digest_mismatch_fails_closed(
     )
 
     # require_pop=False isolates the test to mission_digest semantics —
-    # cnf carried by the factory is irrelevant here.
-    with pytest.raises(PermissionError, match="mission_digest"):
+    # cnf carried by the factory is irrelevant here. The external message is
+    # fixed-code sanitized; the chained cause retains the diagnostic detail.
+    with pytest.raises(PermissionError) as exc_info:
         proxy.start_session_from_aat(
             aat_token,
             signing_key=private_key,
             require_pop=False,
         )
+    assert str(exc_info.value) == "aat_mission_resolution_failed"
+    assert isinstance(exc_info.value.__cause__, mission_module.MissionBindingError)
+    assert "mission_digest" in str(exc_info.value.__cause__)
 
 
 def test_aat_unsupported_token_shape_fails_closed(proxy, private_key):

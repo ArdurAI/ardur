@@ -24,7 +24,9 @@ _IMPORT_SIDE_EFFECT_MODULES = [
 ]
 
 
-def _run_in_clean_env(module: str, *, extra_code: str = "") -> subprocess.CompletedProcess[str]:
+def _run_in_clean_env(
+    module: str, *, extra_code: str = ""
+) -> subprocess.CompletedProcess[str]:
     """Run a Python snippet in a subprocess with isolated cwd and HOME."""
     with tempfile.TemporaryDirectory() as tmpdir:
         cwd = Path(tmpdir) / "cwd"
@@ -74,9 +76,7 @@ def test_import_does_not_create_vibap_home(module: str) -> None:
             },
             timeout=30,
         )
-        assert result.returncode == 0, (
-            f"import vibap.{module} failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"import vibap.{module} failed: {result.stderr}"
         assert not (cwd / ".vibap").exists(), (
             f"import vibap.{module} created .vibap in cwd"
         )
@@ -116,9 +116,13 @@ def test_ensure_default_home_dir_creates_0o700() -> None:
             },
             timeout=30,
         )
-        assert result.returncode == 0, f"_ensure_default_home_dir failed: {result.stderr}"
+        assert result.returncode == 0, (
+            f"_ensure_default_home_dir failed: {result.stderr}"
+        )
         # Parse the MODE= line from stdout
-        mode_line = [l for l in result.stdout.splitlines() if l.startswith("MODE=")]
+        mode_line = [
+            line for line in result.stdout.splitlines() if line.startswith("MODE=")
+        ]
         assert mode_line, f"No MODE= line in output: {result.stdout}"
         mode_str = mode_line[0].split("=", 1)[1]
         assert mode_str == "700", f"Expected mode 700, got {mode_str}"
@@ -156,7 +160,9 @@ def test_keygen_creates_home_with_0o700() -> None:
             timeout=30,
         )
         assert result.returncode == 0, f"generate_keypair failed: {result.stderr}"
-        mode_line = [l for l in result.stdout.splitlines() if l.startswith("MODE=")]
+        mode_line = [
+            line for line in result.stdout.splitlines() if line.startswith("MODE=")
+        ]
         assert mode_line, f"No MODE= line in output: {result.stdout}"
         mode_str = mode_line[0].split("=", 1)[1]
         assert mode_str == "700", f"Expected mode 700, got {mode_str}"
@@ -193,8 +199,12 @@ def test_explicit_vibap_home_not_recreated() -> None:
             },
             timeout=30,
         )
-        assert result.returncode == 0, f"_ensure_default_home_dir failed: {result.stderr}"
-        mode_line = [l for l in result.stdout.splitlines() if l.startswith("MODE=")]
+        assert result.returncode == 0, (
+            f"_ensure_default_home_dir failed: {result.stderr}"
+        )
+        mode_line = [
+            line for line in result.stdout.splitlines() if line.startswith("MODE=")
+        ]
         assert mode_line, f"No MODE= line in output: {result.stdout}"
         mode_str = mode_line[0].split("=", 1)[1]
         assert mode_str == "750", (
@@ -234,7 +244,9 @@ def test_empty_vibap_home_treated_as_unset() -> None:
             timeout=30,
         )
         assert result.returncode == 0, f"_default_home_dir failed: {result.stderr}"
-        path_line = [l for l in result.stdout.splitlines() if l.startswith("PATH=")]
+        path_line = [
+            line for line in result.stdout.splitlines() if line.startswith("PATH=")
+        ]
         assert path_line, f"No PATH= line in output: {result.stdout}"
         resolved = path_line[0].split("=", 1)[1]
         expected = str((cwd / ".vibap").resolve())

@@ -2,7 +2,7 @@
 title: "Ardur vs OAuth (and the managed-agent-auth direction)"
 description: "**Status:** Working comparison. Will gain links and quantitative numbers as Phase 7 benchmark data lands. The technical claims here should hold without those numbers; the numbers a"
 source_path: "docs/comparisons/oauth-and-managed-agent-auth.md"
-source_sha256: "5eaf48617b8348fcf7624788579c9fb7dfaefe7ab0a8ef09f3ecd0c9aa08c523"
+source_sha256: "438b14d8c5cf94ff9ff258c521ee23e8c82d76cfed70baaafabf1dab709f0aae"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["comparison"]
@@ -79,7 +79,7 @@ Ardur's design intentionally sits *next to* the OAuth flow, not in place of it. 
 Three additions:
 
 - **Mission Declaration as a layer above the OAuth token.** A signed envelope that says "this session is for mission M, with allowed tools T, resource scope R, side-effect budget B, delegation policy D." The OAuth token says who the agent is; the Mission Declaration says what it's been authorised to do for this session. They sign separately and can be audited separately. *Reference-proxy scope:* the Python proxy validates required v0.1 MD members (FIX-3, 2026-04-28) but the full v0.1 schema (`additionalProperties: false`) is opt-in via `strict_schema=True` on producers that emit clean MDs.
-- **Per-tool-call Execution Receipt with a tri-state verdict** (`compliant` / `violation` / `insufficient_evidence`). Each receipt is signed and chain-hashed to the previous one. The audit trail is the receipt chain, not the access log of the resource server. *Reference-proxy scope:* receipts are emitted with hash-linking; MIC-Evidence visible-receipt-linkage (no hidden hop) is enforced as of 2026-05-19 (t_dcbf560b) — child receipts carry `parent_receipt_id` and `last_seen_receipts` state is replayed across restarts.
+- **Per-tool-call Execution Receipt with a verdict** (`compliant` / `violation` / `insufficient_evidence` / `unknown`). Each receipt is signed and chain-hashed to the previous one. The audit trail is the receipt chain, not the access log of the resource server. *Reference-proxy scope:* receipts are emitted with hash-linking; MIC-Evidence visible-receipt-linkage (no hidden hop) is enforced as of 2026-05-19 (t_dcbf560b) — child receipts carry `parent_receipt_id` and `last_seen_receipts` state is replayed across restarts.
 - **Verifiable delegation provenance.** Sub-agents emit signed attestations of their delegation edges. The receipt chain can be reconstructed end-to-end; silent delegations fail verification. *Reference-proxy scope:* attenuation rules (`tool_subset`, `resource_subset`, `effect_subset`, `budget_nonincrease`, etc.) are enforced at delegation; hidden-hop detection via per-grant `last_seen_receipts` is enforced as of 2026-05-19.
 
 If you already use OAuth, none of this requires changing your OAuth setup. The Mission Declaration sits at session start; the Execution Receipts emit alongside whatever the resource server logs; the AAT attenuation slots into your existing token attenuation flow. Ardur's verifier reads OAuth tokens for identity and emits MCEP receipts for evidence.

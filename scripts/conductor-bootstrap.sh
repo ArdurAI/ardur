@@ -21,6 +21,36 @@ if [ -z "$PYTHON_BIN" ]; then
   fi
 fi
 
+version_lt() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def parts(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split(".") if part.isdigit())
+
+sys.exit(0 if parts(sys.argv[1]) < parts(sys.argv[2]) else 1)
+PY
+}
+
+# Enforce Ardur's Python minimum before running graph-generation Python.
+# Mirrors the guard in scripts/setup-dev.sh: a below-minimum PYTHON_BIN (common
+# on macOS where python3 is the system 3.9.6) produces confusing tracebacks
+# instead of a clear, actionable message. conductor-bootstrap.sh is documented
+# as the first command in every new session, so this check must fire here too.
+if [ -f python/pyproject.toml ]; then
+  required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+else
+  required_python_min=""
+fi
+if [ -z "$required_python_min" ]; then
+  required_python_min="3.10"
+fi
+actual_python="$("$PYTHON_BIN" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+if version_lt "$actual_python" "$required_python_min"; then
+  echo "ERROR: Python $actual_python is below Ardur's minimum ($required_python_min). Install Python ${required_python_min}+ or set PYTHON_BIN." >&2
+  exit 1
+fi
+
 mkdir -p "$CONTEXT_DIR"
 mkdir -p "$CONTEXT_DIR/skills"
 

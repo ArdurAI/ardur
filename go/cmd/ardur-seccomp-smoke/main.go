@@ -72,8 +72,10 @@ func main() {
 	lifecycleStressIterations := flag.Int("lifecycle-stress-iterations", 100, "live listener teardown iterations under concurrent control traffic")
 	flag.Parse()
 
-	if *probeConnect != "" {
-		runProbe(*probeConnect)
+	// Trim whitespace from --probe-connect so whitespace-only doesn't
+	// accidentally trigger the probe-re-exec path.
+	if probeAddr := strings.TrimSpace(*probeConnect); probeAddr != "" {
+		runProbe(probeAddr)
 		return
 	}
 	if *probeWait {
@@ -89,7 +91,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "lifecycle-stress-iterations must be at least 1")
 		os.Exit(2)
 	}
-	if err := run(*daemonBin, *shimBin, *lifecycleStressIterations); err != nil {
+	daemonPath := strings.TrimSpace(*daemonBin)
+	shimPath := strings.TrimSpace(*shimBin)
+	if err := run(daemonPath, shimPath, *lifecycleStressIterations); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
 		os.Exit(1)
 	}

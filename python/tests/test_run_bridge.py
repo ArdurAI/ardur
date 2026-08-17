@@ -46,6 +46,8 @@ from vibap.run_bridge import (
     _wrap_command_with_seccomp_shim,
     run_governed,
     run_governed_cli,
+    run_governed_command_not_executable_next_steps,
+    run_governed_command_not_found_next_steps,
     run_governed_mission_invalid_next_steps,
     select_adapter,
 )
@@ -327,6 +329,39 @@ def test_ardur_run_governs_launched_agent_zero_setup(
     # — kernel correlation degraded gracefully (no daemon on the test host) —
     assert result.correlation["available"] is False
     assert "governing via env/hook" in result.correlation["reason"]
+
+
+def test_ardur_run_receipts_path_uses_canonical_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, standin_agent: Path
+) -> None:
+    """``ardur run`` must write receipts to ``<home>/receipts.jsonl`` (the
+    canonical filename used by Personal Hub and every hook adapter), not the
+    ``receipts_log.jsonl`` default that ``GovernanceProxy`` falls back to when
+    ``receipts_log_path`` is omitted.
+
+    Regression guard for the run-bridge → GovernanceProxy wiring: a fresh user
+    following the governance summary's printed receipts path must find a real
+    file, not a missing outlier filename.
+    """
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    home = tmp_path / "ardur-home"
+
+    result = run_governed(
+        command=[sys.executable, str(standin_agent)],
+        mission="Regression: receipts path must be canonical receipts.jsonl.",
+        allowed_tools=["Read", "Glob", "Grep"],
+        forbidden_tools=["Bash"],
+        max_tool_calls=10,
+        home=home,
+        via="env",
+    )
+
+    # The summary-printed path must end with the canonical filename so that a
+    # fresh user reading ``<home>/receipts.jsonl`` finds the real chain.
+    assert result.receipts_path.endswith("receipts.jsonl")
+    assert not result.receipts_path.endswith("receipts_log.jsonl")
+    # The outlier filename must not also exist alongside the canonical one.
+    assert not (home / "receipts_log.jsonl").exists()
 
 
 def test_ardur_run_denies_when_no_tools_allowed(
@@ -1180,6 +1215,41 @@ def test_run_governed_rejects_empty_command(
         run_governed(command=[], mission="x", home=tmp_path / "h")
 
 
+@pytest.mark.parametrize(
+    "command",
+    (
+        [""],
+        ["   "],
+        ["\t\n"],
+        # Zero-width and invisible characters that bypass str.strip().
+        # These should be treated as blank/whitespace-only commands.
+        ["\u200b"],
+        ["\u200c"],
+        ["\u2060"],
+        ["\ufeff"],
+        ["\u200b\u200b\u200b"],
+    ),
+)
+def test_run_governed_rejects_whitespace_only_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """A whitespace-only executable must be rejected at the library level too.
+
+    Previously ``run_governed`` only checked ``not command`` (empty list) but
+    ``[""]`` or ``["   "]`` passed through to ``subprocess.Popen`` and crashed
+    with an unhandled ``PermissionError`` traceback.  The fix tightens the guard
+    to ``not command[0].strip()``.
+
+    Zero-width characters (U+200B–U+200F, U+2060, U+FEFF) are invisible but
+    are not stripped by Python's ``str.strip()``.  Without the additional
+    regex check they would pass validation and produce confusing subprocess
+    errors.  See ``_INVISIBLE_OR_WS_RE`` in ``run_bridge.py``.
+    """
+    _hermetic_kernel_env(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="requires a command"):
+        run_governed(command=command, mission="x", home=tmp_path / "h")
+
+
 def test_run_governed_rejects_unknown_via(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1514,7 +1584,7 @@ def test_run_governed_cli_passes_explicit_resource_scope(
     assert captured["no_resource_scope"] is False
 
 
-@pytest.mark.parametrize("command", ([], ["--"]))
+@pytest.mark.parametrize("command", ([], ["--"], [""], ["   "], ["\t\n"]))
 def test_run_governed_cli_missing_command_reports_placeholder_next_steps(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -1617,6 +1687,114 @@ def test_run_governed_cli_empty_or_whitespace_mission_is_rejected(
         assert bad_mission not in remediation
     assert str(home) not in remediation
     assert "Traceback" not in remediation
+
+
+def test_run_governed_cli_nonexistent_command_emits_structured_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A governed command that cannot be found (FileNotFoundError from Popen)
+    must emit a clean, actionable error with next_steps and exit code 2 —
+    not a raw Python traceback."""
+    home = tmp_path / "ardur-home"
+    bad_cmd = "/nonexistent/binary-from-test"
+
+    def raise_file_not_found(**_kwargs: object) -> None:
+        raise FileNotFoundError(2, "No such file or directory", bad_cmd)
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", raise_file_not_found)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=[bad_cmd],
+            mission="nonexistent command smoke",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+            enforce=False,
+            resource_scope=None,
+            no_resource_scope=False,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "Traceback" not in captured.err
+    assert "governed command not found" in captured.err
+    assert bad_cmd in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "verify_command_name_and_path" not in remediation  # action key not in prose
+    assert "PATH" in remediation or "path exists" in remediation
+    assert "ardur run --via env" in remediation
+
+
+def test_run_governed_cli_non_executable_command_emits_structured_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A governed command that exists but is not executable (PermissionError
+    from Popen) must emit a clean, actionable error with next_steps and exit
+    code 2 — not a raw Python traceback."""
+    home = tmp_path / "ardur-home"
+    script = tmp_path / "not-executable.sh"
+    script.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")  # no +x bit
+
+    def raise_permission(**_kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied", str(script))
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", raise_permission)
+
+    exit_code = run_governed_cli(
+        Namespace(
+            command=[str(script)],
+            mission="non-executable command smoke",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home,
+            via="env",
+            no_kernel_correlation=True,
+            enforce=False,
+            resource_scope=None,
+            no_resource_scope=False,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "Traceback" not in captured.err
+    assert "governed command not executable" in captured.err
+    assert str(script) in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "chmod +x" in remediation
+    assert "interpreter" in remediation
+
+
+def test_run_governed_command_not_found_next_steps_are_deterministic() -> None:
+    steps = run_governed_command_not_found_next_steps("/some/missing/cmd")
+    assert len(steps) == 2
+    assert all(s["condition"] == "run_command_not_found" for s in steps)
+    for step in steps:
+        assert step["command"]
+        assert step["detail"]
+
+
+def test_run_governed_command_not_executable_next_steps_are_deterministic() -> None:
+    steps = run_governed_command_not_executable_next_steps("/some/script.sh")
+    assert len(steps) == 2
+    assert all(s["condition"] == "run_command_not_executable" for s in steps)
+    for step in steps:
+        assert step["command"]
+        assert step["detail"]
 
 
 def test_run_governed_mission_invalid_next_steps_are_deterministic() -> None:
@@ -1796,8 +1974,10 @@ def test_run_governed_cli_negative_max_duration_returns_structured_json_without_
     assert not sentinel.exists()
     assert not home.exists()
 
-    # stdout must be structured JSON
-    response = json.loads(captured.out)
+    # Budget validation JSON now goes to stderr (not stdout) so stdout
+    # stays clean for child process output even on pre-execution errors.
+    # See _run_governed_budget_failure in run_bridge.py.
+    response = json.loads(captured.err)
     assert response["ok"] is False
     assert response["condition"] == "run_max_duration_invalid"
     assert response["error"] == "run_max_duration_invalid"
@@ -1806,8 +1986,8 @@ def test_run_governed_cli_negative_max_duration_returns_structured_json_without_
     for step in response["next_steps"]:
         assert "<" in step["command"]  # placeholder-only
 
-    # stderr must be empty
-    assert captured.err == ""
+    # stdout must be empty
+    assert captured.out == ""
 
     # No traceback or raw ValueError in either stream
     assert "Traceback" not in captured.out
@@ -1854,7 +2034,7 @@ def test_run_governed_cli_negative_max_tool_calls_returns_structured_json_withou
     assert not sentinel.exists()
     assert not home.exists()
 
-    response = json.loads(captured.out)
+    response = json.loads(captured.err)
     assert response["ok"] is False
     assert response["condition"] == "run_max_tool_calls_invalid"
     assert response["error"] == "run_max_tool_calls_invalid"
@@ -1863,7 +2043,7 @@ def test_run_governed_cli_negative_max_tool_calls_returns_structured_json_withou
     for step in response["next_steps"]:
         assert "<" in step["command"]
 
-    assert captured.err == ""
+    assert captured.out == ""
     assert "Traceback" not in captured.out
     assert "Traceback" not in captured.err
     assert "/Users/" not in captured.out
@@ -1934,7 +2114,8 @@ def test_run_governed_cli_negative_max_duration_no_stderr_traceback(
 
     captured = capsys.readouterr()
     assert exit_code == 2
-    assert captured.err == ""
+    # Budget validation JSON now goes to stderr; stdout must be empty.
+    assert captured.out == ""
     assert "Traceback" not in captured.out
     assert "Traceback" not in captured.err
     assert "ttl_s must be positive" not in captured.out
@@ -2312,6 +2493,90 @@ def test_run_governed_cli_omitted_home_passes_through(
     )
 
     assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# --home empty / whitespace validation (CWD pollution prevention)
+#
+# ``Path("").resolve()`` resolves to CWD and ``Path("   ").resolve()``
+# resolves to a literal-whitespace-named directory. Both silently pollute
+# the wrong location with signing keys, governance logs, and state.
+# The guard rejects empty/whitespace values before any ``Path()`` conversion.
+# ---------------------------------------------------------------------------
+
+
+def test_run_governed_home_empty_next_steps_are_deterministic() -> None:
+    """The ``next_steps`` list for ``run_home_empty`` must be deterministic
+    and contain the expected ``condition`` field."""
+    steps = run_bridge.run_governed_home_empty_next_steps()
+    assert len(steps) == 2
+    for step in steps:
+        assert step["condition"] == "run_home_empty"
+        assert "command" in step
+        assert "detail" in step
+        assert "action" in step
+
+
+@pytest.mark.parametrize(
+    "home_value",
+    [
+        "",
+        "   ",
+        "\t",
+        "\n",
+        "  \t\n ",
+    ],
+    ids=["empty", "spaces", "tab", "newline", "mixed_whitespace"],
+)
+def test_run_governed_cli_empty_or_whitespace_home_is_rejected_before_artifacts(
+    home_value: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--home ""`` and ``--home "   "`` must be rejected with exit 2,
+    empty stdout, deterministic stderr + Next steps, no traceback, and NO
+    artifacts created in CWD or a literal-whitespace-named directory.
+
+    This closes the CWD-pollution-with-signing-keys defect class for
+    ``ardur run --home``, matching the closed proxy.py path-arg sweep.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    def fail_run_governed(**_kwargs: object) -> None:
+        raise AssertionError(
+            "empty/whitespace home must be rejected before governed launch"
+        )
+
+    monkeypatch.setattr("vibap.run_bridge.run_governed", fail_run_governed)
+
+    exit_code = run_bridge.run_governed_cli(
+        Namespace(
+            command=["echo", "hi"],
+            mission="example-mission-placeholder",
+            allowed_tools=["Read"],
+            forbidden_tools=None,
+            max_tool_calls=5,
+            max_duration_s=60,
+            home=home_value,
+            via="env",
+            no_kernel_correlation=True,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert "must be a non-empty path" in captured.err
+    assert "Next steps:" in captured.err
+    # No keys/state/jwt created in tmp_path (which is the CWD via monkeypatch).
+    assert not (tmp_path / "keys").exists()
+    assert not (tmp_path / "state").exists()
+    assert not (tmp_path / "active_mission.jwt").exists()
+    # No literal-whitespace-named directory created.
+    assert not (tmp_path / "   ").exists()
 
 
 # ---------------------------------------------------------------------------

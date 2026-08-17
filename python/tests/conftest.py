@@ -237,3 +237,86 @@ def unused_tcp_port() -> int:
 def _isolate_vibap_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point VIBAP_HOME at tmp_path for every test so nothing leaks into $HOME."""
     monkeypatch.setenv("VIBAP_HOME", str(tmp_path / "vibap-home"))
+
+
+# ---------------------------------------------------------------------------
+# Ollama showcase fail-closed gate (issue #375).
+#
+# pytest only auto-registers collection hooks from ``conftest.py`` (never from
+# a test module), so this is the single place the hook can live. It is gated
+# on ``ARDUR_OLLAMA_FAIL_CLOSED=1``, an env var the credentialed showcase job
+# sets after a workflow-level preflight. In every other run (local dev, PR CI,
+# the blocking test aggregate) the hook is inert.
+#
+# When the flag IS set, the showcase must either run its model-gated tests or
+# fail loudly: a silent skip (stale module-level skipif, broken client import,
+# missing credential that slipped past preflight) is converted to a collection
+# error so the job cannot report green while skipping every gated test.
+# ---------------------------------------------------------------------------
+
+
+def _ardur_ollama_preflight() -> tuple[bool, str]:
+    """Credential-free preflight; returns ``(ok, reason)`` without leaking secrets."""
+    import os
+
+    api_key = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
+    cloud_model = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+    if not api_key:
+        return False, "ARDUR_OLLAMA_API_KEY unset/empty"
+    if not cloud_model:
+        return False, "ARDUR_OLLAMA_CLOUD_MODEL unset/empty"
+    try:
+        import ollama  # noqa: F401
+    except ImportError as exc:
+        return False, f"ollama client import failed: {type(exc).__name__}"
+    return True, ""
+
+
+def _item_has_ardur_ollama_skip(item) -> bool:
+    """Return True if ``item`` carries the showcase's model-gated ``skipif``.
+
+    The showcase's ``ollama_required`` marker stores a precomputed boolean as
+    the first positional arg and carries both env-var names in its reason.
+    We detect by reason text (stable across import-time condition evaluation)
+    rather than marker identity so the hook works regardless of whether the
+    test module was imported with credentials present.
+    """
+    reason_needles = ("ARDUR_OLLAMA_API_KEY", "ARDUR_OLLAMA_CLOUD_MODEL")
+    for marker in item.iter_markers(name="skipif"):
+        if not marker.args:
+            continue
+        condition = marker.args[0]
+        try:
+            would_skip = bool(condition)
+        except Exception:
+            continue
+        if not would_skip:
+            continue
+        reason = marker.kwargs.get("reason", "")
+        if all(needle in reason for needle in reason_needles):
+            return True
+    return False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Fail closed for the Ollama showcase when ``ARDUR_OLLAMA_FAIL_CLOSED=1``."""
+    import os
+
+    if os.environ.get("ARDUR_OLLAMA_FAIL_CLOSED", "") != "1":
+        return
+    ok, reason = _ardur_ollama_preflight()
+    if not ok:
+        # Preflight failed: surface as a collection error rather than letting
+        # every gated test skip silently. The reason is redacted (no key value).
+        raise pytest.UsageError(
+            "ARDUR_OLLAMA_FAIL_CLOSED=1 but Ollama preflight failed: "
+            f"{reason}. Showcase cannot run honestly."
+        )
+    skipped = [item for item in items if _item_has_ardur_ollama_skip(item)]
+    if skipped:
+        names = ", ".join(item.nodeid for item in skipped[:5])
+        raise pytest.UsageError(
+            "ARDUR_OLLAMA_FAIL_CLOSED=1 and preflight passed, but "
+            f"{len(skipped)} ollama_required test(s) are still marked skip: "
+            f"{names}. Stale skip state must not mask a broken showcase."
+        )

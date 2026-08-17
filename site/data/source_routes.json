@@ -248,6 +248,7 @@
     "docs/decisions/ADR-023-explicit-resource-scope-authority.md": "source/docs/decisions/adr-023-explicit-resource-scope-authority/",
     "docs/decisions/ADR-024-self-asserted-owner-identity-assurance.md": "source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/",
     "docs/decisions/ADR-026-typed-dangerous-action-risk-budgets.md": "source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/",
+    "docs/decisions/ADR-027-latency-benchmark-gate-evaluator.md": "source/docs/decisions/adr-027-latency-benchmark-gate-evaluator/",
     "docs/decisions/README.md": "source/docs/decisions/readme/",
     "docs/demo/enforce-e2e.md": "source/docs/demo/enforce-e2e/",
     "docs/engineering-standards.md": "source/docs/engineering-standards/",
