@@ -7,6 +7,7 @@
     ".github/workflows/agent-docs.yml": "repo/.github/workflows/agent-docs.yml",
     ".github/workflows/agent-recognition-benchmark.yml": "repo/.github/workflows/agent-recognition-benchmark.yml",
     ".github/workflows/codeql.yml": "repo/.github/workflows/codeql.yml",
+    ".github/workflows/dependabot-workflow-mirrors.yml": "repo/.github/workflows/dependabot-workflow-mirrors.yml",
     ".github/workflows/hugo-site.yml": "repo/.github/workflows/hugo-site.yml",
     ".github/workflows/kernel-enforce.yml": "repo/.github/workflows/kernel-enforce.yml",
     ".github/workflows/link-check.yml": "repo/.github/workflows/link-check.yml",
