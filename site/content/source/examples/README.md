@@ -2,7 +2,7 @@
 title: "Ardur Examples"
 description: "Working examples of Ardur governing AI agents across major frameworks and local"
 source_path: "examples/README.md"
-source_sha256: "59cdc08f673aa1338ecb6ce1749329d716238eaef0f232a42975086fda80757d"
+source_sha256: "32830c3eec7b4c032a8264d874ad017c26694028c978b40a8313720acaf7626c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -49,10 +49,11 @@ credentials.
 ## Running the mission examples (today, no agent required)
 
 ```bash
-cd ../python
-pip install -e .
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
-# Issue and verify a passport. ardur issue takes mission claims via flags,
+# 2. Issue and verify a passport. ardur issue takes mission claims via flags,
 # not a JSON file — the example mission files under missions/ are reference
 # documents for the spec layer. To exercise the protocol path:
 ardur issue \
@@ -63,6 +64,12 @@ ardur issue \
 
 ardur verify --token <token-from-issue-output>
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 That exercises the core protocol surface end-to-end — mission compilation, passport issuance, signature, verification — without an LLM or framework in the loop. It's the fastest way to confirm a local install actually works.
 

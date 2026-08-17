@@ -9,6 +9,7 @@ the same Hub API instead of issuing an independent receipt format.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import struct
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import BinaryIO, Any
 
 from .personal_hub import DEFAULT_HUB_URL, hub_request, _hub_setup_failure_flags
+
+logger = logging.getLogger(__name__)
 
 HOST_OBSERVATION_TYPE = "ardur.personal.host_observation.v0.1"
 NATIVE_HOST_NAME = "dev.ardur.personal"
@@ -496,8 +499,9 @@ def run_native_host(
                     keys_dir=keys_dir,
                     caller_origin=caller_origin,
                 )
-            except Exception as exc:  # pragma: no cover - native host guardrail
-                response = {"ok": False, "error": str(exc)}
+            except Exception:  # pragma: no cover - native host guardrail
+                logger.exception("Unhandled exception in native host message handler")
+                response = {"ok": False, "error": "internal error"}
         data = json.dumps(response).encode("utf-8")
         stdout.write(struct.pack("<I", len(data)))
         stdout.write(data)

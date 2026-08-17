@@ -18,6 +18,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -25,12 +26,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: enforce-verify <enforce_events.jsonl> [expected_chain_digest]")
 		os.Exit(2)
 	}
+
+	logPath := os.Args[1]
+	if strings.TrimSpace(logPath) == "" {
+		fmt.Fprintln(os.Stderr, "enforce-verify: the enforce_events.jsonl path must be a non-empty path after trimming whitespace")
+		os.Exit(2)
+	}
+
 	expectDigest := ""
 	if len(os.Args) == 3 {
 		expectDigest = os.Args[2]
 	}
 
-	res, err := verifyLog(os.Args[1], expectDigest)
+	res, err := verifyLog(logPath, expectDigest)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "enforce-verify:", err)
 		os.Exit(2)

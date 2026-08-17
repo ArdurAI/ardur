@@ -226,6 +226,17 @@ const (
 	// was observed targeting a path/network destination outside the allowlist;
 	// the event was logged but the syscall was not killed (permissive mode).
 	SyntheticKernelReceiptVerdictBlocked = "blocked"
+
+	// SyntheticKernelReceiptVerdictUnknown means the correlator observed the
+	// event but evidence is structurally outside the capture boundary — the
+	// daemon was down (restart gap) or coverage is otherwise unknowable. This
+	// mirrors the Python receipt's first-class "unknown" verdict for honest
+	// observation-gap abstention: the verifier genuinely cannot tell what
+	// happened. Callers MUST treat UNKNOWN as DENY (fail-closed). The
+	// distinction from INSUFFICIENT_EVIDENCE is that UNKNOWN records a genuine
+	// structural visibility gap, while INSUFFICIENT_EVIDENCE means the
+	// verifier tried but could not evaluate (transient operational failure).
+	SyntheticKernelReceiptVerdictUnknown = "unknown"
 )
 
 // SyntheticKernelReceipt is the kernel-effect synthetic receipt projection.

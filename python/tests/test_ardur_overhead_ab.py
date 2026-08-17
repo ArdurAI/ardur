@@ -28,8 +28,6 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-import ollama
-
 # Add project root to path so vibap imports work
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -44,6 +42,22 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 REPORT_PATH = Path(__file__).resolve().parent / "overhead_ab_report.json"
 TURNS = 16  # enough turns for a ~5 min creative task per run
 # ---------------------------------------------------------------------------
+
+
+def _message_field(message: Any, field: str, default: Any = None) -> Any:
+    """Read a field from either an Ollama Message object or a message dict."""
+    if isinstance(message, dict):
+        return message.get(field, default)
+    return getattr(message, field, default)
+
+
+def _has_review_prompt(messages: list[Any]) -> bool:
+    return any(
+        _message_field(message, "role") == "user"
+        and "good. now do a code review"
+        in str(_message_field(message, "content", "") or "").casefold()
+        for message in messages
+    )
 
 
 def _free_port():
@@ -62,12 +76,18 @@ def _ssl_context():
 def _post_tls(base, path, payload=None):
     data = json.dumps(payload or {}).encode("utf-8")
     req = urllib.request.Request(
-        base + path, data=data,
-        headers={"Content-Type": "application/json"}, method="POST",
+        base + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=15, context=_ssl_context()) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8")), dict(resp.headers.items())
+            return (
+                resp.status,
+                json.loads(resp.read().decode("utf-8")),
+                dict(resp.headers.items()),
+            )
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8")
         try:
@@ -79,6 +99,7 @@ def _post_tls(base, path, payload=None):
 def _build_server_tls(proxy, private_key, port, tls_cert, tls_key):
     """Start TLS proxy in a daemon thread, return base URL."""
     import signal as _signal
+
     _signal.signal = lambda *_a, **_kw: None
 
     os.environ["ARDUR_RATE_LIMIT_RPS"] = "100"
@@ -86,10 +107,15 @@ def _build_server_tls(proxy, private_key, port, tls_cert, tls_key):
 
     def run():
         serve_proxy(
-            proxy=proxy, private_key=private_key,
-            host="127.0.0.1", port=port,
-            tls_cert=tls_cert, tls_key=tls_key,
-            no_tls=False, require_auth=False, api_token="",
+            proxy=proxy,
+            private_key=private_key,
+            host="127.0.0.1",
+            port=port,
+            tls_cert=tls_cert,
+            tls_key=tls_key,
+            no_tls=False,
+            require_auth=False,
+            api_token="",
         )
 
     t = threading.Thread(target=run, daemon=True)
@@ -190,18 +216,22 @@ SYSTEM_PROMPT = (
 def build_initial_messages():
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": (
-            "Build the complete Task Tracker CLI. Write every file with full "
-            "implementations. Create the tracker/ package directory structure. "
-            "After writing all files, review each one and fix bugs. "
-            "Write production-quality code."
-        )},
+        {
+            "role": "user",
+            "content": (
+                "Build the complete Task Tracker CLI. Write every file with full "
+                "implementations. Create the tracker/ package directory structure. "
+                "After writing all files, review each one and fix bugs. "
+                "Write production-quality code."
+            ),
+        },
     ]
 
 
 # ---------------------------------------------------------------------------
 # Run A: WITHOUT Ardur (local tool simulation)
 # ---------------------------------------------------------------------------
+
 
 def run_without_ardur(client) -> dict[str, Any]:
     """Model calls tools; harness simulates results locally. No proxy."""
@@ -218,6 +248,7 @@ def run_without_ardur(client) -> dict[str, Any]:
 
     for turn in range(TURNS):
         resp = client.chat(model=CLOUD_MODEL, messages=messages, tools=TOOLS)
+        turns_used = turn + 1
 
         total_prompt_tokens += getattr(resp, "prompt_eval_count", 0) or 0
         total_completion_tokens += getattr(resp, "eval_count", 0) or 0
@@ -226,12 +257,10 @@ def run_without_ardur(client) -> dict[str, Any]:
         tool_calls = getattr(resp.message, "tool_calls", None)
         if not tool_calls:
             if resp.message.content:
-                messages.append({"role": "assistant", "content": resp.message.content})
+                messages.append(resp.message)
             continue
 
-        turns_used = turn + 1
-
-        tool_msgs = []
+        tool_results: list[tuple[str, dict[str, Any]]] = []
         for tc in tool_calls:
             tool_name = tc.function.name
             tool_args = tc.function.arguments
@@ -246,30 +275,48 @@ def run_without_ardur(client) -> dict[str, Any]:
             if tool_name == "write_file":
                 files_created.add(tool_args.get("path", "unknown"))
                 result = {
-                    "status": "ok", "path": tool_args.get("path", ""),
+                    "status": "ok",
+                    "path": tool_args.get("path", ""),
                     "bytes_written": len(tool_args.get("content", "")),
                 }
             elif tool_name == "read_file":
-                result = {"status": "ok", "path": tool_args.get("path", ""), "exists": True}
+                result = {
+                    "status": "ok",
+                    "path": tool_args.get("path", ""),
+                    "exists": True,
+                }
             elif tool_name == "list_directory":
-                result = {"status": "ok", "path": tool_args.get("path", ""), "entries": sorted(files_created)}
+                result = {
+                    "status": "ok",
+                    "path": tool_args.get("path", ""),
+                    "entries": sorted(files_created),
+                }
             else:
                 result = {"status": "ok"}
 
-            tool_msgs.append(tc)
-            messages.append({"role": "tool", "name": tool_name, "content": json.dumps(result)})
+            tool_results.append((tool_name, result))
 
-        messages.append({"role": "assistant", "content": None, "tool_calls": tool_msgs})
+        messages.append(resp.message)
+        messages.extend(
+            {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": json.dumps(result),
+            }
+            for tool_name, result in tool_results
+        )
 
         # Progress prompts (same at same thresholds as B run)
-        if len(files_created) >= 4 and not any(
-            m.get("content", "") and "review pass" in str(m.get("content", ""))
-            for m in messages if m["role"] == "user"
-        ):
-            messages.append({"role": "user", "content": (
-                "Good. Now do a code review — read back each file, check for bugs, "
-                "edge cases, and fix everything you find."
-            )})
+        if len(files_created) >= 4 and not _has_review_prompt(messages):
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Good. Now do a code review — read back each file, check for bugs, "
+                        "edge cases, and fix everything you find."
+                    ),
+                }
+            )
 
     wall_s = time.time() - t0
     return {
@@ -290,6 +337,7 @@ def run_without_ardur(client) -> dict[str, Any]:
 # Run B: WITH Ardur (full governance over TLS)
 # ---------------------------------------------------------------------------
 
+
 def run_with_ardur(client, base, sid) -> dict[str, Any]:
     """Every tool call evaluated by GovernanceProxy before execution."""
     messages = build_initial_messages()
@@ -305,6 +353,7 @@ def run_with_ardur(client, base, sid) -> dict[str, Any]:
 
     for turn in range(TURNS):
         resp = client.chat(model=CLOUD_MODEL, messages=messages, tools=TOOLS)
+        turns_used = turn + 1
 
         total_prompt_tokens += getattr(resp, "prompt_eval_count", 0) or 0
         total_completion_tokens += getattr(resp, "eval_count", 0) or 0
@@ -313,12 +362,10 @@ def run_with_ardur(client, base, sid) -> dict[str, Any]:
         tool_calls = getattr(resp.message, "tool_calls", None)
         if not tool_calls:
             if resp.message.content:
-                messages.append({"role": "assistant", "content": resp.message.content})
+                messages.append(resp.message)
             continue
 
-        turns_used = turn + 1
-
-        tool_msgs = []
+        tool_results: list[tuple[str, dict[str, Any]]] = []
         for tc in tool_calls:
             tool_name = tc.function.name
             tool_args = tc.function.arguments
@@ -330,39 +377,64 @@ def run_with_ardur(client, base, sid) -> dict[str, Any]:
             tool_calls_total += 1
 
             # Governance evaluation over TLS
-            status, decision, _ = _post_tls(base, "/evaluate", {
-                "session_id": sid,
-                "tool_name": tool_name,
-                "arguments": tool_args,
-            })
+            status, decision, _ = _post_tls(
+                base,
+                "/evaluate",
+                {
+                    "session_id": sid,
+                    "tool_name": tool_name,
+                    "arguments": tool_args,
+                },
+            )
             if status != 200 or decision.get("decision") != "PERMIT":
-                result = {"status": "denied", "reason": decision.get("reason", "unknown")}
+                result = {
+                    "status": "denied",
+                    "reason": decision.get("reason", "unknown"),
+                }
             elif tool_name == "write_file":
                 files_created.add(tool_args.get("path", "unknown"))
                 result = {
-                    "status": "ok", "path": tool_args.get("path", ""),
+                    "status": "ok",
+                    "path": tool_args.get("path", ""),
                     "bytes_written": len(tool_args.get("content", "")),
                 }
             elif tool_name == "read_file":
-                result = {"status": "ok", "path": tool_args.get("path", ""), "exists": True}
+                result = {
+                    "status": "ok",
+                    "path": tool_args.get("path", ""),
+                    "exists": True,
+                }
             elif tool_name == "list_directory":
-                result = {"status": "ok", "path": tool_args.get("path", ""), "entries": sorted(files_created)}
+                result = {
+                    "status": "ok",
+                    "path": tool_args.get("path", ""),
+                    "entries": sorted(files_created),
+                }
             else:
                 result = {"status": "ok"}
 
-            tool_msgs.append(tc)
-            messages.append({"role": "tool", "name": tool_name, "content": json.dumps(result)})
+            tool_results.append((tool_name, result))
 
-        messages.append({"role": "assistant", "content": None, "tool_calls": tool_msgs})
+        messages.append(resp.message)
+        messages.extend(
+            {
+                "role": "tool",
+                "tool_name": tool_name,
+                "content": json.dumps(result),
+            }
+            for tool_name, result in tool_results
+        )
 
-        if len(files_created) >= 4 and not any(
-            m.get("content", "") and "review pass" in str(m.get("content", ""))
-            for m in messages if m["role"] == "user"
-        ):
-            messages.append({"role": "user", "content": (
-                "Good. Now do a code review — read back each file, check for bugs, "
-                "edge cases, and fix everything you find."
-            )})
+        if len(files_created) >= 4 and not _has_review_prompt(messages):
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Good. Now do a code review — read back each file, check for bugs, "
+                        "edge cases, and fix everything you find."
+                    ),
+                }
+            )
 
     wall_s = time.time() - t0
     return {
@@ -383,6 +455,7 @@ def run_with_ardur(client, base, sid) -> dict[str, Any]:
 # report
 # ---------------------------------------------------------------------------
 
+
 def compute_overhead(no_ardur: dict, with_ardur: dict) -> dict:
     def pct(a, b):
         if b == 0:
@@ -391,15 +464,20 @@ def compute_overhead(no_ardur: dict, with_ardur: dict) -> dict:
 
     return {
         "prompt_tokens_overhead_pct": pct(
-            with_ardur["prompt_tokens"], no_ardur["prompt_tokens"]),
+            with_ardur["prompt_tokens"], no_ardur["prompt_tokens"]
+        ),
         "completion_tokens_overhead_pct": pct(
-            with_ardur["completion_tokens"], no_ardur["completion_tokens"]),
+            with_ardur["completion_tokens"], no_ardur["completion_tokens"]
+        ),
         "total_tokens_overhead_pct": pct(
-            with_ardur["total_tokens"], no_ardur["total_tokens"]),
+            with_ardur["total_tokens"], no_ardur["total_tokens"]
+        ),
         "wall_time_overhead_pct": pct(
-            with_ardur["wall_seconds"], no_ardur["wall_seconds"]),
+            with_ardur["wall_seconds"], no_ardur["wall_seconds"]
+        ),
         "model_time_overhead_pct": pct(
-            with_ardur["total_duration_s"], no_ardur["total_duration_s"]),
+            with_ardur["total_duration_s"], no_ardur["total_duration_s"]
+        ),
         "tool_calls_delta": with_ardur["tool_calls"] - no_ardur["tool_calls"],
     }
 
@@ -408,7 +486,10 @@ def compute_overhead(no_ardur: dict, with_ardur: dict) -> dict:
 # main
 # ---------------------------------------------------------------------------
 
+
 def main():
+    import ollama
+
     client = ollama.Client(host=OLLAMA_HOST)
     try:
         model_names = [m.model for m in client.list().models]
@@ -427,18 +508,23 @@ def main():
     # ------- Run A: WITHOUT Ardur -------
     print("\n>>> Run A: WITHOUT Ardur (local tool simulation)")
     result_no_ardur = run_without_ardur(client)
-    print(f"  prompt_tokens={result_no_ardur['prompt_tokens']}  "
-          f"completion_tokens={result_no_ardur['completion_tokens']}  "
-          f"total_tokens={result_no_ardur['total_tokens']}")
-    print(f"  model_time={result_no_ardur['total_duration_s']}s  "
-          f"wall_time={result_no_ardur['wall_seconds']}s  "
-          f"tool_calls={result_no_ardur['tool_calls']}  "
-          f"files={result_no_ardur['files_created']}")
+    print(
+        f"  prompt_tokens={result_no_ardur['prompt_tokens']}  "
+        f"completion_tokens={result_no_ardur['completion_tokens']}  "
+        f"total_tokens={result_no_ardur['total_tokens']}"
+    )
+    print(
+        f"  model_time={result_no_ardur['total_duration_s']}s  "
+        f"wall_time={result_no_ardur['wall_seconds']}s  "
+        f"tool_calls={result_no_ardur['tool_calls']}  "
+        f"files={result_no_ardur['files_created']}"
+    )
 
     # ------- Run B: WITH Ardur -------
     print("\n>>> Run B: WITH Ardur (governance proxy over TLS)")
 
     import tempfile
+
     with tempfile.TemporaryDirectory() as td:
         keys_dir = Path(td)
         private_key, public_key = generate_keypair(keys_dir=keys_dir)
@@ -477,13 +563,17 @@ def main():
 
         _post_tls(base, "/session/end", {"session_id": sid})
 
-    print(f"  prompt_tokens={result_with_ardur['prompt_tokens']}  "
-          f"completion_tokens={result_with_ardur['completion_tokens']}  "
-          f"total_tokens={result_with_ardur['total_tokens']}")
-    print(f"  model_time={result_with_ardur['total_duration_s']}s  "
-          f"wall_time={result_with_ardur['wall_seconds']}s  "
-          f"tool_calls={result_with_ardur['tool_calls']}  "
-          f"files={result_with_ardur['files_created']}")
+    print(
+        f"  prompt_tokens={result_with_ardur['prompt_tokens']}  "
+        f"completion_tokens={result_with_ardur['completion_tokens']}  "
+        f"total_tokens={result_with_ardur['total_tokens']}"
+    )
+    print(
+        f"  model_time={result_with_ardur['total_duration_s']}s  "
+        f"wall_time={result_with_ardur['wall_seconds']}s  "
+        f"tool_calls={result_with_ardur['tool_calls']}  "
+        f"files={result_with_ardur['files_created']}"
+    )
 
     # ------- Overhead report -------
     overhead = compute_overhead(result_no_ardur, result_with_ardur)

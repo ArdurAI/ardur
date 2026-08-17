@@ -23,7 +23,7 @@ langgraph-quickstart/
 
 - Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
 - `python/` editable install with the LangGraph integration extra
-  (`pip install -e '../../python[dev,langgraph]'`)
+  (via `./scripts/setup-dev.sh --skip-go` then `pip install -e '.[langgraph]'`)
 - `langgraph >=1.2.9,<2` and `langchain >=1.3.13,<2`, matching the typed
   runtime-context and `ToolRuntime` APIs used by the reference
 - LLM access: local Ollama, an OpenAI-compatible gateway, or an Anthropic API key
@@ -32,12 +32,25 @@ langgraph-quickstart/
 ## Running locally
 
 ```bash
-cd ../../python && pip install -e '.[dev,langgraph]'
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
+pip install -e '.[langgraph]'
+
+# 2. Pick a provider + model id
 export ARDUR_PROVIDER=ollama
 export OLLAMA_MODEL='<your local model tag>'
-cd ../examples/langgraph-quickstart
+
+# 3. Run the demo from this directory
+cd examples/langgraph-quickstart
 PYTHONPATH=../_shared python demo.py
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e 'python/.[dev,langgraph]'`; macOS system Python 3.9 and
+its bundled pip are too old for the PEP 660 editable install.
 
 `ARDUR_PROVIDER` plus the matching `*_MODEL` env var are required. No model identifiers are hard-coded — see [CONTRIBUTING.md](../../CONTRIBUTING.md).
 

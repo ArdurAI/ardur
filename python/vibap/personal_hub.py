@@ -14,11 +14,13 @@ from contextlib import suppress
 import hashlib
 import html
 import json
+import logging
 import os
 import plistlib
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -49,11 +51,19 @@ from .metrics import metrics as ardur_metrics
 from .rate_limiter import RateLimiter
 from .tls import create_ssl_context, resolve_tls_paths
 
+# Characters that are invisible/whitespace but not caught by ``str.strip()``:
+# zero-width spaces (U+200B–U+200F), word joiner (U+2060), and BOM (U+FEFF).
+# Including these in the blank-command check prevents confusing subprocess
+# errors when a user's input contains only these characters.
+_INVISIBLE_OR_WS_RE = re.compile(r"^[\s\u200b-\u200f\u2060\ufeff]*$")
+
 HUB_SCHEMA_VERSION = "ardur.personal.hub.v0.1"
 EVENT_SCHEMA_VERSION = "ardur.personal.event.v0.1"
 SESSION_REVIEW_SCHEMA_VERSION = "ardur.personal.session_review.v0.1"
 DEFAULT_HUB_HOST = "127.0.0.1"
 DEFAULT_HUB_PORT = 8765
+
+logger = logging.getLogger(__name__)
 DEFAULT_HUB_HOME = Path(
     os.environ.get("ARDUR_PERSONAL_HOME", DEFAULT_HOME / "personal")
 ).expanduser()
@@ -70,6 +80,8 @@ HUB_TOKEN_HEADER = "X-Ardur-Hub-Token"
 _HUB_TOKEN_COMPARE_MAX_BYTES = 4096
 _ALLOWED_HUB_URL_SCHEMES = {"http", "https"}
 PERSONAL_HOME_NOT_DIRECTORY_CONDITION = "personal_home_not_directory"
+HOME_DANGLING_SYMLINK_PARENT_CONDITION = "home_dangling_symlink_parent"
+HOME_PARENT_NOT_DIRECTORY_CONDITION = "home_parent_not_directory"
 SETUP_HOME_INVALID_CONDITION = "setup_home_invalid"
 SETUP_HOST_INVALID_CONDITION = "setup_host_invalid"
 SETUP_PORT_INVALID_CONDITION = "setup_port_invalid"
@@ -184,8 +196,107 @@ def validate_personal_home_directory(paths: HubPaths) -> None:
         raise _personal_home_not_directory_error()
 
 
+def _home_dangling_symlink_parent_error() -> HubError:
+    return HubError(
+        "Ardur home path has a parent component that is a dangling symlink.",
+        status=400,
+        code=HOME_DANGLING_SYMLINK_PARENT_CONDITION,
+    )
+
+
+def _home_parent_not_directory_error() -> HubError:
+    return HubError(
+        "Ardur home path has a parent component that is an existing non-directory.",
+        status=400,
+        code=HOME_PARENT_NOT_DIRECTORY_CONDITION,
+    )
+
+
+def validate_personal_home_path_components(home: str | Path) -> None:
+    """Reject a Personal ``--home`` path whose parent chain crosses a dangling
+    symlink or an existing non-directory, BEFORE any ``Path.resolve()`` /
+    ``mkdir(parents=True)`` follows the link or materialises the target.
+
+    Why this exists
+    ---------------
+    Three Ardur commands (``run``, ``setup``, ``protect claude-code``) accept
+    ``--home <dangling-symlink>/child``. The previous leaf-only validation
+    inspected just the final path component:
+
+    * ``Path(dangling/child).is_symlink()`` returns False (``child`` is the
+      leaf, not the symlink).
+    * ``Path(dangling/child).resolve()`` follows the symlink and returns the
+      missing-target path ``/missing/child``.
+    * ``missing.exists()`` returns False, so the resolved-path guard also
+      short-circuits.
+    * ``home.mkdir(parents=True, exist_ok=True)`` then silently materialises
+      the missing target and Ardur writes the Ed25519 private key,
+      ``active_mission.jwt``, state, and the governance log there.
+
+    The fix mirrors the 2026-06-28 ``ardur start --state-dir``/``--log-path``
+    precedent: walk each *parent* component of the **un-resolved** expanded
+    path and reject when any parent is a dangling symlink or an existing
+    non-directory. Operating on the un-resolved path is essential because
+    ``.resolve()`` collapses the symlink chain before the check can see it.
+
+    What is rejected
+    ----------------
+    * Any parent component that is a dangling symlink
+      (``parent.is_symlink() and not parent.exists()``).
+    * Any parent component that exists and is not a directory
+      (regular file, socket, block device, etc.).
+
+    What is preserved
+    -----------------
+    * A direct dangling symlink leaf (``home`` itself) is rejected by the
+      existing ``validate_personal_home_directory`` /
+      ``protect_claude_code`` leaf checks; this helper deliberately does not
+      duplicate that so callers keep firing their own leaf-specific
+      structured responses.
+    * A symlink whose target is an existing directory proceeds normally —
+      ``is_symlink() and not exists()`` is False, and the resolved path is a
+      real directory.
+    * A plain nonexistent non-symlink path proceeds normally — Ardur creates
+      it later with ``mkdir(parents=True, exist_ok=True)``.
+
+    Parameters
+    ----------
+    home:
+        The raw ``--home`` value as supplied by the caller. It is
+        ``expanduser()``-ed internally. Empty/whitespace values must already
+        have been rejected by ``_resolve_personal_home`` so this helper
+        intentionally does not re-check them.
+
+    Raises
+    ------
+    HubError(HOME_DANGLING_SYMLINK_PARENT_CONDITION)
+        If any parent component is a dangling symlink.
+    HubError(HOME_PARENT_NOT_DIRECTORY_CONDITION)
+        If any parent component exists and is not a directory.
+    """
+
+    expanded = Path(home).expanduser()
+    # Walk parent components from the immediate parent up to the filesystem
+    # root. ``Path.parents`` yields absolute ancestors for an absolute input
+    # and CWD-relative ancestors for a relative input; both are correct here
+    # because ``mkdir(parents=True)`` operates on the same chain.
+    for parent in expanded.parents:
+        is_symlink = parent.is_symlink()
+        exists = parent.exists()
+        if is_symlink and not exists:
+            raise _home_dangling_symlink_parent_error()
+        if exists and not parent.is_dir():
+            raise _home_parent_not_directory_error()
+
+
 def _ensure_personal_home_directory(paths: HubPaths) -> None:
     validate_personal_home_directory(paths)
+    # Reject parent-component dangling symlinks or non-directory parents BEFORE
+    # mkdir(parents=True) follows the symlink chain and materialises the missing
+    # target. ``paths.home`` is already the expanded path from HubPaths.from_home
+    # but it is un-resolved, which is exactly what the parent walk needs: walking
+    # parents of the resolved path would already have collapsed the symlink.
+    validate_personal_home_path_components(paths.home)
     # When the personal home is under DEFAULT_HOME, materialise the home
     # with 0o700 first so the mkdir(parents=True) doesn't create it with
     # the process umask.
@@ -246,6 +357,106 @@ def personal_home_failure_response() -> dict[str, Any]:
             "non-directory. Choose a directory path before running setup or starting the Hub."
         ),
         "next_steps": personal_home_failure_next_steps(),
+    }
+
+
+def home_dangling_symlink_parent_next_steps() -> list[dict[str, str]]:
+    condition = HOME_DANGLING_SYMLINK_PARENT_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "remove_or_fix_dangling_symlink_parent",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "A parent directory in the supplied --home path is a dangling "
+                "symlink (a symlink whose target does not exist). Ardur resolves "
+                "the symlink chain and would silently write signing keys, "
+                "active_mission.jwt, state, and governance logs at the resolved "
+                "target rather than the path you typed. Remove the dangling "
+                "symlink or point it at a real directory before retrying."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "After choosing a valid Ardur Personal home directory whose parent "
+                "chain contains no dangling symlinks, start the loopback Hub. "
+                "Keep raw local paths and Hub tokens out of shared logs."
+            ),
+        },
+    ]
+
+
+def home_dangling_symlink_parent_failure_response() -> dict[str, Any]:
+    condition = HOME_DANGLING_SYMLINK_PARENT_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": (
+            "Ardur home path has a parent component that is a dangling symlink."
+        ),
+        "detail": (
+            "The supplied --home path passes through a dangling symlink in one of "
+            "its parent directories. Without this check Ardur follows the symlink, "
+            "materialises the missing target, and writes the Ed25519 private key, "
+            "active_mission.jwt, state, and governance log at a location you did "
+            "not type. Remove the dangling symlink or repoint it at a real "
+            "directory before retrying."
+        ),
+        "next_steps": home_dangling_symlink_parent_next_steps(),
+    }
+
+
+def home_parent_not_directory_next_steps() -> list[dict[str, str]]:
+    condition = HOME_PARENT_NOT_DIRECTORY_CONDITION
+    return [
+        {
+            "condition": condition,
+            "action": "move_aside_or_choose_directory_parent",
+            "command": "ardur setup --home <ardur-home>",
+            "detail": (
+                "A parent directory in the supplied --home path exists as a "
+                "regular file or other non-directory. Ardur cannot create the "
+                "home tree inside a file. Move the file aside or choose a "
+                "different parent directory before retrying."
+            ),
+        },
+        {
+            "condition": condition,
+            "action": "start_personal_hub_after_setup",
+            "command": "ardur hub --home <ardur-home>",
+            "detail": (
+                "After choosing a valid Ardur Personal home directory whose parent "
+                "chain contains no regular files, start the loopback Hub. "
+                "Keep raw local paths and Hub tokens out of shared logs."
+            ),
+        },
+    ]
+
+
+def home_parent_not_directory_failure_response() -> dict[str, Any]:
+    condition = HOME_PARENT_NOT_DIRECTORY_CONDITION
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": (
+            "Ardur home path has a parent component that is an existing "
+            "non-directory."
+        ),
+        "detail": (
+            "A parent directory in the supplied --home path already exists as a "
+            "regular file or other non-directory. Ardur cannot create the home "
+            "tree (keys, active_mission.jwt, state, governance log) inside a file. "
+            "Move the file aside or choose a different parent directory before "
+            "retrying."
+        ),
+        "next_steps": home_parent_not_directory_next_steps(),
     }
 
 
@@ -471,6 +682,20 @@ def _personal_home_failure_response_for(exc: HubError) -> dict[str, Any] | None:
 def _print_json_response(payload: dict[str, Any]) -> None:
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
+
+
+def _emit_json_error_to_stderr(payload: dict[str, Any]) -> None:
+    """Emit a structured JSON error to stderr.
+
+    The legacy ``run_under_hub`` path previously emitted human-readable
+    summary lines to stderr, which violated the ``--json`` contract
+    (stdout = child output, stderr = governance JSON).  This helper
+    writes the same error/condition/next_steps structure that the
+    governance path uses, but to stderr so JSON consumers can parse
+    it without polluting the child's stdout.
+    """
+    json.dump(payload, sys.stderr, indent=2)
+    sys.stderr.write("\n")
 
 
 _RUN_SUPPORT_CONDITIONS = {
@@ -798,6 +1023,42 @@ def resolve_hub_token(
             raise
         return None
     return str(token) if token else None
+
+
+def resolve_hub_url(
+    *,
+    home: str | Path | None = None,
+    explicit: str | None = None,
+) -> str:
+    """Resolve the Hub base URL mirroring :func:`resolve_hub_token`.
+
+    Resolution order: explicit override → ``ARDUR_PERSONAL_HUB_URL`` env var →
+    ``hub_url`` recorded in the Personal home config → :data:`DEFAULT_HUB_URL`.
+
+    ``hub_request`` uses this when a caller passes the unchanged CLI default
+    (plain HTTP) so that a Hub which serves TLS is still reached once
+    ``ardur hub`` has recorded its real HTTPS URL in config. An explicit
+    override that differs from the default is always honoured as-is.
+    """
+
+    paths = HubPaths.from_home(home)
+    validate_personal_home_directory(paths)
+    if explicit:
+        return explicit
+    env_url = os.environ.get("ARDUR_PERSONAL_HUB_URL", "").strip()
+    if env_url:
+        return env_url
+    try:
+        config_url = _load_hub_config(paths).get("hub_url")
+    except HubError as exc:
+        if _is_personal_home_not_directory_error(exc) or _is_setup_home_invalid_error(
+            exc
+        ):
+            raise
+        config_url = None
+    if config_url:
+        return str(config_url)
+    return DEFAULT_HUB_URL
 
 
 def _clip(value: Any, limit: int = MAX_EXCERPT_CHARS) -> str:
@@ -1373,9 +1634,13 @@ class _HubRequestHandler(BaseHTTPRequestHandler):
                 {"ok": False, "error": str(exc), "error_code": exc.code},
                 status=exc.status,
             )
-        except Exception as exc:  # pragma: no cover - defensive server boundary
+        except Exception:  # pragma: no cover - defensive server boundary
+            logger.exception(
+                "Unhandled exception in Personal Hub HTTP handler",
+                extra={"path": "<request-path-redacted>"},
+            )
             self._send_json(
-                {"ok": False, "error": str(exc), "error_code": "internal_error"},
+                {"ok": False, "error": "internal server error", "error_code": "internal_error"},
                 status=500,
             )
 
@@ -1675,6 +1940,64 @@ def _validated_hub_request_url(hub_url: str, path: str) -> str | None:
     return base_url.rstrip("/") + path
 
 
+# Loopback hostnames for which the Personal Hub serves a self-signed cert that
+# is not present in the system trust store. The Hub's pinned certificate lives
+# at ``<home>/tls/cert.pem`` and is the only trust root the client should add.
+_LOOPBACK_HUB_HOSTS = frozenset({"127.0.0.1", "localhost"})
+
+
+def _is_loopback_https_hub(hub_url: str) -> bool:
+    """True when ``hub_url`` is an https URL pinned to a loopback host."""
+
+    try:
+        parsed = urlparse.urlsplit(str(hub_url).strip())
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != "https":
+        return False
+    return (parsed.hostname or "").lower() in _LOOPBACK_HUB_HOSTS
+
+
+def _loopback_hub_ssl_context(
+    hub_url: str,
+    home: str | Path | None,
+) -> ssl.SSLContext | None:
+    """Return a client SSL context that trusts only the Hub's pinned cert.
+
+    The Personal Hub auto-generates a self-signed certificate under
+    ``<home>/tls/cert.pem`` and serves HTTPS on loopback. That certificate is
+    not installed in the system trust store, so the default ``urlopen`` SSL
+    context rejects it and the client reports ``hub_unavailable`` even when the
+    Hub is healthy.
+
+    This helper builds a strict client context that trusts *only* the pinned
+    Hub certificate (CA = ``<home>/tls/cert.pem``) and still validates the
+    hostname and certificate chain against that single CA. It is used solely
+    for loopback https Hub URLs whose pinned cert file exists. For any other
+    case (non-https, non-loopback, http, or missing cert file) it returns
+    ``None`` so ``urlopen`` falls back to the default system trust store.
+    """
+
+    if not _is_loopback_https_hub(hub_url):
+        return None
+    try:
+        resolved_home = _resolve_personal_home(home)
+    except HubError:
+        return None
+    pinned_cert = resolved_home / "tls" / "cert.pem"
+    if not pinned_cert.is_file():
+        return None
+    try:
+        context = ssl.create_default_context(cafile=str(pinned_cert))
+    except (OSError, ssl.SSLError):
+        return None
+    # Keep default strict verification against the pinned CA. Hostname
+    # validation stays enabled so only a cert issued for the loopback host
+    # is accepted.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 def hub_request(
     method: str,
     path: str,
@@ -1699,6 +2022,20 @@ def hub_request(
     if token:
         headers["authorization"] = f"Bearer {token}"
         headers[HUB_TOKEN_HEADER] = token
+    # When a caller (typically a CLI command whose ``--hub-url`` argument
+    # defaults to the plain-HTTP :data:`DEFAULT_HUB_URL`) has not supplied an
+    # explicit override, consult the Personal home config so a Hub that is
+    # actually serving HTTPS is reached with the correct scheme. ``ardur hub``
+    # records the real scheme://host:port it serves on into config, so this
+    # mirrors how :func:`resolve_hub_token` already resolves the token.
+    if str(hub_url).strip() == DEFAULT_HUB_URL:
+        try:
+            hub_url = resolve_hub_url(home=home)
+        except HubError as exc:
+            mapped = _personal_home_failure_response_for(exc)
+            if mapped is not None:
+                return mapped
+            raise
     request_url = _validated_hub_request_url(hub_url, path)
     if request_url is None:
         return _hub_url_invalid_response()
@@ -1706,8 +2043,12 @@ def hub_request(
         req = urlrequest.Request(request_url, data=data, method=method, headers=headers)
     except ValueError:
         return _hub_url_invalid_response()
+    # The loopback Personal Hub serves a self-signed cert pinned at
+    # ``<home>/tls/cert.pem``; trust only that cert, and only for loopback
+    # https. Fall back to the default (system) trust store otherwise.
+    ssl_context = _loopback_hub_ssl_context(hub_url, home=home)
     try:
-        with urlrequest.urlopen(req, timeout=5) as response:
+        with urlrequest.urlopen(req, timeout=5, context=ssl_context) as response:
             return json.loads(response.read().decode("utf-8"))
     except httpclient.InvalidURL:
         return _hub_url_invalid_response()
@@ -1715,7 +2056,7 @@ def hub_request(
         try:
             return json.loads(exc.read().decode("utf-8"))
         except Exception:
-            return {"ok": False, "error": str(exc), "status": exc.code}
+            return {"ok": False, "error": "hub_error", "error_code": "hub_error", "status": exc.code}
     except OSError:
         return {
             "ok": False,
@@ -2249,6 +2590,18 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
     config_ok = paths.config.exists()
     hub_token_ok = bool(token)
     hub_ok = bool(hub.get("ok"))
+    # Mirror how hub_request resolves the URL: when the caller passed the
+    # plain-HTTP argparse default, consult the Personal home config so the
+    # doctor detail shows the real HTTPS URL the Hub serves on instead of the
+    # default. Explicit overrides are honoured as-is; hub errors short-circuit
+    # the detail below so resolution here is purely for the success display.
+    display_hub_url = str(args.hub_url)
+    if display_hub_url.strip() == DEFAULT_HUB_URL:
+        # Best-effort display resolution: if config resolution fails, keep the
+        # pre-try default. This only affects the doctor detail string; the
+        # hub_request call above already ran with the resolved or default URL.
+        with suppress(HubError):
+            display_hub_url = resolve_hub_url(home=args.home)
     checks = [
         {"name": "home", "ok": home_ok, "detail": "<ardur-home>"},
         {"name": "config", "ok": config_ok, "detail": "<ardur-config>"},
@@ -2260,8 +2613,7 @@ def doctor_personal(args: argparse.Namespace) -> dict[str, Any]:
         {
             "name": "hub",
             "ok": hub_ok,
-            "detail": hub.get("error")
-            or _redact_url_for_user_output(str(args.hub_url)),
+            "detail": hub.get("error") or _redact_url_for_user_output(display_hub_url),
         },
         {
             "name": "desktop_permissions",
@@ -2379,8 +2731,37 @@ def uninstall_personal(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_under_hub(args: argparse.Namespace) -> int:
+    json_mode = bool(getattr(args, "json", False))
     command = list(args.command or [])
-    if not command:
+    if not command or not command[0].strip():
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "missing_run_command",
+                    "error_code": "missing_run_command",
+                    "condition": "missing_run_command",
+                    "message": "ardur run requires a command after --",
+                    "next_steps": run_missing_command_next_steps(),
+                }
+            )
+            return 1
+        print("ardur run requires a command after --", file=sys.stderr)
+        _print_run_missing_command_next_steps()
+        return 2
+    if _INVISIBLE_OR_WS_RE.match(command[0]):
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "missing_run_command",
+                    "error_code": "missing_run_command",
+                    "condition": "missing_run_command",
+                    "message": "ardur run requires a command after --",
+                    "next_steps": run_missing_command_next_steps(),
+                }
+            )
+            return 1
         print("ardur run requires a command after --", file=sys.stderr)
         _print_run_missing_command_next_steps()
         return 2
@@ -2391,6 +2772,28 @@ def run_under_hub(args: argparse.Namespace) -> int:
     # ``None`` means the flag was omitted and the default home should be used.
     home_arg = getattr(args, "home", None)
     if home_arg is not None and not str(home_arg).strip():
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "home_arg_invalid",
+                    "error_code": "home_arg_invalid",
+                    "condition": "home_arg_invalid",
+                    "message": "ardur run --home must be a non-empty path after trimming whitespace.",
+                    "next_steps": [
+                        {
+                            "condition": "home_arg_invalid",
+                            "action": "pass_a_directory_or_nonexistent_path",
+                            "command": 'ardur run --home <ardur-home> --mission "..." -- <agent-cmd...>',
+                            "detail": (
+                                "Pass a path that is either nonexistent (it will be created) or "
+                                "an existing directory. Empty or whitespace-only values are rejected."
+                            ),
+                        }
+                    ],
+                }
+            )
+            return 1
         print(
             "ardur run --home must be a non-empty path after trimming whitespace.",
             file=sys.stderr,
@@ -2425,6 +2828,21 @@ def run_under_hub(args: argparse.Namespace) -> int:
         home=getattr(args, "home", None),
     )
     if not start.get("ok"):
+        if json_mode:
+            condition = _run_failure_support_condition(start, phase="session_start")
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": condition,
+                    "error_code": condition,
+                    "condition": condition,
+                    "message": _run_failure_summary_line(start, phase="session_start"),
+                    "next_steps": run_recovery_next_steps_for_response(
+                        start, phase="session_start"
+                    ),
+                }
+            )
+            return 1
         print(_run_failure_summary_line(start, phase="session_start"), file=sys.stderr)
         _print_run_recovery_next_steps(start, phase="session_start")
         return 127
@@ -2447,6 +2865,21 @@ def run_under_hub(args: argparse.Namespace) -> int:
         home=getattr(args, "home", None),
     )
     if not check.get("ok"):
+        if json_mode:
+            condition = _run_failure_support_condition(check, phase="policy_check")
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": condition,
+                    "error_code": condition,
+                    "condition": condition,
+                    "message": _run_failure_summary_line(check, phase="policy_check"),
+                    "next_steps": run_recovery_next_steps_for_response(
+                        check, phase="policy_check"
+                    ),
+                }
+            )
+            return 1
         print(_run_failure_summary_line(check, phase="policy_check"), file=sys.stderr)
         _print_run_recovery_next_steps(check, phase="policy_check")
         return 127
@@ -2460,6 +2893,18 @@ def run_under_hub(args: argparse.Namespace) -> int:
             hub_token=token,
             home=getattr(args, "home", None),
         )
+        if json_mode:
+            _emit_json_error_to_stderr(
+                {
+                    "ok": False,
+                    "error": "policy_blocked",
+                    "error_code": "policy_blocked",
+                    "condition": "policy_blocked",
+                    "message": _blocked_command_summary_line(policy),
+                    "receipt": _dict(observe.get("receipt")),
+                }
+            )
+            return 1
         print(_blocked_command_summary_line(policy), file=sys.stderr)
         _emit_run_audit_reference_for_user_output(observe)
         return 126

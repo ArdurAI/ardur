@@ -1,0 +1,66 @@
+name: agent-docs
+
+# AGENTS.md is the canonical entry point for coding agents. Its toolchain
+# versions and `make` targets are generated from the files that define them,
+# so this job fails when a change to the Makefile, go/go.mod,
+# python/pyproject.toml, or .pre-commit-config.yaml leaves AGENTS.md stale.
+#
+# This is a staleness gate, not an auto-committer: it needs no write token and
+# works under branch protection. The fix is always to run `make gen-agent-docs`
+# locally and commit the result.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "AGENTS.md"
+      - "Makefile"
+      - "go/go.mod"
+      - "python/pyproject.toml"
+      - ".pre-commit-config.yaml"
+      - "scripts/gen-agent-docs.py"
+      - ".github/workflows/agent-docs.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "AGENTS.md"
+      - "Makefile"
+      - "go/go.mod"
+      - "python/pyproject.toml"
+      - ".pre-commit-config.yaml"
+      - "scripts/gen-agent-docs.py"
+      - ".github/workflows/agent-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-docs-fresh:
+    name: AGENTS.md is not stale
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          # This job only reads and diffs; it never pushes. Don't leave the
+          # token in .git/config on the runner.
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.13"
+
+      # Regenerate rather than only running --check, so that a failure prints
+      # the exact drift in the log instead of just naming the file.
+      - name: Regenerate the AGENTS.md command block
+        run: python3 scripts/gen-agent-docs.py
+
+      - name: Fail if AGENTS.md was stale
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- AGENTS.md; then
+            echo "::error::AGENTS.md's generated command block is stale (drift shown above). Run 'make gen-agent-docs' and commit the result."
+            exit 1
+          fi
+          echo "AGENTS.md generated command block is up to date."

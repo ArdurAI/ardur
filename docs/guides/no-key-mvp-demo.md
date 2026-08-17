@@ -13,11 +13,14 @@ exits.
 ## Run it
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 python scripts/run-no-key-mvp-demo.py
 ```
+
+For a manual install instead, use Python 3.10 or newer, run
+`python -m pip install --upgrade pip`, then `python -m pip install -e python/`.
+macOS system Python 3.9 and its bundled pip are too old for the editable install.
 
 Expected output includes:
 

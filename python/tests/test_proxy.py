@@ -277,6 +277,62 @@ class TestIssueAttestationForSessionKernelEnforcement:
 
         assert "kernel_enforcement" not in claims
 
+    def test_includes_process_lifecycle_when_provided(
+        self, proxy, example_mission, private_key
+    ):
+        token = issue_passport(example_mission, private_key, ttl_s=60)
+        session = proxy.start_session(token)
+        lifecycle = {
+            "root_pid": 12345,
+            "command": ["echo", "hello"],
+            "started_at": "2026-08-06T09:00:00Z",
+            "wall_clock_s": 1.234,
+            "exit_code": 0,
+            "capture_tier": "host-observer",
+        }
+
+        _jwt_token, claims = proxy.issue_attestation_for_session(
+            session.jti, proxy.receipt_private_key,
+            process_lifecycle=lifecycle,
+        )
+
+        assert claims["process_lifecycle"] == lifecycle
+        assert claims["process_lifecycle"]["root_pid"] == 12345
+        assert claims["process_lifecycle"]["capture_tier"] == "host-observer"
+
+    def test_omits_process_lifecycle_when_none_provided(
+        self, proxy, example_mission, private_key
+    ):
+        token = issue_passport(example_mission, private_key, ttl_s=60)
+        session = proxy.start_session(token)
+
+        _jwt_token, claims = proxy.issue_attestation_for_session(
+            session.jti, proxy.receipt_private_key
+        )
+
+        assert "process_lifecycle" not in claims
+
+    def test_process_lifecycle_with_kernel_enforcement(
+        self, proxy, example_mission, private_key
+    ):
+        token = issue_passport(example_mission, private_key, ttl_s=60)
+        session = proxy.start_session(token)
+        lifecycle = {
+            "root_pid": 12345,
+            "command": ["echo", "hello"],
+            "capture_tier": "host-observer",
+        }
+        enforcement = {"tier": "none", "reason": "no daemon"}
+
+        _jwt_token, claims = proxy.issue_attestation_for_session(
+            session.jti, proxy.receipt_private_key,
+            kernel_enforcement=enforcement,
+            process_lifecycle=lifecycle,
+        )
+
+        assert claims["process_lifecycle"] == lifecycle
+        assert claims["kernel_enforcement"] == enforcement
+
 
 class TestPassportVerification:
     def test_verify_valid_passport(self, proxy, example_mission, private_key):

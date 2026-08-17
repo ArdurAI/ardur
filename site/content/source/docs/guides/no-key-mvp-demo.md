@@ -2,7 +2,7 @@
 title: "No-Key MVP Demo"
 description: "Run this from a source checkout when you want to see the core governance loop"
 source_path: "docs/guides/no-key-mvp-demo.md"
-source_sha256: "4f0f0a671d800f4394b9099d41c19787e9f6811cf01445e161943410addb4118"
+source_sha256: "22f4e1929278b760eb3203c24a9371f7399d1a706e4d9f8c80d4961effc99bd1"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -30,11 +30,14 @@ exits.
 ## Run it
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 python scripts/run-no-key-mvp-demo.py
 ```
+
+For a manual install instead, use Python 3.10 or newer, run
+`python -m pip install --upgrade pip`, then `python -m pip install -e python/`.
+macOS system Python 3.9 and its bundled pip are too old for the editable install.
 
 Expected output includes:
 

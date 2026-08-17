@@ -24,6 +24,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`mvp-evaluator-guide.md`](/__ardur_internal__/source/docs/mvp-evaluator-guide/)
 - [`protocol-roots.md`](/__ardur_internal__/source/docs/protocol-roots/)
 - [`public-import-plan.md`](/__ardur_internal__/source/docs/public-import-plan/)
+- [`release-evidence-v0.2.0.md`](/__ardur_internal__/source/docs/release-evidence-v0.2.0/)
 - [`security-model.md`](/__ardur_internal__/source/docs/security-model/)
 
 ## Child Sections

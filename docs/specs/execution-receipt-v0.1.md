@@ -31,7 +31,7 @@ For every governed step:
 1. the active DG contributes `grant_id`, which MUST equal the governing AAT
    `jti`;
 2. the verifier evaluates the normalized invocation;
-3. the verifier emits an ER with a tri-state `verdict`; and
+3. the verifier emits an ER with a `verdict`; and
 4. the next ER in the lineage references this ER via `parent_receipt_id`.
 
 ## 3. Core Semantics
@@ -57,7 +57,7 @@ The following claims are REQUIRED in every ER:
 | `target` | string | Normalized target of the invocation after projection. |
 | `resource_family` | string | Coarse resource category used by MIC policy. |
 | `side_effect_class` | enum | Side-effect family: `none`, `internal_write`, `external_send`, or `state_change`. |
-| `verdict` | enum | One of `compliant`, `violation`, or `insufficient_evidence`. |
+| `verdict` | enum | One of `compliant`, `violation`, `insufficient_evidence`, or `unknown`. |
 | `evidence_level` | enum | One of `self_signed`, `counter_signed`, or `transparency_logged`. |
 | `reason` | string | Audit-facing verifier explanation. Public projections MAY redact it. |
 | `policy_decisions` | array | Per-policy-engine decisions that contributed to the receipt verdict. |

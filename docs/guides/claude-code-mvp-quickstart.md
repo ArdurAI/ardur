@@ -28,15 +28,16 @@ Use it in two modes:
 From a fresh checkout of this branch:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur --help
 ```
 
 Keep the virtualenv active for the rest of the walkthrough so Claude Code hooks
-can find the same installed `ardur` package.
+can find the same installed `ardur` package. For a manual install instead, use
+Python 3.10 or newer, run `python -m pip install --upgrade pip`, then
+`python -m pip install -e python/`. macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 ## 2. Optional: see the local governance loop first
 

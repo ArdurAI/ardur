@@ -1,0 +1,81 @@
+# v0.2.0 Version-Sensitive Release Evidence
+
+This record supports the external dependency claims added to the v0.2.0
+changelog. It was last reviewed on 2026-07-22 and deliberately separates the
+repository's reproducible constraints from live advisory and package-index
+metadata.
+
+## pyasn1 advisory boundary
+
+Primary records:
+
+- [CVE-2026-59884](https://nvd.nist.gov/vuln/detail/CVE-2026-59884)
+- [CVE-2026-59885](https://nvd.nist.gov/vuln/detail/CVE-2026-59885)
+- [CVE-2026-59886](https://nvd.nist.gov/vuln/detail/CVE-2026-59886)
+- [pyasn1 0.6.4 on PyPI](https://pypi.org/project/pyasn1/0.6.4/)
+
+The repository enforces `pyasn1>=0.6.4,<0.7` in the Python `dev` extra and
+checks that the lock resolves inside that complete interval. To reproduce the
+dependency audit in isolated Python 3.10 and 3.13 environments, run from the
+`python` directory:
+
+```bash
+set -euo pipefail
+for python in python3.10 python3.13; do
+  audit_env="$(mktemp -d)"
+  "$python" -m venv "$audit_env"
+  "$audit_env/bin/python" -m pip install --quiet '.[dev]' pip-audit==2.10.1
+  "$audit_env/bin/pip-audit"
+  rm -rf "$audit_env"
+done
+```
+
+The 2026-07-22 run audited 53 dependencies on Python 3.10 and 51 on Python
+3.13. Both runs reported zero known advisories, and none of the three CVE IDs
+appeared.
+
+## Python build yank boundary
+
+PyPI exposes yank metadata per distribution file. The following check reads
+the primary JSON records and requires every 1.5.1 file to be yanked while no
+1.5.0 file is yanked:
+
+```bash
+python3 - <<'PY'
+import json
+import urllib.request
+
+base = "https://pypi.org/pypi/build/{version}/json"
+
+
+def yank_states(version: str) -> list[bool]:
+    with urllib.request.urlopen(base.format(version=version), timeout=15) as response:
+        payload = json.load(response)
+    states = [bool(item["yanked"]) for item in payload["urls"]]
+    if not states:
+        raise SystemExit(f"build {version} has no distribution files")
+    return states
+
+
+if any(yank_states("1.5.0")):
+    raise SystemExit("build 1.5.0 unexpectedly has a yanked distribution file")
+if not all(yank_states("1.5.1")):
+    raise SystemExit("build 1.5.1 unexpectedly has a non-yanked distribution file")
+print("build 1.5.0 non-yanked; build 1.5.1 yanked")
+PY
+```
+
+Direct primary endpoints:
+
+- [build 1.5.0 JSON](https://pypi.org/pypi/build/1.5.0/json)
+- [build 1.5.1 JSON](https://pypi.org/pypi/build/1.5.1/json)
+- [build project history](https://pypi.org/project/build/#history)
+
+## Limitation and release-time revalidation
+
+Repository tests enforce the selected dependency range, lock version, release
+tool pin, evidence links, and this limitation. Those offline checks **do not
+independently attest current advisory or yank metadata**. The linked primary
+records and network-backed commands must be rerun immediately before the
+immutable release tag is approved. If the primary records change, update the
+claim and constraint together rather than suppressing or weakening the check.

@@ -2,7 +2,7 @@
 title: "Ardur Personal Hub"
 description: "Ardur Personal is the local product shape for regular users. It protects local"
 source_path: "docs/guides/ardur-personal-hub.md"
-source_sha256: "a9620e5a0b61553cf4340f1c3a2b38c96b26e9e383311376a12d6b224b8b1610"
+source_sha256: "1380596d11d19ba672def2c85b12fd0011df3b8bedf6a66103cf0f1f45e27f17"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -29,9 +29,16 @@ Install Ardur with its Python dependencies:
 
 ```bash
 cd <ardur-repo>
-pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur --version
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 See the personal safety boundary locally before configuring a provider:
 

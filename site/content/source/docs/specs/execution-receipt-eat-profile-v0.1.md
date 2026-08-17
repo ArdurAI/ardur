@@ -2,7 +2,7 @@
 title: "Execution Receipt EAT/CWT Profile v0.1"
 description: "This document profiles RFC 9711 EAT for Ardur Execution Receipts carried as"
 source_path: "docs/specs/execution-receipt-eat-profile-v0.1.md"
-source_sha256: "3f6774ef677a6a0eb31ee8edbf92307b3174494409fd6b2b244e6c6703761388"
+source_sha256: "64ecaa141f59c86155555a89321bb5400425087b06d74d627006edec91d521cb"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -120,15 +120,17 @@ Receivers MUST reject an ER EAT whose `eat_profile` differs.
 ### 3.4 Verdict as a Profile-Specific EAT Claim
 
 RFC 9711 does not define an attestation verdict claim suitable for MIC's
-tri-state semantics. This profile therefore defines `verdict` as a
+verdict semantics. This profile therefore defines `verdict` as a
 profile-specific EAT claim with the same string values as the base ER schema:
 
 - `compliant`
 - `violation`
 - `insufficient_evidence`
+- `unknown` (v0.2 extension: structural observation gap, distinct from
+  `insufficient_evidence`)
 
-Receivers MUST preserve the tri-state semantics and MUST NOT collapse
-`insufficient_evidence` into `compliant`.
+Receivers MUST preserve the verdict semantics and MUST NOT collapse
+`insufficient_evidence` or `unknown` into `compliant`.
 
 ## 4. Mapping `measurements` into `submods`
 

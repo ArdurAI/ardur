@@ -5,23 +5,40 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/ArdurAI/ardur/go/benchmark/independent"
 )
 
+const (
+	exitOK       = 0
+	exitRuntime  = 1
+	exitInvalid  = 2
+)
+
 func main() {
-	input := flag.String("in", "", "raw capture JSON")
-	output := flag.String("out", "", "output directory")
-	flag.Parse()
-	if *input == "" || *output == "" || flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: auditbench-oracle -in capture.json -out corpus/")
-		os.Exit(2)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("auditbench-oracle", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	input := fs.String("in", "", "raw capture JSON")
+	output := fs.String("out", "", "output directory")
+	if err := fs.Parse(args); err != nil {
+		return exitInvalid
+	}
+	if strings.TrimSpace(*input) == "" || strings.TrimSpace(*output) == "" || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: auditbench-oracle -in capture.json -out corpus/")
+		return exitInvalid
 	}
 	oracle, evidence, err := independent.NormalizeCaptureFile(*input, *output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "auditbench-oracle: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "auditbench-oracle: %v\n", err)
+		return exitRuntime
 	}
-	fmt.Printf("normalized scenario %s: oracle=%d evidence=%d\n", oracle.ScenarioID, len(oracle.Observations), len(evidence.Observations))
+	fmt.Fprintf(stdout, "normalized scenario %s: oracle=%d evidence=%d\n", oracle.ScenarioID, len(oracle.Observations), len(evidence.Observations))
+	return exitOK
 }

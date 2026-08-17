@@ -75,8 +75,8 @@ capability attenuation, cascading revocation, and basic receipt emission.
    (A.6 §4).
 7. The verifier MUST emit a linked Execution Receipt (A.3) for every
    evaluated step. Receipt `parent_receipt_id` MUST chain correctly.
-8. The verifier MUST use the tri-state verdict codomain: `compliant`,
-   `violation`, `insufficient_evidence` (A.4 §4).
+8. The verifier MUST use the verdict codomain: `compliant`,
+   `violation`, `insufficient_evidence`, `unknown` (A.4 §4).
 
 ### 3.2. MIC-State
 

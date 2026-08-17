@@ -14,7 +14,7 @@ import vibap.mission as mission_module
 from vibap.passport import MissionPassport, issue_passport
 from vibap.proxy import Decision
 
-from tests.conftest import v01_required_md_extras
+from conftest import v01_required_md_extras
 
 
 def _b64url(data: bytes) -> str:
@@ -515,7 +515,7 @@ class TestMissionDeclarationSchemaGuard:
     def test_load_fails_closed_on_missing_required_member(
         self, private_key, public_key, missing_field
     ):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
@@ -543,7 +543,7 @@ class TestMissionDeclarationSchemaGuard:
     def test_load_fails_closed_on_invalid_conformance_profile(
         self, private_key, public_key
     ):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
@@ -572,7 +572,7 @@ class TestMissionDeclarationSchemaGuard:
     def test_load_fails_closed_on_invalid_tool_manifest_digest(
         self, private_key, public_key
     ):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
@@ -600,7 +600,7 @@ class TestMissionDeclarationSchemaGuard:
         self, private_key, public_key
     ):
         """Profile/receipt-level interaction: MIC-Evidence forbids minimal receipts."""
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
@@ -632,7 +632,7 @@ class TestMissionDeclarationSchemaGuard:
         ``additionalProperties: false`` at the root. Existing MDs from
         :func:`issue_passport` carry legacy fields like ``allowed_tools``
         — they must be rejected when the caller opts into strict mode."""
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
@@ -905,7 +905,7 @@ class TestStatusListIatSkewGuard:
 
 class TestMissionDeclarationIatSkewGuard:
     def test_md_with_iat_in_far_future_fails_closed(self, private_key, public_key):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",

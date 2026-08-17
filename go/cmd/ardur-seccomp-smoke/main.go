@@ -51,6 +51,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,8 +72,10 @@ func main() {
 	lifecycleStressIterations := flag.Int("lifecycle-stress-iterations", 100, "live listener teardown iterations under concurrent control traffic")
 	flag.Parse()
 
-	if *probeConnect != "" {
-		runProbe(*probeConnect)
+	// Trim whitespace from --probe-connect so whitespace-only doesn't
+	// accidentally trigger the probe-re-exec path.
+	if probeAddr := strings.TrimSpace(*probeConnect); probeAddr != "" {
+		runProbe(probeAddr)
 		return
 	}
 	if *probeWait {
@@ -80,7 +83,7 @@ func main() {
 		return
 	}
 
-	if *daemonBin == "" || *shimBin == "" {
+	if !validateRequiredPaths(*daemonBin, *shimBin) {
 		fmt.Fprintln(os.Stderr, "usage: ardur-seccomp-smoke --daemon-bin PATH --shim-bin PATH")
 		os.Exit(2)
 	}
@@ -88,11 +91,21 @@ func main() {
 		fmt.Fprintln(os.Stderr, "lifecycle-stress-iterations must be at least 1")
 		os.Exit(2)
 	}
-	if err := run(*daemonBin, *shimBin, *lifecycleStressIterations); err != nil {
+	daemonPath := strings.TrimSpace(*daemonBin)
+	shimPath := strings.TrimSpace(*shimBin)
+	if err := run(daemonPath, shimPath, *lifecycleStressIterations); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("PASS: seccomp tier enforced connect policy and listener cancellation did not corrupt concurrent control connections")
+}
+
+// validateRequiredPaths enforces the required --daemon-bin and --shim-bin
+// flags without depending on process-wide side effects, so the whitespace
+// guard can be unit tested independently of the socket/process setup in
+// run(). A whitespace-only path is treated as missing.
+func validateRequiredPaths(daemonBin, shimBin string) bool {
+	return strings.TrimSpace(daemonBin) != "" && strings.TrimSpace(shimBin) != ""
 }
 
 // runProbe is this binary's own re-exec mode: attempt one TCP connect and

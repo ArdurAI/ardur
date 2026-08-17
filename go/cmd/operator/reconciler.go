@@ -64,8 +64,9 @@ type AgentPassportReconciler struct {
 func NewAgentPassportReconciler(c client.Client, scheme *runtime.Scheme, signingKeyPath, issuerURI string, allowEphemeralKey bool) (*AgentPassportReconciler, error) {
 	var signingKey *credential.SigningKey
 
-	if signingKeyPath != "" {
-		key, err := loadSigningKey(signingKeyPath)
+	trimmedPath := strings.TrimSpace(signingKeyPath)
+	if trimmedPath != "" {
+		key, err := loadSigningKey(trimmedPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading signing key: %w", err)
 		}

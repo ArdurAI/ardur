@@ -401,3 +401,115 @@ def test_claude_project_write_rejects_ambiguous_content_and_local_path(tmp_path:
             },
             roots={"OUTPUT_DIR": tmp_path},
         )
+
+
+def test_out_dir_empty_string_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Empty --out-dir must produce a clean JSON error, no traceback, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    from vibap.provider_adapter_fixture import main as fixture_main
+
+    code = fixture_main(
+        ["--adapter", "openai-agents-sdk", "--out-dir", "", "--mission", str(MISSION)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "provider_adapter_fixture_path_invalid"
+    assert report["condition"] == "provider_adapter_fixture_out_dir_empty"
+    assert "Traceback" not in captured.out
+    assert not any(tmp_path.iterdir()), "no files written to CWD on empty --out-dir"
+
+
+def test_out_dir_whitespace_only_is_structured(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whitespace-only --out-dir must produce a clean JSON error, no CWD writes."""
+    monkeypatch.chdir(tmp_path)
+
+    from vibap.provider_adapter_fixture import main as fixture_main
+
+    code = fixture_main(
+        ["--adapter", "openai-agents-sdk", "--out-dir", "   ", "--mission", str(MISSION)]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "provider_adapter_fixture_path_invalid"
+    assert report["condition"] == "provider_adapter_fixture_out_dir_empty"
+    assert "Traceback" not in captured.out
+    assert not any(p.name.strip() == "" or p.name == "   " for p in tmp_path.iterdir()), (
+        "no whitespace-named dir created on whitespace-only --out-dir"
+    )
+
+
+def test_mission_empty_string_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Empty --mission must produce a clean JSON error, no traceback, no CWD writes."""
+    from vibap.provider_adapter_fixture import main as fixture_main
+
+    out_dir = tmp_path / "out"
+    code = fixture_main(
+        ["--adapter", "openai-agents-sdk", "--out-dir", str(out_dir), "--mission", ""]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "provider_adapter_fixture_path_invalid"
+    assert report["condition"] == "provider_adapter_fixture_mission_empty"
+    assert "Traceback" not in captured.out
+    assert not out_dir.exists(), "no output dir created on empty --mission"
+
+
+def test_mission_whitespace_only_is_structured(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whitespace-only --mission must produce a clean JSON error, no traceback."""
+    from vibap.provider_adapter_fixture import main as fixture_main
+
+    out_dir = tmp_path / "out"
+    code = fixture_main(
+        ["--adapter", "openai-agents-sdk", "--out-dir", str(out_dir), "--mission", "   "]
+    )
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+
+    assert code == 1
+    assert report["ok"] is False
+    assert report["error"] == "provider_adapter_fixture_path_invalid"
+    assert report["condition"] == "provider_adapter_fixture_mission_empty"
+    assert "Traceback" not in captured.out
+    assert not out_dir.exists(), "no output dir created on whitespace --mission"
+
+
+def test_out_dir_empty_raises_specialized_error(tmp_path: Path) -> None:
+    from vibap.provider_adapter_fixture import ProviderAdapterFixturePathError, run_fixture
+
+    with pytest.raises(ProviderAdapterFixturePathError) as exc_info:
+        run_fixture(
+            adapter_id="openai-agents-sdk",
+            out_dir="",
+            mission_path=str(MISSION),
+        )
+    assert exc_info.value.condition == "provider_adapter_fixture_out_dir_empty"
+
+
+def test_mission_empty_raises_specialized_error(tmp_path: Path) -> None:
+    from vibap.provider_adapter_fixture import ProviderAdapterFixturePathError, run_fixture
+
+    with pytest.raises(ProviderAdapterFixturePathError) as exc_info:
+        run_fixture(
+            adapter_id="openai-agents-sdk",
+            out_dir=str(tmp_path / "out"),
+            mission_path="",
+        )
+    assert exc_info.value.condition == "provider_adapter_fixture_mission_empty"

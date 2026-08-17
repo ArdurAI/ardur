@@ -293,6 +293,86 @@ def test_direct_hook_fails_closed_for_malformed_additional_policies_claim(
     assert "unknown policy backend: invalid_additional_policies" in _deny_reason(output)
 
 
+@pytest.mark.parametrize(
+    "bad_tool_input",
+    [
+        "not_a_dict_string",
+        12345,
+        ["a", "list"],
+        True,
+    ],
+)
+def test_pre_tool_use_tolerates_non_dict_tool_input(
+    tmp_path, monkeypatch, bad_tool_input
+):
+    """A non-dict ``tool_input`` must not crash the hook handler.
+
+    Claude Code may emit any JSON value for ``tool_input`` under malformed or
+    adversarial conditions. The hook must coerce it to an empty dict (fail
+    safe) rather than raising ``ValueError`` from ``dict(non_dict)``. A crash
+    here propagates as exit code 1 with a raw traceback on stderr, violating
+    the project's empty-stderr / structured-output contract. Regression test
+    for the bare ``dict(x or {})`` coercion replaced by an isinstance guard.
+    """
+    from vibap.claude_code_hook import handle_pre_tool_use
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chains"))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "non-dict-tool-input")
+
+    output = handle_pre_tool_use(
+        {
+            "session_id": "non-dict-tool-input",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_use_id": "tool-non-dict-input",
+            "tool_input": bad_tool_input,
+        },
+        keys_dir=tmp_path,
+    )
+
+    # Must return a valid hook-protocol dict, not raise. With a wildcard
+    # passport allowing Read, an empty (coerced) tool_input is permitted,
+    # so the expected shape is {"continue": True, ...}. The regression is
+    # the absence of a ValueError crash, not the specific decision.
+    assert isinstance(output, dict)
+    if "hookSpecificOutput" in output:
+        hook_specific = output["hookSpecificOutput"]
+        assert hook_specific.get("hookEventName") == "PreToolUse"
+        assert hook_specific.get("permissionDecision") == "deny"
+    else:
+        assert output.get("continue") is True
+
+
+def test_post_tool_use_tolerates_non_dict_tool_input_and_response(
+    tmp_path, monkeypatch
+):
+    """PostToolUse must tolerate non-dict ``tool_input`` / ``tool_response``."""
+    from vibap.claude_code_hook import handle_post_tool_use
+
+    token = _issue_wildcard_test_passport(tmp_path)
+    monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
+    monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chains"))
+    monkeypatch.setenv("ARDUR_TRACE_ID", "non-dict-post")
+
+    output = handle_post_tool_use(
+        {
+            "session_id": "non-dict-post",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Read",
+            "tool_use_id": "tool-non-dict-post",
+            "tool_input": "not_a_dict",
+            "tool_response": 42,
+        },
+        keys_dir=tmp_path,
+    )
+
+    # PostToolUse returns {"continue": True} on non-blocking paths; it must
+    # not raise regardless of tool_input / tool_response shape.
+    assert isinstance(output, dict)
+
+
 def test_direct_hook_fails_closed_for_oversized_budget_chain(tmp_path, monkeypatch):
     from vibap import claude_code_hook as hook
 
@@ -1454,18 +1534,22 @@ def test_claude_code_hook_cli_returns_structured_input_error_next_steps(
         timeout=20,
     )
 
-    assert completed.returncode == 1
-    assert completed.stderr == ""
+    # Fail-safe: PreToolUse now returns exit 0 with a protocol-valid deny on
+    # stdout so the host honours the block, and the diagnostic detail on stderr
+    # so operators can still troubleshoot.
+    assert completed.returncode == 0
     output = json.loads(completed.stdout)
-    output_text = json.dumps(output, sort_keys=True)
-    assert output["ok"] is False
-    assert output["error"] == condition
-    assert output["condition"] == condition
-    assert expected_detail in output["detail"]
-    assert [step["action"] for step in output["next_steps"]] == [
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    stderr_output = json.loads(completed.stderr.strip())
+    assert stderr_output["ok"] is False
+    assert stderr_output["error"] == condition
+    assert stderr_output["condition"] == condition
+    assert expected_detail in stderr_output["detail"]
+    assert [step["action"] for step in stderr_output["next_steps"]] == [
         "configure_claude_code_protection",
         "rerun_with_hook_event_json_file",
     ]
+    output_text = json.dumps(stderr_output, sort_keys=True)
     assert (
         "ardur protect claude-code --scope <your-project> --home <ardur-home>"
         in output_text
@@ -1490,8 +1574,95 @@ def test_main_rejects_oversize_stdin(monkeypatch, capsys):
     rc = hook_module.main(["pre"])
 
     captured = capsys.readouterr()
-    assert rc == 1
+    # Fail-safe: exit 0 with a protocol-valid deny so the host honours the block.
+    assert rc == 0
     assert "hook input exceeds" in captured.err
+    stdout_output = json.loads(captured.out)
+    assert stdout_output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_main_pre_crash_emits_fail_safe_deny(monkeypatch, capsys):
+    """A handler crash must emit a protocol-valid deny with exit 0.
+
+    If the host treats exit 1 as a non-blocking error, returning exit 1 on a
+    crash would silently bypass governance.  The fail-safe path must deny.
+    """
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    def _crashing_handler(_hook_input, *, keys_dir=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        hook_module, "_handle_pre_tool_use_daemon_first", _crashing_handler
+    )
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO('{"tool_name": "Read", "tool_input": {}}')
+    )
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "hook handler crashed" in captured.err
+    output = json.loads(captured.out)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "could not be processed safely" in output["hookSpecificOutput"][
+        "permissionDecisionReason"
+    ]
+
+
+def test_main_post_crash_emits_fail_safe_continue(monkeypatch, capsys):
+    """PostToolUse crashes should not produce a traceback on stderr."""
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    def _crashing_handler(_hook_input, *, keys_dir=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(hook_module, "handle_post_tool_use", _crashing_handler)
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO('{"tool_name": "Read", "tool_input": {}}')
+    )
+
+    rc = hook_module.main(["post"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "hook handler crashed" in captured.err
+    output = json.loads(captured.out)
+    assert output == {"continue": True}
+
+
+def test_main_pre_non_serializable_output_emits_fail_safe_deny(
+    monkeypatch, capsys
+):
+    """If json.dumps fails on the handler output, fall back to deny."""
+    import io
+
+    from vibap import claude_code_hook as hook_module
+
+    class _NotSerializable:
+        pass
+
+    def _bad_output_handler(_hook_input, *, keys_dir=None):
+        return {"bad": _NotSerializable()}
+
+    monkeypatch.setattr(
+        hook_module, "_handle_pre_tool_use_daemon_first", _bad_output_handler
+    )
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO('{"tool_name": "Read", "tool_input": {}}')
+    )
+
+    rc = hook_module.main(["pre"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    output = json.loads(captured.out)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
@@ -2711,6 +2882,465 @@ def test_install_native_pre_tool_use_command_rebuilds_tampered_executable_with_i
     assert native_pre_tool_use_command.read_bytes() != tampered
 
 
+# ---------------------------------------------------------------------------
+# Native client response-read errno preservation, bounded EINTR retry, and
+# SO_RCVTIMEO visibility (issue #378).
+#
+# These tests use a compile-time fault-injection seam (-DARDUR_NATIVE_FAULT_HOOK)
+# so EINTR / EIO / EAGAIN / setsockopt-failure can be injected deterministically
+# without relying on scheduler timing. The production binary never defines that
+# macro; the fault-enabled binary is built exclusively by the test helper
+# ``daemon_module.build_fault_injection_native_client``.
+# ---------------------------------------------------------------------------
+
+
+def _build_native_hook_input() -> str:
+    return json.dumps(
+        {
+            "session_id": "native-eintr-session",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/native-eintr.txt"},
+            "tool_use_id": "native-eintr-call",
+        }
+    )
+
+
+def _start_stalled_unix_server(socket_path: Path, ready):
+    """Bind/listen on an AF_UNIX socket and accept one connection, then stall.
+
+    Used to keep the client's response-read path blocking until the client
+    gives up (timeout, terminal error, or exhausted bounded EINTR retries).
+    """
+    import socket
+
+    def _serve() -> None:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(2)
+                server.settimeout(_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
+                ready.set()
+                conn, _ = server.accept()
+                with conn:
+                    _ = conn.recv(8192)
+                    # Intentionally never send a response.
+                    import time
+
+                    time.sleep(15)
+        except Exception:  # pragma: no cover - test-only server
+            pass
+
+    import threading
+
+    thread = threading.Thread(target=_serve, daemon=True)
+    thread.start()
+    return thread
+
+
+def test_native_client_retries_single_eintr_then_succeeds(tmp_path):
+    """A single injected EINTR on the response read is retried and a
+    subsequent valid daemon response succeeds (exit 0, correct stdout)."""
+    import os
+    import socket
+    import subprocess
+    import threading
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    fault_client = daemon_module.build_fault_injection_native_client(tmp_path)
+    if fault_client is None:
+        pytest.xfail("native fault-injection client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-eintr-once-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    failures: list[Exception] = []
+    observed = {"requests": 0}
+    good_envelope = b'{"continue":true}\n'
+
+    def _serve() -> None:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(2)
+                server.settimeout(_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
+                ready.set()
+                conn, _ = server.accept()
+                with conn:
+                    _ = conn.recv(8192)
+                    observed["requests"] += 1
+                    conn.sendall(good_envelope)
+        except Exception as exc:  # pragma: no cover - surfaced via assertion
+            failures.append(exc)
+
+    thread = threading.Thread(target=_serve, daemon=True)
+    thread.start()
+
+    try:
+        assert ready.wait(timeout=2)
+        env = {**os.environ, "ARDUR_NATIVE_TEST_FAULT": "EINTR"}
+        result = subprocess.run(
+            [str(fault_client), str(socket_path), "2000"],
+            input=_build_native_hook_input(),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert not failures
+        assert observed["requests"] == 1
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert result.stdout.strip() == '{"continue":true}'
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
+def test_native_client_bounded_eintr_does_not_extend_budget_indefinitely(tmp_path):
+    """Repeated EINTR cannot extend the configured overall response budget
+    without bound. With 100 injected EINTRs (exceeding the 64-retry cap), the
+    client terminates with a sanitized response-read diagnostic preserving the
+    EINTR errno."""
+    import os
+    import threading
+    import subprocess
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    fault_client = daemon_module.build_fault_injection_native_client(tmp_path)
+    if fault_client is None:
+        pytest.xfail("native fault-injection client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-eintr-repeat-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    thread = _start_stalled_unix_server(socket_path, ready)
+
+    try:
+        assert ready.wait(timeout=2)
+        faults = ",".join(["EINTR"] * 100)
+        env = {**os.environ, "ARDUR_NATIVE_TEST_FAULT": faults}
+        result = subprocess.run(
+            [str(fault_client), str(socket_path), "100"],
+            input=_build_native_hook_input(),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert result.returncode != 0
+        assert "stage=response-read" in result.stderr
+        assert "errno=4" in result.stderr
+        assert "name=EINTR" in result.stderr
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
+def test_native_client_persistent_eio_is_terminal_and_preserves_errno(tmp_path):
+    """A persistent injected EIO read error fails immediately (non-retried),
+    retains its original errno, and emits a sanitized response-read diagnostic."""
+    import os
+    import threading
+    import subprocess
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    fault_client = daemon_module.build_fault_injection_native_client(tmp_path)
+    if fault_client is None:
+        pytest.xfail("native fault-injection client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-eio-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    thread = _start_stalled_unix_server(socket_path, ready)
+
+    try:
+        assert ready.wait(timeout=2)
+        env = {**os.environ, "ARDUR_NATIVE_TEST_FAULT": "EIO"}
+        result = subprocess.run(
+            [str(fault_client), str(socket_path), "100"],
+            input=_build_native_hook_input(),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert result.returncode != 0
+        assert "stage=response-read" in result.stderr
+        assert "errno=5" in result.stderr
+        assert "name=EIO" in result.stderr
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
+def test_native_client_eagain_is_terminal_not_retried(tmp_path):
+    """EAGAIN / EWOULDBLOCK is a non-retryable terminal outcome; the native
+    client preserves its errno and emits a sanitized diagnostic rather than
+    retrying it into success."""
+    import os
+    import threading
+    import subprocess
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    fault_client = daemon_module.build_fault_injection_native_client(tmp_path)
+    if fault_client is None:
+        pytest.xfail("native fault-injection client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-eagain-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    thread = _start_stalled_unix_server(socket_path, ready)
+
+    try:
+        assert ready.wait(timeout=2)
+        env = {**os.environ, "ARDUR_NATIVE_TEST_FAULT": "EAGAIN"}
+        result = subprocess.run(
+            [str(fault_client), str(socket_path), "100"],
+            input=_build_native_hook_input(),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert result.returncode != 0
+        assert "stage=response-read" in result.stderr
+        assert "name=EAGAIN" in result.stderr
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
+def test_native_client_setsockopt_rcvtimeo_failure_is_visible_and_nonzero(tmp_path):
+    """Failure to configure SO_RCVTIMEO is visible (sanitized diagnostic on
+    stderr) and nonzero (exit 21), rather than silently continuing without a
+    receive timeout."""
+    import os
+    import threading
+    import subprocess
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    fault_client = daemon_module.build_fault_injection_native_client(tmp_path)
+    if fault_client is None:
+        pytest.xfail("native fault-injection client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-sockopt-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    thread = _start_stalled_unix_server(socket_path, ready)
+
+    try:
+        assert ready.wait(timeout=2)
+        env = {**os.environ, "ARDUR_NATIVE_TEST_SOCKOPT_FAIL": "1"}
+        result = subprocess.run(
+            [str(fault_client), str(socket_path), "100"],
+            input=_build_native_hook_input(),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert result.returncode == 21, f"expected exit 21, got {result.returncode}"
+        assert "stage=setsockopt-rcvtimeo" in result.stderr
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
+def test_native_client_real_stalled_server_times_out_with_sanitized_stderr(tmp_path):
+    """A real AF_UNIX server that accepts the connection but never responds
+    must cause the production (non-fault-hook) native client to time out with:
+    nonzero exit, empty stdout, and a sanitized response-read diagnostic
+    containing numeric + symbolic errno."""
+    import os
+    import socket
+    import subprocess
+    import threading
+    import time
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    # Production binary — no fault-injection macro.
+    prod_client = daemon_module.install_native_pre_tool_use_command(
+        home=tmp_path, force=True
+    )
+    if prod_client is None:
+        pytest.xfail("native PreToolUse daemon client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-stalled-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    failures: list[Exception] = []
+
+    def _serve_stalled() -> None:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                server.listen(2)
+                server.settimeout(_FAKE_DAEMON_ACCEPT_TIMEOUT_S)
+                ready.set()
+                conn, _ = server.accept()
+                with conn:
+                    _ = conn.recv(8192)
+                    time.sleep(15)  # never respond
+        except Exception as exc:  # pragma: no cover - surfaced via assertion
+            failures.append(exc)
+
+    thread = threading.Thread(target=_serve_stalled, daemon=True)
+    thread.start()
+
+    try:
+        assert ready.wait(timeout=2)
+        result = subprocess.run(
+            [str(prod_client), str(socket_path), "200"],
+            input=_build_native_hook_input(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert not failures
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert "stage=response-read" in result.stderr
+        assert "errno=" in result.stderr
+        assert "name=" in result.stderr
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
+def test_native_client_diagnostics_never_leak_sensitive_fields(tmp_path):
+    """Response-read diagnostics must contain ONLY the operation/stage, numeric
+    errno, symbolic name, and strerror text. They must never include request
+    bodies, mission passports, tokens, tool arguments, socket paths, temp
+    paths, env dumps, or host-specific data."""
+    import os
+    import threading
+    import subprocess
+    import uuid
+
+    from vibap import claude_code_daemon as daemon_module
+
+    fault_client = daemon_module.build_fault_injection_native_client(tmp_path)
+    if fault_client is None:
+        pytest.xfail("native fault-injection client could not be built on this host")
+
+    socket_parent = Path(
+        f"/tmp/ardur-native-leak-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    )
+    socket_parent.mkdir(mode=0o700)
+    socket_path = socket_parent / "hook.sock"
+
+    ready = threading.Event()
+    thread = _start_stalled_unix_server(socket_path, ready)
+
+    # Hook input deliberately contains sensitive-looking values that must
+    # never appear in the sanitized stderr diagnostic.
+    sensitive_hook_input = json.dumps(
+        {
+            "session_id": "SECRET-SESSION-TOKEN-VALUE",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /sensitive/path"},
+            "tool_use_id": "super-secret-tool-use-id",
+            "passport": "eyJ-FKE-JWT-PASSPORT-VALUE",
+        }
+    )
+
+    try:
+        assert ready.wait(timeout=2)
+        env = {**os.environ, "ARDUR_NATIVE_TEST_FAULT": "EIO"}
+        result = subprocess.run(
+            [str(fault_client), str(socket_path), "100"],
+            input=sensitive_hook_input,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        thread.join(timeout=3)
+        assert result.returncode != 0
+        stderr = result.stderr
+        # The diagnostic line must be the only thing on stderr and must match
+        # the allowlisted field set.
+        assert "stage=response-read" in stderr
+        assert "errno=" in stderr
+        assert "name=" in stderr
+        # None of the sensitive input fields may leak.
+        assert "SECRET-SESSION-TOKEN-VALUE" not in stderr
+        assert "super-secret-tool-use-id" not in stderr
+        assert "eyJ-FKE-JWT-PASSPORT-VALUE" not in stderr
+        assert "rm -rf" not in stderr
+        assert "/sensitive/path" not in stderr
+        # The socket path (a host-specific local path) must not leak.
+        assert str(socket_path) not in stderr
+        assert str(socket_parent) not in stderr
+    finally:
+        if socket_path.exists():
+            socket_path.unlink()
+        if socket_parent.exists():
+            socket_parent.rmdir()
+
+
 def test_wrapper_local_fallback_denies_forbidden_tool_after_truncated_ok_envelope(
     tmp_path,
 ):
@@ -3191,3 +3821,43 @@ def test_three_call_session_chain_verifies(tmp_path, monkeypatch):
     from vibap.receipt import verify_chain
 
     verify_chain(lines, public_key)  # raises ReceiptChainError if chain is broken
+
+
+# ---------------------------------------------------------------------------
+# Empty / whitespace-only --keys-dir validation
+# ---------------------------------------------------------------------------
+
+
+def test_main_rejects_empty_or_whitespace_keys_dir_before_handler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty / whitespace-only ``--keys-dir`` must produce a fail-closed deny
+    response on stdout *before* the handler is ever called.
+
+    ``argparse``'s ``type=Path`` converts ``""`` to ``Path(".")`` (the CWD),
+    which would silently pollute the working directory.  The pre-validation
+    catches empty / whitespace-only values and returns a structured error +
+    protocol-valid deny instead.
+    """
+    from vibap import claude_code_hook
+
+    # Redirect stdin so _load_hook_input does not block.
+    monkeypatch.setattr("sys.stdin", _StdinStub('{"tool_name": "Read", "tool_input": {}}'))
+
+    for raw in ("", "   "):
+        rc = claude_code_hook.main(["--keys-dir", raw, "pre"])
+        assert rc == 0  # fail-safe deny (exit 0) before handler is reached
+
+
+class _StdinStub:
+    """Minimal stdin replacement that yields a single JSON line."""
+
+    def __init__(self, payload: str) -> None:
+        self._payload = payload
+
+    def read(self, *_args: object, **_kwargs: object) -> str:
+        return self._payload
+
+    def readline(self, *_args: object, **_kwargs: object) -> str:
+        return self._payload

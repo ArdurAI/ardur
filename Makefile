@@ -1,5 +1,6 @@
 .PHONY: help demo demo-down test test-python test-go lint lint-python lint-go \
-        build build-proxy build-hub clean cert bench bench-protocol-test
+        build build-proxy build-hub clean cert bench bench-protocol-test \
+        gen-agent-docs gen-agent-docs-check
 
 ARDUROOT := $(shell pwd)
 PYDIR   := python
@@ -62,6 +63,14 @@ bench: ## Run the AuditBench evaluation harness and write results to bench-resul
 
 bench-protocol-test: ## Test the AuditBench evaluation protocol (no real annotation study)
 	cd $(GODIR) && go test -race -count=1 ./benchmark/independent ./cmd/auditbench-oracle ./cmd/auditbench-label ./cmd/auditbench-score
+
+# ── Agent docs ───────────────────────────────────────────────────────────────
+
+gen-agent-docs: ## Regenerate the generated command block in AGENTS.md
+	python3 scripts/gen-agent-docs.py
+
+gen-agent-docs-check: ## Fail if the AGENTS.md command block is stale (local equivalent of the CI gate)
+	python3 scripts/gen-agent-docs.py --check
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 

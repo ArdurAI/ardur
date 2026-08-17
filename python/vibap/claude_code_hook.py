@@ -47,6 +47,25 @@ HOOK_INPUT_MAX_CHARS = 1024 * 1024
 HOOK_STATE_MAX_BYTES = 16 * 1024 * 1024
 HOOK_STATE_MAX_RECEIPTS = 8192
 HOOK_SESSION_CACHE_MAX_ENTRIES = 128
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    """Return ``value`` as a dict, tolerating non-mapping JSON values.
+
+    Claude Code hook payloads are externally controlled and may carry any JSON
+    type for fields that are nominally objects (``tool_input``,
+    ``tool_response``, nested ``measurements``/``lifecycle`` blocks). A bare
+    ``dict(value or {})`` raises ``ValueError``/``TypeError`` for strings,
+    ints, lists, or bools, which would crash the hook handler and emit a raw
+    traceback on stderr instead of a structured decision. Coerce non-mappings
+    to an empty dict so the handler fails safe with a normal deny/continue
+    response.
+    """
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 _SAFE_TRACE_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 
 
@@ -944,7 +963,7 @@ def handle_pre_tool_use(
         return _pre_tool_use_deny_output(f"ardur: {exc}")
 
     tool_name = str(hook_input.get("tool_name", ""))
-    tool_input_dict = dict(hook_input.get("tool_input", {}) or {})
+    tool_input_dict = _coerce_mapping(hook_input.get("tool_input"))
     arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
 
     trace_id = _trace_id_from_claims(claims)
@@ -1088,8 +1107,8 @@ def handle_post_tool_use(
         return {"continue": True}
 
     tool_name = str(hook_input.get("tool_name", ""))
-    tool_input_dict = dict(hook_input.get("tool_input", {}) or {})
-    tool_response = dict(hook_input.get("tool_response", {}) or {})
+    tool_input_dict = _coerce_mapping(hook_input.get("tool_input"))
+    tool_response = _coerce_mapping(hook_input.get("tool_response"))
     arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
 
     trace_id = _trace_id_from_claims(claims)
@@ -1264,7 +1283,7 @@ def _summarize_child_receipts_unverified(
             if str(claims.get("tool", "")) in {"SubagentStart", "SubagentStop"}:
                 continue
             meta = (
-                dict(claims.get("measurements", {}) or {})
+                _coerce_mapping(claims.get("measurements"))
                 .get("claude_code", {})
             )
             if not isinstance(meta, dict):
@@ -1291,7 +1310,7 @@ def _subagent_registry_record(
     lifecycle: str,
     observed_at: str,
 ) -> dict[str, Any]:
-    lifecycle_meta = dict(metadata.get("lifecycle", {}) or {})
+    lifecycle_meta = _coerce_mapping(metadata.get("lifecycle"))
     return _without_empty_values(
         {
             "schema_version": "ardur.claude_code.subagents.v0.1",
@@ -1483,10 +1502,71 @@ def _load_hook_input(stream: Any) -> dict[str, Any]:
     return parsed
 
 
+def _fail_safe_output(phase: str) -> dict[str, Any]:
+    """Return the protocol-valid response when the hook cannot process input.
+
+    For PreToolUse this is a fail-closed ``deny`` so that malformed or crashing
+    input cannot silently bypass governance — Claude Code treats exit code 1 as
+    a non-blocking error, which means the tool call would proceed without a
+    policy decision.  Returning a deny with exit code 0 ensures the host honours
+    the block.
+
+    For non-blocking phases (post / subagent) we emit ``{"continue": True}``
+    because those phases cannot block the host; at least the output is
+    protocol-valid so the host does not interpret a crash as an actionable
+    error.
+    """
+    if phase == "pre":
+        return _pre_tool_use_deny_output(
+            "ardur: blocked - hook input could not be processed safely"
+        )
+    return {"continue": True}
+
+
+def _claude_code_hook_keys_dir_invalid_response(*, phase: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": "claude_code_hook_keys_dir_invalid",
+        "error_code": "claude_code_hook_keys_dir_invalid",
+        "condition": "claude_code_hook_keys_dir_invalid",
+        "message": (
+            "vibap.claude_code_hook --keys-dir must be a non-empty path "
+            "after trimming whitespace."
+        ),
+        "detail": (
+            "An empty or whitespace-only --keys-dir path was provided. "
+            "Provide an explicit keys directory, or omit --keys-dir to use "
+            "$VIBAP_KEYS_DIR or the default Ardur keys directory."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_keys_dir",
+                "command": (
+                    f"ardur claude-code-hook {phase} --keys-dir <keys-dir> "
+                    "< <claude-code-hook-event-json-file>"
+                ),
+                "detail": "Provide an explicit --keys-dir path.",
+            },
+            {
+                "action": "omit_keys_dir_to_use_default",
+                "command": (
+                    f"ardur claude-code-hook {phase} "
+                    "< <claude-code-hook-event-json-file>"
+                ),
+                "detail": "Omit --keys-dir to use the configured default keys directory.",
+            },
+        ],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point. Reads hook input JSON from stdin, writes hook
-    output JSON to stdout. Exit code is 0 on success (handler returned
-    a dict), 1 on JSON-parse failure or unhandled exception."""
+    output JSON to stdout.
+
+    Exit code is always 0 when any response — success or fail-safe — can be
+    formulated.  For PreToolUse every error path emits a fail-closed deny so
+    that unparseable or crashing input cannot silently bypass governance.
+    """
     import argparse
     import sys
 
@@ -1498,23 +1578,45 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--keys-dir",
-        type=Path,
+        # Keep raw strings through argparse so explicit "" / whitespace values
+        # can fail closed before Path("") collapses to Path(".").
+        type=str,
         default=None,
         help="signing keys directory (default: $VIBAP_KEYS_DIR or DEFAULT_HOME/keys)",
     )
     args = parser.parse_args(argv)
 
+    fail_safe = _fail_safe_output(args.phase)
+    if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
+        sys.stderr.write(
+            json.dumps(
+                _claude_code_hook_keys_dir_invalid_response(phase=args.phase),
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        print(json.dumps(fail_safe))
+        return 0
+    keys_dir = Path(args.keys_dir) if isinstance(args.keys_dir, str) else None
+
     try:
         hook_input = _load_hook_input(sys.stdin)
-    except json.JSONDecodeError as exc:
-        print(json.dumps(_claude_code_hook_input_failure_response(exc, phase=args.phase), sort_keys=True))
-        return 1
-    except HookInputNotObjectError as exc:
-        print(json.dumps(_claude_code_hook_input_failure_response(exc, phase=args.phase), sort_keys=True))
-        return 1
+    except (json.JSONDecodeError, HookInputNotObjectError) as exc:
+        # Diagnostic detail goes to stderr so operators can troubleshoot;
+        # stdout carries the protocol-valid fail-safe response.
+        sys.stderr.write(
+            json.dumps(
+                _claude_code_hook_input_failure_response(exc, phase=args.phase),
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        print(json.dumps(fail_safe))
+        return 0
     except ValueError as exc:
         sys.stderr.write(f"ardur: invalid hook input: {exc}\n")
-        return 1
+        print(json.dumps(fail_safe))
+        return 0
 
     handlers = {
         "pre": _handle_pre_tool_use_daemon_first,
@@ -1524,11 +1626,17 @@ def main(argv: list[str] | None = None) -> int:
     }
     handler = handlers[args.phase]
     try:
-        output = handler(hook_input, keys_dir=args.keys_dir)
+        output = handler(hook_input, keys_dir=keys_dir)
     except Exception as exc:  # pylint: disable=broad-except
         sys.stderr.write(f"ardur: hook handler crashed: {exc}\n")
-        return 1
-    print(json.dumps(output))
+        print(json.dumps(fail_safe))
+        return 0
+    try:
+        print(json.dumps(output))
+    except (TypeError, ValueError):
+        # Output dict contained a non-serializable value — fall back to the
+        # protocol-valid fail-safe instead of crashing with a traceback.
+        print(json.dumps(fail_safe))
     return 0
 
 
