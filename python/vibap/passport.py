@@ -19,6 +19,8 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from .spend_budget import normalize_spend_budget
+
 ALGORITHM = "ES256"
 DEFAULT_ISSUER = "vibap-governance-proxy"
 DEFAULT_AUDIENCE = "vibap-proxy"
@@ -320,6 +322,10 @@ class MissionPassport:
     # DENY-wins across native + additional; formally verified in
     # verification/composition_smt.py (properties P1-P4).
     additional_policies: list[dict[str, Any]] = field(default_factory=list)
+    # Optional pre-action monetary/token authority. The mission form omits a
+    # lineage_id; issue_passport binds it to the fresh root JTI. Derived
+    # children inherit the signed policy and lineage identifier unchanged.
+    spend_budget: dict[str, Any] | None = None
     # Optional typed dangerous-action policy. When present, trusted proxy-side
     # tool contracts derive risk facts before execution and reserve the signed
     # session/agent/lineage ceilings atomically. Absence preserves the legacy
@@ -330,6 +336,8 @@ class MissionPassport:
         # Validate/normalize cwd at construction time so an invalid passport
         # can never be issued. Empty string → None; relative → ValueError.
         self.cwd = _normalize_cwd(self.cwd)
+        if self.spend_budget is not None:
+            self.spend_budget = normalize_spend_budget(self.spend_budget)
         if (
             UNRESTRICTED_RESOURCE_SCOPE_PATTERN in self.resource_scope
             and not resource_scope_is_explicitly_unrestricted(self.resource_scope)
@@ -367,6 +375,7 @@ class MissionPassport:
             "holder_key_thumbprint",  # K2 PoP
             "holder_spiffe_id",
             "additional_policies",  # pluggable policy backends
+            "spend_budget",  # pre-action token and monetary authority
             "risk_budget",  # typed dangerous-action blast-radius caps
             "mission_id",  # H1: stable mission identifier for PolicyStore lookup
             # Mission-file metadata handled by load_mission_file / issue_passport
@@ -402,6 +411,8 @@ class MissionPassport:
                 f"unknown fields in mission: {unknown_fields} (known: {known_fields})"
             )
         budget = data.get("budget") or {}
+        if "spend_budget" in data and not isinstance(data["spend_budget"], dict):
+            raise ValueError("spend_budget must be a JSON object when present")
         if "risk_budget" in data and not isinstance(data["risk_budget"], dict):
             raise ValueError("risk_budget must be a JSON object when present")
         return cls(
@@ -428,6 +439,11 @@ class MissionPassport:
             holder_spiffe_id=data.get("holder_spiffe_id"),
             additional_policies=list(data.get("additional_policies", [])),
             mission_id=data.get("mission_id"),
+            spend_budget=(
+                dict(data["spend_budget"])
+                if isinstance(data.get("spend_budget"), dict)
+                else None
+            ),
             risk_budget=(
                 dict(data["risk_budget"])
                 if isinstance(data.get("risk_budget"), dict)
@@ -441,6 +457,8 @@ class MissionPassport:
         data = asdict(self)
         if data.get("cwd") is None:
             data.pop("cwd", None)
+        if data.get("spend_budget") is None:
+            data.pop("spend_budget", None)
         if data.get("risk_budget") is None:
             data.pop("risk_budget", None)
         return data
@@ -705,6 +723,21 @@ def issue_passport(
         claims["max_tool_calls_per_class"] = mission.max_tool_calls_per_class
     if mission.additional_policies:
         claims["additional_policies"] = mission.additional_policies
+    if mission.spend_budget is not None:
+        inherited_lineage_id = mission.spend_budget.get("lineage_id")
+        if mission.parent_jti is None and inherited_lineage_id is not None:
+            raise ValueError(
+                "root spend_budget must omit lineage_id; issuance binds it to the fresh jti"
+            )
+        if mission.parent_jti is not None and inherited_lineage_id is None:
+            raise ValueError("child spend_budget must inherit the parent lineage_id")
+        claims["spend_budget"] = normalize_spend_budget(
+            mission.spend_budget,
+            lineage_id=(
+                str(inherited_lineage_id) if inherited_lineage_id is not None else jti
+            ),
+            require_lineage_id=True,
+        )
     if mission.risk_budget is not None:
         from .risk_budget import normalize_risk_budget
 
@@ -1397,6 +1430,14 @@ def derive_child_passport(
         max_delegation_depth=child_depth,
         parent_jti=parent["jti"],
         cwd=final_cwd,
+        spend_budget=(
+            normalize_spend_budget(
+                parent["spend_budget"],
+                require_lineage_id=True,
+            )
+            if parent.get("spend_budget") is not None
+            else None
+        ),
         risk_budget=final_risk_budget,
     )
     child_chain: list[dict[str, str]] = [{"jti": str(parent["jti"])}]
