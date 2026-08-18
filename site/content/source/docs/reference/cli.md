@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "8a7263d1052eca563a538f3007669304fa37ec0b2119bed298f261071d81d5bf"
+source_sha256: "a052b46ea53ef3758bf5dedff7a8ff59bb660b38d4a0594860f12afa29076b98"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1375,8 +1375,10 @@ valid registry enables one delegation level, adds `Agent` to the parent
 allowlist when necessary, and prints a launch command containing
 `ARDUR_CC_CHILD_POLICY_FILE`. Symlinks, insecure modes, malformed or empty
 registries, nested `Agent`/`Task` child authority, parent/child policy
-conflicts, wildcard child tools, and child budgets that leave no room for the
-parent dispatch fail closed before key or passport creation. Runtime binding
+conflicts over `Agent`, wildcard child tools, and child budgets that leave no
+room for the parent dispatch fail closed before key or passport creation. Other
+tool, scope, and TTL widening attempts fail closed when the blockable `Agent`
+pre-hook derives the child grant, before child execution. Runtime binding
 and its correlation limits are specified in
 [ADR-028](/__ardur_internal__/source/docs/decisions/adr-028-claude-code-child-authority-binding/).
 
