@@ -46,6 +46,16 @@ from .risk_budget import (
     normalize_risk_budget,
     validate_action_risk,
 )
+from .spend_budget import (
+    FileSpendBudgetLedger,
+    SpendBudgetError,
+    SpendBudgetLedger,
+    SpendCloseResult,
+    SpendReservationRequest,
+    SpendReservationResult,
+    StaticSpendQuoteStore,
+    normalize_spend_budget,
+)
 from .aat_adapter import (
     AAT_CREDENTIAL_FORMAT,
     AAT_DEFAULT_AUDIENCE,
@@ -2172,6 +2182,8 @@ class GovernanceProxy:
         lineage_budget_ledger: LineageBudgetLedger | None = None,
         risk_registry: ToolRiskRegistry | None = None,
         risk_budget_ledger: FileRiskBudgetLedger | None = None,
+        spend_quote_store: StaticSpendQuoteStore | None = None,
+        spend_budget_ledger: SpendBudgetLedger | None = None,
         biscuit_issuer_public_key: Any | None = None,
         biscuit_peer_trust_bundle: Any | None = None,
         biscuit_svid_audience: str = "ardur-proxy",
@@ -2218,6 +2230,10 @@ class GovernanceProxy:
         self.risk_registry = risk_registry or ToolRiskRegistry()
         self.risk_registry.freeze()
         self.risk_budget_ledger = risk_budget_ledger or FileRiskBudgetLedger(
+            self.state_dir
+        )
+        self.spend_quote_store = spend_quote_store
+        self.spend_budget_ledger = spend_budget_ledger or FileSpendBudgetLedger(
             self.state_dir
         )
         if (
@@ -2584,6 +2600,225 @@ class GovernanceProxy:
             "side_effect_class": event.side_effect_class,
         }
 
+    @staticmethod
+    def _zero_spend_amounts() -> dict[str, int]:
+        return {"tokens": 0, "currency_micros": 0}
+
+    @classmethod
+    def _spend_reservation_delta(
+        cls,
+        result: SpendReservationResult,
+    ) -> dict[str, Any]:
+        zero = cls._zero_spend_amounts()
+        return {
+            "operation": "reserve" if result.accepted else "reject",
+            "resource": "spend",
+            "requested": dict(result.reserved),
+            "reserved": dict(result.reserved) if result.accepted else zero,
+            "actual": cls._zero_spend_amounts(),
+            "refunded": cls._zero_spend_amounts(),
+            "remaining": copy.deepcopy(result.remaining),
+            "currency": result.currency,
+            "quote_digest": result.quote_digest,
+            "reservation_hash": result.reservation_hash,
+            "reason_code": result.reason_code,
+            "idempotent": result.idempotent,
+        }
+
+    @classmethod
+    def _spend_close_delta(cls, result: SpendCloseResult) -> dict[str, Any]:
+        retained = (
+            dict(result.reserved)
+            if result.operation == "quarantine"
+            else cls._zero_spend_amounts()
+        )
+        return {
+            "operation": result.operation,
+            "resource": "spend",
+            "requested": dict(result.reserved),
+            "reserved": retained,
+            "actual": dict(result.actual),
+            "refunded": dict(result.refunded),
+            "remaining": copy.deepcopy(result.remaining),
+            "currency": result.currency,
+            "quote_digest": result.quote_digest,
+            "reservation_hash": result.reservation_hash,
+            "reason_code": result.reason_code,
+            "idempotent": result.idempotent,
+            "reconciled": result.reconciled,
+        }
+
+    @staticmethod
+    def _spend_budget_remaining(delta: Mapping[str, Any]) -> dict[str, int]:
+        remaining: dict[str, int] = {}
+        raw_remaining = delta.get("remaining")
+        currency = str(delta.get("currency", "")).lower()
+        if not isinstance(raw_remaining, Mapping) or not currency:
+            return remaining
+        for scope in ("session", "agent", "lineage"):
+            amounts = raw_remaining.get(scope)
+            if not isinstance(amounts, Mapping):
+                continue
+            for dimension, bucket in (
+                ("tokens", "tokens"),
+                ("currency_micros", f"{currency}_micros"),
+            ):
+                raw_amount = amounts.get(dimension)
+                if isinstance(raw_amount, int) and not isinstance(raw_amount, bool):
+                    remaining[f"spend.{scope}.{bucket}"] = max(0, raw_amount)
+        return remaining
+
+    def _reserve_spend_if_required(
+        self,
+        session: GovernanceSession,
+        tool_name: str,
+        policy_claims: Mapping[str, Any],
+        spend_request: SpendReservationRequest | None,
+        reservation_state: dict[str, Any] | None = None,
+    ) -> SpendReservationResult | None:
+        raw_policy = policy_claims.get("spend_budget")
+        if raw_policy is None:
+            if spend_request is not None:
+                raise SpendBudgetError("spend_request_unexpected")
+            return None
+        policy = normalize_spend_budget(raw_policy, require_lineage_id=True)
+        if tool_name not in policy["metered_tools"]:
+            if spend_request is not None:
+                raise SpendBudgetError("spend_request_unexpected")
+            return None
+        if spend_request is None:
+            raise SpendBudgetError("spend_reservation_missing")
+        if not isinstance(spend_request, SpendReservationRequest):
+            raise SpendBudgetError("spend_request_invalid")
+        if self.spend_quote_store is None:
+            raise SpendBudgetError("spend_quote_store_unavailable")
+        quote = self.spend_quote_store.resolve(
+            spend_request.quote_id,
+            tool_name=tool_name,
+            model=spend_request.model,
+            currency=str(policy["currency"]),
+        )
+        result = self.spend_budget_ledger.reserve(
+            policy=policy,
+            session_id=session.jti,
+            agent_id=str(session.passport_claims.get("sub", "unknown")),
+            request=spend_request,
+            quote=quote,
+            retention_until=int(session.passport_claims["exp"]),
+        )
+        if result.accepted and reservation_state is not None:
+            reservation_state["spend"] = {
+                "accepted": True,
+                "closed": False,
+                "lineage_id": policy["lineage_id"],
+                "session_id": session.jti,
+                "request_id": spend_request.request_id,
+            }
+        return result
+
+    @staticmethod
+    def _record_spend_amount_metrics(
+        operation: str, amounts: Mapping[str, int]
+    ) -> None:
+        for unit in ("tokens", "currency_micros"):
+            amount = amounts.get(unit)
+            if isinstance(amount, int) and not isinstance(amount, bool):
+                ardur_metrics.spend_amount_total.add(
+                    max(0, amount),
+                    operation=operation,
+                    unit=unit,
+                )
+
+    @classmethod
+    def _record_spend_reservation_metrics(
+        cls,
+        result: SpendReservationResult,
+    ) -> None:
+        operation = "reserve" if result.accepted else "reject"
+        ardur_metrics.spend_events_total.inc(
+            operation=operation,
+            outcome=result.reason_code,
+        )
+        cls._record_spend_amount_metrics(operation, result.reserved)
+
+    @classmethod
+    def _record_spend_close_metrics(cls, result: SpendCloseResult) -> None:
+        ardur_metrics.spend_events_total.inc(
+            operation=result.operation,
+            outcome=result.reason_code,
+        )
+        if result.operation == "settle":
+            cls._record_spend_amount_metrics("settle", result.actual)
+            cls._record_spend_amount_metrics("refund", result.refunded)
+            if result.reconciled:
+                cls._record_spend_amount_metrics("reconcile", result.actual)
+        elif result.operation == "release":
+            cls._record_spend_amount_metrics("release", result.refunded)
+        elif result.operation == "quarantine":
+            cls._record_spend_amount_metrics("quarantine", result.reserved)
+
+    def _release_pre_action_reservations(
+        self,
+        reservations: dict[str, Any],
+        *,
+        spend_reason_code: str,
+    ) -> tuple[RiskOutcomeResult | None, SpendCloseResult | None]:
+        """Idempotently release every accepted pre-action reservation."""
+
+        risk_result: RiskOutcomeResult | None = None
+        spend_result: SpendCloseResult | None = None
+        failures: list[tuple[str, BaseException]] = []
+
+        spend = reservations.get("spend")
+        if (
+            isinstance(spend, dict)
+            and spend.get("accepted")
+            and not spend.get("closed")
+        ):
+            try:
+                spend_result = self.spend_budget_ledger.cancel(
+                    lineage_id=str(spend["lineage_id"]),
+                    session_id=str(spend["session_id"]),
+                    request_id=str(spend["request_id"]),
+                    reason_code=spend_reason_code,
+                )
+            except BaseException as exc:
+                failures.append(("spend", exc))
+            else:
+                spend["closed"] = True
+                try:
+                    self._record_spend_close_metrics(spend_result)
+                except Exception:  # pragma: no cover - observability boundary
+                    logger.exception("failed to record spend compensation metrics")
+
+        risk = reservations.get("risk")
+        if isinstance(risk, dict) and risk.get("accepted") and not risk.get("closed"):
+            try:
+                risk_result = self.risk_budget_ledger.record_outcome(
+                    lineage_id=str(risk["lineage_id"]),
+                    session_id=str(risk["session_id"]),
+                    request_id=str(risk["request_id"]),
+                    outcome="released",
+                )
+            except BaseException as exc:
+                failures.append(("risk", exc))
+            else:
+                risk["closed"] = True
+                try:
+                    self._risk_metric(operation="release", outcome="released")
+                except Exception:  # pragma: no cover - observability boundary
+                    logger.exception("failed to record risk compensation metrics")
+
+        if failures:
+            kind, failure = failures[0]
+            if kind == "spend":
+                raise SpendBudgetError(
+                    "spend_compensation_failed",
+                    "pre-action spend reservation compensation failed",
+                ) from failure
+            raise RiskBudgetError("risk_compensation_failed") from failure
+        return risk_result, spend_result
+
     def _build_receipt_log_entry(
         self,
         session: GovernanceSession,
@@ -2619,17 +2854,23 @@ class GovernanceProxy:
                 "mission_ref": copy.deepcopy(policy_claims.get("mission_ref")),
                 "mission_digest": policy_claims.get("mission_digest"),
             }
+        budget_remaining = self._receipt_budget_remaining(
+            session,
+            policy_claims,
+            event,
+        )
+        if (
+            isinstance(event.budget_delta, Mapping)
+            and event.budget_delta.get("resource") == "spend"
+        ):
+            budget_remaining.update(self._spend_budget_remaining(event.budget_delta))
         receipt = build_receipt(
             decision,
             event,
             parent_receipt_hash=session.last_receipt_full_hash,
             policy_decisions=signed_policy_decisions,
             reason=audit_reason,
-            budget_remaining=self._receipt_budget_remaining(
-                session,
-                policy_claims,
-                event,
-            ),
+            budget_remaining=budget_remaining,
         )
         signed_jwt = sign_receipt(receipt, self.receipt_private_key)
         session.last_receipt_id = receipt.receipt_id
@@ -3692,6 +3933,7 @@ class GovernanceProxy:
         arguments: dict[str, Any],
         policy_claims: dict[str, Any],
         risk_request_id: str | None,
+        reservation_state: dict[str, Any] | None = None,
     ) -> _RiskPreflight:
         raw_policy = policy_claims.get("risk_budget")
         if raw_policy is None and session.risk_policy_snapshot is None:
@@ -3880,6 +4122,14 @@ class GovernanceProxy:
                 measurements=measurements,
                 remaining=reservation.remaining,
             )
+        if reservation_state is not None:
+            reservation_state["risk"] = {
+                "accepted": True,
+                "closed": False,
+                "lineage_id": policy["lineage_id"],
+                "session_id": session.jti,
+                "request_id": risk_request_id,
+            }
         self._risk_metric(
             operation="reserve",
             outcome="accepted",
@@ -3992,12 +4242,47 @@ class GovernanceProxy:
         *,
         risk_request_id: str | None = None,
         receipt_callback: Callable[[str], None] | None = None,
+        spend_request: SpendReservationRequest | None = None,
     ) -> tuple[Decision, str]:
         self.flush_risk_lifecycle_outbox(session)
+        reservations: dict[str, Any] = {}
+        try:
+            return self._evaluate_tool_call(
+                session,
+                tool_name,
+                arguments,
+                risk_request_id=risk_request_id,
+                receipt_callback=receipt_callback,
+                spend_request=spend_request,
+                _pre_action_reservations=reservations,
+            )
+        except BaseException as exc:
+            try:
+                self._release_pre_action_reservations(
+                    reservations,
+                    spend_reason_code="spend_evaluation_failed",
+                )
+            except BaseException as compensation_exc:
+                raise compensation_exc from exc
+            raise
+
+    def _evaluate_tool_call(
+        self,
+        session: GovernanceSession | str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        risk_request_id: str | None,
+        receipt_callback: Callable[[str], None] | None,
+        spend_request: SpendReservationRequest | None,
+        _pre_action_reservations: dict[str, Any],
+    ) -> tuple[Decision, str]:
         arguments_snapshot = copy.deepcopy(arguments)
         receipt_entry: dict[str, Any] | None = None
         receipt_callback_id: str | None = None
         released: RiskOutcomeResult | None = None
+        spend_reservation: SpendReservationResult | None = None
+        spend_close: SpendCloseResult | None = None
         # Refresh persisted state under a per-session coordination lock before
         # mutating. Without this, separate proxies that share a state_dir can
         # both approve from stale in-memory snapshots and last-writer-wins the
@@ -4081,11 +4366,25 @@ class GovernanceProxy:
                         self._persist_session(target)
                     else:
                         receipt_policy_claims = dict(policy_claims)
-                        mic_result = self._apply_mic_conformance_checks(
-                            target, tool_name, arguments_snapshot, receipt_policy_claims
+                        risk_preflight = self._risk_preflight(
+                            target,
+                            tool_name,
+                            arguments_snapshot,
+                            policy_claims,
+                            risk_request_id,
+                            _pre_action_reservations,
                         )
-                        if mic_result is not None:
-                            decision, reason, denial_reason = mic_result
+                        if not risk_preflight.accepted:
+                            denial_reason = risk_preflight.denial_reason
+                            if denial_reason in {
+                                DenialReason.RISK_ACTION_CAP_EXCEEDED,
+                                DenialReason.RISK_BUDGET_EXHAUSTED,
+                                DenialReason.RISK_REPLAY,
+                            }:
+                                decision = Decision.DENY
+                            else:
+                                decision = Decision.INSUFFICIENT_EVIDENCE
+                            reason = risk_preflight.reason or "risk_policy_invalid"
                             self._record_tool_policy_event(
                                 target,
                                 tool_name,
@@ -4096,101 +4395,102 @@ class GovernanceProxy:
                                 verifier_id=self.verifier_id,
                             )
                             event = target.events[-1]
-                            self._persist_session(target)
                         else:
-                            risk_preflight = self._risk_preflight(
-                                target,
-                                tool_name,
-                                arguments_snapshot,
-                                policy_claims,
-                                risk_request_id,
-                            )
-                            if not risk_preflight.accepted:
-                                denial_reason = risk_preflight.denial_reason
-                                if denial_reason in {
-                                    DenialReason.RISK_ACTION_CAP_EXCEEDED,
-                                    DenialReason.RISK_BUDGET_EXHAUSTED,
-                                    DenialReason.RISK_REPLAY,
-                                }:
-                                    decision = Decision.DENY
-                                else:
-                                    decision = Decision.INSUFFICIENT_EVIDENCE
-                                reason = risk_preflight.reason or "risk_policy_invalid"
+                            try:
+                                spend_reservation = self._reserve_spend_if_required(
+                                    target,
+                                    tool_name,
+                                    policy_claims,
+                                    spend_request,
+                                    _pre_action_reservations,
+                                )
+                            except SpendBudgetError as exc:
+                                decision = Decision.INSUFFICIENT_EVIDENCE
+                                reason = exc.reason_code
                                 self._record_tool_policy_event(
                                     target,
                                     tool_name,
                                     arguments_snapshot,
                                     decision,
                                     reason,
-                                    denial_reason,
+                                    DenialReason.TELEMETRY_MISSING,
                                     verifier_id=self.verifier_id,
                                 )
                                 event = target.events[-1]
                             else:
-                                try:
-                                    decision, reason, event = (
-                                        self._evaluate_ordinary_tool_policy(
+                                if (
+                                    spend_reservation is not None
+                                    and not spend_reservation.accepted
+                                ):
+                                    decision = Decision.DENY
+                                    reason = spend_reservation.reason_code
+                                    self._record_tool_policy_event(
+                                        target,
+                                        tool_name,
+                                        arguments_snapshot,
+                                        decision,
+                                        reason,
+                                        DenialReason.BUDGET_EXHAUSTED,
+                                        verifier_id=self.verifier_id,
+                                    )
+                                    event = target.events[-1]
+                                else:
+                                    mic_result = self._apply_mic_conformance_checks(
+                                        target,
+                                        tool_name,
+                                        arguments_snapshot,
+                                        receipt_policy_claims,
+                                    )
+                                    if mic_result is not None:
+                                        decision, reason, denial_reason = mic_result
+                                        self._record_tool_policy_event(
                                             target,
                                             tool_name,
                                             arguments_snapshot,
-                                            policy_claims,
+                                            decision,
+                                            reason,
+                                            denial_reason,
+                                            verifier_id=self.verifier_id,
                                         )
-                                    )
-                                except BaseException:
-                                    # An exception cannot prove that execution did
-                                    # not begin (internal memory tools are the
-                                    # canonical counterexample). Keep the
-                                    # reservation charged for explicit executor
-                                    # reconciliation or quarantine.
-                                    raise
-                                if (
-                                    risk_preflight.reserved
-                                    and decision != Decision.PERMIT
-                                ):
-                                    try:
-                                        policy = normalize_risk_budget(
-                                            policy_claims["risk_budget"]
-                                        )
-                                        released = (
-                                            self.risk_budget_ledger.record_outcome(
-                                                lineage_id=policy["lineage_id"],
-                                                session_id=target.jti,
-                                                request_id=str(
-                                                    risk_preflight.request_id
-                                                ),
-                                                outcome="released",
+                                        event = target.events[-1]
+                                    else:
+                                        decision, reason, event = (
+                                            self._evaluate_ordinary_tool_policy(
+                                                target,
+                                                tool_name,
+                                                arguments_snapshot,
+                                                policy_claims,
                                             )
                                         )
-                                    except (OSError, RiskBudgetError):
-                                        decision = Decision.INSUFFICIENT_EVIDENCE
-                                        reason = "risk_state_unavailable"
-                                        event.decision = decision
-                                        event.reason = reason
-                                        event.denial_reason = (
-                                            DenialReason.RISK_STATE_UNAVAILABLE
-                                        )
-                                        self._risk_metric(
-                                            operation="release",
-                                            outcome="error",
-                                            reason="state_unavailable",
-                                        )
-                                    else:
-                                        risk_preflight = _RiskPreflight(
-                                            governed=True,
-                                            accepted=True,
-                                            remaining=released.remaining,
-                                            measurements=risk_preflight.measurements,
-                                        )
-                                        self._risk_metric(
-                                            operation="release",
-                                            outcome="released",
-                                        )
-                                        event.risk_lifecycle_id = released.lifecycle_id
-                            event.measurements = copy.deepcopy(
-                                risk_preflight.measurements
-                            )
-                            event.risk_budget_remaining = dict(risk_preflight.remaining)
-                            self._persist_session(target)
+                            if decision != Decision.PERMIT:
+                                released, spend_close = (
+                                    self._release_pre_action_reservations(
+                                        _pre_action_reservations,
+                                        spend_reason_code="spend_action_not_permitted",
+                                    )
+                                )
+                                if released is not None:
+                                    risk_preflight = _RiskPreflight(
+                                        governed=True,
+                                        accepted=True,
+                                        remaining=released.remaining,
+                                        measurements=risk_preflight.measurements,
+                                    )
+                                    event.risk_lifecycle_id = released.lifecycle_id
+                            if spend_reservation is not None:
+                                event.budget_delta = (
+                                    self._spend_close_delta(spend_close)
+                                    if spend_close is not None
+                                    else self._spend_reservation_delta(
+                                        spend_reservation
+                                    )
+                                )
+                                self._record_spend_reservation_metrics(
+                                    spend_reservation
+                                )
+                        event.measurements = copy.deepcopy(risk_preflight.measurements)
+                        event.risk_budget_remaining = dict(risk_preflight.remaining)
+                        self._persist_session(target)
                 receipt_entry = self._build_receipt_log_entry(
                     target,
                     event,
@@ -4232,6 +4532,194 @@ class GovernanceProxy:
         if receipt_callback is not None and receipt_callback_id is not None:
             receipt_callback(receipt_callback_id)
         return decision, reason
+
+    def settle_spend(
+        self,
+        session: GovernanceSession | str,
+        *,
+        request_id: str,
+        actual_input_tokens: int,
+        actual_output_tokens: int,
+        usage_proof_digest: str | None,
+    ) -> SpendCloseResult:
+        """Settle a reservation against trusted adapter usage evidence."""
+
+        receipt_entry: dict[str, Any] | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                self._assert_spend_lifecycle_open(target)
+                policy_claims = self._resolve_authoritative_policy_claims(
+                    target.passport_claims
+                )
+                raw_policy = policy_claims.get("spend_budget")
+                if raw_policy is None:
+                    raise SpendBudgetError("spend_policy_missing")
+                policy = normalize_spend_budget(raw_policy, require_lineage_id=True)
+                result = self.spend_budget_ledger.settle(
+                    lineage_id=str(policy["lineage_id"]),
+                    session_id=target.jti,
+                    request_id=request_id,
+                    actual_input_tokens=actual_input_tokens,
+                    actual_output_tokens=actual_output_tokens,
+                    usage_proof_digest=usage_proof_digest,
+                )
+                decision = (
+                    Decision.PERMIT
+                    if result.operation == "settle"
+                    else Decision.INSUFFICIENT_EVIDENCE
+                )
+                event = self._spend_lifecycle_event(
+                    target,
+                    result,
+                    decision=decision,
+                )
+                target.events.append(event)
+                receipt_entry = self._build_receipt_log_entry(
+                    target,
+                    event,
+                    decision,
+                    result.reason_code,
+                    dict(policy_claims),
+                )
+                self._persist_session(target)
+        self._record_spend_close_metrics(result)
+        if receipt_entry is not None:
+            self._log_receipt(receipt_entry)
+        return result
+
+    def quarantine_spend(
+        self,
+        session: GovernanceSession | str,
+        *,
+        request_id: str,
+        reason_code: str = "spend_settlement_evidence_missing",
+    ) -> SpendCloseResult:
+        """Retain a reservation when trusted settlement cannot be produced."""
+
+        receipt_entry: dict[str, Any] | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                self._assert_spend_lifecycle_open(target)
+                policy_claims = self._resolve_authoritative_policy_claims(
+                    target.passport_claims
+                )
+                policy = normalize_spend_budget(
+                    policy_claims.get("spend_budget"),
+                    require_lineage_id=True,
+                )
+                result = self.spend_budget_ledger.quarantine(
+                    lineage_id=str(policy["lineage_id"]),
+                    session_id=target.jti,
+                    request_id=request_id,
+                    reason_code=reason_code,
+                )
+                event = self._spend_lifecycle_event(
+                    target,
+                    result,
+                    decision=Decision.INSUFFICIENT_EVIDENCE,
+                )
+                target.events.append(event)
+                receipt_entry = self._build_receipt_log_entry(
+                    target,
+                    event,
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    result.reason_code,
+                    dict(policy_claims),
+                )
+                self._persist_session(target)
+        self._record_spend_close_metrics(result)
+        if receipt_entry is not None:
+            self._log_receipt(receipt_entry)
+        return result
+
+    def quarantine_stale_spend(
+        self,
+        session: GovernanceSession | str,
+        *,
+        older_than_s: int,
+        now: int | None = None,
+    ) -> list[SpendCloseResult]:
+        """Quarantine stale active reservations without refunding authority."""
+
+        receipt_entries: list[dict[str, Any]] = []
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                self._assert_spend_lifecycle_open(target)
+                policy_claims = self._resolve_authoritative_policy_claims(
+                    target.passport_claims
+                )
+                policy = normalize_spend_budget(
+                    policy_claims.get("spend_budget"),
+                    require_lineage_id=True,
+                )
+                results = self.spend_budget_ledger.quarantine_stale(
+                    lineage_id=str(policy["lineage_id"]),
+                    session_id=target.jti,
+                    older_than_s=older_than_s,
+                    now=now,
+                )
+                for result in results:
+                    event = self._spend_lifecycle_event(
+                        target,
+                        result,
+                        decision=Decision.INSUFFICIENT_EVIDENCE,
+                    )
+                    target.events.append(event)
+                    receipt_entries.append(
+                        self._build_receipt_log_entry(
+                            target,
+                            event,
+                            Decision.INSUFFICIENT_EVIDENCE,
+                            result.reason_code,
+                            dict(policy_claims),
+                        )
+                    )
+                if results:
+                    self._persist_session(target)
+        for result in results:
+            self._record_spend_close_metrics(result)
+        for entry in receipt_entries:
+            self._log_receipt(entry)
+        return results
+
+    def _spend_lifecycle_event(
+        self,
+        session: GovernanceSession,
+        result: SpendCloseResult,
+        *,
+        decision: Decision,
+    ) -> PolicyEvent:
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        arguments = {
+            "reservation_hash": result.reservation_hash,
+            "quote_digest": result.quote_digest,
+        }
+        return PolicyEvent(
+            timestamp=timestamp,
+            step_id=_receipt_step_id(
+                session.jti,
+                timestamp,
+                f"spend_{result.operation}",
+                arguments,
+            ),
+            actor=str(session.passport_claims.get("sub", "unknown")),
+            verifier_id=self.verifier_id,
+            tool_name=f"spend_{result.operation}",
+            arguments=arguments,
+            action_class="observe",
+            target="spend_budget",
+            resource_family="budget",
+            side_effect_class="none",
+            decision=decision,
+            reason=result.reason_code,
+            passport_jti=session.jti,
+            trace_id=session.jti,
+            run_nonce=session.run_nonce,
+            denial_reason=(
+                None if decision == Decision.PERMIT else DenialReason.TELEMETRY_MISSING
+            ),
+            budget_delta=self._spend_close_delta(result),
+        )
 
     def record_tool_result(
         self,
@@ -4577,6 +5065,20 @@ class GovernanceProxy:
                 raise PermissionError(
                     "risk_budget_lifecycle_pending: deliver lifecycle receipts before finalization"
                 )
+        policy_claims = self._resolve_authoritative_policy_claims(
+            session.passport_claims
+        )
+        raw_spend_policy = policy_claims.get("spend_budget")
+        if raw_spend_policy is not None:
+            spend_policy = normalize_spend_budget(
+                raw_spend_policy,
+                require_lineage_id=True,
+            )
+            if self.spend_budget_ledger.has_active_reservations(
+                lineage_id=str(spend_policy["lineage_id"]),
+                session_id=session.jti,
+            ):
+                raise PermissionError("spend_reservations_unresolved")
         if session.summary is not None:
             return dict(session.summary), False
         session.end_time = time.time()
@@ -4783,11 +5285,23 @@ class GovernanceProxy:
                 continue
             if event.decision != Decision.PERMIT:
                 continue
+            if (
+                event.resource_family == "budget"
+                and event.target == "spend_budget"
+                and event.tool_name
+                in {"spend_release", "spend_settle", "spend_quarantine"}
+            ):
+                continue
             if event.tool_name in forbidden:
                 return False
             if tool_scope_mode != "unrestricted" and event.tool_name not in allowed:
                 return False
         return True
+
+    @staticmethod
+    def _assert_spend_lifecycle_open(session: GovernanceSession) -> None:
+        if session.summary is not None or session.attestation_token is not None:
+            raise PermissionError("session already finalized")
 
     def _session_path(self, session_id: str) -> Path:
         if not _SESSION_ID_RE.match(session_id):

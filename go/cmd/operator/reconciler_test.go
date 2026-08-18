@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"os"
 	"strings"
@@ -139,6 +141,71 @@ func testPassport(name, ns string) *vibapv1alpha1.AgentPassport {
 	}
 }
 
+func legacyEncodedCredential(t *testing.T, spiffeID, ownerID string) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating legacy signing key: %v", err)
+	}
+	key := &credential.SigningKey{PrivateKey: priv, PublicKey: pub, KeyID: "legacy"}
+	legacyCredential, err := credential.NewBuilder("https://legacy.example", spiffeID).
+		WithIdentity(spiffeID, ownerID, "").
+		WithIntent("legacy-checksum", "cedar", "legacy-policy-hash", []string{"read"}).
+		WithTrust(0.8, 0.9, 85, "", "").
+		Build(key)
+	if err != nil {
+		t.Fatalf("building legacy credential: %v", err)
+	}
+	encoded, err := credential.Encode(legacyCredential, key)
+	if err != nil {
+		t.Fatalf("encoding legacy credential: %v", err)
+	}
+	return encoded
+}
+
+func identitylessEncodedCredential(t *testing.T, subject string) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating identity-less signing key: %v", err)
+	}
+	key := &credential.SigningKey{PrivateKey: priv, PublicKey: pub, KeyID: "identity-less"}
+	identitylessCredential, err := credential.NewBuilder("https://identity-less.example", subject).
+		WithIntent("identity-less-checksum", "cedar", "identity-less-policy-hash", []string{"read"}).
+		WithTrust(0.8, 0.9, 85, "", "").
+		Build(key)
+	if err != nil {
+		t.Fatalf("building identity-less credential: %v", err)
+	}
+	encoded, err := credential.Encode(identitylessCredential, key)
+	if err != nil {
+		t.Fatalf("encoding identity-less credential: %v", err)
+	}
+	return encoded
+}
+
+func spiffeSubjectOnlyEncodedCredential(t *testing.T, subject string) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating subject-only signing key: %v", err)
+	}
+	key := &credential.SigningKey{PrivateKey: priv, PublicKey: pub, KeyID: "subject-only"}
+	subjectOnlyCredential, err := credential.NewBuilder("https://subject-only.example", "legacy/non-spiffe").
+		WithIntent("subject-only-checksum", "cedar", "subject-only-policy-hash", []string{"read"}).
+		WithTrust(0.8, 0.9, 85, "", "").
+		Build(key)
+	if err != nil {
+		t.Fatalf("building subject-only credential: %v", err)
+	}
+	subjectOnlyCredential.Claims.Subject = subject
+	encoded, err := credential.Encode(subjectOnlyCredential, key)
+	if err != nil {
+		t.Fatalf("encoding subject-only credential: %v", err)
+	}
+	return encoded
+}
+
 // reconcileUntilStable runs reconcile in a loop until there's no immediate requeue,
 // simulating the controller queue. This handles the finalizer addition round-trip.
 func reconcileUntilStable(t *testing.T, r *AgentPassportReconciler, nn types.NamespacedName, maxRounds int) ctrl.Result {
@@ -254,6 +321,126 @@ func TestReconcile_MissingSPIFFEIDOmitsClaimAndReportsUnverifiedIdentity(t *test
 	}
 }
 
+func TestReconcile_ExistingMissingSPIFFEIDRemediatesLegacyCredential(t *testing.T) {
+	ap := testPassport("legacy-empty-spiffe", "default")
+	ap.Finalizers = []string{vibapv1alpha1.FinalizerName}
+
+	const legacySPIFFEID = "spiffe://ardur.dev/ns/default/agent/legacy-empty-spiffe"
+	legacyEncoded := legacyEncodedCredential(t, legacySPIFFEID, ap.Spec.Identity.OwnerID)
+	ap.Status.Credential = legacyEncoded
+	ap.Status.ObservedGeneration = ap.Generation
+	expiresAt := metav1.NewTime(time.Now().Add(2 * time.Hour))
+	ap.Status.ExpiresAt = &expiresAt
+
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: nn})
+	if err != nil {
+		t.Fatalf("reconciling existing resource: %v", err)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatal("migrated credential must schedule a future renewal")
+	}
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting reconciled resource: %v", err)
+	}
+	decoded, err := credential.Decode(updated.Status.Credential)
+	if err != nil {
+		t.Fatalf("decoding reconciled credential: %v", err)
+	}
+	if decoded.Claims.Identity != nil {
+		t.Fatalf("existing fabricated credential must be replaced with an identity-less credential: %+v", decoded.Claims.Identity)
+	}
+	if updated.Status.Credential == legacyEncoded {
+		t.Fatal("existing fabricated credential was not rotated")
+	}
+	if updated.Status.ExpiresAt == nil || time.Until(updated.Status.ExpiresAt.Time) < 50*time.Minute {
+		t.Fatalf("migrated credential expiry was not refreshed: %v", updated.Status.ExpiresAt)
+	}
+	const expectedSubject = "default/legacy-empty-spiffe"
+	if decoded.Claims.Subject != expectedSubject {
+		t.Fatalf("subject = %q, want non-SPIFFE subject %q", decoded.Claims.Subject, expectedSubject)
+	}
+	claimsJSON, err := json.Marshal(decoded.Claims)
+	if err != nil {
+		t.Fatalf("marshaling migrated credential claims: %v", err)
+	}
+	if strings.Contains(string(claimsJSON), "spiffe://") {
+		t.Fatalf("migrated credential must not retain a SPIFFE URI: %s", claimsJSON)
+	}
+
+	found := false
+	var migratedCondition metav1.Condition
+	for _, condition := range updated.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionIdentityUnverified &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.Reason == vibapv1alpha1.ReasonMissingSPIFFEID {
+			found = true
+			migratedCondition = condition
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected IdentityUnverified=True with reason MissingSPIFFEID; conditions=%+v", updated.Status.Conditions)
+	}
+
+	migratedEncoded := updated.Status.Credential
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: nn}); err != nil {
+		t.Fatalf("reconciling migrated resource: %v", err)
+	}
+	var stable vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &stable); err != nil {
+		t.Fatalf("getting stable migrated resource: %v", err)
+	}
+	if stable.Status.Credential != migratedEncoded {
+		t.Fatal("migrated credential rotated again on the next reconcile")
+	}
+	for _, condition := range stable.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionIdentityUnverified {
+			if !condition.LastTransitionTime.Time.Equal(migratedCondition.LastTransitionTime.Time) {
+				t.Fatal("IdentityUnverified transition time changed after migration completed")
+			}
+			return
+		}
+	}
+	t.Fatal("IdentityUnverified condition disappeared after migration completed")
+}
+
+func TestNeedsUnverifiedIdentityMigration_InspectsCredentialDespiteCondition(t *testing.T) {
+	ap := testPassport("stale-condition", "default")
+	const legacySPIFFEID = "spiffe://ardur.dev/ns/default/agent/stale-condition"
+	ap.Status.Credential = legacyEncodedCredential(t, legacySPIFFEID, ap.Spec.Identity.OwnerID)
+	ap.Status.Conditions = []metav1.Condition{{
+		Type:   vibapv1alpha1.ConditionIdentityUnverified,
+		Status: metav1.ConditionTrue,
+		Reason: vibapv1alpha1.ReasonMissingSPIFFEID,
+	}}
+
+	if !needsUnverifiedIdentityMigration(ap) {
+		t.Fatal("fabricated credential must migrate even when a stale completion condition is present")
+	}
+}
+
+func TestNeedsUnverifiedIdentityMigration_DetectsSPIFFEURIAnywhereInSubject(t *testing.T) {
+	ap := testPassport("subject-only", "default")
+	ap.Status.Credential = spiffeSubjectOnlyEncodedCredential(t, "legacy-agent spiffe://ardur.dev/agent/subject-only")
+	ap.Status.Conditions = []metav1.Condition{{
+		Type:               vibapv1alpha1.ConditionIdentityUnverified,
+		Status:             metav1.ConditionTrue,
+		Reason:             vibapv1alpha1.ReasonMissingSPIFFEID,
+		ObservedGeneration: ap.Generation,
+	}}
+
+	if !needsUnverifiedIdentityMigration(ap) {
+		t.Fatal("SPIFFE URI in a subject-only credential must trigger migration")
+	}
+}
+
 func TestReconcile_ExplicitSPIFFEIDIsPreserved(t *testing.T) {
 	ap := testPassport("explicit-spiffe", "default")
 	const explicitSPIFFEID = "spiffe://example.test/agent/explicit"
@@ -325,6 +512,7 @@ func TestReconcile_NotFound(t *testing.T) {
 
 func TestReconcile_AlreadyIssued(t *testing.T) {
 	ap := testPassport("test-agent", "default")
+	ap.Spec.Identity.SPIFFEID = "spiffe://example.test/agent/already-issued"
 	ap.Finalizers = []string{vibapv1alpha1.FinalizerName}
 	now := metav1.Now()
 	future := metav1.NewTime(now.Add(1 * time.Hour))
@@ -353,6 +541,14 @@ func TestReconcile_AlreadyIssued(t *testing.T) {
 
 	if result.RequeueAfter <= 0 {
 		t.Error("should schedule renewal")
+	}
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(ctx, types.NamespacedName{Name: "test-agent", Namespace: "default"}, &updated); err != nil {
+		t.Fatalf("getting updated passport: %v", err)
+	}
+	if updated.Status.Credential != "eyJhbGciOiJFZERTQSJ9.test~disc1~" {
+		t.Fatal("current-generation explicit identity credential must not be reissued")
 	}
 }
 
@@ -635,10 +831,49 @@ func TestNeedsCredential(t *testing.T) {
 			expect: true,
 		},
 		{
-			name: "has credential, generation matches",
+			name: "explicit identity credential, generation matches",
+			ap: &vibapv1alpha1.AgentPassport{
+				ObjectMeta: metav1.ObjectMeta{Generation: 1},
+				Spec: vibapv1alpha1.AgentPassportSpec{
+					Identity: vibapv1alpha1.IdentitySpec{SPIFFEID: "spiffe://example.test/agent"},
+				},
+				Status: vibapv1alpha1.AgentPassportStatus{Credential: "eyJ...", ObservedGeneration: 1},
+			},
+			expect: false,
+		},
+		{
+			name: "malformed credential fails closed",
 			ap: &vibapv1alpha1.AgentPassport{
 				ObjectMeta: metav1.ObjectMeta{Generation: 1},
 				Status:     vibapv1alpha1.AgentPassportStatus{Credential: "eyJ...", ObservedGeneration: 1},
+			},
+			expect: true,
+		},
+		{
+			name: "valid identity-less credential missing migration marker",
+			ap: &vibapv1alpha1.AgentPassport{
+				ObjectMeta: metav1.ObjectMeta{Generation: 1},
+				Status: vibapv1alpha1.AgentPassportStatus{
+					Credential:         identitylessEncodedCredential(t, "default/unmarked"),
+					ObservedGeneration: 1,
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "identity-less credential migration complete",
+			ap: &vibapv1alpha1.AgentPassport{
+				ObjectMeta: metav1.ObjectMeta{Generation: 1},
+				Status: vibapv1alpha1.AgentPassportStatus{
+					Credential:         identitylessEncodedCredential(t, "default/migrated"),
+					ObservedGeneration: 1,
+					Conditions: []metav1.Condition{{
+						Type:               vibapv1alpha1.ConditionIdentityUnverified,
+						Status:             metav1.ConditionTrue,
+						Reason:             vibapv1alpha1.ReasonMissingSPIFFEID,
+						ObservedGeneration: 1,
+					}},
+				},
 			},
 			expect: false,
 		},

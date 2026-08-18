@@ -50,7 +50,8 @@ type Builder struct {
 
 // NewBuilder creates a new credential builder.
 // issuer is the VIBAP Authority identifier.
-// subject is the agent's SPIFFE ID.
+// subject is always required. It is a SPIFFE ID when Layer 1 is present, or a
+// non-SPIFFE agent identifier when a Core credential omits optional Layer 1.
 func NewBuilder(issuer, subject string) *Builder {
 	b := &Builder{
 		issuer:   issuer,

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_ROOT = Path(".github/workflows")
 MIRROR_ROOT = Path("site/static/repo/.github/workflows")
 SOURCE_SYNC = REPO_ROOT / "site" / "scripts" / "sync_source_docs.py"
+PINNED_ACTION = re.compile(
+    r"^(?P<prefix>\s*(?:-\s+)?uses:\s+)"
+    r"(?P<action>[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)"
+    r"@(?P<sha>[0-9a-f]{40})"
+    r"(?P<suffix>\s+#\s+v[0-9][A-Za-z0-9._+-]*)\s*$"
+)
 
 
 def _git(*args: str, text: bool = True) -> str | bytes:
@@ -63,6 +70,48 @@ def validate_changed_paths(changes: list[tuple[str, Path]]) -> list[Path]:
     return sorted(sources, key=lambda path: path.as_posix())
 
 
+def validate_action_pin_updates(source: Path, base: bytes, head: bytes) -> None:
+    """Reject workflow edits that are not pinned third-party action updates."""
+    try:
+        base_lines = base.decode("utf-8").splitlines()
+        head_lines = head.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"Dependabot action-pin-only validation refused {source}: non-UTF-8 input"
+        ) from exc
+
+    if len(base_lines) != len(head_lines):
+        raise ValueError(
+            f"Dependabot action-pin-only validation refused {source}: line count changed"
+        )
+
+    changed = False
+    for line_number, (base_line, head_line) in enumerate(
+        zip(base_lines, head_lines, strict=True), start=1
+    ):
+        if base_line == head_line:
+            continue
+        changed = True
+        base_match = PINNED_ACTION.fullmatch(base_line)
+        head_match = PINNED_ACTION.fullmatch(head_line)
+        if (
+            base_match is None
+            or head_match is None
+            or base_match["prefix"] != head_match["prefix"]
+            or base_match["action"] != head_match["action"]
+            or base_match["sha"] == head_match["sha"]
+        ):
+            raise ValueError(
+                "Dependabot action-pin-only validation refused "
+                f"{source}:{line_number}"
+            )
+
+    if not changed:
+        raise ValueError(
+            f"Dependabot action-pin-only validation refused {source}: no changed pin"
+        )
+
+
 def _changed_paths(base_sha: str, head_sha: str) -> list[tuple[str, Path]]:
     raw = _git(
         "diff",
@@ -98,9 +147,12 @@ def prepare(base_sha: str, head_sha: str) -> list[Path]:
     mirrors = [_mirror_for(source) for source in sources]
 
     for source in sources:
-        content = _git("show", f"{head_commit}:{source.as_posix()}", text=False)
-        assert isinstance(content, bytes)
-        (REPO_ROOT / source).write_bytes(content)
+        base_content = _git("show", f"{base_commit}:{source.as_posix()}", text=False)
+        head_content = _git("show", f"{head_commit}:{source.as_posix()}", text=False)
+        assert isinstance(base_content, bytes)
+        assert isinstance(head_content, bytes)
+        validate_action_pin_updates(source, base_content, head_content)
+        (REPO_ROOT / source).write_bytes(head_content)
 
     subprocess.run([sys.executable, str(SOURCE_SYNC)], cwd=REPO_ROOT, check=True)
 

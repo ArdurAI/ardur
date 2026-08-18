@@ -433,8 +433,35 @@ func (r *AgentPassportReconciler) recordEvent(ap *vibapv1alpha1.AgentPassport, e
 }
 
 func needsCredential(ap *vibapv1alpha1.AgentPassport) bool {
-	return ap.Status.Credential == "" ||
-		ap.Status.ObservedGeneration != ap.Generation
+	if ap.Status.Credential == "" || ap.Status.ObservedGeneration != ap.Generation {
+		return true
+	}
+	return needsUnverifiedIdentityMigration(ap)
+}
+
+// needsUnverifiedIdentityMigration forces one reissuance for credentials
+// written before empty SPIFFE IDs were represented honestly in the signed
+// artifact and status. The caller guarantees that a credential is present.
+func needsUnverifiedIdentityMigration(ap *vibapv1alpha1.AgentPassport) bool {
+	if ap.Spec.Identity.SPIFFEID != "" {
+		return false
+	}
+	// Status is controller-owned. Decode classifies the artifact conservatively;
+	// it is not treated as independent proof of signature authenticity.
+	decoded, err := credential.Decode(ap.Status.Credential)
+	if err != nil || decoded.Claims.Identity != nil ||
+		strings.Contains(strings.ToLower(decoded.Claims.Subject), "spiffe://") {
+		return true
+	}
+	for _, condition := range ap.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionIdentityUnverified &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.Reason == vibapv1alpha1.ReasonMissingSPIFFEID &&
+			condition.ObservedGeneration == ap.Generation {
+			return false
+		}
+	}
+	return true
 }
 
 func needsRenewal(ap *vibapv1alpha1.AgentPassport) bool {

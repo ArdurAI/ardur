@@ -36,7 +36,7 @@ import (
 type ComplianceLevel string
 
 const (
-	LevelCore     ComplianceLevel = "core"     // L1: self-attested identity + intent + trust
+	LevelCore     ComplianceLevel = "core"     // Core: intent + trust; Layer 1 is optional and caller-provided
 	LevelVerified ComplianceLevel = "verified" // L2: workload SPIFFE ID + Sigstore + Cedar verified; owner attribution is not
 	LevelEnforced ComplianceLevel = "enforced" // L3: Full stack with eBPF + network enforcement
 )
@@ -133,7 +133,8 @@ func computeActualCompliance(workloadIdentityFromSPIRE bool, provenanceVerified 
 // IssueRequest contains all inputs for credential issuance.
 // Not all fields are required — it depends on the compliance level.
 type IssueRequest struct {
-	// Layer 1: Identity (required for L2+; for L1, provide SPIFFEID/OwnerID directly)
+	// Layer 1: Identity (required for L2+; optional for Core only when
+	// AllowUnverifiedIdentity is explicitly enabled)
 	SPIFFEID   string // Direct SPIFFE ID (used if no IdentityProvider)
 	OwnerID    string // Direct self-asserted owner attribution (used if no IdentityProvider)
 	A2ACardRef string
