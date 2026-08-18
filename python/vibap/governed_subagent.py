@@ -61,7 +61,9 @@ _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
-_INFLIGHT_OPERATION_STATES = frozenset({"evaluating", "authorized", "executing"})
+_INFLIGHT_OPERATION_STATES = frozenset(
+    {"evaluating", "authorized", "executing", "settling"}
+)
 _TERMINAL_HANDLE_STATES = frozenset({"closed", "cancelled", "expired"})
 _HANDLE_STATES = frozenset(
     {"spawning", "active", "quarantined", "closing"} | _TERMINAL_HANDLE_STATES
@@ -1285,7 +1287,8 @@ class GovernedSubagentAdapter:
                 "authorized": {"evaluating"},
                 "denied": {"evaluating"},
                 "executing": {"authorized"},
-                "completed": {"executing"},
+                "settling": {"executing"},
+                "completed": {"executing", "settling"},
             }.get(status)
             if (
                 expected_previous is None
@@ -1578,6 +1581,235 @@ class GovernedSubagentAdapter:
             receipt_id=receipt_id,
             result_sha256=result_sha256,
         )
+
+    def authorize_external_tool(
+        self,
+        handle: GovernedSubagentHandle | str,
+        *,
+        operation_id: str,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> GovernedToolResult:
+        """Authorize a tool that an external framework will execute.
+
+        A permit is durably moved to ``executing`` before this method returns.
+        The caller must later invoke :meth:`settle_external_tool` or
+        :meth:`quarantine_external_tool`. If the process disappears, lease
+        recovery quarantines the child rather than making the permit
+        replayable.
+        """
+
+        child_jti, operation_key, fingerprint, normalized_arguments, replay = (
+            self._prepare_operation(
+                handle,
+                operation_id=operation_id,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+        )
+        if replay is not None:
+            return replay
+        decision, reason, receipt_id = self._evaluate_operation(
+            handle,
+            child_jti,
+            operation_key,
+            fingerprint,
+            tool_name,
+            normalized_arguments,
+        )
+        if decision != Decision.PERMIT:
+            return GovernedToolResult(
+                status="denied",
+                decision=decision,
+                reason=reason,
+                executed=False,
+                receipt_id=receipt_id,
+            )
+        self._operation_transition(
+            handle,
+            operation_key,
+            fingerprint,
+            status="executing",
+            lease_expires_at=time.time() + self._operation_lease_s,
+        )
+        return GovernedToolResult(
+            status="authorized",
+            decision=decision,
+            reason=reason,
+            executed=False,
+            receipt_id=receipt_id,
+        )
+
+    def _external_operation_for_settlement(
+        self,
+        handle: GovernedSubagentHandle | str,
+        operation_id: str,
+        *,
+        result_sha256: str,
+    ) -> tuple[str, str, str, str | None, GovernedToolResult | None]:
+        operation = _bounded_text(
+            "operation_id", operation_id, max_bytes=MAX_REQUEST_ID_BYTES
+        )
+        operation_key = hashlib.sha256(operation.encode("utf-8")).hexdigest()
+        with self._state_transaction() as state:
+            _handle_digest, record = self._resolve_record(state, handle)
+            stored = record["operations"].get(operation_key)
+            if not isinstance(stored, dict):
+                raise GovernedSubagentError(
+                    "OPERATION_UNKNOWN", "external operation is unknown"
+                )
+            status = str(stored.get("status", ""))
+            if status == "completed":
+                if not secrets.compare_digest(
+                    str(stored.get("result_sha256", "")), result_sha256
+                ):
+                    raise GovernedSubagentConflictError(
+                        "RESULT_CONFLICT",
+                        "operation was already settled with a different result",
+                    )
+                return (
+                    str(record["child_jti"]),
+                    operation_key,
+                    str(stored["fingerprint"]),
+                    stored.get("receipt_id"),
+                    GovernedToolResult(
+                        status="replay_suppressed",
+                        decision=Decision.PERMIT,
+                        reason="duplicate external settlement suppressed",
+                        executed=False,
+                        receipt_id=stored.get("receipt_id"),
+                        result_sha256=result_sha256,
+                    ),
+                )
+            if status != "executing":
+                raise GovernedSubagentError(
+                    "OPERATION_UNCERTAIN",
+                    "external operation is not awaiting settlement",
+                )
+            stored["status"] = "settling"
+            stored["owner_id"] = self._instance_id
+            stored["lease_expires_at"] = time.time() + self._operation_lease_s
+            return (
+                str(record["child_jti"]),
+                operation_key,
+                str(stored["fingerprint"]),
+                stored.get("receipt_id"),
+                None,
+            )
+
+    def settle_external_tool(
+        self,
+        handle: GovernedSubagentHandle | str,
+        *,
+        operation_id: str,
+        result: Any,
+        duration_ms: float = 0.0,
+    ) -> GovernedToolResult:
+        """Settle a previously authorized external tool outcome exactly once."""
+
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):
+            raise TypeError("duration_ms must be numeric")
+        duration = float(duration_ms)
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError("duration_ms must be finite and non-negative")
+        result_sha256 = self._result_digest(result)
+        child_jti, operation_key, fingerprint, receipt_id, replay = (
+            self._external_operation_for_settlement(
+                handle,
+                operation_id,
+                result_sha256=result_sha256,
+            )
+        )
+        if replay is not None:
+            return replay
+        try:
+            self.proxy.record_tool_result(
+                child_jti,
+                response=f"executor_result_sha256:{result_sha256}",
+                duration_ms=duration,
+            )
+        except BaseException:
+            self._quarantine_operation(
+                handle,
+                operation_key,
+                fingerprint,
+                terminal_code="RESULT_EVIDENCE_UNCERTAIN",
+            )
+            raise
+        self._operation_transition(
+            handle,
+            operation_key,
+            fingerprint,
+            status="completed",
+            result_sha256=result_sha256,
+            finished_at=time.time(),
+        )
+        return GovernedToolResult(
+            status="completed",
+            decision=Decision.PERMIT,
+            reason="external platform outcome settled",
+            executed=True,
+            receipt_id=receipt_id,
+            result_sha256=result_sha256,
+        )
+
+    def quarantine_external_tool(
+        self,
+        handle: GovernedSubagentHandle | str,
+        *,
+        operation_id: str,
+        terminal_code: str = "EXTERNAL_OUTCOME_UNCERTAIN",
+        duration_ms: float = 0.0,
+    ) -> None:
+        """Quarantine an authorized call whose external outcome is uncertain."""
+
+        operation = _bounded_text(
+            "operation_id", operation_id, max_bytes=MAX_REQUEST_ID_BYTES
+        )
+        code = _bounded_text("terminal_code", terminal_code, max_bytes=256)
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)):
+            raise TypeError("duration_ms must be numeric")
+        duration = float(duration_ms)
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError("duration_ms must be finite and non-negative")
+        operation_key = hashlib.sha256(operation.encode("utf-8")).hexdigest()
+        with self._state_transaction() as state:
+            _handle_digest, record = self._resolve_record(
+                state,
+                handle,
+                allow_quarantined=True,
+            )
+            stored = record["operations"].get(operation_key)
+            if not isinstance(stored, dict):
+                raise GovernedSubagentError(
+                    "OPERATION_UNKNOWN", "external operation is unknown"
+                )
+            if stored.get("status") == "uncertain":
+                return
+            if stored.get("status") in {"completed", "denied"}:
+                raise GovernedSubagentError(
+                    "OPERATION_TERMINAL",
+                    "completed or denied operation cannot be quarantined",
+                )
+            child_jti = str(record["child_jti"])
+            stored["status"] = "uncertain"
+            stored["terminal_code"] = code
+            stored["finished_at"] = time.time()
+            record["status"] = "quarantined"
+            record["terminal_code"] = code
+        self._record_executor_failure(child_jti, duration)
+
+    def child_policy(self, handle: GovernedSubagentHandle | str) -> dict[str, Any]:
+        """Return a copied child-policy projection with bearer values removed."""
+
+        snapshot = self.lifecycle_snapshot(handle)
+        child = self._fresh_session_snapshot(str(snapshot["child_jti"]))
+        redacted = _redact_authority(child["claims"])
+        if not isinstance(redacted, dict):  # pragma: no cover - defensive type guard
+            raise GovernedSubagentError(
+                "SESSION_INVALID", "child policy projection is malformed"
+            )
+        return redacted
 
     async def arun_tool(
         self,

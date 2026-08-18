@@ -3800,6 +3800,84 @@ class GovernanceProxy:
             self.sessions[session_id] = loaded
             return loaded
 
+    def synchronize_external_tool_usage_floor(
+        self,
+        session: GovernanceSession | str,
+        *,
+        tool_call_count: int,
+        tool_call_count_by_class: Mapping[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Advance a persisted session to a trusted external usage floor.
+
+        Integrations that already maintain a verified receipt chain can use
+        this method before delegation so the lineage ledger accounts for calls
+        made outside :meth:`evaluate_tool_call`. Floors are monotonic and may
+        never overlap capacity already reserved for descendants.
+        """
+
+        if isinstance(tool_call_count, bool) or not isinstance(tool_call_count, int):
+            raise TypeError("tool_call_count must be an integer")
+        if tool_call_count < 0:
+            raise ValueError("tool_call_count must be non-negative")
+        raw_by_class = tool_call_count_by_class or {}
+        if not isinstance(raw_by_class, Mapping):
+            raise TypeError("tool_call_count_by_class must be an object")
+        by_class: dict[str, int] = {}
+        for raw_name, raw_count in raw_by_class.items():
+            name = str(raw_name)
+            if not name:
+                raise ValueError("tool-call class names must be non-empty")
+            if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+                raise TypeError("tool-call class counts must be integers")
+            if raw_count < 0:
+                raise ValueError("tool-call class counts must be non-negative")
+            by_class[name] = raw_count
+        if sum(by_class.values()) > tool_call_count:
+            raise ValueError("per-class usage cannot exceed total tool-call usage")
+
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                if target.summary is not None or target.end_time is not None:
+                    raise PermissionError(
+                        "completed session cannot accept external usage"
+                    )
+                next_total = max(int(target.tool_call_count), tool_call_count)
+                next_by_class = dict(target.tool_call_count_by_class)
+                for name, count in by_class.items():
+                    next_by_class[name] = max(int(next_by_class.get(name, 0)), count)
+                if sum(next_by_class.values()) > next_total:
+                    raise ValueError(
+                        "merged per-class usage cannot exceed total tool-call usage"
+                    )
+                ceiling = int(target.passport_claims.get("max_tool_calls", 50))
+                reserved = int(target.delegated_budget_reserved)
+                if next_total + reserved > ceiling:
+                    raise PermissionError(
+                        "external usage overlaps delegated tool-call reservations"
+                    )
+                class_caps = dict(
+                    target.passport_claims.get("max_tool_calls_per_class", {}) or {}
+                )
+                for name, count in next_by_class.items():
+                    if name in class_caps and count > int(class_caps[name]):
+                        raise PermissionError(
+                            f"external usage exceeds tool-call class budget for {name}"
+                        )
+                changed = (
+                    next_total != target.tool_call_count
+                    or next_by_class != target.tool_call_count_by_class
+                )
+                target.tool_call_count = next_total
+                target.tool_call_count_by_class = next_by_class
+                if changed:
+                    self._persist_session(target)
+                return {
+                    "tool_call_count": target.tool_call_count,
+                    "tool_call_count_by_class": dict(target.tool_call_count_by_class),
+                    "delegated_budget_reserved": target.delegated_budget_reserved,
+                    "max_tool_calls": ceiling,
+                }
+
     @staticmethod
     def _risk_measurements(
         facts: Mapping[str, int | str] | None = None,

@@ -28,4 +28,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ADR-025-pre-action-spend-reservation.md`](/__ardur_internal__/source/docs/decisions/adr-025-pre-action-spend-reservation/)
 - [`ADR-026-typed-dangerous-action-risk-budgets.md`](/__ardur_internal__/source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/)
 - [`ADR-027-latency-benchmark-gate-evaluator.md`](/__ardur_internal__/source/docs/decisions/adr-027-latency-benchmark-gate-evaluator/)
+- [`ADR-028-claude-code-child-authority-binding.md`](/__ardur_internal__/source/docs/decisions/adr-028-claude-code-child-authority-binding/)
 - [`README.md`](/__ardur_internal__/source/docs/decisions/readme/)

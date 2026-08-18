@@ -41,6 +41,7 @@ PLUGIN_ASSETS = (
     PurePosixPath(".claude-plugin/plugin.json"),
     PurePosixPath("hooks/hooks.json"),
     PurePosixPath("hooks/post_tool_use"),
+    PurePosixPath("hooks/post_tool_use_failure"),
     PurePosixPath("hooks/pre_tool_use"),
     PurePosixPath("hooks/subagent_start"),
     PurePosixPath("hooks/subagent_stop"),

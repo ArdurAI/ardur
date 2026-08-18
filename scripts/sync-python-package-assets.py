@@ -18,6 +18,7 @@ PLUGIN_ASSETS = (
     Path(".claude-plugin/plugin.json"),
     Path("hooks/hooks.json"),
     Path("hooks/post_tool_use"),
+    Path("hooks/post_tool_use_failure"),
     Path("hooks/pre_tool_use"),
     Path("hooks/subagent_start"),
     Path("hooks/subagent_stop"),

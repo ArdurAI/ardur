@@ -1342,6 +1342,7 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
                           [--mission TEXT]
                           [--max-tool-calls N] [--max-duration-s N]
                           [--ttl-s N]
+                          [--child-policy-file FILE]
                           [--forbid-rules FILE]
                           [--cedar-policy FILE]
                           [--cedar-entities FILE]
@@ -1350,6 +1351,19 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown
 profile is a friendly layer over the same capability set.
+
+Child delegation is disabled by default. `--child-policy-file` accepts a
+private mode-0600 regular JSON registry keyed by exact Claude agent type. A
+valid registry enables one delegation level, adds `Agent` to the parent
+allowlist when necessary, and prints a launch command containing
+`ARDUR_CC_CHILD_POLICY_FILE`. Symlinks, insecure modes, malformed or empty
+registries, nested `Agent`/`Task` child authority, parent/child policy
+conflicts over `Agent`, wildcard child tools, and child budgets that leave no
+room for the parent dispatch fail closed before key or passport creation. Other
+tool, scope, and TTL widening attempts fail closed when the blockable `Agent`
+pre-hook derives the child grant, before child execution. Runtime binding
+and its correlation limits are specified in
+[ADR-028](../decisions/ADR-028-claude-code-child-authority-binding.md).
 
 If neither `--scope` nor a profile `Protect folder:` value is available, the
 command exits nonzero without configuring Claude Code. JSON output includes

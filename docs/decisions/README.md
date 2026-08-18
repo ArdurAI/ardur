@@ -22,6 +22,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 024 | [Self-asserted owner identity assurance](./ADR-024-self-asserted-owner-identity-assurance.md) | Accepted | 2026-07-12 |
 | 025 | [Pre-action spend reservation and conservative settlement](./ADR-025-pre-action-spend-reservation.md) | Accepted | 2026-07-14 |
 | 026 | [Typed dangerous-action risk budgets](./ADR-026-typed-dangerous-action-risk-budgets.md) | Accepted | 2026-07-14 |
+| 028 | [Claude Code child authority binding](./ADR-028-claude-code-child-authority-binding.md) | Accepted | 2026-07-15 |
 
 ## Conventions
 

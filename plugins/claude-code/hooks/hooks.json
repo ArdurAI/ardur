@@ -22,6 +22,17 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use_failure"
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "matcher": ".*",

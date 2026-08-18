@@ -2,7 +2,7 @@
 title: "Architecture Decision Records"
 description: "ADRs document load-bearing design decisions behind Ardur's runtime, protocol, and deployment shape. Each record captures the context, the decision, and the trade-offs known at the "
 source_path: "docs/decisions/README.md"
-source_sha256: "5f7bc2bece57700000548372aff3050a7e59e96883c666e3aa677b91e104d36f"
+source_sha256: "73f93596c69bc850cc9a758c854ab1236e685039a1b182e0f996ab32afcb8e35"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -39,6 +39,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 024 | [Self-asserted owner identity assurance](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/) | Accepted | 2026-07-12 |
 | 025 | [Pre-action spend reservation and conservative settlement](/__ardur_internal__/source/docs/decisions/adr-025-pre-action-spend-reservation/) | Accepted | 2026-07-14 |
 | 026 | [Typed dangerous-action risk budgets](/__ardur_internal__/source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/) | Accepted | 2026-07-14 |
+| 028 | [Claude Code child authority binding](/__ardur_internal__/source/docs/decisions/adr-028-claude-code-child-authority-binding/) | Accepted | 2026-07-15 |
 
 ## Conventions
 

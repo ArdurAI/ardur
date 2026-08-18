@@ -122,17 +122,6 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def _transcript_contains_tool_use_id(path: str, tool_use_id: str) -> bool:
-    if not path or not tool_use_id:
-        return False
-    transcript = Path(path).expanduser()
-    try:
-        with transcript.open("r", encoding="utf-8", errors="replace") as handle:
-            return any(tool_use_id in line for line in handle)
-    except OSError:
-        return False
-
-
 def _subagents_from_records(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     subagents: dict[str, dict[str, Any]] = {}
     for record in records:
@@ -147,7 +136,8 @@ def _subagents_from_records(records: list[dict[str, Any]]) -> dict[str, dict[str
                 "agent_type": str(record.get("agent_type", "") or ""),
                 "started_at": None,
                 "stopped_at": None,
-                "agent_transcript_path": "",
+                "binding_state": "observed_only",
+                "binding_states": {},
                 "tool_receipt_count": 0,
                 "tools": {},
                 "violations": 0,
@@ -158,8 +148,14 @@ def _subagents_from_records(records: list[dict[str, Any]]) -> dict[str, dict[str
             current["claude_agent_id"] = str(record["claude_agent_id"])
         if record.get("agent_type"):
             current["agent_type"] = str(record["agent_type"])
-        if record.get("agent_transcript_path"):
-            current["agent_transcript_path"] = str(record["agent_transcript_path"])
+        authority_binding = record.get("authority_binding")
+        if isinstance(authority_binding, Mapping):
+            binding_state = str(authority_binding.get("binding_state", "") or "")
+            if binding_state:
+                current["binding_state"] = binding_state
+                binding_states = dict(current.get("binding_states", {}) or {})
+                binding_states[binding_state] = binding_states.get(binding_state, 0) + 1
+                current["binding_states"] = dict(sorted(binding_states.items()))
         if record.get("started_at"):
             current["started_at"] = str(record["started_at"])
         if record.get("stopped_at"):
@@ -173,30 +169,25 @@ def _attribute_child_tool(
 ) -> tuple[str | None, str]:
     meta = _claude_code_meta(claim)
     child_id = str(meta.get("ardur_child_id", "") or "")
-    if child_id and child_id in subagents and meta.get("claude_agent_id"):
+    authority_binding = meta.get("authority_binding")
+    binding_state = (
+        str(authority_binding.get("binding_state", "") or "")
+        if isinstance(authority_binding, Mapping)
+        else ""
+    )
+    policy_fingerprint = (
+        str(authority_binding.get("policy_fingerprint", "") or "")
+        if isinstance(authority_binding, Mapping)
+        else ""
+    )
+    if (
+        child_id
+        and child_id in subagents
+        and meta.get("claude_agent_id")
+        and binding_state in {"bound", "quarantined"}
+        and policy_fingerprint
+    ):
         return child_id, "exact"
-
-    transcript_path = str(meta.get("transcript_path", "") or "")
-    transcript_matches = [
-        candidate
-        for candidate, subagent in subagents.items()
-        if transcript_path and transcript_path == subagent.get("agent_transcript_path")
-    ]
-    if len(transcript_matches) == 1:
-        return transcript_matches[0], "derived"
-    if len(transcript_matches) > 1:
-        return None, "ambiguous"
-
-    tool_use_id = str(meta.get("tool_use_id", "") or "")
-    transcript_tool_matches = [
-        candidate
-        for candidate, subagent in subagents.items()
-        if _transcript_contains_tool_use_id(str(subagent.get("agent_transcript_path", "") or ""), tool_use_id)
-    ]
-    if len(transcript_tool_matches) == 1:
-        return transcript_tool_matches[0], "derived"
-    if len(transcript_tool_matches) > 1:
-        return None, "ambiguous"
     return None, "trace_only"
 
 
@@ -207,8 +198,6 @@ def _merge_attribution_mode(modes: list[str]) -> str:
         return "ambiguous"
     if "trace_only" in modes:
         return "trace_only"
-    if "derived" in modes:
-        return "derived"
     return "exact"
 
 
@@ -216,7 +205,13 @@ def _action_summary(claim: Mapping[str, Any]) -> dict[str, Any]:
     verdict = str(claim.get("verdict", ""))
     public_reason = str(claim.get("public_denial_reason", "") or "")
     step_id = str(claim.get("step_id", ""))
-    phase = "pre" if step_id.endswith(":pre") else "post" if step_id.endswith(":post") else "other"
+    phase = (
+        "pre"
+        if step_id.endswith(":pre")
+        else "post"
+        if step_id.endswith(":post")
+        else "other"
+    )
     if phase == "post":
         explanation = "recorded a post-action result observation"
     elif verdict == "compliant":
@@ -228,7 +223,11 @@ def _action_summary(claim: Mapping[str, Any]) -> dict[str, Any]:
     else:
         explanation = "blocked because the receipt did not prove a compliant action"
     policies: list[dict[str, str]] = []
-    applied_rule = "session_action_budget" if public_reason == "budget_exhausted" else "configured_policy"
+    applied_rule = (
+        "session_action_budget"
+        if public_reason == "budget_exhausted"
+        else "configured_policy"
+    )
     for item in claim.get("policy_decisions", []):
         if not isinstance(item, Mapping):
             continue
@@ -280,7 +279,9 @@ def _chain_report(
         attribution_modes.append(mode)
         if child_id:
             subagent = subagents_by_child[child_id]
-            subagent["tool_receipt_count"] = int(subagent.get("tool_receipt_count", 0)) + 1
+            subagent["tool_receipt_count"] = (
+                int(subagent.get("tool_receipt_count", 0)) + 1
+            )
             tools = dict(subagent.get("tools", {}) or {})
             tool = str(claim.get("tool", ""))
             tools[tool] = tools.get(tool, 0) + 1
@@ -326,14 +327,12 @@ def _chain_report(
         if dispatch["reason"] == "post-call observation"
     ]
     first_dispatch_index = next(
-        (
-            idx
-            for idx, claim in enumerate(claims)
-            if _is_dispatch_claim(claim)
-        ),
+        (idx for idx, claim in enumerate(claims) if _is_dispatch_claim(claim)),
         None,
     )
-    after_dispatch = claims[first_dispatch_index + 1 :] if first_dispatch_index is not None else []
+    after_dispatch = (
+        claims[first_dispatch_index + 1 :] if first_dispatch_index is not None else []
+    )
     return {
         "trace_id": trace_id,
         "receipt_file": str(receipt_file),
@@ -342,8 +341,12 @@ def _chain_report(
         "last_timestamp": str(claims[-1].get("timestamp", "")) if claims else None,
         "tools": _counter_dict([str(claim.get("tool", "")) for claim in claims]),
         "verdicts": _counter_dict([str(claim.get("verdict", "")) for claim in claims]),
-        "action_classes": _counter_dict([str(claim.get("action_class", "")) for claim in claims]),
-        "side_effect_classes": _counter_dict([str(claim.get("side_effect_class", "")) for claim in claims]),
+        "action_classes": _counter_dict(
+            [str(claim.get("action_class", "")) for claim in claims]
+        ),
+        "side_effect_classes": _counter_dict(
+            [str(claim.get("side_effect_class", "")) for claim in claims]
+        ),
         "actions": [_action_summary(claim) for claim in claims],
         "dispatches": dispatches,
         "dispatch_launches": dispatch_launches,
@@ -352,11 +355,17 @@ def _chain_report(
         "dispatch_launch_count": len(dispatch_launches),
         "dispatch_observation_count": len(dispatch_observations),
         "receipt_count_after_first_dispatch": len(after_dispatch),
-        "tools_after_first_dispatch": _counter_dict([str(claim.get("tool", "")) for claim in after_dispatch]),
+        "tools_after_first_dispatch": _counter_dict(
+            [str(claim.get("tool", "")) for claim in after_dispatch]
+        ),
         "subagent_registry_file": str(receipt_file.parent / "subagents.jsonl"),
         "subagent_registry_records": len(subagent_records),
-        "subagents_started": sum(1 for record in subagent_records if record.get("event") == "start"),
-        "subagents_stopped": sum(1 for record in subagent_records if record.get("event") == "stop"),
+        "subagents_started": sum(
+            1 for record in subagent_records if record.get("event") == "start"
+        ),
+        "subagents_stopped": sum(
+            1 for record in subagent_records if record.get("event") == "stop"
+        ),
         "subagents": list(subagents_by_child.values()),
         "per_child_attribution": _merge_attribution_mode(attribution_modes),
         "unattributed_tool_receipts": unattributed_tool_receipts,
@@ -380,7 +389,9 @@ def build_claude_code_report(
     freshness window has passed.
     """
     resolved_home = (home or DEFAULT_HOME).expanduser().resolve()
-    resolved_chain_dir = (chain_dir or (resolved_home / "claude-code-hook")).expanduser().resolve()
+    resolved_chain_dir = (
+        (chain_dir or (resolved_home / "claude-code-hook")).expanduser().resolve()
+    )
     resolved_keys_dir = (keys_dir or (resolved_home / "keys")).expanduser().resolve()
     receipt_files = sorted(resolved_chain_dir.rglob("receipts.jsonl"))
     public_key = load_public_key(resolved_keys_dir)
@@ -396,17 +407,36 @@ def build_claude_code_report(
         claims = verify_chain(tokens, public_key, verify_expiry=verify_expiry)
         all_claims.extend(claims)
         trace_id = receipt_file.parent.name
-        chains.append(_chain_report(trace_id=trace_id, receipt_file=receipt_file, claims=claims))
+        chains.append(
+            _chain_report(trace_id=trace_id, receipt_file=receipt_file, claims=claims)
+        )
 
     dispatch_receipt_count = sum(len(chain["dispatches"]) for chain in chains)
     dispatch_launch_count = sum(chain["dispatch_launch_count"] for chain in chains)
-    dispatch_observation_count = sum(chain["dispatch_observation_count"] for chain in chains)
+    dispatch_observation_count = sum(
+        chain["dispatch_observation_count"] for chain in chains
+    )
     subagents_started = sum(int(chain["subagents_started"]) for chain in chains)
     subagents_stopped = sum(int(chain["subagents_stopped"]) for chain in chains)
-    unattributed_tool_receipt_count = sum(int(chain["unattributed_tool_receipt_count"]) for chain in chains)
-    ambiguous_tool_receipt_count = sum(int(chain["ambiguous_tool_receipt_count"]) for chain in chains)
+    child_binding_states = _counter_dict(
+        [
+            str(subagent.get("binding_state", "observed_only"))
+            for chain in chains
+            for subagent in chain["subagents"]
+        ]
+    )
+    unattributed_tool_receipt_count = sum(
+        int(chain["unattributed_tool_receipt_count"]) for chain in chains
+    )
+    ambiguous_tool_receipt_count = sum(
+        int(chain["ambiguous_tool_receipt_count"]) for chain in chains
+    )
     per_child_attribution = _merge_attribution_mode(
-        [str(chain["per_child_attribution"]) for chain in chains if chain["subagents"] or chain["unattributed_tool_receipts"]]
+        [
+            str(chain["per_child_attribution"])
+            for chain in chains
+            if chain["subagents"] or chain["unattributed_tool_receipts"]
+        ]
     )
     roots: dict[str, str | Path | None] = {
         "CLAUDE_CODE_HOME": resolved_home,
@@ -435,17 +465,28 @@ def build_claude_code_report(
         "receipt_count": len(all_claims),
         "next_steps": _empty_report_next_steps() if not all_claims else [],
         "totals": {
-            "tools": _counter_dict([str(claim.get("tool", "")) for claim in all_claims]),
-            "verdicts": _counter_dict([str(claim.get("verdict", "")) for claim in all_claims]),
-            "action_classes": _counter_dict([str(claim.get("action_class", "")) for claim in all_claims]),
-            "side_effect_classes": _counter_dict([str(claim.get("side_effect_class", "")) for claim in all_claims]),
+            "tools": _counter_dict(
+                [str(claim.get("tool", "")) for claim in all_claims]
+            ),
+            "verdicts": _counter_dict(
+                [str(claim.get("verdict", "")) for claim in all_claims]
+            ),
+            "action_classes": _counter_dict(
+                [str(claim.get("action_class", "")) for claim in all_claims]
+            ),
+            "side_effect_classes": _counter_dict(
+                [str(claim.get("side_effect_class", "")) for claim in all_claims]
+            ),
             "dispatch_count": dispatch_launch_count,
             "dispatch_launch_count": dispatch_launch_count,
             "dispatch_observation_count": dispatch_observation_count,
             "dispatch_receipt_count": dispatch_receipt_count,
-            "violation_count": sum(1 for claim in all_claims if claim.get("verdict") == "violation"),
+            "violation_count": sum(
+                1 for claim in all_claims if claim.get("verdict") == "violation"
+            ),
             "subagents_started": subagents_started,
             "subagents_stopped": subagents_stopped,
+            "child_binding_states": child_binding_states,
             "unattributed_tool_receipt_count": unattributed_tool_receipt_count,
             "ambiguous_tool_receipt_count": ambiguous_tool_receipt_count,
         },
@@ -454,6 +495,7 @@ def build_claude_code_report(
             "subagent_launch_count": dispatch_launch_count,
             "subagents_started": subagents_started,
             "subagents_stopped": subagents_stopped,
+            "child_binding_states": child_binding_states,
             "per_child_attribution": per_child_attribution,
             "unattributed_tool_receipt_count": unattributed_tool_receipt_count,
             "ambiguous_tool_receipt_count": ambiguous_tool_receipt_count,
@@ -461,9 +503,9 @@ def build_claude_code_report(
                 chain["receipt_count_after_first_dispatch"] > 0 for chain in chains
             ),
             "attribution": (
-                "exact when Claude Code hook payloads carry agent_id; derived when "
-                "transcript_path or transcript tool_use_id binds one child; trace_only "
-                "when Ardur can prove only parent-trace membership"
+                "exact only when a tool hook's agent_id resolves to the opaque child "
+                "authority binding; trace_only when Ardur can prove only parent-trace "
+                "membership. Transcript paths and transcript contents are never identity."
             ),
         },
         "chains": chains,
