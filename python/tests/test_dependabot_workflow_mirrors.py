@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import runpy
+import re
 from pathlib import Path
 
 import pytest
@@ -50,13 +51,32 @@ def _sync_condition_applies(
     return all(predicates[term] for term in terms)
 
 
-def _contains_secret_reference(value: object) -> bool:
+def _contains_secret_reference(value: object, *, key: str | None = None) -> bool:
     if isinstance(value, str):
-        return "${{ secrets." in value
+        if key == "secrets" and value == "inherit":
+            return True
+        return re.search(
+            r"\$\{\{[^}]*\bsecrets(?:\s*\.|\s*\[|\s*\)|\s*\}\})",
+            value,
+            flags=re.IGNORECASE,
+        ) is not None
     if isinstance(value, dict):
-        return any(_contains_secret_reference(item) for item in value.values())
+        if key == "secrets" and value:
+            return True
+        return any(
+            _contains_secret_reference(item, key=str(item_key))
+            for item_key, item in value.items()
+        )
     if isinstance(value, list):
         return any(_contains_secret_reference(item) for item in value)
+    return False
+
+
+def _permissions_grant_oidc(permissions: object) -> bool:
+    if isinstance(permissions, str):
+        return permissions == "write-all"
+    if isinstance(permissions, dict):
+        return permissions.get("id-token") == "write"
     return False
 
 
@@ -121,10 +141,21 @@ def test_mirror_sync_workflow_is_bot_only_and_least_privilege() -> None:
     assert dispatch["env"]["RUN_ID"] == "${{ github.run_id }}"
     assert 'git ls-remote origin "refs/heads/$HEAD_REF"' in dispatch["run"]
     assert 'if [ "$remote_sha" != "$expected_sha" ]; then' in dispatch["run"]
+    assert (
+        'CHECK_REF="dependabot-workflow-mirrors/pr-${PR_NUMBER}-run-${RUN_ID}-'
+        '${expected_sha}"' in dispatch["run"]
+    )
     assert 'git push origin "$expected_sha:refs/tags/$CHECK_REF"' in dispatch["run"]
     assert 'trap cleanup_check_ref EXIT' in dispatch["run"]
     assert 'gh workflow run "$workflow" --ref "$CHECK_REF"' in dispatch["run"]
     assert 'gh workflow run "$workflow" --ref "$HEAD_REF"' not in dispatch["run"]
+    assert "gh run list" in dispatch["run"]
+    assert '--workflow "$workflow"' in dispatch["run"]
+    assert '--branch "$CHECK_REF"' in dispatch["run"]
+    assert '--commit "$expected_sha"' in dispatch["run"]
+    assert 'if [ -z "$run_id" ]; then' in dispatch["run"]
+    assert 'trap - EXIT' in dispatch["run"]
+    assert 'git push origin ":refs/tags/$CHECK_REF"' in dispatch["run"]
 
 
 def test_sync_runs_for_dependabot_pr_when_human_updates_base() -> None:
@@ -142,7 +173,7 @@ def test_sync_runs_for_dependabot_pr_when_human_updates_base() -> None:
     )
 
 
-def test_bot_dispatch_mode_skips_secret_bearing_jobs() -> None:
+def test_every_dispatched_workflow_is_credential_safe() -> None:
     with WORKFLOW.open(encoding="utf-8") as handle:
         mirror_workflow = yaml.load(handle, Loader=yaml.BaseLoader)
     with TESTS_WORKFLOW.open(encoding="utf-8") as handle:
@@ -163,12 +194,37 @@ def test_bot_dispatch_mode_skips_secret_bearing_jobs() -> None:
         "-f recheck_mode=secretless" in dispatch_run
     )
 
-    secret_jobs = {
-        name
-        for name, job in tests_workflow["jobs"].items()
-        if _contains_secret_reference(job)
-    }
-    assert secret_jobs == {"e2e-showcase"}
+    secret_jobs: set[tuple[str, str]] = set()
+    credential_capable_jobs: set[tuple[str, str]] = set()
+    for workflow_name in REQUIRED_WORKFLOWS:
+        workflow_path = REPO_ROOT / ".github" / "workflows" / workflow_name
+        with workflow_path.open(encoding="utf-8") as handle:
+            dispatched_workflow = yaml.load(handle, Loader=yaml.BaseLoader)
+
+        assert not _contains_secret_reference(
+            dispatched_workflow.get("env", {})
+        ), workflow_name
+        workflow_permissions = dispatched_workflow.get("permissions", {})
+        assert isinstance(workflow_permissions, dict), workflow_name
+        assert not _permissions_grant_oidc(workflow_permissions), workflow_name
+        for job_name, job in dispatched_workflow["jobs"].items():
+            if _contains_secret_reference(job):
+                secret_jobs.add((workflow_name, job_name))
+            permissions = job.get("permissions", {})
+            assert isinstance(permissions, dict), (workflow_name, job_name)
+            if job.get("environment") or permissions.get("id-token") == "write":
+                credential_capable_jobs.add((workflow_name, job_name))
+
+    assert secret_jobs == {("tests.yml", "e2e-showcase")}
+    assert credential_capable_jobs == {("hugo-site.yml", "deploy")}
+    with (REPO_ROOT / ".github" / "workflows" / "hugo-site.yml").open(
+        encoding="utf-8"
+    ) as handle:
+        hugo_workflow = yaml.load(handle, Loader=yaml.BaseLoader)
+    assert hugo_workflow["jobs"]["deploy"]["if"] == (
+        "github.ref == 'refs/heads/main'"
+    )
+
     condition = tests_workflow["jobs"]["e2e-showcase"]["if"]
     assert not _e2e_showcase_applies(
         condition,
@@ -182,12 +238,46 @@ def test_bot_dispatch_mode_skips_secret_bearing_jobs() -> None:
         ref="refs/heads/main",
         recheck_mode="secretless",
     )
+    assert not _e2e_showcase_applies(
+        condition,
+        event_name="pull_request",
+        ref="refs/pull/406/merge",
+        recheck_mode="",
+    )
     assert _e2e_showcase_applies(
         condition,
         event_name="workflow_dispatch",
         ref="refs/heads/manual-validation",
         recheck_mode="full",
     )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "${{secrets.API_KEY}}",
+        "${{ secrets['API_KEY'] }}",
+        "${{ toJSON(secrets) }}",
+        "${{ SECRETS.API_KEY }}",
+        "${{ secrets }}",
+        {"secrets": "inherit"},
+        {"secrets": {"token": "${{ secrets.API_KEY }}"}},
+    ],
+)
+def test_secret_reference_scanner_covers_expression_and_inheritance_forms(
+    value: object,
+) -> None:
+    assert _contains_secret_reference(value)
+
+
+@pytest.mark.parametrize(
+    "permissions",
+    [{"id-token": "write"}, "write-all"],
+)
+def test_permissions_scanner_detects_workflow_level_oidc(
+    permissions: object,
+) -> None:
+    assert _permissions_grant_oidc(permissions)
 
 
 def test_every_dispatched_workflow_exposes_its_protected_aggregate() -> None:
@@ -210,6 +300,51 @@ def test_change_validator_allows_only_workflow_sources_and_their_mirrors() -> No
     mirror = Path("site/static/repo/.github/workflows/tests.yml")
     assert validator([("M", source)]) == [source]
     assert validator([("M", source), ("M", mirror)]) == [source]
+
+
+def test_content_validator_allows_only_pinned_action_updates() -> None:
+    validator = runpy.run_path(str(SYNC_SCRIPT))["validate_action_pin_updates"]
+    source = Path(".github/workflows/tests.yml")
+    base = b"""steps:
+  - uses: actions/setup-python@1111111111111111111111111111111111111111  # v6.3.0
+  - uses: github/codeql-action/init@2222222222222222222222222222222222222222  # v4.37.0
+"""
+    head = b"""steps:
+  - uses: actions/setup-python@3333333333333333333333333333333333333333  # v7.0.0
+  - uses: github/codeql-action/init@4444444444444444444444444444444444444444  # v4.37.7
+"""
+
+    validator(source, base, head)
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        b"""steps:
+  - uses: attacker/setup-python@3333333333333333333333333333333333333333  # v7.0.0
+""",
+        b"""steps:
+  - uses: actions/setup-python@v7
+""",
+        b"""steps:
+  - uses: actions/setup-python@3333333333333333333333333333333333333333  # v7.0.0
+  - run: echo injected
+""",
+        b"""steps:
+  - uses: actions/setup-python@3333333333333333333333333333333333333333  # v7.0.0
+if: always()
+""",
+    ],
+)
+def test_content_validator_rejects_non_pin_workflow_changes(head: bytes) -> None:
+    validator = runpy.run_path(str(SYNC_SCRIPT))["validate_action_pin_updates"]
+    source = Path(".github/workflows/tests.yml")
+    base = b"""steps:
+  - uses: actions/setup-python@1111111111111111111111111111111111111111  # v6.3.0
+"""
+
+    with pytest.raises(ValueError, match="action-pin-only validation"):
+        validator(source, base, head)
 
 
 @pytest.mark.parametrize(

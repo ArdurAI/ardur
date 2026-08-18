@@ -94,6 +94,28 @@ jobs:
               else
                 gh workflow run "$workflow" --ref "$CHECK_REF"
               fi
+              run_id=""
+              for _ in $(seq 1 30); do
+                run_id="$(
+                  gh run list \
+                    --workflow "$workflow" \
+                    --event workflow_dispatch \
+                    --branch "$CHECK_REF" \
+                    --commit "$expected_sha" \
+                    --limit 1 \
+                    --json databaseId \
+                    --jq '.[0].databaseId // empty'
+                )"
+                if [ -n "$run_id" ]; then
+                  break
+                fi
+                sleep 2
+              done
+              if [ -z "$run_id" ]; then
+                echo "::error::Protected workflow $workflow did not materialize before tag cleanup."
+                exit 1
+              fi
+              echo "Dispatched $workflow as run $run_id on $expected_sha."
             fi
           done <<< "$REQUIRED_WORKFLOWS"
           trap - EXIT
