@@ -276,6 +276,7 @@
     "docs/reference/proxy-oci-image.md": "source/docs/reference/proxy-oci-image/",
     "docs/reference/risk-budgets.md": "source/docs/reference/risk-budgets/",
     "docs/reference/spend-budgets.md": "source/docs/reference/spend-budgets/",
+    "docs/reference/spiffe-workload-identity.md": "source/docs/reference/spiffe-workload-identity/",
     "docs/release-evidence-v0.2.0.md": "source/docs/release-evidence-v0.2.0/",
     "docs/research/epic-b-performance-fp-budget.md": "source/docs/research/epic-b-performance-fp-budget/",
     "docs/research/epic-b-policy-selection.md": "source/docs/research/epic-b-policy-selection/",

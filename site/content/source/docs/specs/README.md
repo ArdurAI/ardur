@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "1fea299ec7bbbaab8f235015d0812a0139c62271b100ae0166b0ff0f5da32177"
+source_sha256: "e98cf9c89f60df18f964fe37e7a3c47c70e889b9d23612af3eaa1d705c55e4b8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -117,7 +117,7 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 - **AAT (Attenuating Authorization Tokens)** — individual Internet-Drafts with no formal IETF standing; MCEP preserves its draft-00 DG v0.1 wire contract and adds the explicitly discriminated draft-01 DG v0.2 profile. The 2026-07-11 review and field ledger are recorded in [issue #246](https://github.com/ArdurAI/ardur/issues/246); independent interoperability remains not demonstrated.
 - **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur implements its draft-10-pinned profile and publishes portable implementation self-test fixtures, while raw RFC 3161 proof integration and independent interoperability remain not demonstrated.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
-- **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.
+- **SPIFFE** — workload identity substrate. The implemented Python S0–S2 path can obtain its service SVID and can verify a peer JWT-SVID when configured, but Mission Passport issuance does not yet resolve identity from SPIRE. Credential `spiffe_id` values remain caller-provided and self-asserted.
 - **Biscuit** — first-party-attenuation credential format; the DG profile's narrowing semantics rely on Biscuit's append-only block model (see [ADR-017](/__ardur_internal__/source/docs/decisions/adr-017-biscuit-attenuation-narrowing-semantics/)).
 
 These are real artifacts, not codenames. Their names stay in the specs as technical lineage.

@@ -200,7 +200,7 @@ python/
 └── tests/                  # Curated runtime, adapter, security, and release tests
 ```
 
-A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+A couple of runtime dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format used for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). They are ordinary project dependencies, not dev-only extras, because shipped modules import them and the proxy/Hub can use them at runtime. The constraints are deliberate: both libraries have had breaking minor releases, so we hold them until we explicitly retest.
 
 ## Typed dangerous-action budgets
 
@@ -222,6 +222,20 @@ SVID is mandatory and per-call inputs cannot replace the issuer, JWKS, trust
 domain, or audience. Without server trust configuration, Biscuit sessions
 remain explicitly `svid_bound=false`. JWT-SVID is still a bearer credential
 with a bounded replay window.
+
+The shipped `ardur start` and `ardur hub` commands fetch and retain their own
+X.509-SVID before serving when `--spiffe-endpoint-socket` or
+`SPIFFE_ENDPOINT_SOCKET` is configured. The shipped Compose path uses
+`unix:///run/spire/sockets/agent.sock`; a configured but unreachable or
+unusable socket fails startup. The fetched private key remains in memory and is
+not written by this path. `ardur start` also exposes operator-owned bundle,
+Biscuit issuer-public-key, trust-domain, and audience settings for the inbound
+verification described above. See the
+[S0–S2 workload-identity reference](../docs/reference/spiffe-workload-identity.md).
+
+Neither startup acquisition nor peer verification resolves identity from
+SPIRE during credential issuance. Python credential `spiffe_id` values remain
+caller-provided and self-asserted at this stage.
 
 Library adapters for metered tools can also configure operator-owned quote
 snapshots and signed session/agent/lineage spend ceilings. The proxy reserves

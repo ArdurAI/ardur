@@ -209,14 +209,28 @@ payloads cannot supply or override the JWKS, trust domain, or audience, and a
 per-call issuer key cannot replace the configured issuer. Configured binding is
 fail-closed: omitting the SVID, presenting a matching SPIFFE ID under an
 untrusted key, using a different trust domain, or relying on a bundle key not
-marked `use=jwt-svid` rejects the session. `svid_bound=true` is recorded only
-after all of those checks pass.
+eligible for JWT-SVID verification rejects the session. Workload API JWT JWKS
+keys commonly omit the optional `use` member and are eligible; federation keys
+must use `use=jwt-svid`, while explicit `x509-svid` and other labels are
+excluded. `svid_bound=true` is recorded only after all checks pass.
 
 This closes presenter-owned-root forgery; it does not turn JWT-SVID into proof
 of a live channel or one-time possession. JWT-SVID is a bearer credential and
 can be replayed during its validity window if both the Biscuit and SVID are
 stolen. Deployments needing channel-bound workload identity should prefer the
 X.509-SVID mTLS pattern in ADR-022.
+
+Configured `ardur start` and `ardur hub` processes can now fetch and retain
+their own X.509-SVID before serving, and the shipped proxy can load the
+server-owned inputs above from flags or environment variables. These S0–S2
+paths do not resolve identity at issuance, bind the receipt signer to the
+fetched SVID, or upgrade caller-provided credential `spiffe_id` values beyond
+self-asserted attribution.
+
+The local Compose demo joins the proxy and Hub to the SPIRE agent PID namespace
+so the Unix workload attestor can inspect callers. This reduces process
+isolation among those local containers and is not a production deployment
+recommendation.
 
 ## BPF policy-map teardown is serialized, but mid-run failover is not automatic
 

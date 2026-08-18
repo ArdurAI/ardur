@@ -1087,7 +1087,11 @@ class PersonalHub:
     """Local in-process Hub used by the HTTP server and CLI helpers."""
 
     def __init__(
-        self, home: str | Path | None = None, *, hub_url: str | None = None
+        self,
+        home: str | Path | None = None,
+        *,
+        hub_url: str | None = None,
+        workload_identity: Any | None = None,
     ) -> None:
         self.paths = HubPaths.from_home(home)
         _ensure_personal_home_directory(self.paths)
@@ -1104,6 +1108,7 @@ class PersonalHub:
             keys_dir=self.paths.keys_dir,
             private_key=private_key,
             public_key=public_key,
+            workload_identity=workload_identity,
         )
         self.verifier_id = self.proxy.verifier_id
 
@@ -1858,6 +1863,7 @@ def serve_hub(
     host: str = DEFAULT_HUB_HOST,
     port: int = DEFAULT_HUB_PORT,
     home: str | Path | None = None,
+    workload_identity: Any | None = None,
     tls_cert: str | Path | None = None,
     tls_key: str | Path | None = None,
     no_tls: bool = False,
@@ -1906,7 +1912,11 @@ def serve_hub(
         print("[tls] WARNING: TLS disabled — plain HTTP only", file=sys.stderr)
 
     scheme = "https" if tls_active else "http"
-    server.hub = PersonalHub(paths.home, hub_url=f"{scheme}://{host}:{port}")  # type: ignore[attr-defined]
+    server.hub = PersonalHub(  # type: ignore[attr-defined]
+        paths.home,
+        hub_url=f"{scheme}://{host}:{port}",
+        workload_identity=workload_identity,
+    )
     print(f"Ardur Personal Hub listening on {scheme}://{host}:{port}", file=sys.stderr)
     server.serve_forever()
 

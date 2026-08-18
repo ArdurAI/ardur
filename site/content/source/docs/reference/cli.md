@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "a052b46ea53ef3758bf5dedff7a8ff59bb660b38d4a0594860f12afa29076b98"
+source_sha256: "b511c529870fa9f3aaa163429ed4e709916e2fa97c7c852b2a957256e13e3755"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -46,6 +46,11 @@ Passport from a JSON mission file and start a session immediately.
 ```text
 ardur start [--host HOST] [--port PORT] [--mission FILE]
             [--keys-dir DIR] [--state-dir DIR] [--log-path FILE]
+            [--spiffe-endpoint-socket SOCKET]
+            [--biscuit-peer-trust-bundle FILE]
+            [--biscuit-peer-trust-domain DOMAIN]
+            [--biscuit-issuer-public-key FILE]
+            [--biscuit-svid-audience AUDIENCE]
             [--api-token TOKEN] [--require-auth | --no-require-auth]
             [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
@@ -53,6 +58,27 @@ ardur start [--host HOST] [--port PORT] [--mission FILE]
 Defaults: bind `127.0.0.1:8080`. Auth required by default. When auth is
 required and `--api-token` is omitted, Ardur generates a random bearer token
 at startup.
+
+`--spiffe-endpoint-socket` (or `SPIFFE_ENDPOINT_SOCKET`) enables startup
+X.509-SVID acquisition. It is off when neither setting is present; the shipped
+Compose deployment configures `unix:///run/spire/sockets/agent.sock`. A
+configured socket that is missing, inaccessible, or cannot attest the workload
+fails closed with `spiffe_svid_fetch_failed` before the server starts. The
+fetched SVID bundle, including private-key bytes, is retained in memory and is
+not written to the configured state, key, or log paths.
+
+Inbound Biscuit peer JWT-SVID verification is also off by default. Enable it
+with a paired `--biscuit-peer-trust-bundle` and
+`--biscuit-issuer-public-key`; the equivalent environment variables are
+`ARDUR_BISCUIT_PEER_TRUST_BUNDLE` and
+`ARDUR_BISCUIT_ISSUER_PUBLIC_KEY`. A raw SPIRE JWKS additionally needs
+`--biscuit-peer-trust-domain` or `ARDUR_BISCUIT_PEER_TRUST_DOMAIN`; a wrapped
+Ardur bundle already carries its domain. The expected audience comes from
+`--biscuit-svid-audience` or `ARDUR_BISCUIT_SVID_AUDIENCE` and defaults to
+`ardur-proxy`. Partial, malformed, empty-audience, or X.509-only configuration
+fails startup with `biscuit_peer_verification_config_invalid`. See
+[SPIFFE Workload Identity (S0–S2)](/__ardur_internal__/source/docs/reference/spiffe-workload-identity/) for accepted
+bundle shapes and the assurance boundary.
 
 Empty or whitespace-only directory path arguments (`--keys-dir`, `--state-dir`,
 `--log-path`, `--tls-cert`, `--tls-key`) fail closed before port, host, TLS,
@@ -695,8 +721,15 @@ Start the local Ardur Personal Hub HTTP service.
 
 ```text
 ardur hub [--host HOST] [--port PORT] [--home DIR]
+          [--spiffe-endpoint-socket SOCKET]
           [--tls-cert FILE] [--tls-key FILE] [--no-tls]
 ```
+
+`--spiffe-endpoint-socket` and `SPIFFE_ENDPOINT_SOCKET` have the same optional,
+fail-closed startup semantics as `ardur start`. The fetched SVID is retained by
+the Hub's internal proxy in memory; the startup path does not write its private
+key to Personal Hub state. The shipped Compose deployment configures the
+default agent socket and a Hub-specific Unix selector.
 
 If `--home` points to an existing file instead of a directory, `ardur hub`
 fails closed before starting a server. The command exits `1` and writes

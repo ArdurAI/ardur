@@ -2,7 +2,7 @@
 title: "Status"
 description: "Today, an installed Ardur Claude Code hook records the tool-call events Claude"
 source_path: "STATUS.md"
-source_sha256: "6b4b11ec6c7583159a588735f9fb199af8de6f15f8943980e341a3753ec6afbc"
+source_sha256: "74fcff50603e5df2fb77ffd4412ed274c749a35e01de8daf75aad76612d201ea"
 weight: 100
 maturity: ["in-progress", "public-now"]
 claim_types: ["status"]
@@ -122,14 +122,27 @@ closes the handles. A readiness timeout commits seccomp under the same lock, so
 a late BPF load cannot replace the selected fallback. Mid-run guard loss still
 degrades honestly to `none`; automatic BPF-to-seccomp failover is not claimed.
 
-The Python Biscuit session path now accepts JWT-SVID holder binding only from
-server-owned Biscuit issuer-key, trust-bundle, and audience configuration. A
+The configured Python proxy and Hub now fetch and retain their own X.509-SVID
+before serving and fail closed if the configured Workload API cannot establish
+identity. The shipped Compose deployment uses
+`unix:///run/spire/sockets/agent.sock`, distinct proxy/Hub Unix selectors, and
+the process visibility required by SPIRE's Unix attestor. The fetched private
+key remains in memory and is not persisted by this startup path.
+
+The Python Biscuit session path accepts JWT-SVID holder binding only from
+server-owned Biscuit issuer-key, trust-bundle, and audience configuration, now
+available through shipped `ardur start` flags and environment variables. A
 configured binding is mandatory for every Biscuit presentation; per-call
 issuer keys and caller-supplied JWKS, trust-domain, and audience fields cannot
-select the verifier's authority. Only SPIFFE bundle keys marked
-`use=jwt-svid` can verify the peer, and `svid_bound=true` is recorded only after
-signature, audience, trust-domain, and holder-ID checks. JWT-SVID remains a
-replayable bearer credential, so this does not claim complete replay prevention.
+select the verifier's authority. Workload API keys with absent `use` and
+federation keys with `use=jwt-svid` can verify the peer; explicit X.509-only
+keys cannot. `svid_bound=true` is recorded only after signature, audience,
+trust-domain, and holder-ID checks. JWT-SVID remains a replayable bearer
+credential, so this does not claim complete replay prevention.
+
+S0–S2 do not resolve identity from SPIRE during credential issuance. A
+credential `spiffe_id` remains caller-provided and self-asserted, and receipt
+signing keys are not bound to the fetched workload SVID.
 
 The offline `ardur evidence correlate` command can now verify a receipt journal
 and compare it with operator-supplied normalized, Tetragon, or Falco JSONL. It

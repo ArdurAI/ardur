@@ -22,16 +22,24 @@ RUNTIME_LOCK = REPO_ROOT / "packaging" / "oci" / "runtime-requirements.lock"
 EXPECTED_IMAGE = "ghcr.io/ardurai/ardur-proxy"
 EXPECTED_RUNTIME_PACKAGES = {
     "attrs",
+    "biscuit-python",
     "cffi",
     "cryptography",
+    "grpcio",
     "jsonschema",
     "jsonschema-specifications",
+    "pem",
+    "protobuf",
     "psutil",
+    "pyasn1",
+    "pyasn1-modules",
     "pycparser",
     "pyjwt",
     "referencing",
     "rfc8785",
     "rpds-py",
+    "spiffe",
+    "typing-extensions",
 }
 
 

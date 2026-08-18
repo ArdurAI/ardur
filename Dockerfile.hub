@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.title="Ardur Personal Hub"
 LABEL org.opencontainers.image.description="Personal Hub for browser, desktop, and CLI adapters"
 LABEL org.opencontainers.image.version="0.1.0"
 
-RUN groupadd -r ardur --gid 65532 && useradd -r -g ardur --uid 65532 ardur
+RUN groupadd -r ardur --gid 65533 && useradd -r -g ardur --uid 65533 ardur
 
 COPY python/ /home/ardur/python/
 WORKDIR /home/ardur/python

@@ -22,6 +22,7 @@ _MOCK_IAT = 1_700_000_000
 _MOCK_EXP = 2_524_608_000
 _MOCK_CERT_NOT_BEFORE = datetime(2024, 1, 1, tzinfo=timezone.utc)
 _MOCK_CERT_NOT_AFTER = datetime(2034, 1, 1, tzinfo=timezone.utc)
+DEFAULT_SPIFFE_ENDPOINT_SOCKET = "unix:///run/spire/sockets/agent.sock"
 _P256_ORDER = int(
     "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551",
     16,
@@ -59,12 +60,12 @@ class TrustBundle:
 
 
 def fetch_svid(
-    socket_path: str = "unix:///tmp/spire-agent/public/api.sock",
+    socket_path: str = DEFAULT_SPIFFE_ENDPOINT_SOCKET,
 ) -> SvidBundle:
     """Fetch workload identity material from a real SPIFFE Workload API socket.
 
     This path is only smoke-tested when a live SPIRE agent socket is present.
-    The installed `spiffe==0.2.6` Workload API requires an audience when it
+    The supported `spiffe>=0.2,<0.4` Workload API requires an audience when it
     mints a JWT-SVID, but this contract does not accept one, so the function
     requests a self-audience JWT-SVID (`aud == <spiffe_id>`) on a best-effort
     basis and leaves `jwt_svid_token` unset if that fetch fails.
@@ -183,18 +184,62 @@ def verify_jwt_svid(
     )
 
 
-def load_trust_bundle(path: str) -> TrustBundle:
-    """Load a JSON-serialized trust bundle from disk."""
+def load_trust_bundle(
+    path: str,
+    *,
+    trust_domain: str | None = None,
+) -> TrustBundle:
+    """Load an Ardur-wrapped or native SPIRE JSON trust bundle from disk.
+
+    Native Workload API and federation bundles are raw JWKS documents and do
+    not carry their trust-domain name, so those inputs require the explicit
+    ``trust_domain`` argument. The legacy Ardur wrapper remains supported and
+    rejects a conflicting explicit trust domain.
+    """
 
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("SPIFFE trust bundle must be a JSON object")
+
+    wrapped = "trust_domain" in payload or "jwks" in payload
+    if wrapped:
+        if "trust_domain" not in payload or "jwks" not in payload:
+            raise ValueError(
+                "Wrapped SPIFFE trust bundle requires trust_domain and jwks"
+            )
+        embedded_domain = str(payload["trust_domain"]).strip()
+        if trust_domain is not None and trust_domain.strip() != embedded_domain:
+            raise ValueError("Configured trust domain conflicts with trust bundle")
+        selected_domain = embedded_domain
+        jwks = payload["jwks"]
+        federated = payload.get("federated_bundles", {})
+    else:
+        if trust_domain is None or not trust_domain.strip():
+            raise ValueError("Raw SPIRE trust bundle requires a trust domain")
+        selected_domain = trust_domain.strip()
+        jwks = payload
+        federated = {}
+
+    if not selected_domain:
+        raise ValueError("SPIFFE trust domain cannot be empty")
+    if not isinstance(jwks, dict):
+        raise ValueError("SPIFFE trust bundle JWKS must be an object")
+    if not isinstance(federated, dict):
+        raise ValueError("SPIFFE federated bundles must be an object")
     return TrustBundle(
-        trust_domain=str(payload["trust_domain"]),
-        jwks=dict(payload["jwks"]),
+        trust_domain=selected_domain,
+        jwks=dict(jwks),
         federated_bundles={
-            str(domain): dict(jwks)
-            for domain, jwks in dict(payload.get("federated_bundles", {})).items()
+            str(domain): dict(domain_jwks)
+            for domain, domain_jwks in federated.items()
         },
     )
+
+
+def load_biscuit_public_key(path: str) -> PublicKey:
+    """Load a PEM-encoded Biscuit issuer public key from disk."""
+
+    return PublicKey.from_pem(Path(path).read_text(encoding="ascii"))
 
 
 def save_trust_bundle(bundle: TrustBundle, path: str) -> None:

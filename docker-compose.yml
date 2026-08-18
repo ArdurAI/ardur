@@ -86,6 +86,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.proxy
+    pid: "service:spire-agent"
+    group_add:
+      - "1000"
     ports:
       - "${ARDUR_PROXY_PORT:-8443}:8443"
     environment:
@@ -94,7 +97,11 @@ services:
       - VIBAP_API_TOKEN=${ARDUR_API_TOKEN:-}
       - ARDUR_RATE_LIMIT_RPS=${ARDUR_RATE_LIMIT_RPS:-100}
       - ARDUR_RATE_LIMIT_BURST=${ARDUR_RATE_LIMIT_BURST:-200}
-      - SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/sockets/agent.sock
+      - SPIFFE_ENDPOINT_SOCKET=${SPIFFE_ENDPOINT_SOCKET:-unix:///run/spire/sockets/agent.sock}
+      - ARDUR_BISCUIT_PEER_TRUST_BUNDLE=${ARDUR_BISCUIT_PEER_TRUST_BUNDLE:-}
+      - ARDUR_BISCUIT_PEER_TRUST_DOMAIN=${ARDUR_BISCUIT_PEER_TRUST_DOMAIN:-}
+      - ARDUR_BISCUIT_ISSUER_PUBLIC_KEY=${ARDUR_BISCUIT_ISSUER_PUBLIC_KEY:-}
+      - ARDUR_BISCUIT_SVID_AUDIENCE=${ARDUR_BISCUIT_SVID_AUDIENCE:-ardur-proxy}
     volumes:
       - ardur-data:/home/ardur/.ardur
       - spire-shared:/run/spire/sockets:ro
@@ -117,6 +124,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.hub
+    pid: "service:spire-agent"
+    group_add:
+      - "1000"
     ports:
       - "${ARDUR_HUB_PORT:-8765}:8765"
     environment:
@@ -124,7 +134,7 @@ services:
       - ARDUR_RATE_LIMIT_RPS=${ARDUR_RATE_LIMIT_RPS:-100}
       - ARDUR_RATE_LIMIT_BURST=${ARDUR_RATE_LIMIT_BURST:-200}
       - ARDUR_PERSONAL_HUB_URL=${ARDUR_PERSONAL_HUB_URL:-https://proxy:8443}
-      - SPIFFE_ENDPOINT_SOCKET=unix:///run/spire/sockets/agent.sock
+      - SPIFFE_ENDPOINT_SOCKET=${SPIFFE_ENDPOINT_SOCKET:-unix:///run/spire/sockets/agent.sock}
     volumes:
       - ardur-data:/home/ardur/.ardur
       - spire-shared:/run/spire/sockets:ro

@@ -16,6 +16,9 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
 - [Proxy OCI Image Contract](proxy-oci-image.md) — canonical image name,
   immutable release gates, runtime hardening, state, TLS, auth, scan, and cost
   boundaries without claiming current registry availability
+- [SPIFFE Workload Identity (S0–S2)](spiffe-workload-identity.md) — runtime
+  dependencies, configured startup SVID acquisition, inbound peer verification,
+  native SPIRE bundle shapes, and the remaining self-asserted issuance boundary
 - [Kernel Capture Daemon Operations](kernel-capture-daemon.md) —
   control-plane-only mode, capture-loss semantics, and malformed-record
   response
@@ -44,5 +47,6 @@ These pages mirror the public source. When the underlying surface changes
 `go/pkg/kernelcapture/testdata/agent_recognition_thresholds.json`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
 `python/vibap/risk_budget.py`, `python/vibap/spend_budget.py`,
+`python/vibap/spiffe_identity.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.
