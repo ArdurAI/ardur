@@ -20,7 +20,7 @@ concurrency:
 jobs:
   sync:
     if: >-
-      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'dependabot/github_actions/')
     runs-on: ubuntu-latest
@@ -64,6 +64,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
           REQUIRED_WORKFLOWS: |
             codeql.yml
             hugo-site.yml
@@ -74,6 +76,12 @@ jobs:
         run: |
           set -euo pipefail
           expected_sha="$(git rev-parse HEAD)"
+          CHECK_REF="dependabot-workflow-mirrors/pr-${PR_NUMBER}-run-${RUN_ID}-${expected_sha}"
+          cleanup_check_ref() {
+            git push origin ":refs/tags/$CHECK_REF" >/dev/null 2>&1 || true
+          }
+          trap cleanup_check_ref EXIT
+          git push origin "$expected_sha:refs/tags/$CHECK_REF"
           while IFS= read -r workflow; do
             if [ -n "$workflow" ]; then
               remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | cut -f1)"
@@ -81,6 +89,34 @@ jobs:
                 echo "::error::Dependabot branch moved before protected checks were dispatched."
                 exit 1
               fi
-              gh workflow run "$workflow" --ref "$HEAD_REF"
+              if [ "$workflow" = "tests.yml" ]; then
+                gh workflow run "$workflow" --ref "$CHECK_REF" -f recheck_mode=secretless
+              else
+                gh workflow run "$workflow" --ref "$CHECK_REF"
+              fi
+              run_id=""
+              for _ in $(seq 1 30); do
+                run_id="$(
+                  gh run list \
+                    --workflow "$workflow" \
+                    --event workflow_dispatch \
+                    --branch "$CHECK_REF" \
+                    --commit "$expected_sha" \
+                    --limit 1 \
+                    --json databaseId \
+                    --jq '.[0].databaseId // empty'
+                )"
+                if [ -n "$run_id" ]; then
+                  break
+                fi
+                sleep 2
+              done
+              if [ -z "$run_id" ]; then
+                echo "::error::Protected workflow $workflow did not materialize before tag cleanup."
+                exit 1
+              fi
+              echo "Dispatched $workflow as run $run_id on $expected_sha."
             fi
           done <<< "$REQUIRED_WORKFLOWS"
+          trap - EXIT
+          git push origin ":refs/tags/$CHECK_REF"
