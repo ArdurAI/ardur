@@ -47,6 +47,16 @@ from .risk_budget import (
     attenuate_risk_budget,
     normalize_risk_budget,
 )
+from .spend_budget import (
+    FileSpendBudgetLedger,
+    SpendBudgetConflictError,
+    SpendBudgetError,
+    SpendCloseResult,
+    SpendQuote,
+    SpendReservationRequest,
+    SpendReservationResult,
+    StaticSpendQuoteStore,
+)
 
 __all__ = [
     "ALGORITHM",
@@ -63,6 +73,7 @@ __all__ = [
     "DRPVerifiedRevocationEvidence",
     "ExecutionReceipt",
     "FileRiskBudgetLedger",
+    "FileSpendBudgetLedger",
     "GovernanceProxy",
     "GovernanceSession",
     "GovernedSubagentAdapter",
@@ -78,6 +89,13 @@ __all__ = [
     "MissionDeclaration",
     "PolicyEvent",
     "RiskBudgetError",
+    "SpendBudgetConflictError",
+    "SpendBudgetError",
+    "SpendCloseResult",
+    "SpendQuote",
+    "SpendReservationRequest",
+    "SpendReservationResult",
+    "StaticSpendQuoteStore",
     "ToolRiskContract",
     "ToolRiskRegistry",
     "attenuate_risk_budget",
