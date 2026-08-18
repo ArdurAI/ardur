@@ -22,6 +22,9 @@ walkthroughs see [`../guides/`](../guides/); for protocol semantics see
 - [Advisory AI Controls](advisory-ai-controls.md) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Pre-action Spend Budgets](spend-budgets.md) — signed token/currency policy,
+  operator quote snapshots, atomic reserve/settle/quarantine semantics,
+  evidence, metrics, and deployment limits
 - [Typed Dangerous-Action Risk Budgets](risk-budgets.md) — authenticated tool
   contracts, signed impact caps, atomic session/agent/lineage accounting,
   executor outcomes, receipts, and crash recovery
@@ -40,6 +43,6 @@ These pages mirror the public source. When the underlying surface changes
 `go/pkg/kernelcapture/testdata/agent_recognition_corpus.json`,
 `go/pkg/kernelcapture/testdata/agent_recognition_thresholds.json`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
-`python/vibap/risk_budget.py`,
+`python/vibap/risk_budget.py`, `python/vibap/spend_budget.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.

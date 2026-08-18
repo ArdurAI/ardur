@@ -20,9 +20,14 @@ class _Counter:
         self._lock = threading.Lock()
 
     def inc(self, **label_values: str) -> None:
+        self.add(1, **label_values)
+
+    def add(self, amount: int, **label_values: str) -> None:
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            raise ValueError("counter amount must be a non-negative integer")
         key = tuple(label_values.get(label, "") for label in self.labels)
         with self._lock:
-            self._data[key] += 1
+            self._data[key] += amount
 
     def render(self) -> str:
         lines = [f"# HELP {self.name} {self.help}", f"# TYPE {self.name} counter"]
@@ -122,6 +127,16 @@ class ArdurMetrics:
             "Typed risk-budget operations by bounded outcome",
             ("operation", "outcome", "fact", "reason"),
         )
+        self.spend_events_total = _Counter(
+            "ardur_spend_events_total",
+            "Spend budget lifecycle events",
+            ("operation", "outcome"),
+        )
+        self.spend_amount_total = _Counter(
+            "ardur_spend_amount_total",
+            "Spend budget amounts by lifecycle operation and unit",
+            ("operation", "unit"),
+        )
         self.active_sessions = _Gauge(
             "ardur_active_sessions", "Currently active governed sessions"
         )
@@ -142,6 +157,8 @@ class ArdurMetrics:
             self.evaluations_total.render(),
             self.errors_total.render(),
             self.risk_budget_operations_total.render(),
+            self.spend_events_total.render(),
+            self.spend_amount_total.render(),
             self.active_sessions.render(),
             self.kill_switch_active.render(),
             self.request_duration_seconds.render(),

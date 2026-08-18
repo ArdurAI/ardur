@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
+    inputs:
+      recheck_mode:
+        description: "Choose whether credentialed informational jobs may run"
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - secretless
 
 permissions:
   contents: read
@@ -361,7 +370,14 @@ jobs:
     # informational red on a credentialled run does not block the release
     # train, but the signal is now trustworthy rather than a false green.
     continue-on-error: true
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    # Dependabot mirror repairs dispatch protected checks in ``secretless``
+    # mode. Keep manual dispatches credentialed by default while ensuring bot
+    # branch code cannot receive repository secrets through that recheck path.
+    if: >-
+      (github.event_name != 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' &&
+      inputs.recheck_mode == 'full')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 

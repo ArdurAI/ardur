@@ -2,7 +2,7 @@
 title: "Technical Reference"
 description: "Flat technical reference pages for the public Ardur surface. These describe"
 source_path: "docs/reference/README.md"
-source_sha256: "890c549127f99894fb685df657a03a2fb0eb5dd297ebd2c8ba549178ceb7ca28"
+source_sha256: "5650c96e382f4d20564a88742fad9a95d4c454532ffdecc33dbb6198757da593"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -39,6 +39,9 @@ walkthroughs see [`../guides/`](/__ardur_internal__/source/docs/guides/); for pr
 - [Advisory AI Controls](/__ardur_internal__/source/docs/reference/advisory-ai-controls/) — semantic-judge and
   behavioral-fingerprint defaults, non-authoritative status, failure policy,
   cost, and integration requirements
+- [Pre-action Spend Budgets](/__ardur_internal__/source/docs/reference/spend-budgets/) — signed token/currency policy,
+  operator quote snapshots, atomic reserve/settle/quarantine semantics,
+  evidence, metrics, and deployment limits
 - [Typed Dangerous-Action Risk Budgets](/__ardur_internal__/source/docs/reference/risk-budgets/) — authenticated tool
   contracts, signed impact caps, atomic session/agent/lineage accounting,
   executor outcomes, receipts, and crash recovery
@@ -57,6 +60,6 @@ These pages mirror the public source. When the underlying surface changes
 `go/pkg/kernelcapture/testdata/agent_recognition_corpus.json`,
 `go/pkg/kernelcapture/testdata/agent_recognition_thresholds.json`,
 `python/vibap/semantic_judge.py`, `python/vibap/behavioral_fingerprint.py`,
-`python/vibap/risk_budget.py`,
+`python/vibap/risk_budget.py`, `python/vibap/spend_budget.py`,
 `Dockerfile.proxy`, or its release workflow), update the matching page in the
 same change. They are deliberately mechanical so the diff is easy to review.
