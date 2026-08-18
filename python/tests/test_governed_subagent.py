@@ -202,6 +202,148 @@ def test_child_parent_only_tool_is_signed_deny_before_executor(tmp_path, keypair
     assert receipts[-1]["receipt_id"] == result.receipt_id
 
 
+def test_external_tool_authorization_and_settlement_are_two_phase(tmp_path, keypair):
+    proxy, _parent, adapter = _parent_runtime(tmp_path, keypair)
+    handle = adapter.spawn(_request())
+
+    authorized = adapter.authorize_external_tool(
+        handle,
+        operation_id="claude-tool-use-1",
+        tool_name="read_file",
+        arguments={"path": "/workspace/report.md"},
+    )
+
+    assert authorized.status == "authorized"
+    assert authorized.decision == Decision.PERMIT
+    assert authorized.executed is False
+    assert adapter.lifecycle_snapshot(handle)["operation_count"] == 1
+
+    settled = adapter.settle_external_tool(
+        handle,
+        operation_id="claude-tool-use-1",
+        result={"content": "bounded result"},
+        duration_ms=12.5,
+    )
+
+    assert settled.status == "completed"
+    assert settled.decision == Decision.PERMIT
+    assert settled.executed is True
+    assert settled.result_sha256 is not None
+    assert (
+        proxy.get_session(
+            adapter.lifecycle_snapshot(handle)["child_jti"]
+        ).tool_call_count
+        == 1
+    )
+
+
+def test_external_parent_usage_floor_is_monotonic_and_class_consistent(
+    tmp_path, keypair
+):
+    proxy, parent, _adapter = _parent_runtime(tmp_path, keypair)
+
+    advanced = proxy.synchronize_external_tool_usage_floor(
+        parent,
+        tool_call_count=4,
+        tool_call_count_by_class={"read": 3},
+    )
+    unchanged = proxy.synchronize_external_tool_usage_floor(
+        parent,
+        tool_call_count=2,
+        tool_call_count_by_class={"read": 1},
+    )
+
+    assert advanced["tool_call_count"] == 4
+    assert unchanged["tool_call_count"] == 4
+    assert unchanged["tool_call_count_by_class"] == {"read": 3}
+    with pytest.raises(ValueError, match="merged per-class usage"):
+        proxy.synchronize_external_tool_usage_floor(
+            parent,
+            tool_call_count=4,
+            tool_call_count_by_class={"write": 2},
+        )
+    assert proxy.get_session(parent.jti).tool_call_count_by_class == {"read": 3}
+
+
+def test_external_parent_usage_floor_cannot_overlap_child_reservation(
+    tmp_path, keypair
+):
+    proxy, parent, adapter = _parent_runtime(
+        tmp_path,
+        keypair,
+        max_tool_calls=12,
+    )
+    proxy.synchronize_external_tool_usage_floor(parent, tool_call_count=4)
+    adapter.spawn(_request(max_tool_calls=3))
+
+    with pytest.raises(PermissionError, match="overlaps delegated"):
+        proxy.synchronize_external_tool_usage_floor(parent, tool_call_count=10)
+
+    persisted = proxy.get_session(parent.jti)
+    assert persisted.tool_call_count == 4
+    assert persisted.delegated_budget_reserved == 3
+
+
+def test_external_tool_parent_only_capability_is_denied_before_platform_execution(
+    tmp_path, keypair
+):
+    _proxy, _parent, adapter = _parent_runtime(tmp_path, keypair)
+    handle = adapter.spawn(_request())
+
+    denied = adapter.authorize_external_tool(
+        handle,
+        operation_id="claude-tool-use-parent-only",
+        tool_name="write_file",
+        arguments={"path": "/workspace/report.md", "content": "x"},
+    )
+
+    assert denied.status == "denied"
+    assert denied.decision == Decision.DENY
+    assert denied.executed is False
+
+
+def test_external_tool_missing_outcome_quarantines_and_never_replays(tmp_path, keypair):
+    _proxy, _parent, adapter = _parent_runtime(tmp_path, keypair)
+    handle = adapter.spawn(_request())
+    first = adapter.authorize_external_tool(
+        handle,
+        operation_id="claude-tool-use-crash",
+        tool_name="read_file",
+        arguments={"path": "/workspace/report.md"},
+    )
+    assert first.status == "authorized"
+
+    adapter.quarantine_external_tool(
+        handle,
+        operation_id="claude-tool-use-crash",
+        terminal_code="PLATFORM_OUTCOME_MISSING",
+    )
+
+    assert adapter.lifecycle_snapshot(handle)["status"] == "quarantined"
+    with pytest.raises(GovernedSubagentError) as captured:
+        adapter.authorize_external_tool(
+            handle,
+            operation_id="claude-tool-use-crash",
+            tool_name="read_file",
+            arguments={"path": "/workspace/report.md"},
+        )
+    assert _error_code(captured) == "HANDLE_QUARANTINED"
+
+
+def test_child_policy_projection_contains_no_bearer_authority(tmp_path, keypair):
+    _proxy, _parent, adapter = _parent_runtime(tmp_path, keypair)
+    handle = adapter.spawn(_request())
+
+    claims = adapter.child_policy(handle)
+    encoded = json.dumps(claims, sort_keys=True)
+
+    assert claims["sub"] == "reader-child"
+    assert claims["allowed_tools"] == ["read_file"]
+    assert "passport_token" not in encoded
+    assert "child_token" not in encoded
+    assert not re.search(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", encoded)
+
+
 def test_child_out_of_scope_resource_is_denied_before_executor(tmp_path, keypair):
     _proxy, _parent, adapter = _parent_runtime(tmp_path, keypair)
     handle = adapter.spawn(_request())

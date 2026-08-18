@@ -491,6 +491,35 @@ def _issue_wildcard_test_passport(
     return jwt.encode(payload, private_key, algorithm="ES256")
 
 
+def _write_child_policy_registry(
+    path: Path,
+    *,
+    agent_type: str,
+    allowed_tools: list[str],
+    resource_scope: list[str],
+    max_tool_calls: int = 2,
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ardur.claude_code.child_policies.v1",
+                "agent_types": {
+                    agent_type: {
+                        "child_agent_id": f"claude-code:{agent_type}",
+                        "mission": f"perform bounded {agent_type} work",
+                        "allowed_tools": allowed_tools,
+                        "resource_scope": resource_scope,
+                        "max_tool_calls": max_tool_calls,
+                        "ttl_s": 120,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+
+
 def _exercise_receipt_lock_and_subagent_sinks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -741,7 +770,6 @@ def test_child_receipt_summary_streams_chain_file(tmp_path, monkeypatch):
     summary = _summarize_child_receipts_unverified(
         state=state,
         agent_id="agent-child-1",
-        agent_transcript_path="/tmp/child-transcript.jsonl",
     )
 
     assert summary == {"receipt_count": 1, "tools": {"Read": 1}, "violations": 0}
@@ -895,9 +923,7 @@ def test_allow_path_returns_continue_true_and_chains_receipt(tmp_path, monkeypat
     ]
 
 
-def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(
-    tmp_path, monkeypatch
-):
+def test_wildcard_parent_still_denies_agent_without_child_policy(tmp_path, monkeypatch):
     private_key, _public_key = generate_keypair(keys_dir=tmp_path)
     mission = MissionPassport(
         agent_id="alice",
@@ -921,6 +947,7 @@ def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(
             "session_id": "sess-1",
             "hook_event_name": "PreToolUse",
             "tool_name": "Agent",
+            "tool_use_id": "agent-without-child-policy",
             "tool_input": {
                 "agent_type": "general-purpose",
                 "description": "Read README title",
@@ -930,7 +957,7 @@ def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(
         keys_dir=tmp_path,
     )
 
-    assert output["continue"] is True
+    assert "child policy" in _deny_reason(output).lower()
     report = build_claude_code_report(
         home=tmp_path,
         chain_dir=tmp_path / "chain",
@@ -938,7 +965,7 @@ def test_wildcard_allowed_tools_permits_agent_dispatch_and_reports_it(
         verify_expiry=False,
     )
     assert report["totals"]["dispatch_count"] == 1
-    assert report["next_steps"] == []
+    assert report["totals"]["verdicts"] == {"violation": 1}
     assert report["totals"]["dispatch_launch_count"] == 1
     assert report["totals"]["dispatch_observation_count"] == 0
     assert report["totals"]["dispatch_receipt_count"] == 1
@@ -1008,23 +1035,34 @@ def test_empty_claude_code_report_human_output_prints_next_steps(tmp_path, capsy
     assert str(tmp_path) not in next_steps_output
 
 
-def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
+def test_subagent_lifecycle_receipts_and_report_exact_bound_attribution(
     tmp_path, monkeypatch
 ):
     private_key, _public_key = generate_keypair(keys_dir=tmp_path)
     mission = MissionPassport(
         agent_id="alice",
         mission="observe child lifecycle",
-        allowed_tools=["*"],
+        allowed_tools=["Agent", "Read"],
         forbidden_tools=[],
         resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
+        delegation_allowed=True,
+        max_delegation_depth=1,
     )
     token = issue_passport(mission, private_key, ttl_s=3600)
     monkeypatch.setenv("ARDUR_MISSION_PASSPORT", token)
     monkeypatch.setenv("VIBAP_HOME", str(tmp_path))
     monkeypatch.setenv("ARDUR_CC_HOOK_DIR", str(tmp_path / "chain"))
+
+    policy_file = tmp_path / "child-policies.json"
+    _write_child_policy_registry(
+        policy_file,
+        agent_type="Explore",
+        allowed_tools=["Read"],
+        resource_scope=["**"],
+    )
+    monkeypatch.setenv("ARDUR_CC_CHILD_POLICY_FILE", str(policy_file))
 
     child_transcript = tmp_path / "subagents" / "agent-child-1.jsonl"
     child_transcript.parent.mkdir()
@@ -1040,6 +1078,22 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
     )
     from vibap.claude_code_report import build_claude_code_report
 
+    dispatch_output = handle_pre_tool_use(
+        {
+            "session_id": "sess-1",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Agent",
+            "tool_use_id": "toolu_agent_1",
+            "tool_input": {
+                "subagent_type": "Explore",
+                "description": "bounded read",
+                "prompt": "read the requested file",
+            },
+        },
+        keys_dir=tmp_path,
+    )
+    assert dispatch_output["continue"] is True
+
     start_output = handle_subagent_start(
         {
             "session_id": "sess-1",
@@ -1052,7 +1106,7 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
         keys_dir=tmp_path,
     )
     assert start_output["hookSpecificOutput"]["hookEventName"] == "SubagentStart"
-    assert "child:" in start_output["hookSpecificOutput"]["additionalContext"]
+    assert "ardur_child_" in start_output["hookSpecificOutput"]["additionalContext"]
 
     handle_pre_tool_use(
         {
@@ -1060,6 +1114,7 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
             "transcript_path": str(child_transcript),
             "cwd": str(tmp_path),
             "hook_event_name": "PreToolUse",
+            "agent_id": "agent-child-1",
             "tool_name": "Read",
             "tool_use_id": "toolu_read_1",
             "tool_input": {"file_path": str(tmp_path / "README.md")},
@@ -1072,6 +1127,7 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
             "transcript_path": str(child_transcript),
             "cwd": str(tmp_path),
             "hook_event_name": "PostToolUse",
+            "agent_id": "agent-child-1",
             "tool_name": "Read",
             "tool_use_id": "toolu_read_1",
             "tool_input": {"file_path": str(tmp_path / "README.md")},
@@ -1101,23 +1157,27 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
         for line in receipts[0].read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert len(lines) == 4
+    assert len(lines) == 5
     import jwt as pyjwt
 
     claims = [pyjwt.decode(line, options={"verify_signature": False}) for line in lines]
     assert [claim["tool"] for claim in claims] == [
+        "Agent",
         "SubagentStart",
         "Read",
         "Read",
         "SubagentStop",
     ]
-    start_meta = claims[0]["measurements"]["claude_code"]
+    start_meta = claims[1]["measurements"]["claude_code"]
     assert start_meta["claude_agent_id"] == "agent-child-1"
     assert start_meta["actor_kind"] == "subagent"
     assert start_meta["attribution"]["mode"] == "exact"
-    read_meta = claims[1]["measurements"]["claude_code"]
+    assert start_meta["authority_binding"]["binding_state"] == "bound"
+    read_meta = claims[2]["measurements"]["claude_code"]
     assert read_meta["tool_use_id"] == "toolu_read_1"
-    assert read_meta["actor_kind"] == "unattributed"
+    assert read_meta["actor_kind"] == "subagent"
+    assert read_meta["attribution"]["mode"] == "exact"
+    assert read_meta["authority_binding"]["binding_state"] == "bound"
     stop_meta = claims[-1]["measurements"]["claude_code"]
     assert stop_meta["final_response_hash"]["alg"] == "sha-256"
     assert stop_meta["child_receipt_summary"]["receipt_count"] == 2
@@ -1135,13 +1195,17 @@ def test_subagent_lifecycle_receipts_and_report_derived_tool_attribution(
     assert report["chain_verification"]["ok"] is True
     assert report["totals"]["subagents_started"] == 1
     assert report["totals"]["subagents_stopped"] == 1
-    assert report["coverage"]["per_child_attribution"] == "derived"
+    assert report["coverage"]["per_child_attribution"] == "exact"
     assert report["totals"]["unattributed_tool_receipt_count"] == 0
     subagent = report["chains"][0]["subagents"][0]
     assert subagent["claude_agent_id"] == "agent-child-1"
     assert subagent["tool_receipt_count"] == 2
     assert subagent["tools"] == {"Read": 2}
-    assert subagent["attribution_modes"] == {"derived": 2}
+    assert subagent["attribution_modes"] == {"exact": 2}
+    assert subagent["binding_state"] == "closed"
+    assert subagent["binding_states"] == {"bound": 1, "closed": 1}
+    assert "agent_transcript_path" not in subagent
+    assert report["coverage"]["child_binding_states"] == {"closed": 1}
 
 
 def test_report_keeps_unmatched_child_tools_trace_only(tmp_path, monkeypatch):
@@ -1221,6 +1285,8 @@ def test_report_keeps_unmatched_child_tools_trace_only(tmp_path, monkeypatch):
         report["chains"][0]["unattributed_tool_receipts"][0]["tool_use_id"]
         == "toolu_unmatched"
     )
+    assert report["coverage"]["child_binding_states"] == {"observed_only": 1}
+    assert "agent_transcript_path" not in report["chains"][0]["subagents"][0]
 
 
 def test_long_scoped_bash_command_is_not_denied_by_truncated_target(
@@ -1270,19 +1336,29 @@ def test_parallel_pre_tool_use_processes_serialize_receipt_chain(tmp_path):
     mission = MissionPassport(
         agent_id="alice",
         mission="parallel subagent launch",
-        allowed_tools=["Agent"],
+        allowed_tools=["Agent", "Read"],
         forbidden_tools=[],
         resource_scope=["**"],
         max_tool_calls=20,
         max_duration_s=600,
+        delegation_allowed=True,
+        max_delegation_depth=1,
     )
     token = issue_passport(mission, private_key, ttl_s=3600)
+    policy_file = tmp_path / "child-policies.json"
+    _write_child_policy_registry(
+        policy_file,
+        agent_type="general-purpose",
+        allowed_tools=["Read"],
+        resource_scope=["**"],
+    )
     repo_root = Path(__file__).resolve().parents[2]
     env = {
         **os.environ,
         "ARDUR_MISSION_PASSPORT": token,
         "VIBAP_HOME": str(tmp_path),
         "ARDUR_CC_HOOK_DIR": str(tmp_path / "chain"),
+        "ARDUR_CC_CHILD_POLICY_FILE": str(policy_file),
         "PYTHONPATH": str(repo_root / "python"),
     }
 
@@ -1293,6 +1369,7 @@ def test_parallel_pre_tool_use_processes_serialize_receipt_chain(tmp_path):
                 "session_id": "sess-1",
                 "hook_event_name": "PreToolUse",
                 "tool_name": "Agent",
+                "tool_use_id": f"parallel-agent-{index}",
                 "tool_input": {
                     "agent_type": "general-purpose",
                     "description": f"parallel agent {index}",
@@ -1608,9 +1685,10 @@ def test_main_pre_crash_emits_fail_safe_deny(monkeypatch, capsys):
     assert "hook handler crashed" in captured.err
     output = json.loads(captured.out)
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "could not be processed safely" in output["hookSpecificOutput"][
-        "permissionDecisionReason"
-    ]
+    assert (
+        "could not be processed safely"
+        in output["hookSpecificOutput"]["permissionDecisionReason"]
+    )
 
 
 def test_main_post_crash_emits_fail_safe_continue(monkeypatch, capsys):
@@ -1636,9 +1714,7 @@ def test_main_post_crash_emits_fail_safe_continue(monkeypatch, capsys):
     assert output == {"continue": True}
 
 
-def test_main_pre_non_serializable_output_emits_fail_safe_deny(
-    monkeypatch, capsys
-):
+def test_main_pre_non_serializable_output_emits_fail_safe_deny(monkeypatch, capsys):
     """If json.dumps fails on the handler output, fall back to deny."""
     import io
 
@@ -1690,6 +1766,42 @@ def test_pre_daemon_first_uses_daemon_output(tmp_path, monkeypatch):
     )
     assert output["continue"] is True
     assert output["systemMessage"] == "ardur: daemon pre hook"
+
+
+def test_pre_daemon_first_bypasses_daemon_for_child_policy(tmp_path, monkeypatch):
+    from vibap import claude_code_daemon_client as daemon_client_module
+    from vibap import claude_code_hook as hook_module
+
+    monkeypatch.setenv("ARDUR_CC_CHILD_POLICY_FILE", str(tmp_path / "children.json"))
+
+    calls = 0
+
+    def _daemon_must_not_run(_hook_input, *, keys_dir=None):
+        nonlocal calls
+        calls += 1
+        return {
+            "continue": True,
+            "systemMessage": "ardur: stale parent-only daemon",
+        }
+
+    monkeypatch.setattr(
+        daemon_client_module, "dispatch_pre_tool_use", _daemon_must_not_run
+    )
+    monkeypatch.setattr(
+        hook_module,
+        "handle_pre_tool_use",
+        lambda hook_input, *, keys_dir=None: {
+            "continue": True,
+            "systemMessage": "ardur: child-aware local hook",
+        },
+    )
+
+    output = hook_module._handle_pre_tool_use_daemon_first(
+        {"tool_name": "Agent", "tool_input": {"subagent_type": "Explore"}},
+        keys_dir=tmp_path,
+    )
+    assert output["systemMessage"] == "ardur: child-aware local hook"
+    assert calls == 0
 
 
 def test_pre_daemon_first_falls_back_when_daemon_unavailable(tmp_path, monkeypatch):
@@ -3070,9 +3182,7 @@ def test_native_client_persistent_eio_is_terminal_and_preserves_errno(tmp_path):
     if fault_client is None:
         pytest.xfail("native fault-injection client could not be built on this host")
 
-    socket_parent = Path(
-        f"/tmp/ardur-native-eio-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-    )
+    socket_parent = Path(f"/tmp/ardur-native-eio-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -3283,9 +3393,7 @@ def test_native_client_diagnostics_never_leak_sensitive_fields(tmp_path):
     if fault_client is None:
         pytest.xfail("native fault-injection client could not be built on this host")
 
-    socket_parent = Path(
-        f"/tmp/ardur-native-leak-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-    )
+    socket_parent = Path(f"/tmp/ardur-native-leak-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     socket_parent.mkdir(mode=0o700)
     socket_path = socket_parent / "hook.sock"
 
@@ -3843,7 +3951,9 @@ def test_main_rejects_empty_or_whitespace_keys_dir_before_handler(
     from vibap import claude_code_hook
 
     # Redirect stdin so _load_hook_input does not block.
-    monkeypatch.setattr("sys.stdin", _StdinStub('{"tool_name": "Read", "tool_input": {}}'))
+    monkeypatch.setattr(
+        "sys.stdin", _StdinStub('{"tool_name": "Read", "tool_input": {}}')
+    )
 
     for raw in ("", "   "):
         rc = claude_code_hook.main(["--keys-dir", raw, "pre"])

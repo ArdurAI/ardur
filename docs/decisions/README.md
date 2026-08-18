@@ -21,6 +21,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 023 | [Explicit resource-scope authority](./ADR-023-explicit-resource-scope-authority.md) | Accepted | 2026-07-12 |
 | 024 | [Self-asserted owner identity assurance](./ADR-024-self-asserted-owner-identity-assurance.md) | Accepted | 2026-07-12 |
 | 026 | [Typed dangerous-action risk budgets](./ADR-026-typed-dangerous-action-risk-budgets.md) | Accepted | 2026-07-14 |
+| 028 | [Claude Code child authority binding](./ADR-028-claude-code-child-authority-binding.md) | Accepted | 2026-07-15 |
 
 ADR-025 is reserved by a concurrently reviewed spend-gate decision. Parallel
 issue branches may therefore show ADR-026 before ADR-025 lands in `dev`; the

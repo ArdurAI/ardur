@@ -256,8 +256,7 @@ def _output_write_error_response(command: str, exc: Exception) -> dict[str, Any]
             {
                 "action": "choose_writable_output_path",
                 "command": (
-                    f"ardur {command.replace('_', '-')} "
-                    "--output <writable-file-path>"
+                    f"ardur {command.replace('_', '-')} --output <writable-file-path>"
                 ),
                 "detail": (
                     "Provide a writable file path (not an existing "
@@ -1846,7 +1845,9 @@ def _issue_identity_failure(args: argparse.Namespace) -> tuple[dict, int] | None
     return None
 
 
-def _issue_tool_list_invalid_failure(args: argparse.Namespace) -> tuple[dict, int] | None:
+def _issue_tool_list_invalid_failure(
+    args: argparse.Namespace,
+) -> tuple[dict, int] | None:
     """Reject empty or whitespace-only elements in nargs list arguments."""
     for field_name, flag_name in (
         ("allowed_tools", "--allowed-tools"),
@@ -2001,9 +2002,7 @@ def _verify_failure_next_steps(label: str = "Mission Passport") -> list[dict[str
     ]
 
 
-def _verify_failure_response(
-    exc: Exception, label: str = "Mission Passport"
-) -> dict:
+def _verify_failure_response(exc: Exception, label: str = "Mission Passport") -> dict:
     detail = _safe_exception_message(exc)
     is_attestation = label != "Mission Passport"
     error_code = (
@@ -2020,7 +2019,9 @@ def _verify_failure_response(
     }
 
 
-def _verify_public_key_missing_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+def _verify_public_key_missing_next_steps(
+    label: str = "Mission Passport",
+) -> list[dict[str, str]]:
     condition = (
         "attestation_public_key_missing"
         if label != "Mission Passport"
@@ -2101,7 +2102,9 @@ def _verify_public_key_missing_response(label: str = "Mission Passport") -> dict
     }
 
 
-def _verify_public_key_invalid_next_steps(label: str = "Mission Passport") -> list[dict[str, str]]:
+def _verify_public_key_invalid_next_steps(
+    label: str = "Mission Passport",
+) -> list[dict[str, str]]:
     condition = (
         "attestation_public_key_invalid"
         if label != "Mission Passport"
@@ -2238,7 +2241,11 @@ def _cmd_verify_attestation(args: argparse.Namespace) -> int:
         _print_json(_verify_failure_response(exc, label="Behavioral attestation"))
         return 1
     token_report = {"valid": True, "claims": claims}
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -2346,7 +2353,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
         _print_json(_verify_failure_response(exc))
         return 1
     token_report = {"valid": True, "claims": claims}
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -2589,7 +2600,13 @@ def _cmd_verify_offline(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
-    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+    except (
+        KeyDirectoryError,
+        FileNotFoundError,
+        OSError,
+        PermissionError,
+        ValueError,
+    ) as exc:
         _print_json(
             {
                 "valid": False,
@@ -2713,7 +2730,13 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
-    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+    except (
+        KeyDirectoryError,
+        FileNotFoundError,
+        OSError,
+        PermissionError,
+        ValueError,
+    ) as exc:
         _print_json(
             {
                 "ok": False,
@@ -2741,7 +2764,11 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
             event_batch,
             correlation_window_s=args.correlation_window_s,
         )
-        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "evidence_output", None) is None:
+        if (
+            getattr(args, "redact_paths", False)
+            and not getattr(args, "json", False)
+            and getattr(args, "evidence_output", None) is None
+        ):
             print(
                 "ardur: warning: --redact-paths has no effect without --json or --output",
                 file=sys.stderr,
@@ -2813,7 +2840,9 @@ def cmd_evidence_correlate(args: argparse.Namespace) -> int:
         return 1
     except OSError:
         error_code = "runtime_evidence_io_failed"
-        safe_message = "runtime evidence correlation could not access a required local file safely"
+        safe_message = (
+            "runtime evidence correlation could not access a required local file safely"
+        )
         _print_json(
             {
                 "ok": False,
@@ -2981,7 +3010,13 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             if args.receipt_public_key is not None
             else load_existing_public_key(keys_dir=args.keys_dir)
         )
-    except (KeyDirectoryError, FileNotFoundError, OSError, PermissionError, ValueError) as exc:
+    except (
+        KeyDirectoryError,
+        FileNotFoundError,
+        OSError,
+        PermissionError,
+        ValueError,
+    ) as exc:
         _print_json(
             {
                 "ok": False,
@@ -2997,7 +3032,11 @@ def cmd_telemetry_export(args: argparse.Namespace) -> int:
             receipt_public_key=receipt_public_key,
             verify_expiry=args.verify_expiry,
         )
-        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "telemetry_output", None) is None:
+        if (
+            getattr(args, "redact_paths", False)
+            and not getattr(args, "json", False)
+            and getattr(args, "telemetry_output", None) is None
+        ):
             print(
                 "ardur: warning: --redact-paths has no effect without --json or --output",
                 file=sys.stderr,
@@ -3386,7 +3425,11 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -3627,9 +3670,7 @@ def _offline_verification_fixture_output_invalid_response(condition: str) -> dic
     }
 
 
-def _classify_fixture_error(
-    exc: BaseException, error_code: str
-) -> tuple[str, str]:
+def _classify_fixture_error(exc: BaseException, error_code: str) -> tuple[str, str]:
     """Map a raw ``OSError``/``TypeError``/``ValueError`` to a safe message.
 
     Returns ``(error_code, safe_message)`` so the JSON response never leaks
@@ -3832,8 +3873,14 @@ def _gemini_fixture_path_error_label_arg(condition: str) -> tuple[str, str]:
         "gemini_cli_fixture_home_parent_not_directory": ("home", "--home"),
         "gemini_cli_fixture_chain_dir_empty": ("chain dir", "--chain-dir"),
         "gemini_cli_fixture_chain_dir_not_directory": ("chain dir", "--chain-dir"),
-        "gemini_cli_fixture_chain_dir_dangling_symlink_parent": ("chain dir", "--chain-dir"),
-        "gemini_cli_fixture_chain_dir_parent_not_directory": ("chain dir", "--chain-dir"),
+        "gemini_cli_fixture_chain_dir_dangling_symlink_parent": (
+            "chain dir",
+            "--chain-dir",
+        ),
+        "gemini_cli_fixture_chain_dir_parent_not_directory": (
+            "chain dir",
+            "--chain-dir",
+        ),
         "gemini_cli_fixture_keys_dir_empty": ("keys dir", "--keys-dir"),
         "gemini_cli_fixture_keys_dir_not_directory": ("keys dir", "--keys-dir"),
     }
@@ -3852,9 +3899,18 @@ def _codex_fixture_path_error_label_arg(condition: str) -> tuple[str, str]:
         "codex_app_server_fixture_home_dangling_symlink_parent": ("home", "--home"),
         "codex_app_server_fixture_home_parent_not_directory": ("home", "--home"),
         "codex_app_server_fixture_chain_dir_empty": ("chain dir", "--chain-dir"),
-        "codex_app_server_fixture_chain_dir_not_directory": ("chain dir", "--chain-dir"),
-        "codex_app_server_fixture_chain_dir_dangling_symlink_parent": ("chain dir", "--chain-dir"),
-        "codex_app_server_fixture_chain_dir_parent_not_directory": ("chain dir", "--chain-dir"),
+        "codex_app_server_fixture_chain_dir_not_directory": (
+            "chain dir",
+            "--chain-dir",
+        ),
+        "codex_app_server_fixture_chain_dir_dangling_symlink_parent": (
+            "chain dir",
+            "--chain-dir",
+        ),
+        "codex_app_server_fixture_chain_dir_parent_not_directory": (
+            "chain dir",
+            "--chain-dir",
+        ),
         "codex_app_server_fixture_keys_dir_empty": ("keys dir", "--keys-dir"),
         "codex_app_server_fixture_keys_dir_not_directory": ("keys dir", "--keys-dir"),
     }
@@ -4011,7 +4067,11 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -4201,7 +4261,11 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -4259,7 +4323,11 @@ def cmd_posture_scan(args: argparse.Namespace) -> int:
 
     from .runtime_evidence import RuntimeEvidenceError, write_report
 
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "posture_scan_output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "posture_scan_output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -4322,7 +4390,11 @@ def cmd_tool_server_preflight(args: argparse.Namespace) -> int:
 
     try:
         report = scan_tool_server_config(args.config)
-        if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "output", None) is None:
+        if (
+            getattr(args, "redact_paths", False)
+            and not getattr(args, "json", False)
+            and getattr(args, "output", None) is None
+        ):
             print(
                 "ardur: warning: --redact-paths has no effect without --json or --output",
                 file=sys.stderr,
@@ -4458,7 +4530,11 @@ def cmd_posture_report(args: argparse.Namespace) -> int:
 
     from .runtime_evidence import RuntimeEvidenceError, write_report
 
-    if getattr(args, "redact_paths", False) and not getattr(args, "json", False) and getattr(args, "posture_report_output", None) is None:
+    if (
+        getattr(args, "redact_paths", False)
+        and not getattr(args, "json", False)
+        and getattr(args, "posture_report_output", None) is None
+    ):
         print(
             "ardur: warning: --redact-paths has no effect without --json or --output",
             file=sys.stderr,
@@ -5064,7 +5140,9 @@ def _redact_local_path_string(value: str) -> str:
         (re.escape("/tmp/"), "<tmp>/"),
         (re.escape(home + "/"), "<home>/"),
         (
-            re.escape(temp_root + "/") if temp_root.endswith("/") else re.escape(temp_root),
+            re.escape(temp_root + "/")
+            if temp_root.endswith("/")
+            else re.escape(temp_root),
             "<tmp>",
         ),
         (re.escape("/run/ardur/"), "<run-ardur>/"),
@@ -5429,6 +5507,11 @@ def _claude_code_plugin_checks(plugin_dir: Path) -> list[dict[str, object]]:
             "detail": _claude_code_plugin_detail("file", "hooks/post_tool_use"),
         },
         {
+            "name": "post_tool_use_failure",
+            "ok": (plugin_dir / "hooks" / "post_tool_use_failure").is_file(),
+            "detail": _claude_code_plugin_detail("file", "hooks/post_tool_use_failure"),
+        },
+        {
             "name": "subagent_start",
             "ok": (plugin_dir / "hooks" / "subagent_start").is_file(),
             "detail": _claude_code_plugin_detail("file", "hooks/subagent_start"),
@@ -5480,6 +5563,7 @@ def _protect_claude_code_plugin_incomplete_response(
 _CLAUDE_CODE_REQUIRED_HOOK_EVENTS = (
     "PreToolUse",
     "PostToolUse",
+    "PostToolUseFailure",
     "SubagentStart",
     "SubagentStop",
 )
@@ -6569,6 +6653,51 @@ def _protect_claude_code_ttl_invalid_response() -> dict[str, object]:
     }
 
 
+def _protect_claude_code_child_policy_invalid_response(
+    code: str,
+    *,
+    conflict: str | None = None,
+) -> dict[str, object]:
+    detail = (
+        conflict
+        or "The child policy registry failed strict private-file or schema validation."
+    )
+    return {
+        "ok": False,
+        "agent": "claude-code",
+        "error": "protect_child_policy_invalid",
+        "error_code": code,
+        "condition": "protect_child_policy_invalid",
+        "message": "Claude Code child delegation was not configured.",
+        "detail": detail,
+        "next_steps": [
+            {
+                "action": "fix_child_policy_registry",
+                "command": "chmod 600 <child-policy-file>",
+                "detail": (
+                    "Use a private regular JSON file with schema_version "
+                    "ardur.claude_code.child_policies.v1."
+                ),
+            },
+            {
+                "action": "rerun_protection",
+                "command": (
+                    "ardur protect claude-code --scope <your-project> "
+                    "--child-policy-file <child-policy-file>"
+                ),
+                "detail": (
+                    "Validate the registry before issuing a delegation-enabled passport."
+                ),
+            },
+            {
+                "action": "disable_child_delegation",
+                "command": "ardur protect claude-code --scope <your-project>",
+                "detail": "Omit the registry to keep child delegation disabled.",
+            },
+        ],
+    }
+
+
 def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # Reject empty/whitespace-only --profile before any key generation or
     # profile loading. ``--profile`` is ``type=str`` so an empty or
@@ -6771,6 +6900,25 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     # ``issue_passport()`` after keys are already generated.
     if args.ttl_s is not None and args.ttl_s <= 0:
         return _protect_claude_code_ttl_invalid_response()
+    raw_child_policy = getattr(args, "child_policy_file", None)
+    if isinstance(raw_child_policy, str) and not raw_child_policy.strip():
+        return _protect_claude_code_child_policy_invalid_response(
+            "CHILD_POLICY_UNAVAILABLE"
+        )
+    child_policy_path: Path | None = None
+    child_policies: dict[str, Any] = {}
+    if raw_child_policy is not None:
+        from .claude_code_children import (
+            ClaudeChildBindingError,
+            load_claude_child_policy_registry,
+        )
+
+        child_policy_input = Path(raw_child_policy).expanduser()
+        try:
+            child_policies = load_claude_child_policy_registry(child_policy_input)
+        except ClaudeChildBindingError as exc:
+            return _protect_claude_code_child_policy_invalid_response(exc.code)
+        child_policy_path = child_policy_input.resolve()
     scope = Path(raw_scope).expanduser().resolve()
     home = Path(args.home).expanduser().resolve() if args.home else DEFAULT_HOME
     if args.home:
@@ -6792,10 +6940,6 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         additional_policies = _resolve_protect_policies(args, profile, home)
     except _ProtectPolicyInputError as exc:
         return _protect_policy_input_failure_response(exc)
-    keys_dir_resolved = (
-        Path(args.keys_dir).expanduser().resolve() if args.keys_dir else (home / "keys")
-    )
-    private_key, public_key = generate_keypair(keys_dir=keys_dir_resolved)
     if profile and profile.allowed_tools:
         # A profile with an explicit allowlist is authoritative: if the author
         # leaves the blocklist empty, that means "no explicit tool denylist" and
@@ -6820,6 +6964,32 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         if profile and profile.max_duration_s is not None
         else args.max_duration_s
     )
+    if child_policies:
+        if "Agent" in forbidden_tools:
+            return _protect_claude_code_child_policy_invalid_response(
+                "CHILD_POLICY_CONFLICT",
+                conflict=(
+                    "The selected profile forbids Agent while a child policy registry "
+                    "requests child delegation. Remove that conflict or omit the registry."
+                ),
+            )
+        if "*" not in allowed_tools and "Agent" not in allowed_tools:
+            allowed_tools.append("Agent")
+        largest_child_budget = max(
+            int(policy.max_tool_calls) for policy in child_policies.values()
+        )
+        if max_tool_calls <= largest_child_budget:
+            return _protect_claude_code_child_policy_invalid_response(
+                "CHILD_BUDGET_DENIED",
+                conflict=(
+                    "The parent max-tool-calls budget must exceed every configured "
+                    "child budget so the Agent dispatch also fits."
+                ),
+            )
+    keys_dir_resolved = (
+        Path(args.keys_dir).expanduser().resolve() if args.keys_dir else (home / "keys")
+    )
+    private_key, public_key = generate_keypair(keys_dir=keys_dir_resolved)
     mission = MissionPassport(
         agent_id=args.agent_id,
         mission=args.mission
@@ -6830,6 +7000,8 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         cwd=str(scope),
         max_tool_calls=max_tool_calls,
         max_duration_s=max_duration_s,
+        delegation_allowed=bool(child_policies),
+        max_delegation_depth=1 if child_policies else 0,
         additional_policies=additional_policies,
     )
     token = issue_passport(mission, private_key, ttl_s=args.ttl_s or max_duration_s)
@@ -6855,7 +7027,14 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
     _write_private_text(hook_python, sys.executable + "\n")
     native_pre_hook_command = install_native_pre_tool_use_command(home=home)
     native_pre_hook_command_expected = resolve_native_pre_tool_use_command_path(home)
-    run_command = f"VIBAP_HOME={shlex.quote(str(home))} claude --plugin-dir {shlex.quote(str(plugin_dir))}"
+    run_environment = f"VIBAP_HOME={shlex.quote(str(home))}"
+    if child_policy_path is not None:
+        run_environment += (
+            f" ARDUR_CC_CHILD_POLICY_FILE={shlex.quote(str(child_policy_path))}"
+        )
+    run_command = (
+        f"{run_environment} claude --plugin-dir {shlex.quote(str(plugin_dir))}"
+    )
     return {
         "ok": True,
         "agent": "claude-code",
@@ -6874,6 +7053,8 @@ def protect_claude_code(args: argparse.Namespace) -> dict[str, object]:
         else None,
         "native_pre_hook_command_expected": str(native_pre_hook_command_expected),
         "plugin_dir": str(plugin_dir),
+        "child_policy_file": str(child_policy_path) if child_policy_path else None,
+        "child_agent_types": sorted(child_policies),
         "run_command": run_command,
         "allowed_tools": allowed_tools,
         "forbidden_tools": forbidden_tools,
@@ -7150,9 +7331,7 @@ def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
         failure = _latency_gate_value_failure(
             condition="latency_gate_min_runs_invalid",
             message="latency-gate evaluate --min-runs must be >= 1.",
-            detail=(
-                f"--min-runs must be a positive integer; got {args.min_runs!r}."
-            ),
+            detail=(f"--min-runs must be a positive integer; got {args.min_runs!r}."),
         )
         _print_json(failure)
         return 1
@@ -7264,9 +7443,7 @@ def cmd_latency_gate_evaluate(args: argparse.Namespace) -> int:
         if invalid_reports:
             sys.stdout.write("\nInvalid report files (not evaluated):\n")
             for entry in invalid_reports:
-                sys.stdout.write(
-                    f"  {entry['filename']}: {entry['reason']}\n"
-                )
+                sys.stdout.write(f"  {entry['filename']}: {entry['reason']}\n")
 
     # Exit code: 0 for PASS, 1 for FAIL, 2 for INCONCLUSIVE. This lets CI
     # distinguish "passed the gate" from "failed the gate" from "could not
@@ -7805,7 +7982,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cc_hook.add_argument(
         "phase",
-        choices=["pre", "post", "subagent-start", "subagent-stop"],
+        choices=["pre", "post", "post-failure", "subagent-start", "subagent-stop"],
         help="hook lifecycle phase to invoke",
     )
     cc_hook.add_argument(
@@ -7834,9 +8011,7 @@ def build_parser() -> argparse.ArgumentParser:
     cc_report.add_argument(
         "--json", action="store_true", help="print machine-readable report"
     )
-    cc_report.add_argument(
-        "--output", type=str, help="write the JSON report to a file"
-    )
+    cc_report.add_argument("--output", type=str, help="write the JSON report to a file")
     cc_report.add_argument(
         "--redact-paths",
         action="store_true",
@@ -8584,6 +8759,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="mission duration budget in seconds",
     )
     protect_cc.add_argument("--ttl-s", type=int, help="override token TTL in seconds")
+    protect_cc.add_argument(
+        "--child-policy-file",
+        type=str,
+        help=(
+            "private 0600 JSON registry that enables one level of governed "
+            "Agent delegation"
+        ),
+    )
     protect_cc.add_argument(
         # ``type=str`` (not ``Path``) so an empty or whitespace-only value
         # survives parsing and can be rejected explicitly below. ``type=Path``

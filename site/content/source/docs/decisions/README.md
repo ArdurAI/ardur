@@ -2,7 +2,7 @@
 title: "Architecture Decision Records"
 description: "ADRs document load-bearing design decisions behind Ardur's runtime, protocol, and deployment shape. Each record captures the context, the decision, and the trade-offs known at the "
 source_path: "docs/decisions/README.md"
-source_sha256: "33ad64624315c6f7216bf1b97a52fdfc33cca0365fc6545afe97cb7a9bcd566a"
+source_sha256: "e6465d115381df4041cc7f174c729f252da8ca355e7d3c19e51b437cac0ea41b"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["decision-record"]
@@ -38,6 +38,7 @@ ADRs are migrated from the private research repo with the two-pass cleanup appli
 | 023 | [Explicit resource-scope authority](/__ardur_internal__/source/docs/decisions/adr-023-explicit-resource-scope-authority/) | Accepted | 2026-07-12 |
 | 024 | [Self-asserted owner identity assurance](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/) | Accepted | 2026-07-12 |
 | 026 | [Typed dangerous-action risk budgets](/__ardur_internal__/source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/) | Accepted | 2026-07-14 |
+| 028 | [Claude Code child authority binding](/__ardur_internal__/source/docs/decisions/adr-028-claude-code-child-authority-binding/) | Accepted | 2026-07-15 |
 
 ADR-025 is reserved by a concurrently reviewed spend-gate decision. Parallel
 issue branches may therefore show ADR-026 before ADR-025 lands in `dev`; the

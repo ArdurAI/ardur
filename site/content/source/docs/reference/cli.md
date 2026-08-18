@@ -2,7 +2,7 @@
 title: "ardur` CLI Reference"
 description: "The `ardur` console entry point ships with the Python package. After installing"
 source_path: "docs/reference/cli.md"
-source_sha256: "fdf651980dd3f2b73c2d981e69f29519b01aec329d107e9156539a201d98db06"
+source_sha256: "8a7263d1052eca563a538f3007669304fa37ec0b2119bed298f261071d81d5bf"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -1359,6 +1359,7 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
                           [--mission TEXT]
                           [--max-tool-calls N] [--max-duration-s N]
                           [--ttl-s N]
+                          [--child-policy-file FILE]
                           [--forbid-rules FILE]
                           [--cedar-policy FILE]
                           [--cedar-entities FILE]
@@ -1367,6 +1368,17 @@ ardur protect claude-code [--scope DIR] [--profile PATH]
 
 Profile mode and CLI mode set the same Mission Passport — the Markdown
 profile is a friendly layer over the same capability set.
+
+Child delegation is disabled by default. `--child-policy-file` accepts a
+private mode-0600 regular JSON registry keyed by exact Claude agent type. A
+valid registry enables one delegation level, adds `Agent` to the parent
+allowlist when necessary, and prints a launch command containing
+`ARDUR_CC_CHILD_POLICY_FILE`. Symlinks, insecure modes, malformed or empty
+registries, nested `Agent`/`Task` child authority, parent/child policy
+conflicts, wildcard child tools, and child budgets that leave no room for the
+parent dispatch fail closed before key or passport creation. Runtime binding
+and its correlation limits are specified in
+[ADR-028](/__ardur_internal__/source/docs/decisions/adr-028-claude-code-child-authority-binding/).
 
 If neither `--scope` nor a profile `Protect folder:` value is available, the
 command exits nonzero without configuring Claude Code. JSON output includes

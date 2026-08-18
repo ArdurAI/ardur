@@ -18,7 +18,7 @@ import re
 import stat
 import time
 from collections import OrderedDict
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,7 +113,9 @@ def _contained_trace_dir(*, chain_dir: Path, trace_id: str) -> Path:
     try:
         resolved_candidate.relative_to(resolved_base)
     except ValueError as exc:
-        raise ValueError(f"Claude Code trace id escapes chain dir: {trace_id!r}") from exc
+        raise ValueError(
+            f"Claude Code trace id escapes chain dir: {trace_id!r}"
+        ) from exc
     return candidate
 
 
@@ -203,7 +205,9 @@ def _append_receipt_unlocked(
         _advance_verified_session_cache_unlocked(state, signed_jwt, receipt_obj)
 
 
-def _append_subagent_event_unlocked(state: ChainState, record: Mapping[str, Any]) -> None:
+def _append_subagent_event_unlocked(
+    state: ChainState, record: Mapping[str, Any]
+) -> None:
     with open(state.subagents_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(dict(record), sort_keys=True, separators=(",", ":")) + "\n")
 
@@ -276,7 +280,10 @@ def _candidate_passport_sources() -> list[tuple[str, str]]:
             path = Path(env_value).expanduser()
             if path.is_file():
                 sources.append(
-                    (PASSPORT_ENV_VAR + f" ({path})", path.read_text(encoding="utf-8").strip())
+                    (
+                        PASSPORT_ENV_VAR + f" ({path})",
+                        path.read_text(encoding="utf-8").strip(),
+                    )
                 )
 
     # Priority 2: VIBAP_HOME (or DEFAULT_HOME when env is unset/empty).
@@ -284,21 +291,29 @@ def _candidate_passport_sources() -> list[tuple[str, str]]:
     home_from_env = Path(home_env).expanduser() if home_env else DEFAULT_HOME
     default_path = home_from_env / "active_mission.jwt"
     if default_path.is_file():
-        sources.append((str(default_path), default_path.read_text(encoding="utf-8").strip()))
+        sources.append(
+            (str(default_path), default_path.read_text(encoding="utf-8").strip())
+        )
 
     # Priority 3: ~/.vibap/active_mission.jwt (global default), only when
     # it resolves differently from priority 2.
     global_default = Path.home().expanduser() / ".vibap" / "active_mission.jwt"
     if global_default != default_path and global_default.is_file():
-        sources.append((str(global_default), global_default.read_text(encoding="utf-8").strip()))
+        sources.append(
+            (str(global_default), global_default.read_text(encoding="utf-8").strip())
+        )
 
     return sources
 
 
-def load_active_passport(*, keys_dir: Path | None = None) -> dict[str, Any]:
+def load_active_passport_token(
+    *, keys_dir: Path | None = None
+) -> tuple[str, dict[str, Any]]:
     """Load and verify the active Mission Passport.
 
-    Returns the verified claims dict on success.
+    Returns the authority-bearing token and verified claims on success.  Hook
+    callers must keep the token inside the local enforcement boundary; only
+    verified claims may be projected into receipts or reports.
 
     Raises :class:`MissionLoadError` when:
       - no candidate passport source is discoverable;
@@ -326,7 +341,7 @@ def load_active_passport(*, keys_dir: Path | None = None) -> dict[str, Any]:
     last_error: Exception | None = None
     for label, token in sources:
         try:
-            return verify_passport(token, public_key)
+            return token, verify_passport(token, public_key)
         except (jwt.InvalidTokenError, ValueError, PermissionError) as exc:
             # PermissionError surfaces from delegation-chain validation
             # in passport.verify_passport. We re-raise it as
@@ -339,6 +354,13 @@ def load_active_passport(*, keys_dir: Path | None = None) -> dict[str, Any]:
         f"all candidate passports failed verification (last error: {last_error}); "
         f"sources tried: {[label for label, _ in sources]}"
     )
+
+
+def load_active_passport(*, keys_dir: Path | None = None) -> dict[str, Any]:
+    """Load the active Mission Passport and return verified claims only."""
+
+    _token, claims = load_active_passport_token(keys_dir=keys_dir)
+    return claims
 
 
 # ─── PreToolUse handler ───────────────────────────────────────────────────────
@@ -381,7 +403,10 @@ def _utc_timestamp() -> str:
 
 
 def _hash_text(value: str) -> dict[str, str]:
-    return {"alg": "sha-256", "value": hashlib.sha256(value.encode("utf-8")).hexdigest()}
+    return {
+        "alg": "sha-256",
+        "value": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+    }
 
 
 def _without_empty_values(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -411,8 +436,6 @@ def _common_claude_code_metadata(
             "hook_event_name": str(hook_input.get("hook_event_name", "")),
             "claude_session_id": str(hook_input.get("session_id", "")),
             "tool_use_id": str(hook_input.get("tool_use_id", "")),
-            "transcript_path": str(hook_input.get("transcript_path", "")),
-            "cwd": str(hook_input.get("cwd", "")),
             "permission_mode": str(hook_input.get("permission_mode", "")),
             "tool_name": tool_name,
         }
@@ -443,8 +466,8 @@ def _tool_actor_metadata(
                     agent_id=agent_id,
                 ),
                 "attribution": {
-                    "mode": "exact",
-                    "source": "tool_hook.agent_id",
+                    "mode": "platform_id_only",
+                    "source": "tool_hook.agent_id_without_authority_binding",
                 },
             }
         )
@@ -468,6 +491,39 @@ def _tool_actor_metadata(
                 },
             }
         )
+    return metadata
+
+
+def _child_authority_metadata(
+    hook_input: Mapping[str, Any],
+    *,
+    trace_id: str,
+    tool_name: str,
+    binding_state: str,
+    policy_fingerprint: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    metadata = _tool_actor_metadata(
+        hook_input,
+        trace_id=trace_id,
+        tool_name=tool_name,
+    )
+    exact = binding_state in {"bound", "quarantined"} and bool(policy_fingerprint)
+    metadata["attribution"] = {
+        "mode": "exact" if exact else "trace_only",
+        "source": (
+            "opaque_child_authority_binding"
+            if exact
+            else "platform_agent_id_without_authority_binding"
+        ),
+    }
+    metadata["authority_binding"] = _without_empty_values(
+        {
+            "binding_state": binding_state,
+            "policy_fingerprint": policy_fingerprint,
+            "reason": reason,
+        }
+    )
     return metadata
 
 
@@ -619,9 +675,7 @@ def _evaluate_composed_policy(
     additional = claims.get("additional_policies", [])
     if not isinstance(additional, list):
         additional = [{"backend": "invalid_additional_policies"}]
-    specs: list[Mapping[str, Any]] = [
-        {"backend": "native", "label": "ardur_builtin"}
-    ]
+    specs: list[Mapping[str, Any]] = [{"backend": "native", "label": "ardur_builtin"}]
     for item in additional:
         specs.append(
             item
@@ -681,7 +735,9 @@ def _verified_pretool_session_state_unlocked(
             raw = handle.read(HOOK_STATE_MAX_BYTES + 1)
         if len(raw) > HOOK_STATE_MAX_BYTES:
             raise ValueError("Claude Code receipt chain exceeds the verification limit")
-        tokens = [line.strip() for line in raw.decode("utf-8").splitlines() if line.strip()]
+        tokens = [
+            line.strip() for line in raw.decode("utf-8").splitlines() if line.strip()
+        ]
         if len(tokens) > HOOK_STATE_MAX_RECEIPTS:
             raise ValueError("Claude Code receipt chain has too many receipts")
 
@@ -702,12 +758,16 @@ def _verified_pretool_session_state_unlocked(
             by_class=cached.by_class,
         )
 
-    receipt_claims = verify_chain(tokens, public_key, verify_expiry=False) if tokens else []
+    receipt_claims = (
+        verify_chain(tokens, public_key, verify_expiry=False) if tokens else []
+    )
+    active_grant_id = str(passport_claims.get("jti", ""))
     permitted_pre = [
         claim
         for claim in receipt_claims
         if str(claim.get("step_id", "")).endswith(":pre")
         and claim.get("verdict") == "compliant"
+        and str(claim.get("grant_id", "")) == active_grant_id
     ]
     by_class: dict[str, int] = {}
     for claim in permitted_pre:
@@ -751,6 +811,7 @@ def _hook_session_state(
     passport_claims: Mapping[str, Any],
     tool_call_count: int,
     by_class: Mapping[str, int],
+    delegated_budget_reserved: int = 0,
 ) -> dict[str, Any]:
     try:
         issued_at = float(passport_claims.get("iat", time.time()))
@@ -760,7 +821,7 @@ def _hook_session_state(
         "tool_call_count": tool_call_count,
         "tool_call_count_by_class": dict(by_class),
         "side_effect_counts": dict(by_class),
-        "delegated_budget_reserved": 0,
+        "delegated_budget_reserved": max(0, int(delegated_budget_reserved)),
         "elapsed_s": max(0.0, time.time() - issued_at),
     }
 
@@ -807,7 +868,8 @@ def _hook_budget_evidence(
     ceiling = max(0, int(passport_claims.get("max_tool_calls", 0)))
     used_before = max(0, int(session_state.get("tool_call_count", 0)))
     amount = 1 if permitted else 0
-    remaining_before = max(0, ceiling - used_before)
+    reserved = max(0, int(session_state.get("delegated_budget_reserved", 0)))
+    remaining_before = max(0, ceiling - used_before - reserved)
     remaining_after = max(0, remaining_before - amount)
     return (
         {
@@ -818,7 +880,7 @@ def _hook_budget_evidence(
             "remaining_for_parent": remaining_before,
             "remaining_after": remaining_after,
             "used_total": used_before,
-            "reserved_total": 0,
+            "reserved_total": reserved,
             "side_effect_class": event.side_effect_class,
         },
         {"tool_calls": remaining_after},
@@ -847,7 +909,7 @@ def _strip_hash_prefix(hash_value: str | None) -> str | None:
     if hash_value is None:
         return None
     if hash_value.startswith("sha-256:"):
-        return hash_value[len("sha-256:"):]
+        return hash_value[len("sha-256:") :]
     return hash_value
 
 
@@ -936,6 +998,63 @@ def _emit_chained_receipt_unlocked(
     return receipt_obj
 
 
+def _binding_policy_decision(*, allowed: bool, reason: str) -> dict[str, Any]:
+    return {
+        "backend": "claude_child_binding",
+        "label": "operator_agent_type_registry",
+        "decision": "Allow" if allowed else "Deny",
+        "reasons": [reason],
+        "eval_ms": 0.0,
+    }
+
+
+def _emit_pre_tool_deny_unlocked(
+    *,
+    state: ChainState,
+    private_key: Any,
+    event: Any,
+    decisions: list[Any],
+    reason_text: str,
+    trace_id: str,
+    hook_input: Mapping[str, Any],
+    budget_remaining: Mapping[str, int],
+    measurements: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    from .proxy import Decision, PolicyEvent, _legacy_denial_reason
+
+    deny_event = PolicyEvent(
+        timestamp=event.timestamp,
+        step_id=event.step_id,
+        actor=event.actor,
+        verifier_id=event.verifier_id,
+        tool_name=event.tool_name,
+        arguments=event.arguments,
+        action_class=event.action_class,
+        target=event.target,
+        resource_family=event.resource_family,
+        side_effect_class=event.side_effect_class,
+        decision=Decision.DENY,
+        reason=reason_text,
+        passport_jti=event.passport_jti,
+        trace_id=event.trace_id,
+        denial_reason=_legacy_denial_reason(Decision.DENY, reason_text),
+        budget_delta=event.budget_delta,
+    )
+    _emit_chained_receipt_unlocked(
+        state=state,
+        private_key=private_key,
+        decision_enum=Decision.DENY,
+        event=deny_event,
+        decisions=decisions,
+        reason=reason_text,
+        trace_id=trace_id,
+        hook_input=hook_input,
+        measurements=measurements,
+        budget_remaining=budget_remaining,
+    )
+    return _pre_tool_use_deny_output(f"ardur: blocked - {reason_text}")
+
+
 def handle_pre_tool_use(
     hook_input: dict[str, Any],
     *,
@@ -955,10 +1074,15 @@ def handle_pre_tool_use(
         trace context to chain into).
     """
     from .claude_code_telemetry import map_tool_call
-    from .proxy import Decision, PolicyEvent, _legacy_denial_reason
+    from .claude_code_children import (
+        CHILD_BINDING_FILENAME,
+        ClaudeChildBindingError,
+        ClaudeChildRuntime,
+    )
+    from .proxy import Decision
 
     try:
-        claims = load_active_passport(keys_dir=keys_dir)
+        parent_token, parent_claims = load_active_passport_token(keys_dir=keys_dir)
     except MissionLoadError as exc:
         return _pre_tool_use_deny_output(f"ardur: {exc}")
 
@@ -966,27 +1090,267 @@ def handle_pre_tool_use(
     tool_input_dict = _coerce_mapping(hook_input.get("tool_input"))
     arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
 
-    trace_id = _trace_id_from_claims(claims)
-    event = _build_policy_event(
-        claims=claims,
-        tool_name=tool_name,
-        arguments=arguments,
-        trace_id=trace_id,
-    )
+    trace_id = _trace_id_from_claims(parent_claims)
     private_key = load_private_key(keys_dir=keys_dir)
     state = resolve_chain_state(trace_id=trace_id)
+    runtime: ClaudeChildRuntime | None = None
+    reserved_handle: str | None = None
+    authorized_child: tuple[str, str] | None = None
+    deny_reason_text: str | None = None
     try:
         with _locked(state):
+            agent_id = str(hook_input.get("agent_id", "") or "")
+            session_id = str(hook_input.get("session_id", "") or "")
+            operation_id = str(hook_input.get("tool_use_id", "") or "")
+            child_state_exists = (state.trace_dir / CHILD_BINDING_FILENAME).exists()
+            if agent_id or tool_name == "Agent" or child_state_exists:
+                runtime = ClaudeChildRuntime(
+                    trace_dir=state.trace_dir,
+                    parent_token=parent_token,
+                    parent_claims=parent_claims,
+                    private_key=private_key,
+                )
+
+            binding = None
+            if runtime is not None:
+                try:
+                    binding = runtime.resolve_child(
+                        session_id=session_id,
+                        agent_id=agent_id,
+                    )
+                except ClaudeChildBindingError as exc:
+                    event = _build_policy_event(
+                        claims=parent_claims,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        trace_id=trace_id,
+                    )
+                    session_state = _verified_pretool_session_state_unlocked(
+                        state,
+                        private_key.public_key(),
+                        parent_claims,
+                    )
+                    event.budget_delta, budget_remaining = _hook_budget_evidence(
+                        passport_claims=parent_claims,
+                        session_state=session_state,
+                        event=event,
+                        permitted=False,
+                    )
+                    reason_text = str(exc)
+                    unbound_metadata = _child_authority_metadata(
+                        hook_input,
+                        trace_id=trace_id,
+                        tool_name=tool_name,
+                        binding_state="unbound",
+                        reason="child authority binding was not resolved",
+                    )
+                    return _emit_pre_tool_deny_unlocked(
+                        state=state,
+                        private_key=private_key,
+                        event=event,
+                        decisions=[
+                            _binding_policy_decision(allowed=False, reason=reason_text)
+                        ],
+                        reason_text=reason_text,
+                        trace_id=trace_id,
+                        hook_input=hook_input,
+                        budget_remaining=budget_remaining,
+                        measurements=unbound_metadata,
+                    )
+
+            if binding is not None and binding.handle is not None:
+                if runtime is None:
+                    raise ClaudeChildBindingError(
+                        "CHILD_RUNTIME_MISSING",
+                        "bound child runtime is unavailable",
+                    )
+                claims = runtime.child_policy(binding.handle)
+                event = _build_policy_event(
+                    claims=claims,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    trace_id=trace_id,
+                )
+                session_state = _verified_pretool_session_state_unlocked(
+                    state,
+                    private_key.public_key(),
+                    claims,
+                )
+                if not operation_id:
+                    reason_text = "bound child tool call has no tool_use_id"
+                    runtime.cancel_reservation(
+                        binding.handle,
+                        terminal_code="CHILD_OPERATION_ID_MISSING",
+                    )
+                    event.budget_delta, budget_remaining = _hook_budget_evidence(
+                        passport_claims=claims,
+                        session_state=session_state,
+                        event=event,
+                        permitted=False,
+                    )
+                    child_metadata = _child_authority_metadata(
+                        hook_input,
+                        trace_id=trace_id,
+                        tool_name=tool_name,
+                        binding_state="quarantined",
+                        policy_fingerprint=binding.policy_fingerprint,
+                        reason="missing child operation identity",
+                    )
+                    return _emit_pre_tool_deny_unlocked(
+                        state=state,
+                        private_key=private_key,
+                        event=event,
+                        decisions=[
+                            _binding_policy_decision(
+                                allowed=False,
+                                reason=reason_text,
+                            )
+                        ],
+                        reason_text=reason_text,
+                        trace_id=trace_id,
+                        hook_input=hook_input,
+                        budget_remaining=budget_remaining,
+                        measurements=child_metadata,
+                    )
+                result = runtime.authorize_child_tool(
+                    handle=binding.handle,
+                    operation_id=operation_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+                permitted = result.decision == Decision.PERMIT
+                event.budget_delta, budget_remaining = _hook_budget_evidence(
+                    passport_claims=claims,
+                    session_state=session_state,
+                    event=event,
+                    permitted=permitted,
+                )
+                decisions = [
+                    _binding_policy_decision(
+                        allowed=permitted,
+                        reason=result.reason,
+                    )
+                ]
+                child_metadata = _child_authority_metadata(
+                    hook_input,
+                    trace_id=trace_id,
+                    tool_name=tool_name,
+                    binding_state="bound",
+                    policy_fingerprint=binding.policy_fingerprint,
+                )
+                if not permitted:
+                    return _emit_pre_tool_deny_unlocked(
+                        state=state,
+                        private_key=private_key,
+                        event=event,
+                        decisions=decisions,
+                        reason_text=result.reason,
+                        trace_id=trace_id,
+                        hook_input=hook_input,
+                        budget_remaining=budget_remaining,
+                        measurements=child_metadata,
+                    )
+                authorized_child = (binding.handle, operation_id)
+                receipt_obj = _emit_chained_receipt_unlocked(
+                    state=state,
+                    private_key=private_key,
+                    decision_enum=Decision.PERMIT,
+                    event=event,
+                    decisions=decisions,
+                    reason="allowed by bound attenuated child policy",
+                    trace_id=trace_id,
+                    hook_input=hook_input,
+                    measurements=child_metadata,
+                    budget_remaining=budget_remaining,
+                )
+                return {
+                    "continue": True,
+                    "systemMessage": (
+                        f"ardur: child allowed (receipt {receipt_obj.receipt_id})"
+                    ),
+                }
+
+            claims = parent_claims
+            event = _build_policy_event(
+                claims=claims,
+                tool_name=tool_name,
+                arguments=arguments,
+                trace_id=trace_id,
+            )
             session_state = _verified_pretool_session_state_unlocked(
                 state,
                 private_key.public_key(),
                 claims,
             )
+            parent_usage: Mapping[str, Any] | None = None
+            if runtime is not None:
+                parent_usage = runtime.synchronize_parent_usage(
+                    tool_call_count=int(session_state["tool_call_count"]),
+                    tool_call_count_by_class=dict(
+                        session_state["tool_call_count_by_class"]
+                    ),
+                )
+                session_state = _hook_session_state(
+                    passport_claims=claims,
+                    tool_call_count=int(parent_usage["tool_call_count"]),
+                    by_class=dict(parent_usage["tool_call_count_by_class"]),
+                    delegated_budget_reserved=int(
+                        parent_usage["delegated_budget_reserved"]
+                    ),
+                )
             final, decisions = _evaluate_composed_policy(
                 event,
                 claims,
                 session_state=session_state,
             )
+
+            if final == "Allow" and tool_name == "Agent":
+                assert runtime is not None and parent_usage is not None
+                agent_type = str(
+                    tool_input_dict.get("subagent_type")
+                    or tool_input_dict.get("agent_type")
+                    or tool_input_dict.get("type")
+                    or ""
+                )
+                try:
+                    reservation = runtime.reserve_agent(
+                        session_id=session_id,
+                        tool_use_id=operation_id,
+                        agent_type=agent_type,
+                        parent_usage=parent_usage,
+                    )
+                except ClaudeChildBindingError as exc:
+                    final = "Deny"
+                    deny_reason_text = str(exc)
+                    decisions.append(
+                        _binding_policy_decision(
+                            allowed=False,
+                            reason=deny_reason_text,
+                        )
+                    )
+                else:
+                    reserved_handle = reservation.handle
+                    parent_usage = runtime.synchronize_parent_usage(
+                        tool_call_count=int(session_state["tool_call_count"]),
+                        tool_call_count_by_class=dict(
+                            session_state["tool_call_count_by_class"]
+                        ),
+                    )
+                    session_state = _hook_session_state(
+                        passport_claims=claims,
+                        tool_call_count=int(parent_usage["tool_call_count"]),
+                        by_class=dict(parent_usage["tool_call_count_by_class"]),
+                        delegated_budget_reserved=int(
+                            parent_usage["delegated_budget_reserved"]
+                        ),
+                    )
+                    decisions.append(
+                        _binding_policy_decision(
+                            allowed=True,
+                            reason=reservation.reason,
+                        )
+                    )
+
             budget_delta, budget_remaining = _hook_budget_evidence(
                 passport_claims=claims,
                 session_state=session_state,
@@ -996,42 +1360,31 @@ def handle_pre_tool_use(
             event.budget_delta = budget_delta
 
             if final == "Deny":
-                denier = next(
-                    (d for d in decisions if d.decision == "Deny"),
-                    None,
-                )
-                reasons = list(denier.reasons) if denier else ["denied by composed policy"]
-                reason_text = "; ".join(reasons)
-                deny_event = PolicyEvent(
-                    timestamp=event.timestamp,
-                    step_id=event.step_id,
-                    actor=event.actor,
-                    verifier_id=event.verifier_id,
-                    tool_name=event.tool_name,
-                    arguments=event.arguments,
-                    action_class=event.action_class,
-                    target=event.target,
-                    resource_family=event.resource_family,
-                    side_effect_class=event.side_effect_class,
-                    decision=Decision.DENY,
-                    reason=reason_text,
-                    passport_jti=event.passport_jti,
-                    trace_id=event.trace_id,
-                    denial_reason=_legacy_denial_reason(Decision.DENY, reason_text),
-                    budget_delta=budget_delta,
-                )
-                _emit_chained_receipt_unlocked(
+                if deny_reason_text is None:
+                    denier = next(
+                        (
+                            item
+                            for item in decisions
+                            if getattr(item, "decision", None) == "Deny"
+                        ),
+                        None,
+                    )
+                    reasons = (
+                        list(denier.reasons)
+                        if denier is not None
+                        else ["denied by composed policy"]
+                    )
+                    deny_reason_text = "; ".join(reasons)
+                return _emit_pre_tool_deny_unlocked(
                     state=state,
                     private_key=private_key,
-                    decision_enum=Decision.DENY,
-                    event=deny_event,
+                    event=event,
                     decisions=decisions,
-                    reason=reason_text,
+                    reason_text=deny_reason_text,
                     trace_id=trace_id,
                     hook_input=hook_input,
                     budget_remaining=budget_remaining,
                 )
-                return _pre_tool_use_deny_output(f"ardur: blocked - {reason_text}")
 
             receipt_obj = _emit_chained_receipt_unlocked(
                 state=state,
@@ -1045,6 +1398,24 @@ def handle_pre_tool_use(
                 budget_remaining=budget_remaining,
             )
     except Exception:  # noqa: BLE001 - hook boundary must deny on policy/chain failure
+        if runtime is not None and authorized_child is not None:
+            handle, operation = authorized_child
+            with suppress(Exception):
+                # The outer hook still denies. This cleanup only prevents an
+                # already-authorized child operation from becoming replayable.
+                runtime.quarantine_child_tool(
+                    handle=handle,
+                    operation_id=operation,
+                    terminal_code="HOOK_RECEIPT_UNCERTAIN",
+                )
+        if runtime is not None and reserved_handle is not None:
+            with suppress(Exception):
+                # The outer hook still denies. Recovery will quarantine any
+                # reservation whose cancellation cannot be persisted here.
+                runtime.cancel_reservation(
+                    reserved_handle,
+                    terminal_code="AGENT_PRETOOL_RECEIPT_UNCERTAIN",
+                )
         return _pre_tool_use_deny_output(
             "ardur: blocked - signed receipt chain is unavailable or invalid"
         )
@@ -1096,12 +1467,17 @@ def handle_post_tool_use(
     revoked it between Pre and Post, or the env was never configured),
     we silently no-op rather than emit an unchained receipt.
     """
+    from .claude_code_children import (
+        CHILD_BINDING_FILENAME,
+        ClaudeChildBindingError,
+        ClaudeChildRuntime,
+    )
     from .claude_code_telemetry import map_tool_call
     from .proxy import Decision
     from .receipt import build_receipt, sign_receipt
 
     try:
-        claims = load_active_passport(keys_dir=keys_dir)
+        parent_token, parent_claims = load_active_passport_token(keys_dir=keys_dir)
     except MissionLoadError:
         # No mission means no trace context to chain into. Silent no-op.
         return {"continue": True}
@@ -1111,16 +1487,7 @@ def handle_post_tool_use(
     tool_response = _coerce_mapping(hook_input.get("tool_response"))
     arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
 
-    trace_id = _trace_id_from_claims(claims)
-    event = _build_policy_event(
-        claims=claims,
-        tool_name=tool_name,
-        arguments=arguments,
-        trace_id=trace_id,
-        # Phase suffix on step_id so Pre and Post receipts can never
-        # share an identifier even if they hash the same base inputs.
-        phase="post",
-    )
+    trace_id = _trace_id_from_claims(parent_claims)
 
     # Build receipt directly so we can populate result_hash BEFORE
     # sign_receipt. The shared _emit_chained_receipt helper signs and
@@ -1128,6 +1495,82 @@ def handle_post_tool_use(
     private_key = load_private_key(keys_dir=keys_dir)
     state = resolve_chain_state(trace_id=trace_id)
     with _locked(state):
+        claims = parent_claims
+        metadata: dict[str, Any] | None = None
+        agent_id = str(hook_input.get("agent_id", "") or "")
+        session_id = str(hook_input.get("session_id", "") or "")
+        operation_id = str(hook_input.get("tool_use_id", "") or "")
+        child_state_exists = (state.trace_dir / CHILD_BINDING_FILENAME).exists()
+        if agent_id or child_state_exists:
+            try:
+                runtime = ClaudeChildRuntime(
+                    trace_dir=state.trace_dir,
+                    parent_token=parent_token,
+                    parent_claims=parent_claims,
+                    private_key=private_key,
+                )
+                binding = runtime.resolve_child(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                )
+            except ClaudeChildBindingError:
+                binding = None
+                runtime = None
+            if (
+                binding is not None
+                and binding.handle is not None
+                and runtime is not None
+            ):
+                claims = runtime.child_policy(binding.handle)
+                settlement_state = "completed"
+                settlement_reason = "bound child result settled"
+                try:
+                    runtime.settle_child_tool(
+                        handle=binding.handle,
+                        operation_id=operation_id,
+                        result=tool_response,
+                    )
+                except Exception:  # noqa: BLE001 - post hook cannot block
+                    settlement_state = "quarantined"
+                    settlement_reason = "child result settlement was uncertain"
+                    with suppress(Exception):
+                        # The post hook cannot block. Preserve fail-closed
+                        # adapter state even if the best-effort marker fails.
+                        runtime.quarantine_child_tool(
+                            handle=binding.handle,
+                            operation_id=operation_id,
+                            terminal_code="POST_TOOL_SETTLEMENT_UNCERTAIN",
+                        )
+                metadata = _child_authority_metadata(
+                    hook_input,
+                    trace_id=trace_id,
+                    tool_name=tool_name,
+                    binding_state="bound",
+                    policy_fingerprint=binding.policy_fingerprint,
+                )
+                metadata["authority_binding"].update(
+                    {
+                        "settlement_state": settlement_state,
+                        "reason": settlement_reason,
+                    }
+                )
+            elif agent_id:
+                metadata = _child_authority_metadata(
+                    hook_input,
+                    trace_id=trace_id,
+                    tool_name=tool_name,
+                    binding_state="unverified_child_post",
+                    reason="post-tool child authority binding was not resolved",
+                )
+        event = _build_policy_event(
+            claims=claims,
+            tool_name=tool_name,
+            arguments=arguments,
+            trace_id=trace_id,
+            # Phase suffix on step_id so Pre and Post receipts can never
+            # share an identifier even if they hash the same base inputs.
+            phase="post",
+        )
         # Keep parent lookup/sign/append atomic for the same parallel-hook
         # reason documented in _emit_chained_receipt.
         parent_hash = _strip_hash_prefix(_previous_receipt_hash_unlocked(state))
@@ -1146,11 +1589,140 @@ def handle_post_tool_use(
             hook_input,
             trace_id=trace_id,
             tool_name=tool_name,
+            metadata=metadata,
         )
         receipt_obj.result_hash = _result_hash(tool_response)
         signed = sign_receipt(receipt_obj, private_key)
         _append_receipt_unlocked(state, signed, receipt_obj=receipt_obj)
     return {"continue": True}
+
+
+def handle_post_tool_use_failure(
+    hook_input: dict[str, Any],
+    *,
+    keys_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Quarantine a failed bound-child operation and emit hashed evidence."""
+
+    from .claude_code_children import ClaudeChildBindingError, ClaudeChildRuntime
+    from .claude_code_telemetry import map_tool_call
+    from .governed_subagent import GovernedSubagentError
+    from .proxy import Decision
+    from .receipt import build_receipt, sign_receipt
+
+    try:
+        parent_token, parent_claims = load_active_passport_token(keys_dir=keys_dir)
+    except MissionLoadError:
+        return {"continue": True}
+
+    tool_name = str(hook_input.get("tool_name", ""))
+    tool_input_dict = dict(hook_input.get("tool_input", {}) or {})
+    arguments = map_tool_call(tool_name=tool_name, tool_input=tool_input_dict)
+    trace_id = _trace_id_from_claims(parent_claims)
+    private_key = load_private_key(keys_dir=keys_dir)
+    state = resolve_chain_state(trace_id=trace_id)
+    claims = parent_claims
+    agent_id = str(hook_input.get("agent_id", "") or "")
+    session_id = str(hook_input.get("session_id", "") or "")
+    operation_id = str(hook_input.get("tool_use_id", "") or "")
+    binding_state = "parent_observation"
+    policy_fingerprint: str | None = None
+    if agent_id:
+        runtime: ClaudeChildRuntime | None = None
+        binding = None
+        try:
+            runtime = ClaudeChildRuntime(
+                trace_dir=state.trace_dir,
+                parent_token=parent_token,
+                parent_claims=parent_claims,
+                private_key=private_key,
+            )
+            binding = runtime.resolve_child(
+                session_id=session_id,
+                agent_id=agent_id,
+            )
+            if binding is None or binding.handle is None:
+                raise ClaudeChildBindingError(
+                    "CHILD_BINDING_MISSING", "failed child operation is unbound"
+                )
+            claims = runtime.child_policy(binding.handle)
+            policy_fingerprint = binding.policy_fingerprint
+            runtime.quarantine_child_tool(
+                handle=binding.handle,
+                operation_id=operation_id,
+                terminal_code="PLATFORM_TOOL_FAILURE",
+            )
+            binding_state = "quarantined"
+        except (ClaudeChildBindingError, GovernedSubagentError, ValueError):
+            if (
+                runtime is not None
+                and binding is not None
+                and binding.handle is not None
+            ):
+                runtime.cancel_reservation(
+                    binding.handle,
+                    terminal_code="PLATFORM_TOOL_FAILURE_UNCORRELATED",
+                )
+                binding_state = "quarantined"
+            else:
+                binding_state = "unverified_child_failure"
+
+    raw_duration = hook_input.get("duration_ms")
+    duration_ms: float | None = None
+    if isinstance(raw_duration, (int, float)) and not isinstance(raw_duration, bool):
+        candidate = float(raw_duration)
+        if candidate >= 0 and candidate == candidate and candidate != float("inf"):
+            duration_ms = candidate
+    metadata = _child_authority_metadata(
+        hook_input,
+        trace_id=trace_id,
+        tool_name=tool_name,
+        binding_state=binding_state,
+        policy_fingerprint=policy_fingerprint,
+    )
+    error_text = str(hook_input.get("error", "") or "")
+    metadata["tool_failure"] = _without_empty_values(
+        {
+            "error_hash": _hash_text(error_text),
+            "is_interrupt": bool(hook_input.get("is_interrupt", False)),
+            "duration_ms": duration_ms,
+        }
+    )
+    event = _build_policy_event(
+        claims=claims,
+        tool_name=tool_name,
+        arguments=arguments,
+        trace_id=trace_id,
+        phase="post-failure",
+    )
+    with _locked(state):
+        parent_hash = _strip_hash_prefix(_previous_receipt_hash_unlocked(state))
+        receipt_obj = build_receipt(
+            Decision.PERMIT,
+            event,
+            parent_hash,
+            policy_decisions=None,
+            reason="post-call failure observation",
+        )
+        _backfill_telemetry_fields(receipt_obj, event.arguments)
+        _attach_claude_code_measurements(
+            receipt_obj,
+            hook_input,
+            trace_id=trace_id,
+            tool_name=tool_name,
+            metadata=metadata,
+        )
+        receipt_obj.result_hash = _hash_text(error_text)
+        signed = sign_receipt(receipt_obj, private_key)
+        _append_receipt_unlocked(state, signed, receipt_obj=receipt_obj)
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUseFailure",
+            "additionalContext": (
+                "Ardur recorded the tool failure and quarantined any bound child authority."
+            ),
+        }
+    }
 
 
 # ─── Subagent lifecycle handlers ──────────────────────────────────────────────
@@ -1167,7 +1739,6 @@ def _lifecycle_arguments(
     return {
         "agent_id": agent_id,
         "agent_type": agent_type,
-        "agent_transcript_path": str(hook_input.get("agent_transcript_path", "") or ""),
         "hook_event_name": str(hook_input.get("hook_event_name", "") or ""),
         "tool_name": str(hook_input.get("hook_event_name", "") or lifecycle),
         "action_class": "dispatch" if lifecycle == "start" else "observe",
@@ -1183,20 +1754,6 @@ def _lifecycle_arguments(
     }
 
 
-def _policy_inheritance_summary(claims: Mapping[str, Any]) -> dict[str, Any]:
-    return _without_empty_values(
-        {
-            "grant_id": str(claims.get("jti", "") or ""),
-            "agent_id": str(claims.get("sub", "") or ""),
-            "allowed_tools": list(claims.get("allowed_tools", []) or []),
-            "forbidden_tools": list(claims.get("forbidden_tools", []) or []),
-            "resource_scope": list(claims.get("resource_scope", []) or []),
-            "max_tool_calls": claims.get("max_tool_calls"),
-            "max_duration_s": claims.get("max_duration_s"),
-        }
-    )
-
-
 def _subagent_lifecycle_metadata(
     hook_input: Mapping[str, Any],
     *,
@@ -1204,6 +1761,10 @@ def _subagent_lifecycle_metadata(
     trace_id: str,
     lifecycle: str,
     observed_at: str,
+    binding_state: str,
+    binding_reason: str,
+    policy_fingerprint: str | None = None,
+    child_grant_id: str | None = None,
     child_receipt_summary: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     agent_id = str(hook_input.get("agent_id", "") or "")
@@ -1222,7 +1783,9 @@ def _subagent_lifecycle_metadata(
     metadata = _common_claude_code_metadata(
         hook_input,
         trace_id=trace_id,
-        tool_name=str(hook_input.get("hook_event_name", "") or f"Subagent{lifecycle.title()}"),
+        tool_name=str(
+            hook_input.get("hook_event_name", "") or f"Subagent{lifecycle.title()}"
+        ),
     )
     metadata.update(
         _without_empty_values(
@@ -1231,21 +1794,27 @@ def _subagent_lifecycle_metadata(
                 "claude_agent_id": agent_id,
                 "ardur_child_id": ardur_child_id,
                 "agent_type": str(hook_input.get("agent_type", "") or ""),
-                "agent_transcript_path": str(hook_input.get("agent_transcript_path", "") or ""),
                 "final_response_hash": (
                     _hash_text(str(hook_input.get("last_assistant_message", "")))
                     if hook_input.get("last_assistant_message")
                     else None
                 ),
                 "lifecycle": lifecycle_payload,
-                "inherited_policy": _policy_inheritance_summary(claims),
+                "authority_binding": {
+                    "binding_state": binding_state,
+                    "reason": binding_reason,
+                    "policy_fingerprint": policy_fingerprint,
+                    "child_grant_id": child_grant_id,
+                },
                 "child_receipt_summary": {
                     **dict(child_receipt_summary or {}),
                     "integrity": "unverified",
                 },
                 "attribution": {
                     "mode": "exact" if agent_id else "trace_only",
-                    "source": "Subagent lifecycle hook agent_id" if agent_id else "missing lifecycle agent_id",
+                    "source": "Subagent lifecycle hook agent_id"
+                    if agent_id
+                    else "missing lifecycle agent_id",
                 },
             }
         )
@@ -1265,7 +1834,6 @@ def _summarize_child_receipts_unverified(
     *,
     state: ChainState,
     agent_id: str,
-    agent_transcript_path: str,
 ) -> dict[str, Any]:
     if not state.file.exists():
         return {"receipt_count": 0, "tools": {}, "violations": 0}
@@ -1282,18 +1850,10 @@ def _summarize_child_receipts_unverified(
                 continue
             if str(claims.get("tool", "")) in {"SubagentStart", "SubagentStop"}:
                 continue
-            meta = (
-                _coerce_mapping(claims.get("measurements"))
-                .get("claude_code", {})
-            )
+            meta = _coerce_mapping(claims.get("measurements")).get("claude_code", {})
             if not isinstance(meta, dict):
                 continue
-            if agent_id and meta.get("claude_agent_id") == agent_id:
-                matched = True
-            elif agent_transcript_path and meta.get("transcript_path") == agent_transcript_path:
-                matched = True
-            else:
-                matched = False
+            matched = bool(agent_id and meta.get("claude_agent_id") == agent_id)
             if not matched:
                 continue
             receipt_count += 1
@@ -1301,7 +1861,11 @@ def _summarize_child_receipts_unverified(
             tools[tool] = tools.get(tool, 0) + 1
             if claims.get("verdict") == "violation":
                 violations += 1
-    return {"receipt_count": receipt_count, "tools": dict(sorted(tools.items())), "violations": violations}
+    return {
+        "receipt_count": receipt_count,
+        "tools": dict(sorted(tools.items())),
+        "violations": violations,
+    }
 
 
 def _subagent_registry_record(
@@ -1321,12 +1885,10 @@ def _subagent_registry_record(
             "claude_agent_id": metadata.get("claude_agent_id"),
             "ardur_child_id": metadata.get("ardur_child_id"),
             "agent_type": metadata.get("agent_type"),
-            "transcript_path": metadata.get("transcript_path"),
-            "agent_transcript_path": metadata.get("agent_transcript_path"),
-            "cwd": metadata.get("cwd"),
             "started_at": lifecycle_meta.get("started_at"),
             "stopped_at": lifecycle_meta.get("stopped_at"),
             "attribution": metadata.get("attribution"),
+            "authority_binding": metadata.get("authority_binding"),
         }
     )
 
@@ -1337,34 +1899,79 @@ def _handle_subagent_lifecycle(
     keys_dir: Path | None,
     lifecycle: str,
 ) -> dict[str, Any]:
+    from .claude_code_children import (
+        ClaudeChildBindingError,
+        ClaudeChildBindingOutcome,
+        ClaudeChildRuntime,
+    )
+    from .governed_subagent import GovernedSubagentError
     from .proxy import Decision
 
     try:
-        claims = load_active_passport(keys_dir=keys_dir)
+        parent_token, claims = load_active_passport_token(keys_dir=keys_dir)
     except MissionLoadError:
         return {"continue": True}
 
     trace_id = _trace_id_from_claims(claims)
     observed_at = _utc_timestamp()
-    event_name = str(hook_input.get("hook_event_name", "") or ("SubagentStart" if lifecycle == "start" else "SubagentStop"))
+    event_name = str(
+        hook_input.get("hook_event_name", "")
+        or ("SubagentStart" if lifecycle == "start" else "SubagentStop")
+    )
     state = resolve_chain_state(trace_id=trace_id)
     agent_id = str(hook_input.get("agent_id", "") or "")
-    agent_transcript_path = str(hook_input.get("agent_transcript_path", "") or "")
+    agent_type = str(hook_input.get("agent_type", "") or "")
+    session_id = str(hook_input.get("session_id", "") or "")
+    private_key = load_private_key(keys_dir=keys_dir)
+    try:
+        runtime = ClaudeChildRuntime(
+            trace_dir=state.trace_dir,
+            parent_token=parent_token,
+            parent_claims=claims,
+            private_key=private_key,
+        )
+        if lifecycle == "start":
+            outcome = runtime.bind_start(
+                session_id=session_id,
+                agent_id=agent_id,
+                agent_type=agent_type,
+            )
+        else:
+            outcome = runtime.stop(
+                session_id=session_id,
+                agent_id=agent_id,
+                agent_type=agent_type,
+            )
+    except ClaudeChildBindingError as exc:
+        outcome = ClaudeChildBindingOutcome(
+            state="quarantined",
+            reason=str(exc),
+        )
+
     child_summary = (
         _summarize_child_receipts_unverified(
             state=state,
             agent_id=agent_id,
-            agent_transcript_path=agent_transcript_path,
         )
         if lifecycle == "stop"
         else None
     )
+    child_grant_id: str | None = None
+    if outcome.handle is not None:
+        try:
+            child_grant_id = str(runtime.child_policy(outcome.handle).get("jti", ""))
+        except (ClaudeChildBindingError, GovernedSubagentError, ValueError):
+            child_grant_id = None
     ardur_child_id, metadata = _subagent_lifecycle_metadata(
         hook_input,
         claims=claims,
         trace_id=trace_id,
         lifecycle=lifecycle,
         observed_at=observed_at,
+        binding_state=outcome.state,
+        binding_reason=outcome.reason,
+        policy_fingerprint=outcome.policy_fingerprint,
+        child_grant_id=child_grant_id,
         child_receipt_summary=child_summary,
     )
     arguments = _lifecycle_arguments(hook_input, lifecycle=lifecycle)
@@ -1379,7 +1986,7 @@ def _handle_subagent_lifecycle(
         decision_enum=Decision.PERMIT,
         event=event,
         decisions=[],
-        reason=f"subagent {lifecycle} observed",
+        reason=f"subagent {lifecycle} observed; authority {outcome.state}",
         trace_id=trace_id,
         keys_dir=keys_dir,
         hook_input=hook_input,
@@ -1391,13 +1998,17 @@ def _handle_subagent_lifecycle(
         ),
     )
     if lifecycle == "start":
+        if outcome.state == "bound" and outcome.handle is not None:
+            additional_context = f"Ardur child authority bound: {outcome.handle}."
+        else:
+            additional_context = (
+                f"Ardur child authority {outcome.state}: {outcome.reason}. "
+                "Tool calls will not fall back to parent authority."
+            )
         return {
             "hookSpecificOutput": {
                 "hookEventName": "SubagentStart",
-                "additionalContext": (
-                    "Ardur is observing this subagent as "
-                    f"{ardur_child_id}. Inherited tool and resource policy still applies."
-                ),
+                "additionalContext": additional_context,
             }
         }
     return {"continue": True}
@@ -1429,8 +2040,16 @@ def _handle_pre_tool_use_daemon_first(
     The fallback preserves existing behavior when no daemon is running or when
     daemon I/O fails. We do not fail the hook call on daemon availability.
     """
+    if os.environ.get("ARDUR_CC_CHILD_POLICY_FILE"):
+        # The native daemon enforces only the parent passport today. Keep every
+        # child-enabled trace on the binding-aware Python path so Agent
+        # reservations and child agent_id checks cannot be bypassed.
+        return handle_pre_tool_use(hook_input, keys_dir=keys_dir)
     try:
-        from .claude_code_daemon_client import dispatch_pre_tool_use, is_valid_pre_tool_use_output
+        from .claude_code_daemon_client import (
+            dispatch_pre_tool_use,
+            is_valid_pre_tool_use_output,
+        )
 
         daemon_output = dispatch_pre_tool_use(hook_input, keys_dir=keys_dir)
     except Exception:  # pragma: no cover - defensive daemon boundary
@@ -1441,7 +2060,9 @@ def _handle_pre_tool_use_daemon_first(
     return handle_pre_tool_use(hook_input, keys_dir=keys_dir)
 
 
-def _claude_code_hook_input_next_steps(condition: str, *, phase: str) -> list[dict[str, str]]:
+def _claude_code_hook_input_next_steps(
+    condition: str, *, phase: str
+) -> list[dict[str, str]]:
     return [
         {
             "condition": condition,
@@ -1467,7 +2088,9 @@ def _claude_code_hook_input_next_steps(condition: str, *, phase: str) -> list[di
     ]
 
 
-def _claude_code_hook_input_failure_response(exc: Exception, *, phase: str) -> dict[str, Any]:
+def _claude_code_hook_input_failure_response(
+    exc: Exception, *, phase: str
+) -> dict[str, Any]:
     if isinstance(exc, json.JSONDecodeError):
         condition = "claude_code_hook_input_malformed"
         message = "Claude Code hook input is not valid JSON."
@@ -1573,7 +2196,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vibap.claude_code_hook")
     parser.add_argument(
         "phase",
-        choices=["pre", "post", "subagent-start", "subagent-stop"],
+        choices=["pre", "post", "post-failure", "subagent-start", "subagent-stop"],
         help="hook lifecycle phase being invoked",
     )
     parser.add_argument(
@@ -1621,6 +2244,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "pre": _handle_pre_tool_use_daemon_first,
         "post": handle_post_tool_use,
+        "post-failure": handle_post_tool_use_failure,
         "subagent-start": handle_subagent_start,
         "subagent-stop": handle_subagent_stop,
     }
@@ -1642,4 +2266,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     import sys
+
     raise SystemExit(main(sys.argv[1:]))

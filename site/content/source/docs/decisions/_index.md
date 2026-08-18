@@ -27,4 +27,5 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`ADR-024-self-asserted-owner-identity-assurance.md`](/__ardur_internal__/source/docs/decisions/adr-024-self-asserted-owner-identity-assurance/)
 - [`ADR-026-typed-dangerous-action-risk-budgets.md`](/__ardur_internal__/source/docs/decisions/adr-026-typed-dangerous-action-risk-budgets/)
 - [`ADR-027-latency-benchmark-gate-evaluator.md`](/__ardur_internal__/source/docs/decisions/adr-027-latency-benchmark-gate-evaluator/)
+- [`ADR-028-claude-code-child-authority-binding.md`](/__ardur_internal__/source/docs/decisions/adr-028-claude-code-child-authority-binding/)
 - [`README.md`](/__ardur_internal__/source/docs/decisions/readme/)

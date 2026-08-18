@@ -3559,6 +3559,84 @@ class GovernanceProxy:
             self.sessions[session_id] = loaded
             return loaded
 
+    def synchronize_external_tool_usage_floor(
+        self,
+        session: GovernanceSession | str,
+        *,
+        tool_call_count: int,
+        tool_call_count_by_class: Mapping[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Advance a persisted session to a trusted external usage floor.
+
+        Integrations that already maintain a verified receipt chain can use
+        this method before delegation so the lineage ledger accounts for calls
+        made outside :meth:`evaluate_tool_call`. Floors are monotonic and may
+        never overlap capacity already reserved for descendants.
+        """
+
+        if isinstance(tool_call_count, bool) or not isinstance(tool_call_count, int):
+            raise TypeError("tool_call_count must be an integer")
+        if tool_call_count < 0:
+            raise ValueError("tool_call_count must be non-negative")
+        raw_by_class = tool_call_count_by_class or {}
+        if not isinstance(raw_by_class, Mapping):
+            raise TypeError("tool_call_count_by_class must be an object")
+        by_class: dict[str, int] = {}
+        for raw_name, raw_count in raw_by_class.items():
+            name = str(raw_name)
+            if not name:
+                raise ValueError("tool-call class names must be non-empty")
+            if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+                raise TypeError("tool-call class counts must be integers")
+            if raw_count < 0:
+                raise ValueError("tool-call class counts must be non-negative")
+            by_class[name] = raw_count
+        if sum(by_class.values()) > tool_call_count:
+            raise ValueError("per-class usage cannot exceed total tool-call usage")
+
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                if target.summary is not None or target.end_time is not None:
+                    raise PermissionError(
+                        "completed session cannot accept external usage"
+                    )
+                next_total = max(int(target.tool_call_count), tool_call_count)
+                next_by_class = dict(target.tool_call_count_by_class)
+                for name, count in by_class.items():
+                    next_by_class[name] = max(int(next_by_class.get(name, 0)), count)
+                if sum(next_by_class.values()) > next_total:
+                    raise ValueError(
+                        "merged per-class usage cannot exceed total tool-call usage"
+                    )
+                ceiling = int(target.passport_claims.get("max_tool_calls", 50))
+                reserved = int(target.delegated_budget_reserved)
+                if next_total + reserved > ceiling:
+                    raise PermissionError(
+                        "external usage overlaps delegated tool-call reservations"
+                    )
+                class_caps = dict(
+                    target.passport_claims.get("max_tool_calls_per_class", {}) or {}
+                )
+                for name, count in next_by_class.items():
+                    if name in class_caps and count > int(class_caps[name]):
+                        raise PermissionError(
+                            f"external usage exceeds tool-call class budget for {name}"
+                        )
+                changed = (
+                    next_total != target.tool_call_count
+                    or next_by_class != target.tool_call_count_by_class
+                )
+                target.tool_call_count = next_total
+                target.tool_call_count_by_class = next_by_class
+                if changed:
+                    self._persist_session(target)
+                return {
+                    "tool_call_count": target.tool_call_count,
+                    "tool_call_count_by_class": dict(target.tool_call_count_by_class),
+                    "delegated_budget_reserved": target.delegated_budget_reserved,
+                    "max_tool_calls": ceiling,
+                }
+
     @staticmethod
     def _risk_measurements(
         facts: Mapping[str, int | str] | None = None,
@@ -6484,7 +6562,9 @@ def serve_proxy(
                     )
                     return
                 if path == "/.well-known/jwks.json":
-                    self._send_json(200, {"keys": [_public_key_to_jwk(proxy.public_key)]})
+                    self._send_json(
+                        200, {"keys": [_public_key_to_jwk(proxy.public_key)]}
+                    )
                     return
                 if not self._check_rate_limit():
                     return
@@ -6501,7 +6581,9 @@ def serve_proxy(
                     self.send_header("Referrer-Policy", "no-referrer")
                     self.send_header("Cache-Control", "no-store")
                     if tls_active:
-                        self.send_header("Strict-Transport-Security", "max-age=31536000")
+                        self.send_header(
+                            "Strict-Transport-Security", "max-age=31536000"
+                        )
                     self.end_headers()
                     self.wfile.write(body)
                     ardur_metrics.requests_total.inc(
@@ -6902,9 +6984,7 @@ def serve_proxy(
                         # reached this site are sanitized at their sources, so
                         # str(exc) is safe to surface. Log full detail for
                         # operator triage.
-                        logger.debug(
-                            "PermissionError in /delegate", exc_info=exc
-                        )
+                        logger.debug("PermissionError in /delegate", exc_info=exc)
                         self._send_json(403, {"error": str(exc)})
                     else:
                         self._send_json(
@@ -7051,9 +7131,7 @@ def _proxy_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
         {
             "condition": condition,
             "action": "choose_valid_proxy_port",
-            "command": (
-                "python -m vibap.proxy --host <loopback-host> --port <port>"
-            ),
+            "command": ("python -m vibap.proxy --host <loopback-host> --port <port>"),
             "detail": (
                 "Use an integer TCP port from 0 through 65535. Use 0 when you "
                 "want the operating system to choose an available local port."
@@ -7150,9 +7228,7 @@ def _proxy_api_token_invalid_response() -> dict[str, object]:
         "next_steps": [
             {
                 "action": "pass_real_token",
-                "command": (
-                    "python -m vibap.proxy --api-token <your-secret-token>"
-                ),
+                "command": ("python -m vibap.proxy --api-token <your-secret-token>"),
                 "detail": "Provide a non-empty API token.",
             },
             {
