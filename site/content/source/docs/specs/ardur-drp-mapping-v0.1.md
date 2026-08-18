@@ -2,7 +2,7 @@
 title: "Ardur DRP Mapping Profile v0.1"
 description: "This document maps the current Ardur delegation and action-receipt surfaces to"
 source_path: "docs/specs/ardur-drp-mapping-v0.1.md"
-source_sha256: "6b5151369a536c6c6dc382796fd7a2e7f5d78c3d51216f62cd893d589f4ea442"
+source_sha256: "992642ef6f5ba1a2536f3b74738e395edfc38f95e976f1a5c8e2053379164727"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -94,7 +94,7 @@ transformations are:
 | `par_hash`, `parent_token_hash`, `parent_jti` | `parentReceiptId` plus Ardur audit fields | Resolve the actual profiled parent receipt. Token hashes and token IDs are retained but are not DRP receipt IDs. |
 | `cnf.jwk` | `metadata.x-ardur.capabilityTokenRef.holderConfirmation.jwk` | The holder key is not the DRP receipt-signing key. |
 | depth and delegation policy | `metadata.x-ardur.redelegation` | DRP describes depth behavior but has no Authorization Object fields for mode, depth, or maximum depth. |
-| budgets and policy references | `metadata.x-ardur.budget`, `metadata.x-ardur.policy` | Security-critical extensions that participate in attenuation checks. |
+| call-count/spend budgets and policy references | `metadata.x-ardur.budget`, `metadata.x-ardur.policy` | Security-critical extensions that participate in attenuation checks. The v0.1 mapping ledger reserves `spendBudget`, but the current DRP emitter/profile does not project it and must fail closed rather than omit or downgrade that authority. |
 | Python `risk_budget` | No projection in the current profile | The current emitter/verifier does not implement typed fact contracts or atomic session/agent/lineage risk accounting. An emitter presented with this claim MUST deny/fail closed instead of dropping it. A future profile may define a critical `metadata.x-ardur.riskBudget` extension. |
 | Python MIC `conformance_profile`, `receipt_policy`, `tool_manifest_digest` | No projection for the policy claims; `metadata.x-ardur.capabilityTokenRef.toolManifestDigest` for a standalone digest | The current DRP profile cannot preserve the MIC enforcement/evidence tier. If either policy claim is present, reject the entire source object and never export only the digest. A standalone digest changes its tag from `sha-256:` to `sha256:` without changing the 64 lowercase hexadecimal digest. |
 | `mission_ref` | `metadata.x-ardur.missionRef` | DRP instruction commitment does not replace the governing Mission Declaration reference. |

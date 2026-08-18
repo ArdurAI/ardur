@@ -25,3 +25,4 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`personal-hub-api.md`](/__ardur_internal__/source/docs/reference/personal-hub-api/)
 - [`proxy-oci-image.md`](/__ardur_internal__/source/docs/reference/proxy-oci-image/)
 - [`risk-budgets.md`](/__ardur_internal__/source/docs/reference/risk-budgets/)
+- [`spend-budgets.md`](/__ardur_internal__/source/docs/reference/spend-budgets/)

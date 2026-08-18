@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "0a4ebde09be93448f7944ebb9e61541967941d4e2c9c6d9fced4f1db063c4acf"
+source_sha256: "651182422437be6c603909264dd53b1fd44da1be0a3037aca8d124085c45df8e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -239,6 +239,13 @@ SVID is mandatory and per-call inputs cannot replace the issuer, JWKS, trust
 domain, or audience. Without server trust configuration, Biscuit sessions
 remain explicitly `svid_bound=false`. JWT-SVID is still a bearer credential
 with a bounded replay window.
+
+Library adapters for metered tools can also configure operator-owned quote
+snapshots and signed session/agent/lineage spend ceilings. The proxy reserves
+integer token and currency-micro upper bounds before returning `PERMIT`, then
+settles trusted usage or conservatively quarantines missing evidence. See the
+[pre-action spend budget reference](/__ardur_internal__/source/docs/reference/spend-budgets/); no
+provider prices are hard-coded or fetched on the authorization hot path.
 
 ## Protocol identifier rename
 
