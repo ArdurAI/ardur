@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "8b70d4c17bcc4a7869ded37e39449e3fed6e12789e43d48f8c88fc2c30aa361d"
+source_sha256: "c9acdfe5b9810cb3f802b6f65e80d1de31980fe893bda2cd0a45da4418db42a7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -41,9 +41,8 @@ enforcement, and verifiable evidence.
   credential this repository issues is `caller_provided`: the issuer signed a
   configured SPIFFE ID, it did not authenticate the workload. The stronger
   `identity_provider_verified` value is defined for verifiers but no issuance
-  path emits it yet. An unrecognised assurance value fails verification; an
-  absent one — a credential issued before the label existed — verifies with a
-  warning and is read as unauthenticated, never as verified
+  path emits it yet. Missing and unrecognised values both fail verification
+  closed, on the same reasoning ADR-024 applies to `owner_id_assurance`
 - KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
   proof-of-possession by default; bearer compatibility requires an explicit
   constructor opt-out

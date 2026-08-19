@@ -254,21 +254,18 @@ func Verify(raw string, issuerPubKey ed25519.PublicKey, opts *VerifyOptions) (*V
 				OwnerIDAssuranceSelfAsserted,
 			))
 		}
-		// The assurance label states how spiffe_id entered the credential. An
-		// unrecognised label is a hard failure: a verifier that skipped it
-		// would fall back to reading spiffe_id as though it meant something it
-		// has no basis for. An absent label is not a failure — credentials
-		// issued before the label existed carry none — but it is reported,
-		// and SPIFFEIDProviderVerified reads it as unauthenticated either way.
+		// The assurance label states how spiffe_id entered the credential.
+		// Missing and invented values both fail closed, on the same reasoning
+		// ADR-024 gives for owner_id_assurance: accepting either would let a
+		// credential assert a workload identity with no corresponding proof
+		// path, and would leave a verifier reading spiffe_id as though it
+		// meant something it has no basis for.
 		switch cred.Claims.Identity.SPIFFEIDAssurance {
 		case SPIFFEIDAssuranceCallerProvided, SPIFFEIDAssuranceProviderVerified:
-		case "":
-			result.Warnings = append(result.Warnings,
-				"identity layer: spiffe_id_assurance is absent; spiffe_id is not an authenticated workload identity")
 		default:
 			result.Valid = false
 			result.Errors = append(result.Errors, fmt.Sprintf(
-				"identity layer: unsupported spiffe_id_assurance %q",
+				"identity layer: unsupported spiffe_id_assurance %q; a missing or unrecognised value fails closed",
 				cred.Claims.Identity.SPIFFEIDAssurance,
 			))
 		}

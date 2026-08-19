@@ -24,9 +24,8 @@ enforcement, and verifiable evidence.
   credential this repository issues is `caller_provided`: the issuer signed a
   configured SPIFFE ID, it did not authenticate the workload. The stronger
   `identity_provider_verified` value is defined for verifiers but no issuance
-  path emits it yet. An unrecognised assurance value fails verification; an
-  absent one — a credential issued before the label existed — verifies with a
-  warning and is read as unauthenticated, never as verified
+  path emits it yet. Missing and unrecognised values both fail verification
+  closed, on the same reasoning ADR-024 applies to `owner_id_assurance`
 - KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
   proof-of-possession by default; bearer compatibility requires an explicit
   constructor opt-out

@@ -137,14 +137,23 @@ func TestVerifyNeverAuthenticatesCallerProvidedIdentity(t *testing.T) {
 	}
 }
 
+// TestVerifyRejectsUnsupportedSPIFFEIDAssurance covers the missing value as
+// well as invented ones. ADR-024 fails closed on a missing owner_id_assurance
+// for the reason that applies identically here: a credential must not assert a
+// workload identity with no corresponding proof path, and a verifier that
+// tolerated absence would read spiffe_id as though it meant something it has no
+// basis for. Nothing in the repository issues an unlabelled credential, no
+// committed fixture contains one, and the default credential lifetime is an
+// hour, so failing closed costs no compatibility.
 func TestVerifyRejectsUnsupportedSPIFFEIDAssurance(t *testing.T) {
 	for _, assurance := range []SPIFFEIDAssurance{
+		"",
 		"verified",
 		"spire",
 		"identity_provider_verified ",
 		"IDENTITY_PROVIDER_VERIFIED",
 	} {
-		t.Run(string(assurance), func(t *testing.T) {
+		t.Run("assurance="+string(assurance), func(t *testing.T) {
 			key := testSigningKey(t)
 			cred, err := testBuilder(t).Build(key)
 			if err != nil {
@@ -170,41 +179,48 @@ func TestVerifyRejectsUnsupportedSPIFFEIDAssurance(t *testing.T) {
 	}
 }
 
-// TestVerifyAcceptsCredentialIssuedBeforeAssuranceLabel keeps the restore
-// additive. Credentials issued while the label was absent from dev carry no
-// value at all; rejecting them would turn a labelling improvement into a
-// breaking format change. Absence is reported and read as unauthenticated.
-func TestVerifyAcceptsCredentialIssuedBeforeAssuranceLabel(t *testing.T) {
-	key := testSigningKey(t)
-	cred, err := testBuilder(t).Build(key)
-	if err != nil {
-		t.Fatalf("Build() error: %v", err)
-	}
-	cred.Claims.Identity.SPIFFEIDAssurance = ""
+// TestBothIdentityAssurancesFailClosedAlike pins the symmetry. Two assurance
+// fields sit side by side in the same layer; a verifier author who reads one as
+// strict will assume the other is too, so they must not diverge.
+func TestBothIdentityAssurancesFailClosedAlike(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		strip func(*IdentityClaims)
+		want  string
+	}{
+		{
+			name:  "missing owner_id_assurance",
+			strip: func(i *IdentityClaims) { i.OwnerIDAssurance = "" },
+			want:  "owner_id_assurance",
+		},
+		{
+			name:  "missing spiffe_id_assurance",
+			strip: func(i *IdentityClaims) { i.SPIFFEIDAssurance = "" },
+			want:  "spiffe_id_assurance",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			key := testSigningKey(t)
+			cred, err := testBuilder(t).Build(key)
+			if err != nil {
+				t.Fatalf("Build() error: %v", err)
+			}
+			tt.strip(cred.Claims.Identity)
 
-	encoded, err := Encode(cred, key)
-	if err != nil {
-		t.Fatalf("Encode() error: %v", err)
-	}
-	identityJSON, err := json.Marshal(cred.Claims.Identity)
-	if err != nil {
-		t.Fatalf("marshal identity claims: %v", err)
-	}
-	if strings.Contains(string(identityJSON), "spiffe_id_assurance") {
-		t.Fatalf("an unlabelled identity layer must not serialize the field at all: %s", identityJSON)
-	}
-
-	result, err := Verify(encoded, key.PublicKey, &VerifyOptions{SkipStatusCheck: true})
-	if err != nil {
-		t.Fatalf("Verify() error: %v", err)
-	}
-	if !result.Valid {
-		t.Fatalf("a credential predating the label must still verify, got errors: %v", result.Errors)
-	}
-	if got := strings.Join(result.Warnings, "; "); !strings.Contains(got, "spiffe_id_assurance") {
-		t.Fatalf("verification warnings = %q, want the absent-label warning", got)
-	}
-	if result.Credential.Claims.Identity.SPIFFEIDProviderVerified() {
-		t.Fatal("an absent assurance label was read as an authenticated workload identity")
+			encoded, err := Encode(cred, key)
+			if err != nil {
+				t.Fatalf("Encode() error: %v", err)
+			}
+			result, err := Verify(encoded, key.PublicKey, &VerifyOptions{SkipStatusCheck: true})
+			if err != nil {
+				t.Fatalf("Verify() error: %v", err)
+			}
+			if result.Valid {
+				t.Fatal("a missing assurance value was accepted")
+			}
+			if got := strings.Join(result.Errors, "; "); !strings.Contains(got, tt.want) {
+				t.Fatalf("verification errors = %q, want a %s failure", got, tt.want)
+			}
+		})
 	}
 }

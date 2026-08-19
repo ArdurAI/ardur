@@ -159,8 +159,9 @@ type IdentityClaims struct {
 	// Assurance for SPIFFEID. Verifiers must not treat caller-provided input as
 	// workload-provider-authenticated identity. Use SPIFFEIDProviderVerified
 	// rather than comparing this field directly, so that an absent or
-	// unrecognised value can never read as authenticated.
-	SPIFFEIDAssurance SPIFFEIDAssurance `json:"spiffe_id_assurance,omitempty"`
+	// unrecognised value can never read as authenticated. Verification requires
+	// a recognised value, mirroring ADR-024 for owner_id_assurance.
+	SPIFFEIDAssurance SPIFFEIDAssurance `json:"spiffe_id_assurance"`
 
 	// SPIFFE-formatted deploying human or service-account attribution.
 	// This value is not an authenticated dual-identity binding.
