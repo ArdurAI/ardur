@@ -81,6 +81,11 @@ func (b *Builder) WithTTL(ttl time.Duration) *Builder {
 // WithIdentity sets Layer 1 (Identity) claims.
 // spiffeID and ownerID are required; a2aCardRef is optional. ownerID is
 // configured attribution and is always emitted with self-asserted assurance.
+//
+// The SPIFFE ID is emitted as caller-provided. This builder has no path that
+// emits SPIFFEIDAssuranceProviderVerified, because no issuance path in this
+// repository authenticates a workload identity yet; binding issuance to SPIRE
+// (S3) is what will earn that label.
 func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
 	if spiffeID == "" {
 		b.err = fmt.Errorf("identity: spiffe_id is required")
@@ -91,10 +96,11 @@ func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
 		return b
 	}
 	b.identity = &IdentityClaims{
-		SPIFFEID:         spiffeID,
-		OwnerID:          ownerID,
-		OwnerIDAssurance: OwnerIDAssuranceSelfAsserted,
-		A2ACardRef:       a2aCardRef,
+		SPIFFEID:          spiffeID,
+		SPIFFEIDAssurance: SPIFFEIDAssuranceCallerProvided,
+		OwnerID:           ownerID,
+		OwnerIDAssurance:  OwnerIDAssuranceSelfAsserted,
+		A2ACardRef:        a2aCardRef,
 	}
 	return b
 }

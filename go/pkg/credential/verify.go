@@ -254,6 +254,24 @@ func Verify(raw string, issuerPubKey ed25519.PublicKey, opts *VerifyOptions) (*V
 				OwnerIDAssuranceSelfAsserted,
 			))
 		}
+		// The assurance label states how spiffe_id entered the credential. An
+		// unrecognised label is a hard failure: a verifier that skipped it
+		// would fall back to reading spiffe_id as though it meant something it
+		// has no basis for. An absent label is not a failure — credentials
+		// issued before the label existed carry none — but it is reported,
+		// and SPIFFEIDProviderVerified reads it as unauthenticated either way.
+		switch cred.Claims.Identity.SPIFFEIDAssurance {
+		case SPIFFEIDAssuranceCallerProvided, SPIFFEIDAssuranceProviderVerified:
+		case "":
+			result.Warnings = append(result.Warnings,
+				"identity layer: spiffe_id_assurance is absent; spiffe_id is not an authenticated workload identity")
+		default:
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"identity layer: unsupported spiffe_id_assurance %q",
+				cred.Claims.Identity.SPIFFEIDAssurance,
+			))
+		}
 	}
 
 	// Step 11: Verify intent layer specifics

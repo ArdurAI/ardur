@@ -261,8 +261,14 @@ func TestIssue_CoreLevel_MinimalRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshaling identity claims: %v", err)
 	}
-	if strings.Contains(string(identityJSON), `"spiffe_id_assurance"`) {
-		t.Fatalf("direct identity issuance must preserve the existing credential schema: %s", identityJSON)
+	// Direct issuance signs a SPIFFE ID it was handed. It must say so in the
+	// credential rather than let the signature imply the workload was
+	// authenticated.
+	if got := cred.Claims.Identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceCallerProvided {
+		t.Fatalf("spiffe_id_assurance = %q, want %q: %s", got, credential.SPIFFEIDAssuranceCallerProvided, identityJSON)
+	}
+	if cred.Claims.Identity.SPIFFEIDProviderVerified() {
+		t.Fatalf("direct identity issuance reported provider-verified workload identity: %s", identityJSON)
 	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("missing Layer 3 (Intent)")
@@ -344,6 +350,41 @@ func TestIssue_CoreLevel_RequiresPolicy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "policy text") {
 		t.Errorf("error should mention policy: %v", err)
+	}
+}
+
+// TestIssue_IdentityProviderPathIsStillCallerProvided pins the boundary that
+// issue #405 restored the label to express. Configuring an IdentityProvider
+// raises the compliance level, but the issuer does not yet check that the
+// identity it received came from an authenticated Workload API exchange, or
+// that the returned SVID is the workload it is issuing for. Until S3 defines
+// and enforces that predicate, no credential may claim provider-verified
+// identity — including on the provider path. S3 flips this test deliberately.
+func TestIssue_IdentityProviderPathIsStillCallerProvided(t *testing.T) {
+	key := testSigningKey(t)
+	iss, _ := NewIssuer(key, "https://vibap.example.com",
+		WithIdentityProvider(defaultMockIdentity()),
+		WithProvenanceVerifier(defaultMockProvenance()),
+		WithPolicyEngine(defaultMockPolicy()),
+	)
+
+	result, err := iss.Issue(context.Background(), IssueRequest{
+		ImageRef:         "ghcr.io/ardur/agent:latest",
+		PolicyText:       `permit(principal, action == Action::"read", resource);`,
+		PermittedActions: []string{"read:database"},
+	})
+	if err != nil {
+		t.Fatalf("Issue failed: %v", err)
+	}
+	identity := result.Credential.Claims.Identity
+	if identity == nil {
+		t.Fatal("missing Layer 1 (Identity)")
+	}
+	if got := identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceCallerProvided {
+		t.Fatalf("spiffe_id_assurance = %q, want %q", got, credential.SPIFFEIDAssuranceCallerProvided)
+	}
+	if identity.SPIFFEIDProviderVerified() {
+		t.Fatal("configuring an IdentityProvider claimed provider-verified identity before S3 defined what that requires")
 	}
 }
 

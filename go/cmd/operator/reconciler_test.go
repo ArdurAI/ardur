@@ -476,8 +476,14 @@ func TestReconcile_ExplicitSPIFFEIDIsPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshaling identity claims: %v", err)
 	}
-	if strings.Contains(string(identityJSON), `"spiffe_id_assurance"`) {
-		t.Fatalf("explicit SPIFFE ID must preserve the existing credential schema: %s", identityJSON)
+	// The operator signs the SPIFFE ID configured on the resource. It does not
+	// authenticate the workload, so the credential it hands a relying party has
+	// to carry that limitation with it.
+	if got := decoded.Claims.Identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceCallerProvided {
+		t.Fatalf("spiffe_id_assurance = %q, want %q: %s", got, credential.SPIFFEIDAssuranceCallerProvided, identityJSON)
+	}
+	if decoded.Claims.Identity.SPIFFEIDProviderVerified() {
+		t.Fatalf("operator-issued credential reported provider-verified workload identity: %s", identityJSON)
 	}
 	if got := decoded.Claims.Identity.OwnerIDAssurance; got != credential.OwnerIDAssuranceSelfAsserted {
 		t.Fatalf("owner_id_assurance = %q, want %q", got, credential.OwnerIDAssuranceSelfAsserted)

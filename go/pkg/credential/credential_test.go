@@ -84,8 +84,8 @@ func TestBuilderMinimal(t *testing.T) {
 	if got := identityFields["owner_id_assurance"]; got != "self_asserted" {
 		t.Fatalf("owner_id_assurance = %v, want self_asserted", got)
 	}
-	if _, ok := identityFields["spiffe_id_assurance"]; ok {
-		t.Fatal("identity must not add an unversioned spiffe_id_assurance claim")
+	if got := identityFields["spiffe_id_assurance"]; got != "caller_provided" {
+		t.Fatalf("spiffe_id_assurance = %v, want caller_provided", got)
 	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("Intent layer is nil")
