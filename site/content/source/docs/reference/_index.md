@@ -26,3 +26,4 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`proxy-oci-image.md`](/__ardur_internal__/source/docs/reference/proxy-oci-image/)
 - [`risk-budgets.md`](/__ardur_internal__/source/docs/reference/risk-budgets/)
 - [`spend-budgets.md`](/__ardur_internal__/source/docs/reference/spend-budgets/)
+- [`spiffe-workload-identity.md`](/__ardur_internal__/source/docs/reference/spiffe-workload-identity/)

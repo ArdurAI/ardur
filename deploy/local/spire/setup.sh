@@ -40,7 +40,7 @@ echo "[spire-setup] Creating registration entries..."
     -socketPath /run/spire/sockets/server.sock \
     -spiffeID spiffe://ardur.dev/hub \
     -parentID spiffe://ardur.dev/agent/local \
-    -selector unix:uid:65532 \
+    -selector unix:uid:65533 \
     -x509SVIDTTL 3600
 
 # Test runner (uses host uid for local test execution)

@@ -36,12 +36,26 @@ contract.
 | TLS | Self-signed TLS by default; supply reviewed cert/key arguments for production |
 | Root filesystem | Supports `--read-only` with the state path mounted writable |
 | Linux privileges | No capabilities are required; use `no-new-privileges` |
+| SPIFFE startup | Off when `SPIFFE_ENDPOINT_SOCKET` is unset; fail-closed SVID fetch when configured |
 
 Signing keys, session state, the TLS certificate, and the governance log all
 live under the state path. The directory must be writable by UID/GID 65532 and
 should use encrypted storage with access controls appropriate for signing-key
 material. Do not put API tokens, private keys, or development certificates in
 the image, build arguments, labels, or Kubernetes manifests.
+
+The image contains the runtime SPIFFE/Biscuit dependencies. Setting
+`SPIFFE_ENDPOINT_SOCKET` makes startup fetch and retain the proxy's X.509-SVID;
+an unusable configured socket stops startup. The fetched private key is held in
+memory and is not written to the state volume. The local Compose stack also
+provides the socket directory group and shared PID namespace required by the
+SPIRE Unix workload attestor. An arbitrary `docker run` socket mount without
+equivalent permissions and process visibility is not claimed to work. Sharing
+the agent PID namespace also reduces container process isolation; it is a local
+Compose trade-off, not production isolation guidance. Inbound peer verification
+remains off unless the operator additionally provides the bundle, trust-domain
+(for raw JWKS), Biscuit issuer public key, and audience settings documented in
+the [S0–S2 reference](spiffe-workload-identity.md).
 
 Plain HTTP is supported only when a trusted local reverse proxy, sidecar, or
 service mesh terminates TLS before traffic reaches the container. Append the

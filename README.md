@@ -252,7 +252,7 @@ Ardur is being built to do all three:
 Concretely — these are the design principles the repo is being built to meet, not guarantees that every checked-in surface is already production-ready:
 
 - **Public-by-default as a working principle.** The aim is that every public claim ties to a verifier path, an artifact, a re-runnable test, or an explicit limitation note. The code-bearing runtime is landing in phases per the [public import plan](docs/public-import-plan.md); claims that depend on not-yet-verified runtime behavior still need explicit caveats.
-- **Composable with what already exists.** Designed around SPIFFE for workload identity, Biscuit for first-party-attenuation credentials, Cedar for policy, the individual AAT Internet-Draft for delegation-token semantics, and EAT (RFC 9711) for attestation-token semantics. We didn't reinvent the substrate.
+- **Composable with what already exists.** Designed around SPIFFE for workload identity, Biscuit for first-party-attenuation credentials, Cedar for policy, the individual AAT Internet-Draft for delegation-token semantics, and EAT (RFC 9711) for attestation-token semantics. The configured Python proxy and Hub can fetch and retain their own X.509-SVID at startup, and the proxy can verify a peer JWT-SVID for Biscuit holder binding when operator trust inputs are configured. This does not make issuance SPIRE-bound; see the [S0–S2 workload-identity reference](docs/reference/spiffe-workload-identity.md).
 - **Cryptographically bound by design.** Mission credentials are designed to be signed by an issuer key and produce signed receipts chain-hashed to the previous one. The Python Biscuit path reports SPIFFE holder binding only when the proxy has a server-owned Biscuit issuer key, JWT-SVID trust bundle, and audience and the presented credentials verify against them; request payloads cannot choose those verifier inputs. JWT-SVID itself remains a replayable bearer credential, so this is bounded holder evidence rather than universal replay prevention. The design is documented in the [ADRs](docs/decisions/README.md); the public code that implements it is being curated in phases.
 - **Delegation that narrows, never widens.** Child sessions get strictly narrower authority than their parent — fewer tools, smaller resource scope, smaller budget. The narrowing discipline is formalised in [ADR-017](docs/decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md).
 - **Impact caps before dangerous actions.** Opted-in Mission Passports bind trusted tool contracts to typed action caps and atomically conserved session/agent/lineage ceilings. Crash reservations quarantine instead of silently refunding authority; the design is recorded in [ADR-026](docs/decisions/ADR-026-typed-dangerous-action-risk-budgets.md).
@@ -306,7 +306,7 @@ Ardur sits between an AI agent and the tools it calls — so the integration sto
 | **Agent framework**  | JSON mission examples; Claude Code plugin; runnable LangChain, LangGraph, AutoGen, browser, desktop-observe, native-host, and offline/no-key OpenAI Agents SDK and Google ADK fixture examples | live-provider wrappers and more runnable framework adapters |
 | **Model provider**   | provider-agnostic tool boundary in the runtime design | local Ollama quickstarts and live-provider examples |
 | **Policy engine**    | native checks, forbid-rules, Cedar bridge, draft-00 DG v0.1 plus the versioned draft-01 DG v0.2 JWT AAT profile | independent AAT interoperability, OPA, and broader Biscuit datalog examples |
-| **Identity**         | SPIFFE / SPIRE identity code; X.509-SVID mTLS and source authorization for Go operator-ingress telemetry; detached receipt export labels actor/verifier strings as signed claims, not SPIFFE-verified workloads; production deployment ADR | full cluster deployment walkthrough and live multi-producer proof |
+| **Identity**         | configured Python proxy/Hub X.509-SVID startup acquisition and optional inbound JWT-SVID verification; X.509-SVID mTLS and source authorization for Go operator-ingress telemetry; detached receipt export labels actor/verifier strings as signed claims, not SPIFFE-verified workloads; production deployment ADR | SPIRE-bound Python credential issuance, full cluster deployment walkthrough, and live multi-producer proof |
 | **Receipts sink**    | local JSON / stdout receipts; verified redacted governance JSONL; OTLP/HTTP JSON traces and logs; idempotent pending anchor sidecars; optional Rekor v1 or separately keyed self-hosted signed-log proofs; optional receiver-attested MCP envelopes | production collector deployment/auth/retention examples, checkpoint witnessing/consistency monitoring, vendor-specific sinks, broader durable storage examples, and integrated multi-artifact chain verification |
 
 In the Go credential identity layer, SPIRE authenticates the workload
@@ -316,6 +316,11 @@ authenticated owner binding. New credentials state
 unimplemented assurance values. [ADR-024](docs/decisions/ADR-024-self-asserted-owner-identity-assurance.md)
 records the boundary and the proof required before a verified owner state can
 exist.
+
+The Python S0–S2 startup path is a separate boundary: it does not resolve
+credential identity at issuance. A `spiffe_id` supplied to Python issuance
+remains caller-provided and self-asserted even when the service has fetched its
+own SVID.
 
 If you'd use an integration that isn't listed, file an [integration request](https://github.com/ArdurAI/ardur/issues/new?template=integration_request.yml) — it's the strongest signal we have for prioritisation.
 

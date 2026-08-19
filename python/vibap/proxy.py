@@ -2187,9 +2187,18 @@ class GovernanceProxy:
         biscuit_issuer_public_key: Any | None = None,
         biscuit_peer_trust_bundle: Any | None = None,
         biscuit_svid_audience: str = "ardur-proxy",
+        workload_identity: Any | None = None,
         aat_expected_audience: str = AAT_DEFAULT_AUDIENCE,
         allow_aat_without_cnf: bool = False,
     ) -> None:
+        if workload_identity is not None:
+            from .spiffe_identity import SvidBundle
+
+            if not isinstance(workload_identity, SvidBundle):
+                raise TypeError("workload_identity must be an SvidBundle")
+        # Keep Workload API key material process-local. This reference is never
+        # serialized into proxy state, receipts, or the audit log.
+        self._workload_identity = workload_identity
         # policy_store: optional PolicyStore (see vibap.policy_store).
         # When provided, the proxy resolves additional_policies from
         # the store at session-start time, keyed by the credential's
@@ -2275,7 +2284,9 @@ class GovernanceProxy:
             if not isinstance(keys, list) or not keys:
                 raise ValueError("Biscuit peer trust bundle must contain JWT keys")
             if not any(
-                isinstance(key, dict) and key.get("use") == "jwt-svid" for key in keys
+                isinstance(key, dict)
+                and ("use" not in key or key["use"] == "jwt-svid")
+                for key in keys
             ):
                 raise ValueError(
                     "Biscuit peer trust bundle has no JWT-SVID signing keys"

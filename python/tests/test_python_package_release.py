@@ -93,7 +93,13 @@ def test_dev_extra_and_lock_exclude_vulnerable_pyasn1_releases() -> None:
         package["name"]: package["version"] for package in lock["package"]
     }
 
-    assert PYASN1_SECURITY_FLOOR in config["project"]["optional-dependencies"]["dev"]
+    # pyasn1 is a runtime dependency (spiffe pulls it in); the security floor
+    # matters wherever it is declared, so assert on the union rather than on a
+    # specific section.
+    declared = list(config["project"].get("dependencies", []))
+    for extra_requirements in config["project"]["optional-dependencies"].values():
+        declared.extend(extra_requirements)
+    assert PYASN1_SECURITY_FLOOR in declared
     locked_version = tuple(int(part) for part in locked_versions["pyasn1"].split("."))
     assert (0, 6, 4) <= locked_version < (0, 7)
 

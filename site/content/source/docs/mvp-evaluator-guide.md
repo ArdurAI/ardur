@@ -2,7 +2,7 @@
 title: "Ardur MVP Evaluator Guide"
 description: "Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:"
 source_path: "docs/mvp-evaluator-guide.md"
-source_sha256: "d61273611c9d0c7ff38a2352d4053853727a4275236dc21137e9f39745095573"
+source_sha256: "d9b15c2246cec56f2cfe647f77610923a7dc2513b22f17fd8b2c54cbd97ae2d0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -18,8 +18,9 @@ This page is generated from the public repository source file. Edit the source f
 {{< /proof-status >}}
 
 Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:
-a SPIRE-backed local proxy that applies mission policy before tool execution and
-returns signed session evidence.
+a local proxy that obtains its own X.509-SVID from the included SPIRE stack,
+applies mission policy before tool execution, and returns signed session
+evidence.
 
 For the provider-free, no-bearer first-run path, use the
 [No-Key MVP Demo](/__ardur_internal__/source/docs/guides/no-key-mvp-demo/) instead. The relaxed auth mode in
@@ -210,10 +211,18 @@ verifies the session-end token with its ephemeral public key before cleanup.
 ## Architecture boundary
 
 The local Compose stack contains a SPIRE server, a SPIRE agent, the governance
-proxy, and the Personal Hub. The proxy governs calls presented at its HTTP/tool
-boundary; it does not claim visibility into provider-hidden reasoning or every
-subprocess, filesystem, kernel, or network side effect caused below that
-boundary.
+proxy, and the Personal Hub. The proxy and Hub fetch distinct workload SVIDs
+before serving; startup fails if the configured agent socket cannot establish
+identity. This proves startup acquisition only. Mission Passport issuance does
+not resolve identity from SPIRE, credential `spiffe_id` values remain
+self-asserted, and receipt signing keys are not SVID-bound. The proxy governs
+calls presented at its HTTP/tool boundary; it does not claim visibility into
+provider-hidden reasoning or every subprocess, filesystem, kernel, or network
+side effect caused below that boundary.
+
+For this local demo, the proxy and Hub share the SPIRE agent PID namespace so
+the Unix workload attestor can inspect callers. That reduces isolation among
+the demo containers and is not production deployment guidance.
 
 ## Kill switch
 

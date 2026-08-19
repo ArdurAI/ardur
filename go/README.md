@@ -102,6 +102,12 @@ limiting, kill switch, and Prometheus metrics are all implemented in Python.
 No Go equivalent exists for those — Python is the canonical runtime for the
 governance HTTP API.
 
+The Python proxy/Hub S0–S2 integration can fetch its own SVID at configured
+startup and can verify a peer JWT-SVID when configured. That integration is not
+Go credential issuance: it does not resolve Python credential identity from
+SPIRE, and a caller-provided `spiffe_id` remains self-asserted. See the
+[workload-identity reference](../docs/reference/spiffe-workload-identity.md).
+
 ## What's not in this tree
 
 - **Governance HTTP proxy** — lives in `python/vibap/proxy.py`.

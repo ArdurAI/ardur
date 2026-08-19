@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import jwt
+from spiffe.errors import PySpiffeError
 
 from . import __version__
 from .ardur_profile import (
@@ -131,6 +132,13 @@ from .proxy import (
 )
 from .run_bridge import VALID_VIA_MODES, _redact_local_path, run_governed_cli
 from .shareable_redaction import path_aliases, redact_local_path_text
+from .spiffe_identity import (
+    SvidBundle,
+    TrustBundle,
+    fetch_svid,
+    load_biscuit_public_key,
+    load_trust_bundle,
+)
 from .tool_preflight import (
     FAIL_ON_CHOICES,
     ToolPreflightError,
@@ -156,6 +164,86 @@ def _print_json(payload: dict) -> None:
     # while setup/hub recovery paths return non-secret condition codes.
     json.dump(payload, sys.stdout, indent=2)
     sys.stdout.write("\n")
+
+
+def _spiffe_svid_fetch_failure_response() -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": "spiffe_svid_fetch_failed",
+        "error_code": "spiffe_svid_fetch_failed",
+        "condition": "spiffe_svid_fetch_failed",
+        "message": "Configured SPIFFE workload identity could not be established.",
+        "detail": (
+            "Verify --spiffe-endpoint-socket or SPIFFE_ENDPOINT_SOCKET points to "
+            "a reachable SPIFFE Workload API socket and that this workload is registered."
+        ),
+    }
+
+
+def _fetch_configured_workload_identity(socket_path: str | None) -> SvidBundle | None:
+    if socket_path is None:
+        return None
+    normalized = str(socket_path).strip()
+    if not normalized:
+        raise ValueError("configured SPIFFE endpoint socket is empty")
+    return fetch_svid(normalized)
+
+
+def _biscuit_peer_configuration_failure_response() -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": "biscuit_peer_verification_config_invalid",
+        "error_code": "biscuit_peer_verification_config_invalid",
+        "condition": "biscuit_peer_verification_config_invalid",
+        "message": "Biscuit peer JWT-SVID verification configuration is invalid.",
+        "detail": (
+            "Configure a trust bundle and Biscuit issuer public key together. "
+            "Raw SPIRE bundles also require a trust domain, and the expected "
+            "JWT-SVID audience must be non-empty."
+        ),
+    }
+
+
+def _optional_config_value(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _load_biscuit_peer_configuration(
+    args: argparse.Namespace,
+) -> tuple[Any | None, TrustBundle | None, str]:
+    bundle_path = _optional_config_value(
+        getattr(args, "biscuit_peer_trust_bundle", None)
+    )
+    trust_domain = _optional_config_value(
+        getattr(args, "biscuit_peer_trust_domain", None)
+    )
+    issuer_key_path = _optional_config_value(
+        getattr(args, "biscuit_issuer_public_key", None)
+    )
+    audience = str(getattr(args, "biscuit_svid_audience", "ardur-proxy")).strip()
+    if not audience or len(audience.encode("utf-8")) > 256:
+        raise ValueError("Biscuit JWT-SVID audience is invalid")
+
+    enabled = any((bundle_path, trust_domain, issuer_key_path))
+    if not enabled:
+        return None, None, audience
+    if bundle_path is None or issuer_key_path is None:
+        raise ValueError("Biscuit peer verification requires bundle and issuer key")
+
+    bundle = load_trust_bundle(bundle_path, trust_domain=trust_domain)
+    keys = bundle.jwks.get("keys")
+    if not isinstance(keys, list) or not keys:
+        raise ValueError("Biscuit peer trust bundle has no keys")
+    if not any(
+        isinstance(key, dict) and ("use" not in key or key["use"] == "jwt-svid")
+        for key in keys
+    ):
+        raise ValueError("Biscuit peer trust bundle has no JWT-SVID signing keys")
+    issuer_key = load_biscuit_public_key(issuer_key_path)
+    return issuer_key, bundle, audience
 
 
 def _write_json_report_to_file(path: str | Path, report: object) -> bytes:
@@ -1639,6 +1727,25 @@ def cmd_start(args: argparse.Namespace) -> int:
         _print_json(api_token_failure)
         return 1
     try:
+        biscuit_issuer_public_key, biscuit_peer_trust_bundle, biscuit_svid_audience = (
+            _load_biscuit_peer_configuration(args)
+        )
+    except (KeyError, OSError, TypeError, ValueError):
+        _print_json(_biscuit_peer_configuration_failure_response())
+        return 1
+    try:
+        workload_identity = _fetch_configured_workload_identity(
+            getattr(args, "spiffe_endpoint_socket", None)
+        )
+    except (OSError, PySpiffeError, RuntimeError, ValueError):
+        _print_json(_spiffe_svid_fetch_failure_response())
+        return 1
+    if workload_identity is not None:
+        print(
+            f"[spiffe] workload identity established: {workload_identity.spiffe_id}",
+            file=sys.stderr,
+        )
+    try:
         private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
@@ -1648,6 +1755,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         state_dir=args.state_dir,
         keys_dir=args.keys_dir,
         public_key=public_key,
+        biscuit_issuer_public_key=biscuit_issuer_public_key,
+        biscuit_peer_trust_bundle=biscuit_peer_trust_bundle,
+        biscuit_svid_audience=biscuit_svid_audience,
+        workload_identity=workload_identity,
     )
 
     initial_session_id = None
@@ -4597,10 +4708,23 @@ def cmd_hub(args: argparse.Namespace) -> int:
     if host_failure is not None:
         return host_failure
     try:
+        workload_identity = _fetch_configured_workload_identity(
+            getattr(args, "spiffe_endpoint_socket", None)
+        )
+    except (OSError, PySpiffeError, RuntimeError, ValueError):
+        _print_json(_spiffe_svid_fetch_failure_response())
+        return 1
+    if workload_identity is not None:
+        print(
+            f"[spiffe] workload identity established: {workload_identity.spiffe_id}",
+            file=sys.stderr,
+        )
+    try:
         serve_hub(
             host=args.host,
             port=args.port,
             home=args.home,
+            workload_identity=workload_identity,
             tls_cert=args.tls_cert,
             tls_key=args.tls_key,
             no_tls=args.no_tls,
@@ -7521,6 +7645,46 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--state-dir", type=str, help="directory for persisted sessions")
     start.add_argument("--log-path", type=str, help="JSONL audit log path")
     start.add_argument(
+        "--spiffe-endpoint-socket",
+        default=os.environ.get("SPIFFE_ENDPOINT_SOCKET"),
+        help=(
+            "SPIFFE Workload API socket used to fetch this proxy's SVID; "
+            "defaults to SPIFFE_ENDPOINT_SOCKET and is disabled when unset"
+        ),
+    )
+    start.add_argument(
+        "--biscuit-peer-trust-bundle",
+        default=os.environ.get("ARDUR_BISCUIT_PEER_TRUST_BUNDLE"),
+        help=(
+            "JSON JWT-SVID trust bundle for Biscuit peer verification; "
+            "defaults to ARDUR_BISCUIT_PEER_TRUST_BUNDLE"
+        ),
+    )
+    start.add_argument(
+        "--biscuit-peer-trust-domain",
+        default=os.environ.get("ARDUR_BISCUIT_PEER_TRUST_DOMAIN"),
+        help=(
+            "trust domain for a raw SPIRE bundle; defaults to "
+            "ARDUR_BISCUIT_PEER_TRUST_DOMAIN"
+        ),
+    )
+    start.add_argument(
+        "--biscuit-issuer-public-key",
+        default=os.environ.get("ARDUR_BISCUIT_ISSUER_PUBLIC_KEY"),
+        help=(
+            "PEM Biscuit issuer public key paired with the peer trust bundle; "
+            "defaults to ARDUR_BISCUIT_ISSUER_PUBLIC_KEY"
+        ),
+    )
+    start.add_argument(
+        "--biscuit-svid-audience",
+        default=os.environ.get("ARDUR_BISCUIT_SVID_AUDIENCE", "ardur-proxy"),
+        help=(
+            "expected peer JWT-SVID audience; defaults to "
+            "ARDUR_BISCUIT_SVID_AUDIENCE or ardur-proxy"
+        ),
+    )
+    start.add_argument(
         "--api-token",
         help="Bearer token for clients; VIBAP_API_TOKEN still takes precedence",
     )
@@ -8291,6 +8455,14 @@ def build_parser() -> argparse.ArgumentParser:
     hub.add_argument("--host", default=DEFAULT_HUB_HOST, help="bind address")
     hub.add_argument("--port", type=int, default=DEFAULT_HUB_PORT, help="listen port")
     hub.add_argument("--home", type=str, help="Ardur Personal home directory")
+    hub.add_argument(
+        "--spiffe-endpoint-socket",
+        default=os.environ.get("SPIFFE_ENDPOINT_SOCKET"),
+        help=(
+            "SPIFFE Workload API socket used to fetch this Hub's SVID; "
+            "defaults to SPIFFE_ENDPOINT_SOCKET and is disabled when unset"
+        ),
+    )
     hub.add_argument("--tls-cert", type=str, help="TLS certificate PEM file")
     hub.add_argument("--tls-key", type=str, help="TLS private key PEM file")
     hub.add_argument(

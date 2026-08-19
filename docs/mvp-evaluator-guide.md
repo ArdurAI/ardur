@@ -1,8 +1,9 @@
 # Ardur MVP Evaluator Guide
 
 Use this source-checkout guide to evaluate Ardur's authenticated Docker demo:
-a SPIRE-backed local proxy that applies mission policy before tool execution and
-returns signed session evidence.
+a local proxy that obtains its own X.509-SVID from the included SPIRE stack,
+applies mission policy before tool execution, and returns signed session
+evidence.
 
 For the provider-free, no-bearer first-run path, use the
 [No-Key MVP Demo](guides/no-key-mvp-demo.md) instead. The relaxed auth mode in
@@ -193,10 +194,18 @@ verifies the session-end token with its ephemeral public key before cleanup.
 ## Architecture boundary
 
 The local Compose stack contains a SPIRE server, a SPIRE agent, the governance
-proxy, and the Personal Hub. The proxy governs calls presented at its HTTP/tool
-boundary; it does not claim visibility into provider-hidden reasoning or every
-subprocess, filesystem, kernel, or network side effect caused below that
-boundary.
+proxy, and the Personal Hub. The proxy and Hub fetch distinct workload SVIDs
+before serving; startup fails if the configured agent socket cannot establish
+identity. This proves startup acquisition only. Mission Passport issuance does
+not resolve identity from SPIRE, credential `spiffe_id` values remain
+self-asserted, and receipt signing keys are not SVID-bound. The proxy governs
+calls presented at its HTTP/tool boundary; it does not claim visibility into
+provider-hidden reasoning or every subprocess, filesystem, kernel, or network
+side effect caused below that boundary.
+
+For this local demo, the proxy and Hub share the SPIRE agent PID namespace so
+the Unix workload attestor can inspect callers. That reduces isolation among
+the demo containers and is not production deployment guidance.
 
 ## Kill switch
 

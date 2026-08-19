@@ -767,11 +767,13 @@ def test_hub_port_zero_reaches_server_without_long_lived_service(
 
     bound_addresses = []
     served = []
+    workload_identities = []
 
     class FakeHub:
-        def __init__(self, home, hub_url):
+        def __init__(self, home, hub_url, workload_identity=None):
             self.home = home
             self.hub_url = hub_url
+            workload_identities.append(workload_identity)
 
     class FakeServer:
         def __init__(self, address, handler):
@@ -801,6 +803,7 @@ def test_hub_port_zero_reaches_server_without_long_lived_service(
     assert rc == 0
     assert captured.out == ""
     assert bound_addresses == [(('127.0.0.1', 0), personal_hub._HubRequestHandler)]
+    assert workload_identities == [None]
     assert served == [True]
 
 
