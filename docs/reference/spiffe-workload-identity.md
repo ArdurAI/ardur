@@ -97,3 +97,12 @@ the caller or deployer and is self-asserted unless a separate implemented path
 explicitly says otherwise. S0–S2 also do not bind the receipt signing key to the
 fetched SVID, turn the proxy's own X.509-SVID into transport mTLS, or prove that
 all calls bypassing the configured adapter are observed.
+
+A Go credential states this limitation on its own face: the identity layer
+carries a signed `spiffe_id_assurance`, which is `caller_provided` on every path
+that issues one today. A relying party holding only the credential can therefore
+tell that a valid signature over a `spiffe_id` means the issuer signed that
+string, not that any identity provider authenticated the workload it names. The
+`identity_provider_verified` value exists in the vocabulary so verifiers can
+implement the distinction now; S3 (SPIRE-bound issuance) is what will make an
+issuer able to emit it.

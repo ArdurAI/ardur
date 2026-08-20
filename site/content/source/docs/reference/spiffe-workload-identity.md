@@ -2,7 +2,7 @@
 title: "SPIFFE Workload Identity (S0–S2)"
 description: "This page describes the implemented Python S0–S2 boundary. Ardur can obtain its"
 source_path: "docs/reference/spiffe-workload-identity.md"
-source_sha256: "30546b902fa87a3df9f657aa4a3d33c6098a4dc126c3c930ca5e9538b219c4cb"
+source_sha256: "27a585d68181b295d12f2a9d293963cd0a6567a2a08aa270f7ae402d7d715267"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -114,3 +114,12 @@ the caller or deployer and is self-asserted unless a separate implemented path
 explicitly says otherwise. S0–S2 also do not bind the receipt signing key to the
 fetched SVID, turn the proxy's own X.509-SVID into transport mTLS, or prove that
 all calls bypassing the configured adapter are observed.
+
+A Go credential states this limitation on its own face: the identity layer
+carries a signed `spiffe_id_assurance`, which is `caller_provided` on every path
+that issues one today. A relying party holding only the credential can therefore
+tell that a valid signature over a `spiffe_id` means the issuer signed that
+string, not that any identity provider authenticated the workload it names. The
+`identity_provider_verified` value exists in the vocabulary so verifiers can
+implement the distinction now; S3 (SPIRE-bound issuance) is what will make an
+issuer able to emit it.

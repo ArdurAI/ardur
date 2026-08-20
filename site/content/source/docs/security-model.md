@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "ba684dcb3c8d04bab46169a42e0092f7d4f7e2d169d8ec2a1bcdee883b5ee9c6"
+source_sha256: "c9acdfe5b9810cb3f802b6f65e80d1de31980fe893bda2cd0a45da4418db42a7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -37,6 +37,12 @@ enforcement, and verifiable evidence.
   requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
+- workload identity claims carry a signed `spiffe_id_assurance`. Every
+  credential this repository issues is `caller_provided`: the issuer signed a
+  configured SPIFFE ID, it did not authenticate the workload. The stronger
+  `identity_provider_verified` value is defined for verifiers but no issuance
+  path emits it yet. Missing and unrecognised values both fail verification
+  closed, on the same reasoning ADR-024 applies to `owner_id_assurance`
 - KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
   proof-of-possession by default; bearer compatibility requires an explicit
   constructor opt-out

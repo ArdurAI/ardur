@@ -20,6 +20,12 @@ enforcement, and verifiable evidence.
   requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
+- workload identity claims carry a signed `spiffe_id_assurance`. Every
+  credential this repository issues is `caller_provided`: the issuer signed a
+  configured SPIFFE ID, it did not authenticate the workload. The stronger
+  `identity_provider_verified` value is defined for verifiers but no issuance
+  path emits it yet. Missing and unrecognised values both fail verification
+  closed, on the same reasoning ADR-024 applies to `owner_id_assurance`
 - KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
   proof-of-possession by default; bearer compatibility requires an explicit
   constructor opt-out
