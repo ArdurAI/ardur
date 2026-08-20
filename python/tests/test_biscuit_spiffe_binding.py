@@ -10,10 +10,10 @@ import pytest
 from biscuit_auth import Algorithm, KeyPair, PrivateKey
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from spiffe_doubles import make_mock_svid_bundle, make_mock_trust_bundle
 from vibap.biscuit_passport import BiscuitVerifyError, issue_biscuit_passport
 from vibap.passport import MissionPassport
 from vibap.proxy import GovernanceProxy
-from vibap.spiffe_identity import make_mock_svid_bundle, make_mock_trust_bundle
 
 
 _HOLDER_SPIFFE_ID = "spiffe://ardur.dev/agent/pinned-holder"
