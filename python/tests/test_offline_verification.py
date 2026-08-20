@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+from jsonschema import Draft202012Validator
 
 from vibap import cli as cli_module
 from vibap import offline_verification as offline
@@ -951,6 +952,152 @@ def test_committed_public_fixture_is_verifiable() -> None:
         "receiver_attested_count": 2,
         "authority_narrowing_steps": [1, 2],
     }
+
+
+def _committed_report_inputs() -> tuple[Path, dict[str, Any]]:
+    root = Path(__file__).resolve().parents[2]
+    fixture_dir = root / "docs/specs/fixtures"
+
+    def load_public_key(role: str) -> Any:
+        return serialization.load_pem_public_key(
+            (fixture_dir / f"offline-verification-v0.1-{role}-public.pem").read_bytes()
+        )
+
+    return fixture_dir, {
+        "receipt_public_key": load_public_key("receipt"),
+        "log_public_key": load_public_key("log"),
+        "receiver_public_key": load_public_key("receiver"),
+        # Mirror run_offline_verification_fixture()'s own call, so this test
+        # regenerates the report exactly the way the generator does.
+        "max_registration_delay_s": 60,
+    }
+
+
+def test_committed_report_fixture_matches_regenerated_report() -> None:
+    """Diff the committed explorer report against freshly generated output.
+
+    This is the drift gate. The committed fixture has already silently fallen
+    behind once: ``summary.unknown_count`` is emitted by
+    ``verify_offline_input`` but was missing from the checked-in JSON, so an
+    external evaluator reading the published artifact could not tell whether
+    unknown-verdict receipts were counted or simply not reported.
+
+    ``verified_at`` is the verifier's own wall clock rather than a function of
+    the committed bundle, so it is the one field checked for shape instead of
+    value. Everything else -- including every timeline entry and every summary
+    counter -- must match byte-for-byte after JSON decoding.
+    """
+
+    fixture_dir, keys = _committed_report_inputs()
+    regenerated = offline.verify_offline_path(
+        fixture_dir / "offline-verification-v0.1.json", **keys
+    )
+    committed = json.loads(
+        (fixture_dir / "offline-verification-v0.1-report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    # Pop outside the assert: under ``python -O`` assert statements are stripped,
+    # which would leave ``verified_at`` in both dicts and silently turn the
+    # comparison below into a wall-clock equality check that can never hold.
+    regenerated_verified_at = regenerated.pop("verified_at")
+    committed_verified_at = committed.pop("verified_at")
+    assert isinstance(regenerated_verified_at, int)
+    assert isinstance(committed_verified_at, int)
+    assert regenerated == committed
+
+
+def test_committed_report_fixture_validates_against_public_schema() -> None:
+    root = Path(__file__).resolve().parents[2]
+    schema = json.loads(
+        (root / "docs/specs/offline-verification-report-v0.1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    committed = json.loads(
+        (root / "docs/specs/fixtures/offline-verification-v0.1-report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    Draft202012Validator.check_schema(schema)
+    assert list(Draft202012Validator(schema).iter_errors(committed)) == []
+
+
+def test_report_schema_rejects_a_report_missing_unknown_count() -> None:
+    """The schema, not just the fixture diff, must reject the observed drift."""
+
+    root = Path(__file__).resolve().parents[2]
+    schema = json.loads(
+        (root / "docs/specs/offline-verification-report-v0.1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    committed = json.loads(
+        (root / "docs/specs/fixtures/offline-verification-v0.1-report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    del committed["summary"]["unknown_count"]
+
+    errors = list(Draft202012Validator(schema).iter_errors(committed))
+    assert errors and "unknown_count" in errors[0].message
+
+
+def test_report_schema_is_closed_against_an_unexpected_field() -> None:
+    fixture_dir, keys = _committed_report_inputs()
+    report = offline.verify_offline_path(
+        fixture_dir / "offline-verification-v0.1.json", **keys
+    )
+    report["timeline"][0]["surprise_field"] = "drift"
+
+    with pytest.raises(OfflineVerificationError) as excinfo:
+        offline._validate_report(report)
+    assert excinfo.value.code == "report_schema_invalid"
+
+
+def test_report_schema_accepts_chain_only_and_correlation_paths() -> None:
+    """The schema must cover every shape verify_offline_input actually emits."""
+
+    fixture_dir, keys = _committed_report_inputs()
+    bundle = fixture_dir / "offline-verification-v0.1.json"
+
+    chain_only = offline.verify_offline_input(
+        offline.load_offline_input(bundle),
+        receipt_public_key=keys["receipt_public_key"],
+        chain_only=True,
+        include_correlation_fields=True,
+    )
+    assert chain_only["result"] == "verified_chain_only"
+    assert chain_only["assurance_profile"] == "chain-only"
+    assert chain_only["timeline"][0]["evidence"]["receiver"]["status"] == "absent"
+    assert "trace_id" in chain_only["timeline"][0]
+
+    unredacted = offline.verify_offline_path(bundle, redact=False, **keys)
+    assert unredacted["redaction"]["enabled"] is False
+    assert unredacted["freshness"]["one_time_replay_checked"] is False
+
+    # The age-bounded freshness shape (``age_checked`` true, integer
+    # ``age_s``/``max_age_s``) cannot be exercised against this fixture -- its
+    # receipts are dated 2027, so any age check fails closed as future-dated.
+    # That shape is covered by the freshness tests earlier in this module,
+    # which now also run through the report schema.
+
+
+def test_public_and_embedded_report_schemas_are_identical() -> None:
+    root = Path(__file__).resolve().parents[2]
+    public = json.loads(
+        (root / "docs/specs/offline-verification-report-v0.1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    embedded = json.loads(
+        (
+            root / "python/vibap/_specs/offline_verification_report_v01.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert public == embedded
 
 
 def test_public_and_embedded_schemas_are_identical() -> None:

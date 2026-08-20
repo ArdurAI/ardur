@@ -2,7 +2,7 @@
 title: "Offline Verification Bundle v0.1"
 description: "Status: implemented public profile for independently runnable Ardur receipt"
 source_path: "docs/specs/offline-verification-bundle-v0.1.md"
-source_sha256: "9276cddacb6769763990586cc12a41ca60ea2e4ba934dff1c9f1e1eb6582dc15"
+source_sha256: "ca9a6183d03477702a5eb0f6328d1b398ee78335a27a70f1e608bbd2a50b14f0"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -196,6 +196,16 @@ Static HTML reports:
 The HTML and JSON reports are derived views. The original bundle, trust-root
 fingerprints, and verifier command remain the authoritative reproducibility
 inputs.
+
+The JSON report's shape is fixed by
+[`offline-verification-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/offline-verification-report-v0.1.schema.json),
+which the verifier validates against before returning. Two properties of that
+report are easy to misread: `result` has no failure value, because a failed
+verification raises instead of producing a report, so the existence of a report
+means verification succeeded rather than that nothing was wrong; and a receipt
+verdict of `insufficient_evidence` appears in the timeline as the decision
+`ERROR`, which is a governance verdict about missing evidence, not a verifier
+fault.
 
 ## 8. CLI and Package
 

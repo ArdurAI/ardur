@@ -19,7 +19,10 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from jsonschema import Draft202012Validator, ValidationError
 
-from ._specs import offline_verification_bundle_v01_schema
+from ._specs import (
+    offline_verification_bundle_v01_schema,
+    offline_verification_report_v01_schema,
+)
 from .receipt import ReceiptChainError, verify_chain
 from .receiver_attestation import (
     ASSURANCE_RECEIVER_ATTESTED,
@@ -182,6 +185,26 @@ def _validate_bundle(value: Any) -> tuple[dict[str, Any], ...]:
             f"offline bundle schema violation at {location}: {exc.message}",
         ) from exc
     return tuple(copy.deepcopy(value["journal"]))
+
+
+def _validate_report(value: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed if the explorer report drifts from its published schema.
+
+    The report is the artifact an external evaluator actually reads, so a
+    silently reshaped report is an honesty defect, not a cosmetic one. This
+    only ever converts a malformed report into a loud failure: on the success
+    path the value is returned unchanged.
+    """
+
+    try:
+        Draft202012Validator(offline_verification_report_v01_schema()).validate(value)
+    except ValidationError as exc:
+        location = ".".join(str(part) for part in exc.absolute_path) or "root"
+        raise OfflineVerificationError(
+            "report_schema_invalid",
+            f"offline verification report schema violation at {location}: {exc.message}",
+        ) from exc
+    return value
 
 
 def load_offline_input(path: str | Path) -> OfflineInput:
@@ -817,7 +840,7 @@ def verify_offline_input(
         ],
         "verified_at": verified_at,
     }
-    return _redact_value(report) if redact else report
+    return _validate_report(_redact_value(report) if redact else report)
 
 
 def verify_offline_path(

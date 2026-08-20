@@ -23,6 +23,7 @@ This section lists hosted documentation and mirrored artifacts generated from `p
 - [`linux_governance_benchmark_report_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/linux_governance_benchmark_report_v01.schema.json)
 - [`mission_declaration_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/mission_declaration_v01.schema.json)
 - [`offline_verification_bundle_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/offline_verification_bundle_v01.schema.json)
+- [`offline_verification_report_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/offline_verification_report_v01.schema.json)
 - [`policy_conformance_bundle_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/policy_conformance_bundle_v01.schema.json)
 - [`policy_conformance_report_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/policy_conformance_report_v01.schema.json)
 - [`receiver_attestation_v01.schema.json`](/__ardur_internal__/repo/python/vibap/_specs/receiver_attestation_v01.schema.json)

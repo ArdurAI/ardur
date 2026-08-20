@@ -56,6 +56,7 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`linux-governance-benchmark-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/linux-governance-benchmark-report-v0.1.schema.json)
 - [`mission-declaration-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/mission-declaration-v0.1.schema.json)
 - [`offline-verification-bundle-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/offline-verification-bundle-v0.1.schema.json)
+- [`offline-verification-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/offline-verification-report-v0.1.schema.json)
 - [`policy-conformance-bundle-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/policy-conformance-bundle-v0.1.schema.json)
 - [`policy-conformance-report-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/policy-conformance-report-v0.1.schema.json)
 - [`receiver-attestation-v0.1.schema.json`](/__ardur_internal__/repo/docs/specs/receiver-attestation-v0.1.schema.json)
