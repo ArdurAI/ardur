@@ -32,6 +32,7 @@ from vibap.receiver_attestation import (
 )
 from vibap.transparency import (
     BACKEND_LOCAL_SIGNED,
+    BACKEND_REKOR_V1,
     LocalSignedLogBackend,
     pending_anchor_bundle,
 )
@@ -285,6 +286,7 @@ def test_full_bundle_verifies_offline_and_reports_signed_narrowing(
         "error_count": 0,
         "unknown_count": 0,
         "anchored_count": 3,
+        "external_log_anchored_count": 0,
         "receiver_attested_count": 2,
         "authority_narrowing_steps": [1, 2],
     }
@@ -949,6 +951,7 @@ def test_committed_public_fixture_is_verifiable() -> None:
         "error_count": 0,
         "unknown_count": 0,
         "anchored_count": 3,
+        "external_log_anchored_count": 0,
         "receiver_attested_count": 2,
         "authority_narrowing_steps": [1, 2],
     }
@@ -1043,6 +1046,76 @@ def test_report_schema_rejects_a_report_missing_unknown_count() -> None:
 
     errors = list(Draft202012Validator(schema).iter_errors(committed))
     assert errors and "unknown_count" in errors[0].message
+
+
+def test_report_schema_rejects_a_report_missing_external_log_anchored_count() -> None:
+    """A report must state how many anchors are external-log, even when zero."""
+
+    root = Path(__file__).resolve().parents[2]
+    schema = json.loads(
+        (root / "docs/specs/offline-verification-report-v0.1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    committed = json.loads(
+        (root / "docs/specs/fixtures/offline-verification-v0.1-report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    del committed["summary"]["external_log_anchored_count"]
+
+    errors = list(Draft202012Validator(schema).iter_errors(committed))
+    assert errors and "external_log_anchored_count" in errors[0].message
+
+
+def test_self_hosted_anchor_is_labeled_and_never_counts_as_external() -> None:
+    """A c2sp-local-v1 anchor must be visibly operator-administered.
+
+    Before this labeling existed, a report anchored by the operator's own
+    self-hosted signed log was byte-indistinguishable from one anchored in an
+    external log: the evidence block dropped the verified bundle's ``backend``
+    and ``anchored_count`` counted both alike, so a gate for
+    externally-bounded evidence could be satisfied by operator-held keys.
+    """
+
+    fixture_dir, keys = _committed_report_inputs()
+    report = offline.verify_offline_path(
+        fixture_dir / "offline-verification-v0.1.json", **keys
+    )
+
+    for item in report["timeline"]:
+        transparency = item["evidence"]["transparency"]
+        assert transparency["backend"] == "c2sp-local-v1"
+        assert transparency["anchor_class"] == "self-hosted-log"
+    assert report["summary"]["anchored_count"] == 3
+    assert report["summary"]["external_log_anchored_count"] == 0
+    assert (
+        "3 of 3 valid anchors use the self-hosted signed log; a self-hosted "
+        "log is operator-administered evidence and does not establish "
+        "external anchoring"
+    ) in report["limitations"]
+
+    cli = offline.render_cli_report(report)
+    assert "anchor=true [c2sp-local-v1/self-hosted-log]" in cli
+    rendered = offline.render_html_report(report)
+    assert "anchor backend: c2sp-local-v1 (self-hosted-log)" in rendered
+    assert "External-log anchored" in rendered
+
+
+def test_anchor_class_covers_every_backend_the_verifier_accepts() -> None:
+    """Every backend verify_anchor_bundle can emit must carry a class label.
+
+    verify_anchor_bundle rejects unknown backend kinds, so this mapping and
+    that check must move together; an anchor backend without a class would
+    fail the closed report schema at the return site.
+    """
+
+    assert set(offline._ANCHOR_BACKEND_CLASSES) == {
+        BACKEND_LOCAL_SIGNED,
+        BACKEND_REKOR_V1,
+    }
+    assert offline._ANCHOR_BACKEND_CLASSES[BACKEND_LOCAL_SIGNED] == "self-hosted-log"
+    assert offline._ANCHOR_BACKEND_CLASSES[BACKEND_REKOR_V1] == "external-log"
 
 
 def test_report_schema_is_closed_against_an_unexpected_field() -> None:
@@ -1360,8 +1433,13 @@ def test_module_main_oserror_does_not_leak_path(tmp_path: Path) -> None:
     bad_output = str(blocker / "sub" / "dir")
 
     result = subprocess.run(
-        [sys.executable, "-m", "vibap.offline_verification_fixture",
-         "--output", bad_output],
+        [
+            sys.executable,
+            "-m",
+            "vibap.offline_verification_fixture",
+            "--output",
+            bad_output,
+        ],
         capture_output=True,
         text=True,
         timeout=30,

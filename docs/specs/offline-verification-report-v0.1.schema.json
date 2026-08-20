@@ -93,6 +93,7 @@
         "error_count",
         "unknown_count",
         "anchored_count",
+        "external_log_anchored_count",
         "receiver_attested_count",
         "authority_narrowing_steps"
       ],
@@ -110,7 +111,16 @@
           "minimum": 0,
           "description": "Count of timeline entries whose decision is UNKNOWN. Required: a reader must not have to infer the absence of unknown-verdict receipts from a missing field."
         },
-        "anchored_count": {"type": "integer", "minimum": 0},
+        "anchored_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of timeline entries with a valid anchor of any class, including the operator-administered self-hosted log. Do not read this as external anchoring; use external_log_anchored_count for that."
+        },
+        "external_log_anchored_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of timeline entries whose valid anchor's anchor_class is external-log. Required so a gate for externally-bounded evidence can never be satisfied by self-hosted-log anchors reported under anchored_count alone."
+        },
         "receiver_attested_count": {"type": "integer", "minimum": 0},
         "authority_narrowing_steps": {
           "type": "array",
@@ -360,6 +370,14 @@
           "properties": {
             "present": {"type": "boolean"},
             "valid": {"type": "boolean"},
+            "backend": {
+              "enum": ["c2sp-local-v1", "rekor-v1"],
+              "description": "The verified anchor bundle's backend kind, copied verbatim. Deliberately a closed enum: a new backend must be added here, and classified under anchor_class, before the verifier can report it."
+            },
+            "anchor_class": {
+              "enum": ["self-hosted-log", "external-log"],
+              "description": "Mechanism class derived from the backend kind. `self-hosted-log` (c2sp-local-v1) is operator-administered evidence and must not satisfy an externally-anchored gate. `external-log` (rekor-v1) submits to a log outside the operator's deployment, but its independence still rests on the out-of-band provenance of the pinned log key: this field classifies the mechanism, not the key holder."
+            },
             "anchor_id": {"$ref": "#/$defs/nullableBoundedString"},
             "log_id": {"$ref": "#/$defs/nullableBoundedString"},
             "log_index": {

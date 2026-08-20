@@ -190,6 +190,18 @@ verdict of `insufficient_evidence` appears in the timeline as the decision
 `ERROR`, which is a governance verdict about missing evidence, not a verifier
 fault.
 
+Each anchored timeline entry also reports the anchor's `backend` verbatim and
+an `anchor_class` derived from it: `self-hosted-log` for `c2sp-local-v1` and
+`external-log` for `rekor-v1`. The summary reports both `anchored_count` (valid
+anchors of any class) and `external_log_anchored_count`. A consumer gating on
+externally-bounded evidence MUST use `external_log_anchored_count` or the
+per-entry `anchor_class`, never `anchored_count` alone: a self-hosted signed
+log is operator-administered evidence, and its independence is an operational
+property the verifier cannot check (see the transparency anchor profile,
+section 5.2). An `external-log` anchor classifies the mechanism, not the key
+holder — its independence still rests on the out-of-band provenance of the
+pinned log key.
+
 ## 8. CLI and Package
 
 Full verification:
