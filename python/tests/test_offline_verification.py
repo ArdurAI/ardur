@@ -998,8 +998,13 @@ def test_committed_report_fixture_matches_regenerated_report() -> None:
         )
     )
 
-    assert isinstance(regenerated.pop("verified_at"), int)
-    assert isinstance(committed.pop("verified_at"), int)
+    # Pop outside the assert: under ``python -O`` assert statements are stripped,
+    # which would leave ``verified_at`` in both dicts and silently turn the
+    # comparison below into a wall-clock equality check that can never hold.
+    regenerated_verified_at = regenerated.pop("verified_at")
+    committed_verified_at = committed.pop("verified_at")
+    assert isinstance(regenerated_verified_at, int)
+    assert isinstance(committed_verified_at, int)
     assert regenerated == committed
 
 
