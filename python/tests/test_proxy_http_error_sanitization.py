@@ -179,7 +179,7 @@ class TestPermissionErrorLeakSanitization:
         from biscuit_auth import KeyPair
 
         from vibap.biscuit_passport import encode_biscuit_b64, issue_biscuit_passport
-        from vibap.spiffe_identity import make_mock_trust_bundle
+        from spiffe_doubles import make_mock_trust_bundle
 
         holder_spiffe_id = "spiffe://example.org/http-svid-leak-agent"
         biscuit_issuer_keypair = KeyPair()

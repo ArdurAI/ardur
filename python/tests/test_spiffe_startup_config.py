@@ -9,6 +9,7 @@ from biscuit_auth import KeyPair
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+import spiffe_doubles
 from vibap import cli
 from vibap import spiffe_identity
 from vibap.passport import generate_keypair
@@ -109,7 +110,7 @@ def test_start_reads_peer_verification_configuration_from_environment(
 def test_raw_spire_bundle_shapes_load_for_proxy_verification(
     tmp_path, bundle_shape
 ) -> None:
-    source = spiffe_identity.make_mock_trust_bundle()
+    source = spiffe_doubles.make_mock_trust_bundle()
     jwt_key = next(
         dict(key) for key in source.jwks["keys"] if key.get("use") == "jwt-svid"
     )
@@ -145,7 +146,7 @@ def test_raw_spire_bundle_shapes_load_for_proxy_verification(
 def test_start_wires_configured_peer_verification_into_proxy(
     tmp_path, monkeypatch
 ) -> None:
-    source = spiffe_identity.make_mock_trust_bundle()
+    source = spiffe_doubles.make_mock_trust_bundle()
     jwt_key = next(
         dict(key) for key in source.jwks["keys"] if key.get("use") == "jwt-svid"
     )
@@ -237,7 +238,7 @@ def test_start_rejects_partial_peer_verification_configuration(
 def test_start_rejects_x509_only_peer_trust_bundle(
     tmp_path, monkeypatch, capsys
 ) -> None:
-    source = spiffe_identity.make_mock_trust_bundle()
+    source = spiffe_doubles.make_mock_trust_bundle()
     x509_key = next(
         dict(key) for key in source.jwks["keys"] if key.get("use") == "jwt-svid"
     )
@@ -272,7 +273,7 @@ def test_start_rejects_x509_only_peer_trust_bundle(
 
 def test_start_fetches_and_retains_configured_workload_identity(monkeypatch) -> None:
     captured: dict[str, object] = {}
-    workload_identity = spiffe_identity.make_mock_svid_bundle()
+    workload_identity = spiffe_doubles.make_mock_svid_bundle()
 
     def fake_fetch_svid(socket_path: str):
         captured["socket_path"] = socket_path
@@ -334,7 +335,7 @@ def test_start_rejects_unreachable_configured_spiffe_socket(
 
 def test_hub_fetches_and_forwards_configured_workload_identity(monkeypatch) -> None:
     captured: dict[str, object] = {}
-    workload_identity = spiffe_identity.make_mock_svid_bundle()
+    workload_identity = spiffe_doubles.make_mock_svid_bundle()
 
     def fake_fetch_svid(socket_path: str):
         captured["socket_path"] = socket_path
@@ -363,7 +364,7 @@ def test_hub_fetches_and_forwards_configured_workload_identity(monkeypatch) -> N
 
 
 def test_personal_hub_retains_workload_identity_in_its_proxy(tmp_path) -> None:
-    workload_identity = spiffe_identity.make_mock_svid_bundle()
+    workload_identity = spiffe_doubles.make_mock_svid_bundle()
 
     hub = PersonalHub(tmp_path, workload_identity=workload_identity)
 
@@ -373,7 +374,7 @@ def test_personal_hub_retains_workload_identity_in_its_proxy(tmp_path) -> None:
 def test_proxy_keeps_workload_identity_private_key_in_memory_only(tmp_path) -> None:
     keys_dir = tmp_path / "keys"
     private_key, public_key = generate_keypair(keys_dir=keys_dir)
-    workload_identity = spiffe_identity.make_mock_svid_bundle()
+    workload_identity = spiffe_doubles.make_mock_svid_bundle()
 
     proxy = GovernanceProxy(
         log_path=tmp_path / "governance.jsonl",

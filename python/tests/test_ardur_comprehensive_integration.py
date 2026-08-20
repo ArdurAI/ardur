@@ -364,7 +364,7 @@ class TestArdurComprehensive:
         report = ScenarioReport()
 
         policy_store = InMemoryPolicyStore()
-        from vibap.spiffe_identity import make_mock_trust_bundle
+        from spiffe_doubles import make_mock_trust_bundle
 
         proxy = GovernanceProxy(
             log_path=tmp_path / "governance_log.jsonl",
@@ -674,7 +674,7 @@ def _verify_jwt_lifecycle(base, proxy, private_key):
 def _verify_biscuit_spiffe(base, proxy, biscuit_keypair):
     from biscuit_auth import Algorithm, PrivateKey
     from vibap.biscuit_passport import encode_biscuit_b64, issue_biscuit_passport
-    from vibap.spiffe_identity import make_mock_svid_bundle, make_mock_trust_bundle
+    from spiffe_doubles import make_mock_svid_bundle, make_mock_trust_bundle
 
     holder_spiffe = _BISCUIT_HOLDER_SPIFFE_ID
     private_bytes = bytes(biscuit_keypair.private_key.to_bytes())
@@ -1171,7 +1171,7 @@ def _verify_biscuit_attenuation_chain(base, proxy, biscuit_keypair):
         encode_biscuit_b64,
         issue_biscuit_passport,
     )
-    from vibap.spiffe_identity import make_mock_svid_bundle
+    from spiffe_doubles import make_mock_svid_bundle
 
     private_bytes = bytes(biscuit_keypair.private_key.to_bytes())
     root_private = PrivateKey.from_bytes(private_bytes, Algorithm.Ed25519)

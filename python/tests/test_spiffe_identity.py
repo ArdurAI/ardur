@@ -13,9 +13,12 @@ These tests close that gap by exercising:
 - bounded-iat-skew gate on far-past iat,
 - empty token / empty audience input validation.
 
-The tests use the in-package ``make_mock_svid_bundle`` /
-``make_mock_trust_bundle`` helpers; the iat-override parameter added in
-round-5 lets us mint tokens at fresh / future / past timestamps.
+The tests use the ``make_mock_svid_bundle`` / ``make_mock_trust_bundle``
+helpers; the iat-override parameter added in round-5 lets us mint tokens
+at fresh / future / past timestamps. Those helpers used to live in
+``vibap.spiffe_identity`` itself and now live in ``tests/spiffe_doubles.py``
+— they mint deterministic, attacker-derivable key material, so they must
+not sit in the shipped package (see ``test_no_test_doubles_shipped.py``).
 """
 
 from __future__ import annotations
@@ -24,12 +27,8 @@ import time
 
 import pytest
 
-from vibap.spiffe_identity import (
-    SvidClaims,
-    make_mock_svid_bundle,
-    make_mock_trust_bundle,
-    verify_jwt_svid,
-)
+from spiffe_doubles import make_mock_svid_bundle, make_mock_trust_bundle
+from vibap.spiffe_identity import SvidClaims, verify_jwt_svid
 
 
 _AUDIENCE = "vibap://spiffe-mock"
