@@ -1,24 +1,39 @@
-package policy
+// Package policytest provides test doubles for the policy (Layer 3) engine.
+//
+// It lives in its own package, separate from pkg/policy, so that a fake policy
+// engine cannot be linked into a production binary. That matters because
+// pkg/issuer treats "a PolicyEngine is configured and Compile returned no
+// error" as the policyCompiled input to computeActualCompliance, one of the
+// three conditions that raise a credential to LevelVerified. A mock reachable
+// from cmd/ would let policy text that was never parsed — and an authorization
+// decision no real engine produced — earn that treatment.
+//
+// go/internal/linkgraph enforces the separation: its architecture test fails
+// if this package, or any exported Mock/Fake/Stub/Dummy symbol in a non-test
+// file, becomes reachable from a binary under cmd/.
+package policytest
 
 import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/ArdurAI/ardur/go/pkg/policy"
 )
 
-// MockPolicyEngine implements PolicyEngine for testing.
+// MockPolicyEngine implements policy.PolicyEngine for testing.
 // Configurable decision, errors, and call tracking.
 type MockPolicyEngine struct {
 	mu           sync.Mutex
 	closed       bool
-	decision     Decision
+	decision     policy.Decision
 	compileErr   error
 	evalErr      error
 	evalReasons  []string
 	compileCount int
 	evalCount    int
-	entities     []Entity
-	lastRequest  *AuthzRequest
+	entities     []policy.Entity
+	lastRequest  *policy.AuthzRequest
 	name         string
 }
 
@@ -26,7 +41,7 @@ type MockPolicyEngine struct {
 type MockPolicyEngineOption func(*MockPolicyEngine)
 
 // WithMockDecision sets the decision returned by Evaluate.
-func WithMockDecision(d Decision) MockPolicyEngineOption {
+func WithMockDecision(d policy.Decision) MockPolicyEngineOption {
 	return func(m *MockPolicyEngine) { m.decision = d }
 }
 
@@ -48,7 +63,7 @@ func WithMockEngineName(name string) MockPolicyEngineOption {
 // NewMockPolicyEngine creates a new mock policy engine.
 func NewMockPolicyEngine(opts ...MockPolicyEngineOption) *MockPolicyEngine {
 	m := &MockPolicyEngine{
-		decision: DecisionAllow,
+		decision: policy.DecisionAllow,
 		name:     "mock",
 	}
 	for _, opt := range opts {
@@ -57,22 +72,22 @@ func NewMockPolicyEngine(opts ...MockPolicyEngineOption) *MockPolicyEngine {
 	return m
 }
 
-var _ PolicyEngine = (*MockPolicyEngine)(nil)
+var _ policy.PolicyEngine = (*MockPolicyEngine)(nil)
 
-func (m *MockPolicyEngine) Compile(_ context.Context, policyText string) (*CompiledPolicy, error) {
+func (m *MockPolicyEngine) Compile(_ context.Context, policyText string) (*policy.CompiledPolicy, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.compileCount++
 
 	if m.closed {
-		return nil, ErrEngineClosed
+		return nil, policy.ErrEngineClosed
 	}
 	if m.compileErr != nil {
 		return nil, m.compileErr
 	}
 
-	hash := ComputePolicyHash(policyText)
-	return &CompiledPolicy{
+	hash := policy.ComputePolicyHash(policyText)
+	return &policy.CompiledPolicy{
 		PolicyText:  policyText,
 		Hash:        hash,
 		PolicyCount: 1,
@@ -80,31 +95,31 @@ func (m *MockPolicyEngine) Compile(_ context.Context, policyText string) (*Compi
 	}, nil
 }
 
-func (m *MockPolicyEngine) Evaluate(_ context.Context, _ *CompiledPolicy, _ []Entity, request AuthzRequest) (*AuthzResult, error) {
+func (m *MockPolicyEngine) Evaluate(_ context.Context, _ *policy.CompiledPolicy, _ []policy.Entity, request policy.AuthzRequest) (*policy.AuthzResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.evalCount++
 	m.lastRequest = &request
 
 	if m.closed {
-		return nil, ErrEngineClosed
+		return nil, policy.ErrEngineClosed
 	}
 	if m.evalErr != nil {
 		return nil, m.evalErr
 	}
 
-	return &AuthzResult{
+	return &policy.AuthzResult{
 		Decision: m.decision,
 		Reasons:  m.evalReasons,
 		EvalTime: 100 * time.Microsecond,
 	}, nil
 }
 
-func (m *MockPolicyEngine) SetEntities(entities []Entity) error {
+func (m *MockPolicyEngine) SetEntities(entities []policy.Entity) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return ErrEngineClosed
+		return policy.ErrEngineClosed
 	}
 	m.entities = entities
 	return nil
@@ -120,7 +135,7 @@ func (m *MockPolicyEngine) Close() error {
 }
 
 // SetDecision changes the mock decision (thread-safe).
-func (m *MockPolicyEngine) SetDecision(d Decision) {
+func (m *MockPolicyEngine) SetDecision(d policy.Decision) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.decision = d
@@ -141,7 +156,7 @@ func (m *MockPolicyEngine) EvalCount() int {
 }
 
 // LastRequest returns the last AuthzRequest passed to Evaluate.
-func (m *MockPolicyEngine) LastRequest() *AuthzRequest {
+func (m *MockPolicyEngine) LastRequest() *policy.AuthzRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastRequest

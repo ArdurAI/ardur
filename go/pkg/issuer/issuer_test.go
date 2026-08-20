@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/credential"
-	"github.com/ArdurAI/ardur/go/pkg/policy"
+	"github.com/ArdurAI/ardur/go/pkg/policy/policytest"
 	"github.com/ArdurAI/ardur/go/pkg/profiling"
-	"github.com/ArdurAI/ardur/go/pkg/provenance"
-	"github.com/ArdurAI/ardur/go/pkg/spiffe"
+	"github.com/ArdurAI/ardur/go/pkg/profiling/profilingtest"
+	"github.com/ArdurAI/ardur/go/pkg/provenance/provenancetest"
+	"github.com/ArdurAI/ardur/go/pkg/spiffe/spiffetest"
 	"github.com/ArdurAI/ardur/go/pkg/transparency"
 	"github.com/ArdurAI/ardur/go/pkg/trust"
+	"github.com/ArdurAI/ardur/go/pkg/trust/trusttest"
 )
 
 func testSigningKey(t *testing.T) *credential.SigningKey {
@@ -41,8 +43,8 @@ func testHolderKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	return pub, priv
 }
 
-func defaultMockIdentity() *spiffe.MockIdentityProvider {
-	return spiffe.NewMockIdentityProvider(spiffe.MockIdentityProviderOptions{
+func defaultMockIdentity() *spiffetest.MockIdentityProvider {
+	return spiffetest.NewMockIdentityProvider(spiffetest.MockIdentityProviderOptions{
 		SPIFFEID:    "spiffe://ardur.dev/agent/test/instance-001",
 		OwnerID:     "spiffe://ardur.dev/user/deployer",
 		TrustDomain: "ardur.dev",
@@ -50,16 +52,16 @@ func defaultMockIdentity() *spiffe.MockIdentityProvider {
 	})
 }
 
-func defaultMockProvenance() *provenance.MockProvenanceVerifier {
-	return provenance.NewMockProvenanceVerifier()
+func defaultMockProvenance() *provenancetest.MockProvenanceVerifier {
+	return provenancetest.NewMockProvenanceVerifier()
 }
 
-func defaultMockPolicy() *policy.MockPolicyEngine {
-	return policy.NewMockPolicyEngine(policy.WithMockEngineName("cedar"))
+func defaultMockPolicy() *policytest.MockPolicyEngine {
+	return policytest.NewMockPolicyEngine(policytest.WithMockEngineName("cedar"))
 }
 
-func defaultMockProfiling() *profiling.MockProfileProvider {
-	m := profiling.NewMockProfileProvider()
+func defaultMockProfiling() *profilingtest.MockProfileProvider {
+	m := profilingtest.NewMockProfileProvider()
 	m.AddProfile(&profiling.ApplicationProfile{
 		Name:      "test-pod",
 		Namespace: "default",
@@ -70,8 +72,8 @@ func defaultMockProfiling() *profiling.MockProfileProvider {
 	return m
 }
 
-func defaultMockTrust() *trust.MockAggregator {
-	m := trust.NewMockAggregator()
+func defaultMockTrust() *trusttest.MockAggregator {
+	m := trusttest.NewMockAggregator()
 	m.SetScore(&trust.TrustScore{
 		AgentID:              "spiffe://ardur.dev/agent/test/instance-001",
 		StaticCapability:     0.8,
@@ -610,8 +612,8 @@ func TestIssue_ProvenanceVerifierFailure(t *testing.T) {
 
 func TestIssue_PolicyEngineFailure(t *testing.T) {
 	key := testSigningKey(t)
-	mock := policy.NewMockPolicyEngine(
-		policy.WithMockCompileError(fmt.Errorf("invalid Cedar syntax")),
+	mock := policytest.NewMockPolicyEngine(
+		policytest.WithMockCompileError(fmt.Errorf("invalid Cedar syntax")),
 	)
 
 	iss, _ := NewIssuer(key, "https://vibap.example.com",
@@ -629,7 +631,7 @@ func TestIssue_PolicyEngineFailure(t *testing.T) {
 
 func TestIssue_ProfilingProviderFailure(t *testing.T) {
 	key := testSigningKey(t)
-	mock := profiling.NewMockProfileProvider()
+	mock := profilingtest.NewMockProfileProvider()
 	mock.SetGetError(fmt.Errorf("profile not available"))
 
 	iss, _ := NewIssuer(key, "https://vibap.example.com",
@@ -652,7 +654,7 @@ func TestIssue_ProfilingProviderFailure(t *testing.T) {
 
 func TestIssue_TrustAggregatorFailure(t *testing.T) {
 	key := testSigningKey(t)
-	mock := trust.NewMockAggregator()
+	mock := trusttest.NewMockAggregator()
 
 	iss, _ := NewIssuer(key, "https://vibap.example.com",
 		WithTrustAggregator(mock),
