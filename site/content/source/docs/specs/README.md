@@ -2,7 +2,7 @@
 title: "MCEP Specifications (v0.1)"
 description: "This directory carries the v0.1 specification documents for Ardur's protocol layer, MCEP (Mission-Controlled Execution Protocol). v0.1 is a pre-release series — the specs describe "
 source_path: "docs/specs/README.md"
-source_sha256: "e98cf9c89f60df18f964fe37e7a3c47c70e889b9d23612af3eaa1d705c55e4b8"
+source_sha256: "1d5ee46b5ec5c4cc0b35ec5ae0db364332d959513931dde638dd2a4385b8dd5c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -77,6 +77,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Receiver Attestation v0.1 schema](/__ardur_internal__/repo/docs/specs/receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
 | [Receiver Attestation v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/receiver-attestation-v0.1.json) | **implemented** | Separately signed action/receiver evidence with public trust keys and offline verification |
 | [Offline Verification Bundle v0.1 schema](/__ardur_internal__/repo/docs/specs/offline-verification-bundle-v0.1.schema.json) | **implemented** | Strict full-evidence journal shape with no embedded trust-root fields |
+| [Offline Verification Report v0.1 schema](/__ardur_internal__/repo/docs/specs/offline-verification-report-v0.1.schema.json) | **implemented** | Closed explorer-report contract; `result` carries no failure value because failures raise instead of reporting, and a timeline `ERROR` is the `insufficient_evidence` governance verdict, not a verifier fault |
 | [Offline Verification Bundle v0.1 golden fixture](/__ardur_internal__/repo/docs/specs/fixtures/offline-verification-v0.1.json) | **implemented** | Three-receipt PERMIT/DENY/PERMIT chain, separate public trust roots, and redacted JSON/HTML explorer reports |
 | [Host adoption/governance source-semantic vectors](/__ardur_internal__/source/docs/specs/source-semantic-vectors/readme/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 

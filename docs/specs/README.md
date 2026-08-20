@@ -60,6 +60,7 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 | [Receiver Attestation v0.1 schema](./receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
 | [Receiver Attestation v0.1 golden fixture](./fixtures/receiver-attestation-v0.1.json) | **implemented** | Separately signed action/receiver evidence with public trust keys and offline verification |
 | [Offline Verification Bundle v0.1 schema](./offline-verification-bundle-v0.1.schema.json) | **implemented** | Strict full-evidence journal shape with no embedded trust-root fields |
+| [Offline Verification Report v0.1 schema](./offline-verification-report-v0.1.schema.json) | **implemented** | Closed explorer-report contract; `result` carries no failure value because failures raise instead of reporting, and a timeline `ERROR` is the `insufficient_evidence` governance verdict, not a verifier fault |
 | [Offline Verification Bundle v0.1 golden fixture](./fixtures/offline-verification-v0.1.json) | **implemented** | Three-receipt PERMIT/DENY/PERMIT chain, separate public trust roots, and redacted JSON/HTML explorer reports |
 | [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 

@@ -180,6 +180,16 @@ The HTML and JSON reports are derived views. The original bundle, trust-root
 fingerprints, and verifier command remain the authoritative reproducibility
 inputs.
 
+The JSON report's shape is fixed by
+[`offline-verification-report-v0.1.schema.json`](./offline-verification-report-v0.1.schema.json),
+which the verifier validates against before returning. Two properties of that
+report are easy to misread: `result` has no failure value, because a failed
+verification raises instead of producing a report, so the existence of a report
+means verification succeeded rather than that nothing was wrong; and a receipt
+verdict of `insufficient_evidence` appears in the timeline as the decision
+`ERROR`, which is a governance verdict about missing evidence, not a verifier
+fault.
+
 ## 8. CLI and Package
 
 Full verification:

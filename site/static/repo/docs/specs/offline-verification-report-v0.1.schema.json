@@ -1,0 +1,393 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/offline-verification-report-v0.1.schema.json",
+  "title": "Ardur Offline Verification Report v0.1",
+  "description": "Deterministic explorer report emitted by ardur-verify after offline verification of a receipt journal or full-evidence bundle. Two boundaries a reader would otherwise get wrong. (1) `result` has no failure value: verification failures raise instead of producing a report, so the existence of a report means verification succeeded. It does not mean nothing was wrong -- the timeline may still record DENY, ERROR, and UNKNOWN governance outcomes. (2) A receipt verdict of `insufficient_evidence` appears in the timeline as the decision `ERROR`. That label reads like an operational fault but is a governance verdict meaning the evidence was lacking, not that the verifier malfunctioned.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "valid",
+    "result",
+    "verification_mode",
+    "revocation_checked",
+    "freshness",
+    "assurance_profile",
+    "redaction",
+    "source",
+    "trust_roots",
+    "summary",
+    "timeline",
+    "limitations",
+    "verified_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.offline_verification_report.v0.1"
+    },
+    "valid": {
+      "const": true,
+      "description": "Always true. A report is only constructed on the success path; every failure raises OfflineVerificationError instead."
+    },
+    "result": {
+      "enum": ["verified", "verified_chain_only"],
+      "description": "Both values are success values. `verified` is full-evidence verification; `verified_chain_only` verified the signed hash chain alone, without transparency anchors or receiver attestations."
+    },
+    "verification_mode": {
+      "const": "offline"
+    },
+    "revocation_checked": {
+      "type": "boolean",
+      "description": "Required so a reader can never assume a revocation check happened by omission. The reference verifier performs no network lookup and always emits false."
+    },
+    "freshness": {
+      "$ref": "#/$defs/freshness"
+    },
+    "assurance_profile": {
+      "enum": ["full-evidence", "chain-only"]
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "marker"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "marker": {"type": "string", "minLength": 1, "maxLength": 64}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sha256"],
+      "properties": {
+        "kind": {"enum": ["journal", "bundle"]},
+        "sha256": {"$ref": "#/$defs/sha256HexString"}
+      }
+    },
+    "trust_roots": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "spki_fingerprint"],
+        "properties": {
+          "role": {"enum": ["receipt-issuer", "transparency-log", "receiver"]},
+          "spki_fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      },
+      "description": "Chain-only reports carry the receipt issuer alone. Full-evidence reports additionally carry the transparency log and receiver roots, which the verifier requires to be three distinct keys."
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_count",
+        "permit_count",
+        "deny_count",
+        "error_count",
+        "unknown_count",
+        "anchored_count",
+        "receiver_attested_count",
+        "authority_narrowing_steps"
+      ],
+      "properties": {
+        "receipt_count": {"type": "integer", "minimum": 0},
+        "permit_count": {"type": "integer", "minimum": 0},
+        "deny_count": {"type": "integer", "minimum": 0},
+        "error_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of timeline entries whose decision is ERROR, i.e. receipts with the governance verdict `insufficient_evidence`. Not a count of verifier faults."
+        },
+        "unknown_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of timeline entries whose decision is UNKNOWN. Required: a reader must not have to infer the absence of unknown-verdict receipts from a missing field."
+        },
+        "anchored_count": {"type": "integer", "minimum": 0},
+        "receiver_attested_count": {"type": "integer", "minimum": 0},
+        "authority_narrowing_steps": {
+          "type": "array",
+          "maxItems": 2048,
+          "items": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2048,
+      "items": {"$ref": "#/$defs/timelineEntry"}
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "verified_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Verifier wall-clock time at which the report was produced. Not attested by any signature in the bundle."
+    }
+  },
+  "$defs": {
+    "sha256HexString": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "nullableBoundedString": {
+      "anyOf": [
+        {"type": "string", "minLength": 1, "maxLength": 4096},
+        {"type": "null"}
+      ]
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "age_checked",
+        "max_age_s",
+        "allowed_future_skew_s",
+        "latest_receipt_iat",
+        "age_s",
+        "one_time_replay_checked"
+      ],
+      "properties": {
+        "age_checked": {"type": "boolean"},
+        "max_age_s": {
+          "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+        },
+        "allowed_future_skew_s": {
+          "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+        },
+        "latest_receipt_iat": {"type": "integer", "minimum": 0},
+        "age_s": {
+          "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+        },
+        "one_time_replay_checked": {
+          "type": "boolean",
+          "description": "Required so a reader can never assume a one-time-possession check happened by omission. The reference verifier never performs one and always emits false; an age bound alone does not prevent repeated presentation inside the accepted window."
+        }
+      }
+    },
+    "timelineEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "timestamp",
+        "receipt_id",
+        "parent_receipt_hash",
+        "step_id",
+        "verdict",
+        "decision",
+        "reason_code",
+        "actor",
+        "verifier_id",
+        "grant_id",
+        "tool",
+        "action_class",
+        "target",
+        "resource_family",
+        "side_effect_class",
+        "sensitivity",
+        "instruction_bearing",
+        "content_class",
+        "content_provenance",
+        "invocation_digest",
+        "evidence_level",
+        "reason",
+        "policy_outcomes",
+        "cost_outcomes",
+        "authority",
+        "evidence"
+      ],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "timestamp": {"$ref": "#/$defs/boundedString"},
+        "receipt_id": {
+          "$ref": "#/$defs/boundedString",
+          "description": "Copied from the verified receipt. The identifier's own format is governed by the Execution Receipt schema, which admits more shapes than the `receipt:<hex>` form the reference proxy emits, so it is not re-constrained here."
+        },
+        "parent_receipt_hash": {
+          "anyOf": [{"$ref": "#/$defs/sha256HexString"}, {"type": "null"}]
+        },
+        "step_id": {"$ref": "#/$defs/boundedString"},
+        "verdict": {
+          "enum": [
+            "compliant",
+            "violation",
+            "insufficient_evidence",
+            "unknown"
+          ]
+        },
+        "decision": {
+          "enum": ["PERMIT", "DENY", "ERROR", "UNKNOWN"],
+          "description": "Display label for `verdict`: compliant -> PERMIT, violation -> DENY, insufficient_evidence -> ERROR, unknown -> UNKNOWN. ERROR is a governance verdict about missing evidence, not a verifier malfunction."
+        },
+        "reason_code": {"$ref": "#/$defs/boundedString"},
+        "actor": {"$ref": "#/$defs/boundedString"},
+        "verifier_id": {"$ref": "#/$defs/boundedString"},
+        "grant_id": {"$ref": "#/$defs/boundedString"},
+        "tool": {"$ref": "#/$defs/boundedString"},
+        "action_class": {"$ref": "#/$defs/boundedString"},
+        "target": {"$ref": "#/$defs/boundedString"},
+        "resource_family": {"$ref": "#/$defs/boundedString"},
+        "side_effect_class": {"$ref": "#/$defs/boundedString"},
+        "sensitivity": {"$ref": "#/$defs/nullableBoundedString"},
+        "instruction_bearing": {
+          "anyOf": [{"type": "boolean"}, {"type": "null"}]
+        },
+        "content_class": {"$ref": "#/$defs/nullableBoundedString"},
+        "content_provenance": {
+          "anyOf": [{"type": "object"}, {"type": "null"}],
+          "description": "Copied verbatim from the verified receipt. Its interior is governed by the Execution Receipt v0.2 schema, not restated here."
+        },
+        "invocation_digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["alg", "value"],
+          "properties": {
+            "alg": {"enum": ["sha-256", "sha-384", "sha-512"]},
+            "canonicalization": {"enum": ["jcs-rfc8785", "none"]},
+            "scope": {
+              "enum": ["result", "normalized_input", "measurement", "custom"]
+            },
+            "value": {"$ref": "#/$defs/boundedString"}
+          }
+        },
+        "evidence_level": {
+          "enum": ["self_signed", "counter_signed", "transparency_logged"]
+        },
+        "reason": {"$ref": "#/$defs/boundedString"},
+        "policy_outcomes": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["backend", "decision", "reason", "rule_id"],
+            "properties": {
+              "backend": {"$ref": "#/$defs/nullableBoundedString"},
+              "decision": {"$ref": "#/$defs/nullableBoundedString"},
+              "reason": {"$ref": "#/$defs/nullableBoundedString"},
+              "rule_id": {"$ref": "#/$defs/nullableBoundedString"}
+            }
+          }
+        },
+        "cost_outcomes": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[A-Za-z0-9._:-]{1,64}$"},
+          "additionalProperties": {"type": "number"},
+          "description": "Open map: the projection keeps every numeric receipt measurement whose key mentions cost, usd, or token, so the key set is not closed."
+        },
+        "authority": {"$ref": "#/$defs/authority"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "trace_id": {
+          "$ref": "#/$defs/boundedString",
+          "description": "Present only when the caller requested correlation fields (the telemetry export path)."
+        },
+        "arguments_hash": {
+          "$ref": "#/$defs/sha256HexString",
+          "description": "Present only when the caller requested correlation fields (the telemetry export path)."
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_changed",
+        "budget_narrowed",
+        "narrowing_proven",
+        "why",
+        "budget_delta",
+        "budget_remaining"
+      ],
+      "properties": {
+        "grant_changed": {"type": "boolean"},
+        "budget_narrowed": {"type": "boolean"},
+        "narrowing_proven": {
+          "type": "boolean",
+          "description": "True only when a signed budget delta or an observed decrease proves narrowing and nothing contradicts it. A grant change alone never proves scope containment."
+        },
+        "why": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 512}
+        },
+        "budget_delta": {
+          "anyOf": [{"type": "object"}, {"type": "null"}],
+          "description": "Copied verbatim from the verified receipt. Its interior is governed by the Execution Receipt v0.2 schema, not restated here."
+        },
+        "budget_remaining": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[A-Za-z0-9._:-]{1,64}$"},
+          "additionalProperties": {"type": "number"},
+          "description": "Open map keyed by budget bucket, copied from the verified receipt."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_signature_valid",
+        "chain_link_valid",
+        "transparency",
+        "receiver"
+      ],
+      "properties": {
+        "receipt_signature_valid": {"const": true},
+        "chain_link_valid": {"const": true},
+        "transparency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "valid"],
+          "properties": {
+            "present": {"type": "boolean"},
+            "valid": {"type": "boolean"},
+            "anchor_id": {"$ref": "#/$defs/nullableBoundedString"},
+            "log_id": {"$ref": "#/$defs/nullableBoundedString"},
+            "log_index": {
+              "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+            },
+            "tree_size": {
+              "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+            }
+          },
+          "description": "Chain-only reports emit present/valid alone; the anchor detail keys appear only on the full-evidence path."
+        },
+        "receiver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["present", "valid"],
+          "properties": {
+            "present": {"type": "boolean"},
+            "valid": {"type": "boolean"},
+            "status": {
+              "enum": ["verified", "not-dispatched", "absent"],
+              "description": "`absent` means the report is chain-only and no receiver evidence was examined. `not-dispatched` means full evidence showed the call was blocked before dispatch."
+            },
+            "assurance_tier": {"$ref": "#/$defs/nullableBoundedString"},
+            "attestation_id": {"$ref": "#/$defs/nullableBoundedString"},
+            "receiver_id": {"$ref": "#/$defs/nullableBoundedString"}
+          }
+        }
+      }
+    }
+  }
+}
