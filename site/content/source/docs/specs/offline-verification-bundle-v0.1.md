@@ -2,7 +2,7 @@
 title: "Offline Verification Bundle v0.1"
 description: "Status: implemented public profile for independently runnable Ardur receipt"
 source_path: "docs/specs/offline-verification-bundle-v0.1.md"
-source_sha256: "480a05d5704b0165315c59d4c31b6632e5288d858364a4668c7b03f95d0946f3"
+source_sha256: "101148b1ccca091e234767db79acd25079509aa76e7fedbd2572722c2409efc8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -209,15 +209,32 @@ fault.
 
 Each anchored timeline entry also reports the anchor's `backend` verbatim and
 an `anchor_class` derived from it: `self-hosted-log` for `c2sp-local-v1` and
-`external-log` for `rekor-v1`. The summary reports both `anchored_count` (valid
-anchors of any class) and `external_log_anchored_count`. A consumer gating on
-externally-bounded evidence MUST use `external_log_anchored_count` or the
-per-entry `anchor_class`, never `anchored_count` alone: a self-hosted signed
-log is operator-administered evidence, and its independence is an operational
-property the verifier cannot check (see the transparency anchor profile,
-section 5.2). An `external-log` anchor classifies the mechanism, not the key
-holder — its independence still rests on the out-of-band provenance of the
-pinned log key.
+`public-log-protocol` for `rekor-v1`. A valid anchor MUST carry both fields.
+The summary reports `anchored_count` (valid anchors of any class) and
+`public_log_protocol_anchored_count`.
+
+The two classes are not symmetric, and a consumer must not treat them as
+mirror images. `self-hosted-log` is a checked property: that backend writes a
+local log, so the anchor is operator-administered by construction and MUST NOT
+satisfy an externally-anchored gate. `public-log-protocol` is weaker than its
+name may suggest — it records only that the public-log submission protocol was
+used and that its evidence verified under the pinned transparency-log key. The
+backend kind is supplied by the presenter and selects a verification branch; it
+is not a signed statement about where the log ran. The Rekor URL accepts any
+HTTPS host, including one inside the operator's deployment, and unlike the
+self-hosted branch the checkpoint origin is not pinned.
+
+A consumer gating on externally-bounded evidence therefore MUST NOT use
+`anchored_count` alone, and MUST NOT treat
+`public_log_protocol_anchored_count` as sufficient. That count is necessary but
+not sufficient: the consumer MUST additionally confirm out of band that the
+pinned transparency-log key belongs to a log administered outside the
+operator's authority, comparing `trust_roots[transparency-log].spki_fingerprint`
+and the entry's `log_id` against an independently trusted inventory.
+Independence remains an operational property the verifier cannot check (see the
+transparency anchor profile, section 5.2). Note that because a bundle pins a
+single transparency-log key, a `self-hosted-log` anchor anywhere in the bundle
+is evidence that the pinned key is operator-held.
 
 ## 8. CLI and Package
 

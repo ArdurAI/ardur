@@ -41,14 +41,20 @@ BUNDLE_SCHEMA_VERSION = "ardur.offline_verification_bundle.v0.1"
 REPORT_SCHEMA_VERSION = "ardur.offline_verification_report.v0.1"
 FULL_EVIDENCE_PROFILE = "full-evidence"
 CHAIN_ONLY_PROFILE = "chain-only"
+# Anchor mechanism classes. These name the MECHANISM a backend uses, never
+# where the log ran or who holds its key. The local backend's kind does fix
+# its deployment — it writes a local file — so `self-hosted-log` is a checked
+# property. The rekor backend's kind does not: `--rekor-url` accepts any HTTPS
+# host, including one inside the operator's deployment, so the class says only
+# that the public-log submission protocol was used.
 ANCHOR_CLASS_SELF_HOSTED_LOG = "self-hosted-log"
-ANCHOR_CLASS_EXTERNAL_LOG = "external-log"
-# Every backend kind verify_anchor_bundle can emit must be classified here.
+ANCHOR_CLASS_PUBLIC_LOG_PROTOCOL = "public-log-protocol"
+# Every backend kind verify_anchor_bundle accepts must be classified here.
 # The report schema's closed enums make an unclassified backend fail loudly
 # at the return site instead of shipping an unlabeled anchor.
 _ANCHOR_BACKEND_CLASSES = {
     BACKEND_LOCAL_SIGNED: ANCHOR_CLASS_SELF_HOSTED_LOG,
-    BACKEND_REKOR_V1: ANCHOR_CLASS_EXTERNAL_LOG,
+    BACKEND_REKOR_V1: ANCHOR_CLASS_PUBLIC_LOG_PROTOCOL,
 }
 MAX_INPUT_BYTES = 64 * 1024 * 1024
 MAX_JOURNAL_ENTRIES = 2048
@@ -779,15 +785,15 @@ def verify_offline_input(
 
     anchored_total = sum(item["evidence"]["transparency"]["valid"] for item in timeline)
     self_hosted_anchored_count = sum(
-        item["evidence"]["transparency"]["valid"]
+        bool(item["evidence"]["transparency"]["valid"])
         and item["evidence"]["transparency"].get("anchor_class")
         == ANCHOR_CLASS_SELF_HOSTED_LOG
         for item in timeline
     )
-    external_log_anchored_count = sum(
-        item["evidence"]["transparency"]["valid"]
+    public_log_protocol_anchored_count = sum(
+        bool(item["evidence"]["transparency"]["valid"])
         and item["evidence"]["transparency"].get("anchor_class")
-        == ANCHOR_CLASS_EXTERNAL_LOG
+        == ANCHOR_CLASS_PUBLIC_LOG_PROTOCOL
         for item in timeline
     )
     verified_at = int(time.time())
@@ -846,7 +852,7 @@ def verify_offline_input(
             "error_count": sum(item["decision"] == "ERROR" for item in timeline),
             "unknown_count": sum(item["decision"] == "UNKNOWN" for item in timeline),
             "anchored_count": anchored_total,
-            "external_log_anchored_count": external_log_anchored_count,
+            "public_log_protocol_anchored_count": public_log_protocol_anchored_count,
             "receiver_attested_count": sum(
                 item["evidence"]["receiver"]["valid"] for item in timeline
             ),
@@ -878,10 +884,20 @@ def verify_offline_input(
             ),
             *(
                 [
-                    "an external-log anchor is only as independent as the out-of-band "
-                    "channel that supplied the pinned log key"
+                    f"{public_log_protocol_anchored_count} of {anchored_total} valid anchors "
+                    "declare the rekor-v1 backend; that backend kind is supplied by the "
+                    "presenter and selects a verification branch, so it does not establish "
+                    "that any log outside the operator's deployment was contacted"
                 ]
-                if external_log_anchored_count
+                if public_log_protocol_anchored_count
+                else []
+            ),
+            *(
+                [
+                    "an anchor verified under a caller-supplied transparency-log key is "
+                    "only as independent as the out-of-band channel that supplied that key"
+                ]
+                if anchored_total
                 else []
             ),
         ],
@@ -965,7 +981,7 @@ def render_cli_report(report: Mapping[str, Any]) -> str:
         if transparency.get("backend"):
             anchor_display += (
                 f" [{_display(transparency['backend'])}"
-                f"/{_display(transparency['anchor_class'])}]"
+                f"/{_display(transparency.get('anchor_class'))}]"
             )
         lines.append(
             f"      receipt=valid chain=valid anchor={anchor_display} "
@@ -1027,7 +1043,7 @@ def render_html_report(report: Mapping[str, Any]) -> str:
         )
         transparency = evidence["transparency"]
         anchor_backend_cell = (
-            f"{esc(transparency['backend'])} ({esc(transparency['anchor_class'])})"
+            f"{esc(transparency['backend'])} ({esc(transparency.get('anchor_class'))})"
             if transparency.get("backend")
             else "none"
         )
@@ -1091,7 +1107,7 @@ def render_html_report(report: Mapping[str, Any]) -> str:
       <div class="metric"><strong>{summary["deny_count"]}</strong><br>DENY</div>
       <div class="metric"><strong>{summary["error_count"]}</strong><br>ERROR</div>
       <div class="metric"><strong>{summary["anchored_count"]}</strong><br>Anchored</div>
-      <div class="metric"><strong>{summary["external_log_anchored_count"]}</strong><br>External-log anchored</div>
+      <div class="metric"><strong>{summary["public_log_protocol_anchored_count"]}</strong><br>Public-log protocol</div>
       <div class="metric"><strong>{summary["receiver_attested_count"]}</strong><br>Receiver-attested</div>
     </section>
     <h2>Verification Material</h2>
