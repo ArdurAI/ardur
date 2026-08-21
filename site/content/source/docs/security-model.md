@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "d9a499de8d9fe16bcf86afb0e0b31641177e6beacd9ea8163231987cbc69a301"
+source_sha256: "d704a342ce0162410389a5666a89829482d3587a2dcf53b9160546b02236c355"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -136,10 +136,12 @@ consistency under three keys of unknown provenance, which is exactly what a
 hostile operator also produces.
 
 External anchoring is the mechanism that bounds a hostile operator, and only
-when the log is administered outside that operator's authority; the offline
-report's `anchor_class` field says which mechanism class produced each anchor.
-SPIFFE does not bound the operator, because SPIRE is the operator's own
-infrastructure.
+when the log is administered outside that operator's authority. The offline
+report's `anchor_class` field says which anchoring mechanism produced each
+anchor; it does not establish that the log for that mechanism was in fact
+administered outside the operator's authority, or that any submission left the
+deployment. Confirming that remains an out-of-band step. SPIFFE does not bound
+the operator either, because SPIRE is the operator's own infrastructure.
 
 ## Hardening direction
 

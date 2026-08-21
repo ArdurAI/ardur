@@ -2,11 +2,7 @@
 title: "Offline Verification Bundle v0.1"
 description: "Status: implemented public profile for independently runnable Ardur receipt"
 source_path: "docs/specs/offline-verification-bundle-v0.1.md"
-<<<<<<< HEAD
-source_sha256: "101148b1ccca091e234767db79acd25079509aa76e7fedbd2572722c2409efc8"
-=======
-source_sha256: "070ea40474a3f4b6a8348370c2d34c674efab8468e031b0e0647e4f9492b0bac"
->>>>>>> c526fc9 (claims(independence): say distinctness where the surface said independence)
+source_sha256: "d18161ca140bfbe4b6380b07f8b5cecba00d6779b4fce29e99070395f957362f"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
