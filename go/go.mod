@@ -11,7 +11,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.8.1
 	golang.org/x/sys v0.47.0
 	k8s.io/api v0.36.3
-	k8s.io/apimachinery v0.36.3
+	k8s.io/apimachinery v0.36.4
 	k8s.io/client-go v0.36.3
 	sigs.k8s.io/controller-runtime v0.24.1
 )
