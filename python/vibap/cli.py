@@ -3536,6 +3536,14 @@ def cmd_claude_code_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    except FileNotFoundError:
+        # Reporting is read-only: a missing key means "nothing verifiable
+        # here", never "mint a key and verify against it".
+        _print_json(_verify_public_key_missing_response())
+        return 1
+    except ValueError:
+        _print_json(_verify_public_key_invalid_response())
+        return 1
     if (
         getattr(args, "redact_paths", False)
         and not getattr(args, "json", False)
@@ -4178,6 +4186,14 @@ def cmd_gemini_cli_report(args: argparse.Namespace) -> int:
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
         return 1
+    except FileNotFoundError:
+        # Reporting is read-only: a missing key means "nothing verifiable
+        # here", never "mint a key and verify against it".
+        _print_json(_verify_public_key_missing_response())
+        return 1
+    except ValueError:
+        _print_json(_verify_public_key_invalid_response())
+        return 1
     if (
         getattr(args, "redact_paths", False)
         and not getattr(args, "json", False)
@@ -4371,6 +4387,14 @@ def cmd_codex_app_server_report(args: argparse.Namespace) -> int:
         )
     except KeyDirectoryError as exc:
         _print_json(_keys_dir_failure_response(exc))
+        return 1
+    except FileNotFoundError:
+        # Reporting is read-only: a missing key means "nothing verifiable
+        # here", never "mint a key and verify against it".
+        _print_json(_verify_public_key_missing_response())
+        return 1
+    except ValueError:
+        _print_json(_verify_public_key_invalid_response())
         return 1
     if (
         getattr(args, "redact_paths", False)
