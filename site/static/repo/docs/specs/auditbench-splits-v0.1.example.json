@@ -1,0 +1,14 @@
+{
+  "schema_version": "auditbench.split_manifest.v0.1",
+  "study_id": "auditbench-pilot-example",
+  "records": [
+    {
+      "scenario_id": "AB-I-001",
+      "split": "development"
+    },
+    {
+      "scenario_id": "AB-I-002",
+      "split": "held_out"
+    }
+  ]
+}

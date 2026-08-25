@@ -2,7 +2,7 @@
 title: "Delegation Grant (DG) Profile of Attenuating Authorization Tokens (AAT) v0.1"
 description: "This document defines version `v0.1` of the Delegation Grant (DG) profile for"
 source_path: "docs/specs/delegation-grant-profile-v0.1.md"
-source_sha256: "ee93d86c08455a53411615e0ebd1ded294728a82f50681ea069e53d09fd49af9"
+source_sha256: "61da0e94e1aed2bcf61cf2cc3aa321b3978c8b42767ec0d81b21d31155250285"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["protocol-spec"]
@@ -34,6 +34,17 @@ the MCEP (Mission-Controlled Execution Protocol) mission-and-evidence layer.
 
 The DG wire format is the Attenuating Authorization Token (AAT) defined by
 `draft-niyikiza-oauth-attenuating-agent-tokens-00`.
+
+The live Datatracker document advanced to draft-01 on 2026-06-15. Draft-01 is
+an individual Internet-Draft with no formal IETF standing and changes material
+wire semantics, including removal of the draft-00 `aat_type` token-role
+claim. This v0.1 profile remains intentionally pinned to draft-00; a versioned
+migration decision and field ledger are published in
+[`aat-draft-01-migration-decision.md`](/__ardur_internal__/source/docs/specs/aat-draft-01-migration-decision/)
+and
+[`aat-draft-00-to-01-change-ledger.json`](/__ardur_internal__/repo/docs/specs/aat-draft-00-to-01-change-ledger.json).
+Implementations MUST NOT silently interpret draft-00 tokens under draft-01
+rules. This pin MUST be reviewed no later than 2026-09-15.
 
 This profile is intentionally narrow:
 
@@ -81,9 +92,12 @@ Every DG that claims conformance to this profile:
 5. MUST pass the unmodified AAT chain-verification algorithm from AAT
    Section 7 before any profile-specific checks are applied.
 
-If a deployment uses the AAT CBOR/CWT profile from AAT Appendix D, this
-profile applies unchanged. `mission_ref` remains an additional DG claim and
-does not redefine the Appendix D transport mapping.
+This profile defines JWT/JWS carriage only. Although draft-00 titles Appendix
+D as a normative CBOR/CWT profile, the appendix defers claim-key assignments,
+COSE requirements, and interoperable serialization rules to a companion
+document. Draft-01 makes that boundary explicit by describing its Appendix D
+as non-normative and JWT/JWS as the only fully specified encoding. Ardur MUST
+NOT claim CWT DG interoperability without a separate versioned profile.
 
 An implementation claiming this profile MUST NOT fork, weaken, or replace the
 AAT Section 7 algorithm. Profile validation is strictly an additional layer
@@ -99,6 +113,13 @@ AAT-conformant. It is, however, less capable than a deployment that enforces
 this profile because it cannot bind the AAT chain to an MD or apply mission-
 scoped lineage-budget and evidence semantics.
 
+For revision dispatch, every DG v0.1 token MUST carry draft-00 `aat_type`.
+An Ardur verifier that receives an otherwise AAT-shaped token without
+`aat_type` MUST fail with an unsupported-revision result. It MUST NOT infer an
+execution or delegation role from chain position, because that would silently
+apply draft-01 semantics under the v0.1 profile. A present but unknown or
+non-string `aat_type` remains a malformed draft-00 token.
+
 ### 2.3. No New Cryptographic Mechanisms
 
 This profile introduces no new signature scheme, proof-of-possession scheme,
@@ -109,6 +130,11 @@ Implementations MUST reuse AAT's existing JOSE and PoP machinery, including:
 1. AAT token signatures per AAT Section 3.2 and Section 8.14;
 2. PoP JWT semantics per AAT Section 5; and
 3. `par_hash` chain linkage per AAT Section 4.6 and Section 7.
+
+The PoP `hta` claim is the direct tool-argument object. The complete PoP claim
+set MUST be RFC 8785 canonical JSON before JWS signing. Canonicalizing only
+`hta`, or wrapping it in an implementation-specific `{tool, args}` object, is
+not compatible with this profile.
 
 The optional `mission_digest` member defined by this profile reuses SHA-256
 and RFC 8785 JSON Canonicalization Scheme (JCS). It does not add a new
@@ -132,7 +158,21 @@ This profile normatively depends on the following parts of the AAT draft:
    controls;
 10. Section 8.14 for algorithm-confusion defenses;
 11. Section 9.1 for the JWT-claims registration template; and
-12. Appendix D for unchanged CWT/CBOR carriage.
+12. Appendix D only for the boundary that an interoperable CWT encoding is
+    not defined by this profile.
+
+### 2.5. Empty Constraint Maps
+
+This profile preserves draft-00 Sections 3.3 and 7 semantics for tool argument
+maps. A tool mapped to `{}` is authorized without argument restrictions. A
+non-empty map is closed-world: every invocation argument MUST be named, and
+every named constraint MUST have a matching argument. A child MAY introduce
+constraints beneath an empty parent map because doing so narrows unrestricted
+authority. Once the parent map is non-empty, children MUST preserve its exact
+argument-key set and may only narrow the corresponding constraints.
+
+Issuers that require a fixed argument shape while allowing arbitrary values
+MUST name each permitted argument with an explicit `wildcard` constraint.
 
 ## 3. The `mission_ref` Claim
 
@@ -451,6 +491,9 @@ The following profile-specific considerations also apply:
 3. RFC 8174
 4. RFC 8785
 5. RFC 9278
+
+The non-normative revision comparison used for this pin is recorded in
+`docs/specs/aat-draft-00-to-01-change-ledger.json`.
 
 ### 10.2. Informative References
 

@@ -1,0 +1,219 @@
+# Runtime Evidence Correlation Profile v0.1
+
+Status: **implemented external-evidence inspection profile**
+
+This profile defines how Ardur verifies a signed receipt journal, imports a
+bounded JSONL runtime-evidence stream, and emits a detached, redacted
+correlation report. It supports a normalized event shape plus adapters for
+Tetragon JSON events and Falco JSON alerts.
+
+The profile does not deploy a sensor, authenticate imported JSON, enforce a
+runtime policy, or mutate the signed receipt chain. Correlation confidence is
+an association result. It is not proof that the sensor is trustworthy or that
+its event stream is complete.
+
+## Artifacts
+
+- [`runtime-evidence-event-v0.1.schema.json`](runtime-evidence-event-v0.1.schema.json)
+  is the closed private ingest contract after adapter normalization.
+- [`runtime-evidence-correlation-report-v0.1.schema.json`](runtime-evidence-correlation-report-v0.1.schema.json)
+  is the closed public report contract.
+- [`conformance/runtime-evidence-v0.1/`](conformance/runtime-evidence-v0.1/README.md)
+  contains a signed receipt chain, a public receipt key, one event per adapter,
+  and production-generated reports.
+- [`python/vibap/runtime_evidence.py`](../../python/vibap/runtime_evidence.py)
+  implements bounded loading, adapters, matching, redaction, report validation,
+  and owner-only atomic output.
+
+## Processing order
+
+1. The receipt journal MUST verify under an explicitly supplied ES256 P-256
+   public key. Signature or chain failure stops processing before sensor input
+   is parsed.
+2. The operator MUST select `normalized`, `tetragon`, or `falco`; format
+   guessing is not allowed at this trust boundary.
+3. The selected adapter loads bounded UTF-8 JSONL, rejects duplicate keys and
+   non-finite numbers, enforces byte/line/event/depth/node limits, and validates
+   each normalized event against the embedded event schema.
+4. The correlator grades direct signed-field matches and bounded process-tree
+   inheritance.
+5. The report builder removes sensitive sensor detail, validates the closed
+   report schema, and emits deterministic RFC 8785 JSON or bounded text.
+6. An optional file output is atomically replaced with mode `0600` and refuses
+   a symlink target.
+
+The command performs no network request and requires no provider or sensor API
+credential.
+
+## Normalized event
+
+Every normalized event has these top-level fields:
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | Literal `ardur.runtime_evidence_event.v0.1`. |
+| `event_id` | Sensor-local identifier. It is private ingest data and is not copied to the report. |
+| `source` | Kind, format, instance, assurance, and declared coverage. Assurance is always `imported_unverified` in v0.1. |
+| `event_type` | `process_start`, `process_exit`, `file_write`, `file_delete`, or `network_connect`. |
+| `observed_at` | RFC 3339 timestamp with a UTC offset. |
+| `process` | Optional PID/PPID, start timestamps, exec identifiers, and container identifier. |
+| `correlation` | Optional receipt, trace, session, and actor hints supplied by the source. These hints are untrusted. |
+| `details` | Optional command, path, destination, workspace, and operation used only in memory for matching. |
+| `source_event_sha256` | Adapter-computed SHA-256 of the exact source JSONL line. |
+
+The normalized event file is a private operator input. It may contain command
+lines, paths, destinations, container identifiers, or source metadata. Do not
+publish it without a separate review. The public correlation report contains
+only a line number, source-line hash, event class, source kind/assurance,
+coverage label, process-identity presence flags, and a list of fields removed.
+
+## Source assurance and coverage
+
+Source assurance and coverage are independent of correlation confidence.
+
+- `imported_unverified` means Ardur parsed a local JSON artifact but did not
+  verify a sensor signature, host attestation, delivery channel, or retention
+  policy.
+- `complete`, `degraded`, `unknown`, and `alert_only` are source declarations,
+  not cryptographically verified claims in v0.1.
+- A report whose source assurance is `imported_unverified` MUST NOT call an
+  association independently proven, even when confidence is `high`.
+- Missing events MUST NOT be interpreted as proof of no activity unless a
+  future separately attested coverage contract establishes that inference.
+
+The report uses `mixed` only when a normalized input contains more than one
+declared coverage state.
+
+## Tetragon adapter
+
+The Tetragon adapter accepts:
+
+- base `process_exec` and `process_exit` events;
+- `process_kprobe` events whose `function_name` is one of `vfs_write`,
+  `vfs_writev`, `vfs_unlink`, `vfs_rename`, `tcp_connect`, `tcp_v4_connect`, or
+  `tcp_v6_connect`;
+- `process_tracepoint` events explicitly mapped from the supported syscall
+  write, unlink, or connect tracepoints; and
+- a tracing-policy event carrying an explicit supported `ardur_event_type`.
+
+Other tracing functions fail closed instead of being guessed into a file or
+network class. File/network policies can expose `ardur_path`,
+`ardur_destination`, and `ardur_operation` for exact private matching.
+
+The adapter consumes the official process identity fields when present:
+`process.exec_id`, `process.parent_exec_id`, `process.pid`, `process.start_time`,
+the outer `parent`, `node_name`, container identity, binary, arguments, cwd, and
+top-level `time`. Optional Ardur correlation hints may appear in a top-level or
+event-block `ardur` object, or in pod labels named `ai.ardur.receipt_id`,
+`ai.ardur.trace_id`, `ai.ardur.session_id`, and `ai.ardur.actor`.
+
+Tetragon coverage defaults to `unknown`. Tetragon exports can be filtered,
+rate-limited, rotated, or dropped; this profile does not ingest an attested
+export configuration or loss-counter manifest. The official documentation
+also warns that command-line arguments can contain sensitive information, so
+the adapter never copies those values into its report.
+
+## Falco adapter
+
+Falco must run with JSON output and must include the fields needed by the
+correlation policy in `output_fields`. The adapter accepts syscall-source
+alerts only and uses:
+
+- top-level `time`, or `evt.time.iso8601`, `evt.rawtime`, or `evt.time`;
+- `syscall.type` or `evt.type`;
+- `proc.pid`, `proc.ppid`, `proc.pid.ts`, and `proc.ppid.ts`;
+- `proc.cmdline` or `proc.exepath`;
+- `fd.name` or `evt.arg.path`; and
+- optional `ardur.receipt_id`, `ardur.trace_id`, `ardur.session_id`, and
+  `ardur.actor` fields added to the rule output.
+
+Supported event mappings are process start/exit, file write/delete, and
+`connect`. An `open`, `openat`, or `openat2` alert is classified as a write only
+when `evt.arg.flags` contains an explicit write/create/truncate/append marker.
+Unknown events fail closed.
+
+Falco JSON output represents rule-triggered alerts, not a complete syscall
+stream. The adapter therefore forces coverage to `alert_only`. A missing Falco
+alert cannot corroborate safe behavior or establish that no action occurred.
+
+## Matching and confidence
+
+Direct scoring uses only bounded combinations of:
+
+- exact receipt-id hint;
+- signed receipt `trace_id` matched to a source trace/session hint;
+- signed actor identity;
+- compatible event and signed side-effect/action classes;
+- exact target or command-name match; and
+- the configured time window (default 30 seconds, maximum 3600).
+
+An association outside the configured time window is capped at `low`, even if
+an imported event claims an exact receipt id. A candidate whose event class is
+incompatible with the receipt's signed side-effect/action class is also capped
+at `low`. Equal top candidates become `ambiguous` and expose no chosen receipt
+id.
+
+Process inheritance starts only after a `high` or `medium` direct match seeds
+an owner:
+
+- exact sensor exec id, or PID plus process-start time, can propagate the
+  receipt at `medium` confidence within the time window;
+- parent exec identity can propagate the owner to child events;
+- bare PID/PPID can be reused and therefore remains `low` `non_proof`; and
+- conflicting process owners become `ambiguous` `non_proof`;
+- an explicit receipt hint that conflicts with process ownership remains
+  `ambiguous` `non_proof`; and
+- an unknown explicit receipt hint is never upgraded through process
+  propagation.
+
+The report values are:
+
+| Match status | Confidence | Proof status | Meaning |
+|---|---|---|---|
+| `matched` | `high` or `medium` | `corroborating_unverified` | Strong association to imported, unauthenticated evidence. |
+| `weak` | `low` | `non_proof` | One weak candidate, such as PID-only inheritance or an out-of-window hint. |
+| `ambiguous` | `ambiguous` | `non_proof` | More than one equally plausible or conflicting candidate. |
+| `unmatched` | `none` | `no_evidence` | No bounded candidate signal. |
+
+Stable reason codes make every result auditable without echoing the underlying
+sensitive values.
+
+## CLI
+
+```sh
+ardur evidence correlate RECEIPTS.jsonl EVENTS.jsonl \
+  --source-format normalized|tetragon|falco \
+  (--receipt-public-key RECEIPT-PUBLIC.pem | --keys-dir DIR) \
+  [--correlation-window-s 30] [--verify-expiry] \
+  [--format json|text] [--output REPORT]
+```
+
+JSON stdout and JSON file output are deterministic. Text output contains only
+redacted event pointers and stable result fields. With `--output`, stdout is a
+small safe completion object containing the report digest and counts, not the
+local path.
+
+## Security and operational limits
+
+- Input is bounded to 32 MiB, 2 MiB per line, 10,000 events, depth 40, and
+  100,000 JSON nodes per line.
+- Final-component input symlinks and output symlinks fail closed.
+- The report does not contain raw commands, paths, destinations, workspaces,
+  event ids, exec ids, container ids, trace/session ids, actors, credentials,
+  or local input/output paths.
+- Source and line SHA-256 values are integrity pointers, not confidentiality
+  controls. Operators should still protect private sensor files.
+- There is no network or cloud cost in this command. Storage and CPU cost are
+  local and bounded by the limits above.
+- Sensor authenticity and attested coverage remain outside this imported-file
+  profile. The native Linux `ardur run` observability-gap metric in #39 and the
+  measured Linux overhead experiment in #166 are separate evidence surfaces;
+  neither is inferred from an imported report.
+
+## Primary references
+
+- [Tetragon events](https://tetragon.io/docs/concepts/events/)
+- [Tetragon gRPC/event fields](https://tetragon.io/docs/reference/grpc-api/)
+- [Tetragon process lifecycle](https://tetragon.io/docs/use-cases/process-lifecycle/)
+- [Falco JSON output channels](https://falco.org/docs/concepts/outputs/channels/)
+- [Falco supported fields](https://falco.org/docs/reference/rules/supported-fields/)

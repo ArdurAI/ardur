@@ -1,15 +1,21 @@
 """Minimal AAT-compatible JWT adapter for MCEP sessions.
 
-This is intentionally a narrow interop shim, not a standards-complete AAT
-implementation. It accepts the repo's minimal AAT-shaped JWT profile, resolves
+This is intentionally a narrow draft-00 interop shim, not a complete AAT
+chain verifier. It accepts the repo's minimal AAT-shaped JWT profile, resolves
 ``mission_ref`` to an authoritative Mission Declaration, and maps the grant to
 the internal mission-passport claim shape used by the governance proxy.
+
+DG v0.2 draft-01 chains are implemented by the Go verifier. This single-token
+adapter recognizes their positive profile discriminator and rejects them with
+an explicit routing error rather than silently applying draft-00 semantics.
 """
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
+import hmac
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -25,10 +31,22 @@ from .mission import (
     mission_is_revoked,
     parse_mission_ref,
 )
-from .passport import ALGORITHM, MissionPassport, assert_iat_in_window, verify_pop
+from .passport import (
+    ALGORITHM,
+    MissionPassport,
+    UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
+    assert_iat_in_window,
+    resource_scope_is_explicitly_unrestricted,
+    verify_pop,
+)
 
 AAT_AUTHORIZATION_DETAIL_TYPE = "attenuating_agent_token"
 AAT_CREDENTIAL_FORMAT = "aat-compatible-jwt"
+AAT_SUPPORTED_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
+AAT_DRAFT01_REVISION = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
+AAT_UNSUPPORTED_REVISION = AAT_DRAFT01_REVISION
+AAT_DG_PROFILE_V02 = "ardur.dg.aat-draft-01.v0.2"
+AAT_DEFAULT_AUDIENCE = "ardur-proxy"
 
 
 @dataclass(frozen=True)
@@ -43,26 +61,68 @@ class AATSessionMaterial:
 def decode_aat_claims(
     token: str,
     public_key: ec.EllipticCurvePublicKey,
+    *,
+    expected_audience: str = AAT_DEFAULT_AUDIENCE,
+    allow_aat_without_cnf: bool = False,
 ) -> dict[str, Any]:
+    if not isinstance(expected_audience, str) or not expected_audience.strip():
+        raise ValueError("expected_audience must be a non-empty string")
+    if not isinstance(allow_aat_without_cnf, bool):
+        raise TypeError("allow_aat_without_cnf must be a boolean")
     claims = jwt.decode(
         token,
         public_key,
         algorithms=[ALGORITHM],
+        audience=expected_audience.strip(),
         options={
-            "require": ["jti", "iss", "sub", "iat", "exp", "aat_type"],
-            "verify_aud": False,
+            "require": ["jti", "iss", "iat", "exp", "aud"],
+            "verify_aud": True,
             # Bounded-iat check below; PyJWT's default check uses zero
             # leeway and would clash with cross-node clock drift.
             "verify_iat": False,
         },
     )
     assert_iat_in_window(claims.get("iat"), field_name="AAT iat")
+    profile = claims.get("ardur_dg_profile")
+    has_token_type = "aat_type" in claims
+    if profile is not None:
+        if profile != AAT_DG_PROFILE_V02:
+            raise PermissionError("unsupported Ardur DG profile")
+        if has_token_type:
+            raise PermissionError(
+                "mixed AAT wire: DG v0.2 draft-01 tokens must omit aat_type"
+            )
+        raise PermissionError(
+            f"{AAT_DG_PROFILE_V02} requires the Go full-chain verifier; "
+            "the Python session adapter remains draft-00-only"
+        )
+    if not has_token_type:
+        raise PermissionError(
+            "unsupported AAT revision: "
+            f"{AAT_UNSUPPORTED_REVISION} removes aat_type; this adapter is "
+            f"pinned to {AAT_SUPPORTED_REVISION}"
+        )
     if claims.get("aat_type") != "delegation":
-        raise PermissionError("unsupported AAT token shape: aat_type must be delegation")
+        raise PermissionError(
+            "unsupported AAT token shape: aat_type must be delegation"
+        )
+    if not isinstance(claims.get("sub"), str) or not claims["sub"]:
+        raise PermissionError("draft-00 AAT grant missing sub")
     if "mission_ref" not in claims:
         raise PermissionError("AAT grant missing mission_ref")
     if "authorization_details" not in claims:
         raise PermissionError("AAT grant missing authorization_details")
+    cnf = claims.get("cnf")
+    if cnf is None:
+        if not allow_aat_without_cnf:
+            raise PermissionError(
+                "AAT grant missing cnf; set allow_aat_without_cnf=True only for "
+                "temporary bearer-token compatibility"
+            )
+    elif not isinstance(cnf, dict) or not cnf or not ({"jkt", "jwk"} & cnf.keys()):
+        raise PermissionError(
+            "AAT grant cnf must be a non-empty JSON object containing jkt or jwk"
+        )
     return claims
 
 
@@ -72,37 +132,37 @@ def material_from_aat_grant(
     mission_cache: MissionCache,
     *,
     parent_claims: dict[str, Any] | None = None,
+    parent_token: str | None = None,
     mission_loader: Callable[[Any], Any] | None = None,
     holder_public_key: ec.EllipticCurvePublicKey | None = None,
     kb_jwt: str | None = None,
     require_pop: bool = True,
+    expected_audience: str = AAT_DEFAULT_AUDIENCE,
+    allow_aat_without_cnf: bool = False,
 ) -> AATSessionMaterial:
     """Build session material from a verified AAT grant.
 
     Proof-of-possession (H2 from the 2026-04-21 review; default flipped
     fail-closed in the 2026-04-28 hardening pass):
 
-    - When ``require_pop=True`` (the default) AND the AAT carries a ``cnf``
-      claim (confirmation key), the presenter MUST demonstrate possession of
-      the matching private key by supplying ``holder_public_key`` and a fresh
-      ``kb_jwt`` (RFC 7800 key-binding). This mirrors the enforcement the
-      non-AAT passport path performs in :meth:`GovernanceProxy.start_session`.
-    - When the AAT has no ``cnf`` (pure bearer mode), PoP is skipped
-      regardless of ``require_pop`` — the flag only gates *cnf-bearing* AATs.
-    - **The default changed to ``require_pop=True`` on 2026-04-28** so that
-      callers do not accidentally accept replayable confirmation-bound AATs.
-      Library callers that legitimately need bearer-style acceptance (e.g.
-      tests, demos that don't have key-binding infrastructure) MUST opt out
-      explicitly with ``require_pop=False``. This makes the security-relevant
-      decision visible in every call site grep, instead of buried in a
-      default-argument flag.
+    - A ``cnf`` claim is required by default. Temporary bearer-token
+      compatibility requires the explicit ``allow_aat_without_cnf=True`` opt-out.
+    - When ``require_pop=True`` (the default), a ``cnf``-bearing presenter MUST
+      supply ``holder_public_key`` and a fresh ``kb_jwt`` so possession of the
+      matching private key is verified. ``require_pop=False`` remains the
+      explicit compatibility opt-out for skipping verification of a present
+      confirmation binding.
     - Prior to this change, ``cnf`` was structurally copied into
       ``extra_claims["aat_cnf"]`` but never verified by default — a captured
       AAT could be replayed by anyone who observed it, violating the paper's
       claim that confirmation-bound credentials are holder-restricted.
     """
-    claims = decode_aat_claims(token, public_key)
-    cnf = claims.get("cnf")
+    claims = decode_aat_claims(
+        token,
+        public_key,
+        expected_audience=expected_audience,
+        allow_aat_without_cnf=allow_aat_without_cnf,
+    )
     # Round-4 hardening (FIX-R4-5, 2026-04-28): mirror the GovernanceProxy
     # passport path's robust cnf check. Previously the gate at
     # ``isinstance(cnf, dict) and require_pop`` silently routed cnf=""/0/
@@ -126,6 +186,13 @@ def material_from_aat_grant(
         verify_pop(claims, token, holder_public_key, kb_jwt)
     if parent_claims is not None:
         _assert_child_grant_narrows_parent(claims, parent_claims)
+        if parent_token is None:
+            raise PermissionError("AAT child grant requires the exact parent token")
+        _assert_child_parent_binding(claims, parent_token)
+    elif parent_token is not None:
+        raise PermissionError(
+            "AAT parent token was supplied without verified parent claims"
+        )
 
     try:
         mission_ref = parse_mission_ref(claims["mission_ref"])
@@ -136,7 +203,7 @@ def material_from_aat_grant(
         if mission_is_revoked(declaration, public_key):
             raise PermissionError("AAT mission_ref points to a revoked mission")
     except (MissionBindingError, MissionStatusUnavailableError) as exc:
-        raise PermissionError(str(exc)) from exc
+        raise PermissionError("aat_mission_resolution_failed") from exc
 
     granted_tools = _extract_tools(claims)
     mission_tools = set(declaration.passport.allowed_tools)
@@ -144,7 +211,9 @@ def material_from_aat_grant(
     if widened_tools:
         raise PermissionError(f"AAT grant widens mission tools: {widened_tools}")
 
-    max_tool_calls = _extract_max_tool_calls(claims, declaration.passport.max_tool_calls)
+    max_tool_calls = _extract_max_tool_calls(
+        claims, declaration.passport.max_tool_calls
+    )
     if max_tool_calls > declaration.passport.max_tool_calls:
         raise PermissionError("AAT grant widens mission max_tool_calls")
 
@@ -164,7 +233,9 @@ def material_from_aat_grant(
         mission=declaration.passport.mission,
         allowed_tools=sorted(granted_tools),
         forbidden_tools=sorted(mission_tools - granted_tools),
-        resource_scope=_extract_resource_scope(claims, declaration.passport.resource_scope),
+        resource_scope=_extract_resource_scope(
+            claims, declaration.passport.resource_scope
+        ),
         max_tool_calls=max_tool_calls,
         max_duration_s=ttl_s,
         delegation_allowed=remaining_depth > 0,
@@ -172,16 +243,16 @@ def material_from_aat_grant(
         mission_id=declaration.mission_id,
     )
     extra_claims = {
-        "jti": str(claims["jti"]),
         "credential_format": AAT_CREDENTIAL_FORMAT,
         "aat_grant_id": str(claims["jti"]),
         "aat_issuer": str(claims["iss"]),
         "aat_type": str(claims["aat_type"]),
+        "aat_revision": AAT_SUPPORTED_REVISION,
         "mission_ref": copy.deepcopy(claims["mission_ref"]),
         "mission_digest": declaration.payload_digest,
         "external_grant_token_hash": hashlib.sha256(token.encode("utf-8")).hexdigest(),
     }
-    if "cnf" in claims:
+    if claims.get("cnf") is not None:
         extra_claims["aat_cnf"] = copy.deepcopy(claims["cnf"])
     return AATSessionMaterial(
         grant_id=str(claims["jti"]),
@@ -197,12 +268,25 @@ def _extract_tools(claims: dict[str, Any]) -> set[str]:
     for detail in _authorization_details(claims):
         raw_tools = detail.get("tools")
         if isinstance(raw_tools, dict):
-            tools.update(str(name) for name in raw_tools if str(name).strip())
+            for name, argument_constraints in raw_tools.items():
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                if argument_constraints != {}:
+                    raise PermissionError(
+                        "AAT adapter does not support argument constraints; "
+                        "use the Go chain verifier"
+                    )
+                tools.add(name)
         elif isinstance(raw_tools, list):
             for item in raw_tools:
                 if isinstance(item, str) and item.strip():
                     tools.add(item)
                 elif isinstance(item, dict) and isinstance(item.get("name"), str):
+                    if set(item) != {"name"}:
+                        raise PermissionError(
+                            "AAT adapter does not support list-form tool constraints; "
+                            "use the Go chain verifier"
+                        )
                     tools.add(item["name"])
     if not tools:
         raise PermissionError("AAT grant has no supported tool grants")
@@ -212,17 +296,16 @@ def _extract_tools(claims: dict[str, Any]) -> set[str]:
 def _extract_max_tool_calls(claims: dict[str, Any], default: int) -> int:
     candidates: list[int] = []
     if "max_tool_calls" in claims:
-        candidates.append(int(claims["max_tool_calls"]))
+        candidates.append(_positive_int(claims["max_tool_calls"], "max_tool_calls"))
     budget = claims.get("budget")
     if isinstance(budget, dict) and "tool_calls" in budget:
-        candidates.append(int(budget["tool_calls"]))
+        candidates.append(_positive_int(budget["tool_calls"], "budget.tool_calls"))
     for detail in _authorization_details(claims):
         if "max_tool_calls" in detail:
-            candidates.append(int(detail["max_tool_calls"]))
-    value = min(candidates) if candidates else int(default)
-    if value <= 0:
-        raise PermissionError("AAT grant max_tool_calls must be positive")
-    return value
+            candidates.append(
+                _positive_int(detail["max_tool_calls"], "authorization max_tool_calls")
+            )
+    return min(candidates) if candidates else _positive_int(default, "default budget")
 
 
 def _extract_resource_scope(
@@ -232,14 +315,24 @@ def _extract_resource_scope(
     raw_scope = claims.get("resource_scope")
     if raw_scope is None:
         return list(mission_scope)
-    if not isinstance(raw_scope, list) or not all(isinstance(item, str) for item in raw_scope):
+    if not isinstance(raw_scope, list) or not all(
+        isinstance(item, str) for item in raw_scope
+    ):
         raise PermissionError("AAT grant resource_scope must be a string array")
     requested = set(raw_scope)
-    if mission_scope:
+    requested_scope = sorted(requested)
+    if (
+        UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope
+        and not resource_scope_is_explicitly_unrestricted(requested_scope)
+    ):
+        raise PermissionError(
+            "unrestricted '**' must be the only AAT grant resource_scope pattern"
+        )
+    if not resource_scope_is_explicitly_unrestricted(mission_scope):
         widened = sorted(requested - set(mission_scope))
         if widened:
             raise PermissionError(f"AAT grant widens mission resource_scope: {widened}")
-    return sorted(requested)
+    return requested_scope
 
 
 def _assert_child_grant_narrows_parent(
@@ -256,23 +349,79 @@ def _assert_child_grant_narrows_parent(
     if child_budget > parent_budget:
         raise PermissionError("AAT child grant widens parent budget")
     child_depth = _int_claim(child, "del_depth", fallback="delegation_depth", default=0)
-    parent_depth = _int_claim(parent, "del_depth", fallback="delegation_depth", default=0)
+    parent_depth = _int_claim(
+        parent, "del_depth", fallback="delegation_depth", default=0
+    )
     if child_depth <= parent_depth:
         raise PermissionError("AAT child grant must increase delegation depth")
+    if child_depth != parent_depth + 1:
+        raise PermissionError(
+            "AAT child grant must increase delegation depth by exactly one"
+        )
+    child_max_depth = _int_claim(
+        child,
+        "del_max_depth",
+        fallback="max_delegation_depth",
+        default=child_depth,
+    )
+    parent_max_depth = _int_claim(
+        parent,
+        "del_max_depth",
+        fallback="max_delegation_depth",
+        default=parent_depth,
+    )
+    if child_depth > child_max_depth or child_max_depth > parent_max_depth:
+        raise PermissionError(
+            "AAT child grant widens or exhausts an invalid depth window"
+        )
+    if int(child["iat"]) < int(parent["iat"]):
+        raise PermissionError("AAT child grant iat precedes parent iat")
+    if int(child["exp"]) > int(parent["exp"]):
+        raise PermissionError("AAT child grant exp exceeds parent exp")
+    if child.get("mission_ref") != parent.get("mission_ref"):
+        raise PermissionError("AAT child grant changes mission_ref")
+
+
+def _assert_child_parent_binding(child: dict[str, Any], parent_token: str) -> None:
+    actual = child.get("par_hash")
+    if not isinstance(actual, str) or not actual:
+        raise PermissionError("AAT child grant missing par_hash parent binding")
+    expected_text = _aat_parent_hash(parent_token)
+    if not hmac.compare_digest(actual, expected_text):
+        raise PermissionError("AAT child grant par_hash does not bind the parent token")
+
+
+def _aat_parent_hash(parent_token: str) -> str:
+    parts = parent_token.split(".")
+    if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2]:
+        raise PermissionError("AAT parent token is not compact JWS")
+    signing_input = f"{parts[0]}.{parts[1]}".encode("ascii")
+    expected = base64.urlsafe_b64encode(hashlib.sha256(signing_input).digest())
+    return expected.rstrip(b"=").decode("ascii")
 
 
 def _authorization_details(claims: dict[str, Any]) -> list[dict[str, Any]]:
     raw = claims.get("authorization_details")
     if not isinstance(raw, list):
         raise PermissionError("authorization_details must be an array")
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("type"), str)
+        or not item["type"]
+        for item in raw
+    ):
+        raise PermissionError(
+            "authorization_details entries must be objects with a string type"
+        )
     details = [
         item
         for item in raw
-        if isinstance(item, dict)
-        and item.get("type") == AAT_AUTHORIZATION_DETAIL_TYPE
+        if isinstance(item, dict) and item.get("type") == AAT_AUTHORIZATION_DETAIL_TYPE
     ]
-    if not details:
-        raise PermissionError("no supported AAT authorization detail found")
+    if len(details) != 1:
+        raise PermissionError(
+            "AAT grant must contain exactly one supported authorization detail"
+        )
     return details
 
 
@@ -284,4 +433,12 @@ def _int_claim(
     default: int,
 ) -> int:
     raw = claims.get(name, claims.get(fallback, default))
-    return int(raw)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise PermissionError(f"AAT claim {name} must be an integer")
+    return raw
+
+
+def _positive_int(raw: Any, field_name: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise PermissionError(f"AAT grant {field_name} must be a positive integer")
+    return raw

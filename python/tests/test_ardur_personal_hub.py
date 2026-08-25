@@ -1,19 +1,28 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
+import io
 import json
+import os
+import ssl
 import stat
+import struct
 import subprocess
 import sys
 import threading
+from email.message import Message
 from argparse import Namespace
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
+from types import SimpleNamespace
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
 import pytest
 
+from vibap import ardur_personal_native_host as native_host
+from vibap import personal_hub
 from vibap.ardur_personal_native_host import HOST_OBSERVATION_TYPE, handle_native_host_message
 from vibap.personal_hub import _HubRequestHandler, HubError, PersonalHub, run_under_hub, setup_personal
 from vibap.personal_hub import _redact_url_tokens
@@ -88,16 +97,24 @@ def test_browser_observation_uses_standard_ardur_receipt(tmp_path):
     assert claims["tool"] == "browser_observe"
 
 
-def test_cli_dangerous_command_is_blocked_and_receipted(tmp_path):
+@pytest.mark.parametrize(
+    ("process", "command"),
+    [
+        ("sudo rm -rf /", ["sudo", "rm", "-rf", "/"]),
+        ("rm --recursive --force /", ["rm", "--recursive", "--force", "/"]),
+        ("dd if=/tmp/source of=/tmp/target", ["dd", "if=/tmp/source", "of=/tmp/target"]),
+    ],
+)
+def test_cli_dangerous_command_is_blocked_and_receipted(tmp_path, process, command):
     hub = PersonalHub(tmp_path)
     payload = {
-        "source": {"type": "cli", "app": "sh", "process": "sudo rm -rf /"},
-        "session": {"id": "cli:test", "title": "sudo rm -rf /"},
+        "source": {"type": "cli", "app": "sh", "process": process},
+        "session": {"id": "cli:test", "title": process},
         "event": {
             "kind": "cli_command",
             "action_class": "observe",
             "target": "sh",
-            "command": ["sudo", "rm", "-rf", "/"],
+            "command": command,
             "raw_content_included": False,
         },
     }
@@ -115,6 +132,25 @@ def test_cli_dangerous_command_is_blocked_and_receipted(tmp_path):
     )
     assert claims["verdict"] == "violation"
     assert claims["tool"] == "cli_blocked_action"
+
+
+@pytest.mark.parametrize("target", ["my_password_field", "user_secret_config", "api_key"])
+def test_sensitive_write_targets_block_underscore_compounds(tmp_path, target):
+    hub = PersonalHub(tmp_path)
+    payload = _browser_payload()
+    payload["event"].update(
+        {
+            "kind": "browser_action",
+            "action_class": "write",
+            "target": target,
+            "text_snapshot_included": False,
+        }
+    )
+
+    policy = hub.check_policy(payload)
+
+    assert policy["verdict"] == "blocked"
+    assert "sensitive target" in policy["reason"]
 
 
 def test_visible_text_requires_explicit_consent(tmp_path):
@@ -137,10 +173,173 @@ def test_export_includes_session_reviews_and_receipts(tmp_path):
     assert exported["receipts"]
 
 
+def test_receipt_readers_stream_without_reading_whole_log(tmp_path, monkeypatch):
+    hub = PersonalHub(tmp_path)
+    first = hub.observe(_browser_payload("first answer"))
+    second = hub.observe(_browser_payload("second answer"))
+
+    def fail_read_text(self, *args, **kwargs):
+        if self == hub.paths.receipts_log:
+            raise AssertionError("receipt log must be streamed, not read as one string")
+        return original_read_text(self, *args, **kwargs)
+
+    original_read_text = personal_hub.Path.read_text
+    monkeypatch.setattr(personal_hub.Path, "read_text", fail_read_text)
+
+    entries = hub._receipt_entries()
+    latest = hub._latest_receipt()
+
+    assert [entry["session_id"] for entry in entries] == [
+        first["ardur_session_id"],
+        second["ardur_session_id"],
+    ]
+    assert latest is not None
+    assert latest["session_id"] == second["ardur_session_id"]
+    assert latest["receipt_hash"]
+
+
 def test_status_reports_configured_hub_url(tmp_path):
     hub = PersonalHub(tmp_path, hub_url="http://127.0.0.1:18765")
 
     assert hub.status()["hub_url"] == "http://127.0.0.1:18765"
+
+
+def test_hub_cors_origin_is_normalized_and_rejects_header_splitting():
+    handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "server", SimpleNamespace(hub=PersonalHub(hub_url="http://localhost:8765")))
+
+    setattr(handler, "headers", {"origin": "http://localhost:8765"})
+    assert handler._allowed_cors_origin() == "http://localhost:8765"
+
+    setattr(handler, "headers", {"origin": "https://127.0.0.1"})
+    assert handler._allowed_cors_origin() is None
+
+    setattr(handler, "headers", {"origin": "chrome-extension://abc_DEF-123"})
+    assert handler._allowed_cors_origin() == "*"
+
+    setattr(handler, "headers", {"origin": "http://localhost:8765\r\nX-Injected: yes"})
+    assert handler._allowed_cors_origin() is None
+
+    setattr(handler, "headers", {"origin": "http://localhost:8765/path"})
+    assert handler._allowed_cors_origin() is None
+
+    setattr(handler, "headers", {"origin": "https://evil.example"})
+    assert handler._allowed_cors_origin() is None
+
+
+@pytest.mark.parametrize("content_length", ["-1", "not-an-integer"])
+def test_hub_rejects_invalid_content_length_before_body_read(content_length):
+    handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "headers", {"content-length": content_length})
+
+    class ReadMustNotRun:
+        def read(self, length=-1):
+            raise AssertionError("invalid Content-Length must fail before body read")
+
+    setattr(handler, "rfile", ReadMustNotRun())
+
+    with pytest.raises(HubError) as excinfo:
+        handler._read_payload()
+
+    assert excinfo.value.status == 400
+    assert excinfo.value.code == "invalid_content_length"
+    assert "non-negative integer" in str(excinfo.value)
+
+
+def test_hub_json_responses_carry_no_store_security_headers(tmp_path):
+    handler = object.__new__(_HubRequestHandler)
+    sent_headers: list[tuple[str, str]] = []
+    statuses: list[int] = []
+    setattr(handler, "headers", {})
+    setattr(handler, "server", SimpleNamespace(hub=PersonalHub(tmp_path)))
+    setattr(handler, "wfile", io.BytesIO())
+    setattr(handler, "send_response", lambda status: statuses.append(status))
+    setattr(
+        handler,
+        "send_header",
+        lambda name, value: sent_headers.append((name.lower(), value)),
+    )
+    setattr(handler, "end_headers", lambda: None)
+
+    handler._send_json({"ok": True, "token": "bearer-like-value"})
+
+    header_map = {name: value for name, value in sent_headers}
+    assert statuses == [200]
+    assert header_map["cache-control"] == "no-store"
+    assert header_map["pragma"] == "no-cache"
+    assert header_map["referrer-policy"] == "no-referrer"
+    assert header_map["content-security-policy"] == (
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    )
+    assert header_map["x-content-type-options"] == "nosniff"
+
+
+def test_hub_html_responses_carry_no_store_security_headers(tmp_path):
+    handler = object.__new__(_HubRequestHandler)
+    sent_headers: list[tuple[str, str]] = []
+    statuses: list[int] = []
+    wfile = io.BytesIO()
+    setattr(handler, "headers", {})
+    setattr(handler, "server", SimpleNamespace(hub=PersonalHub(tmp_path)))
+    setattr(handler, "wfile", wfile)
+    setattr(handler, "send_response", lambda status: statuses.append(status))
+    setattr(
+        handler,
+        "send_header",
+        lambda name, value: sent_headers.append((name.lower(), value)),
+    )
+    setattr(handler, "end_headers", lambda: None)
+
+    html_body = "<main>Ardur dashboard</main>"
+    handler._send_html(html_body, status=202)
+
+    header_map = {name: value for name, value in sent_headers}
+    response_body = wfile.getvalue()
+    assert statuses == [202]
+    assert header_map["content-type"] == "text/html; charset=utf-8"
+    assert header_map["cache-control"] == "no-store"
+    assert header_map["pragma"] == "no-cache"
+    assert header_map["referrer-policy"] == "no-referrer"
+    assert header_map["content-security-policy"] == (
+        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+    )
+    assert header_map["x-content-type-options"] == "nosniff"
+    assert header_map["content-length"] == str(len(response_body))
+    assert response_body == html_body.encode("utf-8")
+
+
+def test_hub_metrics_response_carries_no_store_security_headers(tmp_path, monkeypatch):
+    handler = object.__new__(_HubRequestHandler)
+    hub = PersonalHub(tmp_path)
+    sent_headers: list[tuple[str, str]] = []
+    statuses: list[int] = []
+    wfile = io.BytesIO()
+    metrics_body = "ardur_personal_hub_test_metric 1\n"
+    monkeypatch.setattr(personal_hub.ardur_metrics, "render", lambda: metrics_body)
+
+    setattr(handler, "path", "/v1/metrics")
+    setattr(handler, "headers", {personal_hub.HUB_TOKEN_HEADER: hub.hub_token})
+    setattr(handler, "server", SimpleNamespace(hub=hub))
+    setattr(handler, "wfile", wfile)
+    setattr(handler, "send_response", lambda status: statuses.append(status))
+    setattr(
+        handler,
+        "send_header",
+        lambda name, value: sent_headers.append((name.lower(), value)),
+    )
+    setattr(handler, "end_headers", lambda: None)
+
+    handler.do_GET()
+
+    header_map = {name: value for name, value in sent_headers}
+    response_body = wfile.getvalue()
+    assert statuses == [200]
+    assert header_map["content-type"] == "text/plain; charset=utf-8"
+    assert header_map["cache-control"] == "no-store"
+    assert header_map["pragma"] == "no-cache"
+    assert header_map["x-content-type-options"] == "nosniff"
+    assert header_map["content-length"] == str(len(response_body))
+    assert response_body == metrics_body.encode("utf-8")
 
 
 def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
@@ -161,6 +360,1545 @@ def test_setup_generates_stable_hub_token(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     assert json.loads(config_path.read_text())["hub_token"] == first["hub_token"]
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+
+def test_setup_existing_file_home_fails_closed_without_path_leak(tmp_path, capsys):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main(["setup", "--home", str(existing_file_home)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "path_not_directory"
+    assert result["error_code"] == "path_not_directory"
+    assert result["next_steps"]
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur setup --home <ardur-dir>" in next_steps_json
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "FileExistsError",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+
+
+@pytest.mark.parametrize("home_value", ["", "   ", "\t\n"])
+def test_setup_empty_or_whitespace_home_fails_closed_before_artifact_creation(
+    tmp_path, monkeypatch, capsys, home_value
+):
+    from vibap import cli as cli_module
+
+    monkeypatch.setattr("vibap.personal_hub._write_launch_agent", lambda *a, **kw: None)
+    monkeypatch.setattr("vibap.personal_hub._ensure_hub_config", lambda *a, **kw: {"hub_url": "http://127.0.0.1:8765", "hub_token": "test-token"})
+
+    rc = cli_module.main(["setup", "--home", home_value])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "setup_home_invalid"
+    assert result["error"] == "setup_home_invalid"
+    assert result["error_code"] == "setup_home_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "ValueError",
+        "HubError",
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+    if home_value.strip():
+        assert home_value not in combined_output
+
+
+def test_setup_empty_home_creates_no_artifacts(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    # Prevent real plist/config writes so we can verify the guard fires first
+    plist_written = []
+    config_written = []
+
+    def fake_launch_agent(*args, **kwargs):
+        plist_written.append(True)
+        return None
+
+    def fake_config(*args, **kwargs):
+        config_written.append(True)
+        return {"hub_url": "http://127.0.0.1:8765", "hub_token": "test-token"}
+
+    monkeypatch.setattr("vibap.personal_hub._write_launch_agent", fake_launch_agent)
+    monkeypatch.setattr("vibap.personal_hub._ensure_hub_config", fake_config)
+
+    rc = cli_module.main(["setup", "--home", ""])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert result["condition"] == "setup_home_invalid"
+    assert not plist_written, "plist was written before validation"
+    assert not config_written, "config was written before validation"
+
+
+def test_setup_valid_new_home_still_succeeds(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    valid_home = tmp_path / "ardur-home"
+    monkeypatch.setattr("vibap.personal_hub._write_launch_agent", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "vibap.personal_hub._ensure_hub_config",
+        lambda *a, **kw: {"hub_url": "http://127.0.0.1:8765", "hub_token": "test-token"},
+    )
+
+    rc = cli_module.main(["setup", "--home", str(valid_home)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 0
+    assert result["ok"] is True
+    assert result["home"] == str(valid_home)
+    assert captured.err == ""
+
+
+def test_setup_existing_file_home_still_returns_path_not_directory(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    existing_file = tmp_path / "ardur-home-file"
+    existing_file.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main(["setup", "--home", str(existing_file)])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert result["condition"] == "path_not_directory"
+    assert result["ok"] is False
+
+
+@pytest.mark.parametrize("command", ["hub", "doctor", "status", "uninstall"])
+def test_personal_commands_empty_home_fail_closed_without_artifacts(
+    tmp_path, monkeypatch, capsys, command
+):
+    from vibap import cli as cli_module
+
+    args = [command, "--home", ""]
+    if command == "hub":
+        args.extend(["--port", "0", "--no-tls"])
+    elif command in ("status", "doctor"):
+        args.extend(["--hub-url", "http://127.0.0.1:1"])
+
+    rc = cli_module.main(args)
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "setup_home_invalid"
+    assert result["next_steps"]
+    combined_output = captured.out + captured.err
+    for marker in ("Traceback", "ValueError", str(tmp_path), "/tmp/", "/Users/"):
+        assert marker not in combined_output
+
+
+def _assert_no_setup_artifacts(home, user_home):
+    assert not (home / "config.json").exists()
+    assert not (home / "state").exists()
+    assert not (home / "keys").exists()
+    assert not (home / "governance_log.jsonl").exists()
+    assert not (home / "receipts.jsonl").exists()
+    assert not (home / "sessions_index.json").exists()
+    assert not (home / "session_reviews.json").exists()
+    assert not (
+        user_home / "Library" / "LaunchAgents" / "dev.ardur.personal-hub.plist"
+    ).exists()
+
+
+def _assert_setup_validation_response(
+    *,
+    rc: int,
+    stdout: str,
+    stderr: str,
+    condition: str,
+    raw_input: str,
+    home,
+    tmp_path,
+):
+    result = json.loads(stdout)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert stderr == ""
+    assert result["ok"] is False
+    assert result["condition"] == condition
+    assert result["error"] == condition
+    assert result["error_code"] == condition
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+    for marker in (
+        "Traceback",
+        "ValueError",
+        "OverflowError",
+        "gaierror",
+        str(home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in rendered
+    if raw_input and raw_input not in {"0", " 127.0.0.1"}:
+        assert raw_input not in rendered
+
+
+@pytest.mark.parametrize("port", ["-1", "0", "70000", "not-a-port", "", " 8765"])
+def test_setup_invalid_port_fails_closed_before_config_token_or_launch_agent(
+    tmp_path, monkeypatch, capsys, port
+):
+    from vibap import cli as cli_module
+
+    user_home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(user_home))
+    home = tmp_path / "ardur-home"
+
+    rc = cli_module.main(["setup", "--home", str(home), "--port", port])
+    captured = capsys.readouterr()
+
+    _assert_setup_validation_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        condition=personal_hub.SETUP_PORT_INVALID_CONDITION,
+        raw_input=port,
+        home=home,
+        tmp_path=tmp_path,
+    )
+    _assert_no_setup_artifacts(home, user_home)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["", " 127.0.0.1", "http://127.0.0.1", "http://[", "127.0.0.1:8765"],
+)
+def test_setup_invalid_host_fails_closed_before_config_token_or_launch_agent(
+    tmp_path, monkeypatch, capsys, host
+):
+    from vibap import cli as cli_module
+
+    user_home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(user_home))
+    home = tmp_path / "ardur-home"
+
+    rc = cli_module.main(["setup", "--home", str(home), "--host", host])
+    captured = capsys.readouterr()
+
+    _assert_setup_validation_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        condition=personal_hub.SETUP_HOST_INVALID_CONDITION,
+        raw_input=host,
+        home=home,
+        tmp_path=tmp_path,
+    )
+    _assert_no_setup_artifacts(home, user_home)
+
+
+def test_hub_existing_file_home_fails_closed_before_server_bind_without_path_leak(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --home before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        [
+            "hub",
+            "--home",
+            str(existing_file_home),
+            "--no-tls",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "path_not_directory"
+    assert result["error_code"] == "path_not_directory"
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur hub --home <ardur-dir>" in next_steps_json
+    assert "ardur setup --home <ardur-dir>" in next_steps_json
+    combined_output = captured.out + captured.err
+    for marker in (
+        "Traceback",
+        "FileExistsError",
+        "[tls] WARNING",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+
+
+@pytest.mark.parametrize("port", ["-1", "70000"])
+def test_hub_invalid_port_returns_safe_json_before_server_bind_without_artifacts(
+    tmp_path, monkeypatch, capsys, port
+):
+    from vibap import cli as cli_module
+
+    hub_home = tmp_path / "ardur-home"
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --port before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        ["hub", "--home", str(hub_home), "--no-tls", "--host", "127.0.0.1", "--port", port]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_port_invalid"
+    assert result["error"] == "hub_port_invalid"
+    assert result["error_code"] == "hub_port_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert "Traceback" not in rendered
+    assert "OverflowError" not in rendered
+    assert port not in rendered
+    assert str(hub_home) not in rendered
+    assert str(tmp_path) not in rendered
+    assert not hub_home.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+
+
+def test_hub_invalid_host_returns_safe_json_before_server_bind_without_artifacts(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    hub_home = tmp_path / "ardur-home"
+    raw_host = "http://["
+
+    def fail_if_bound(*_args, **_kwargs):
+        pytest.fail("hub must validate --host before binding a server")
+
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", fail_if_bound)
+
+    rc = cli_module.main(
+        ["hub", "--home", str(hub_home), "--no-tls", "--host", raw_host, "--port", "0"]
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    rendered = json.dumps(result, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_host_invalid"
+    assert result["error"] == "hub_host_invalid"
+    assert result["error_code"] == "hub_host_invalid"
+    assert result["message"]
+    assert result["detail"]
+    assert result["next_steps"]
+    assert "Traceback" not in rendered
+    assert "gaierror" not in rendered.lower()
+    assert "socket" not in rendered.lower()
+    assert raw_host not in rendered
+    assert str(hub_home) not in rendered
+    assert str(tmp_path) not in rendered
+    assert not hub_home.exists()
+    assert all(
+        "<" in step["command"] and ">" in step["command"] for step in result["next_steps"]
+    )
+
+
+def test_hub_port_zero_reaches_server_without_long_lived_service(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    bound_addresses = []
+    served = []
+    workload_identities = []
+
+    class FakeHub:
+        def __init__(self, home, hub_url, workload_identity=None):
+            self.home = home
+            self.hub_url = hub_url
+            workload_identities.append(workload_identity)
+
+    class FakeServer:
+        def __init__(self, address, handler):
+            bound_addresses.append((address, handler))
+            self.socket = object()
+
+        def serve_forever(self):
+            served.append(True)
+
+    monkeypatch.setattr(personal_hub, "PersonalHub", FakeHub)
+    monkeypatch.setattr(personal_hub, "ThreadingHTTPServer", FakeServer)
+
+    rc = cli_module.main(
+        [
+            "hub",
+            "--home",
+            str(tmp_path / "ardur-home"),
+            "--no-tls",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.out == ""
+    assert bound_addresses == [(('127.0.0.1', 0), personal_hub._HubRequestHandler)]
+    assert workload_identities == [None]
+    assert served == [True]
+
+
+def _assert_personal_home_not_directory_response(
+    *,
+    rc: int,
+    stdout: str,
+    stderr: str,
+    existing_file_home,
+    tmp_path,
+) -> dict:
+    result = json.loads(stdout)
+
+    assert rc == 1
+    assert stderr == ""
+    assert result["ok"] is False
+    assert result["condition"] == personal_hub.PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    assert result["error_code"] == personal_hub.PERSONAL_HOME_NOT_DIRECTORY_CONDITION
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur setup --home <ardur-home>" in next_steps_json
+    assert "ardur hub --home <ardur-home>" in next_steps_json
+    assert "ardur doctor --home <ardur-home>" in next_steps_json
+    combined_output = stdout + stderr
+    for marker in (
+        "Traceback",
+        "NotADirectoryError",
+        "FileExistsError",
+        str(existing_file_home),
+        str(tmp_path),
+        "/tmp/",
+        "/Users/",
+        "/private/var/folders/",
+    ):
+        assert marker not in combined_output
+    return result
+
+
+@pytest.mark.parametrize(
+    "command_args",
+    [
+        ["doctor", "--hub-url", "http://127.0.0.1:9"],
+        ["status", "--hub-url", "http://127.0.0.1:9"],
+        [
+            "desktop-observe",
+            "--hub-url",
+            "http://127.0.0.1:9",
+            "--app",
+            "SmokeApp",
+            "--title",
+            "SmokeWindow",
+        ],
+    ],
+)
+def test_personal_json_commands_existing_file_home_fail_closed_without_path_leak(
+    tmp_path,
+    capsys,
+    command_args,
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+
+    rc = cli_module.main([command_args[0], "--home", str(existing_file_home), *command_args[1:]])
+    captured = capsys.readouterr()
+
+    _assert_personal_home_not_directory_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        existing_file_home=existing_file_home,
+        tmp_path=tmp_path,
+    )
+
+
+def test_run_existing_file_home_fails_closed_before_child_execution_without_path_leak(
+    tmp_path,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    existing_file_home = tmp_path / "ardur-home-file"
+    existing_file_home.write_text("not a directory", encoding="utf-8")
+    child_marker = tmp_path / "child-executed"
+
+    rc = cli_module.main(
+        [
+            "run",
+            "--home",
+            str(existing_file_home),
+            "--hub-url",
+            "http://127.0.0.1:9",
+            "--",
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(child_marker)!r}).write_text('ran', encoding='utf-8')",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    _assert_personal_home_not_directory_response(
+        rc=rc,
+        stdout=captured.out,
+        stderr=captured.err,
+        existing_file_home=existing_file_home,
+        tmp_path=tmp_path,
+    )
+    assert not child_marker.exists()
+
+
+def test_uninstall_dry_run_previews_launch_agent_and_data_without_removing(
+    tmp_path, monkeypatch, capsys
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-hub-token-placeholder"
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    (personal_home / "config.json").write_text(
+        json.dumps({"hub_token": raw_token}), encoding="utf-8"
+    )
+    data_file = personal_home / "receipt.json"
+    data_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    rc = cli_module.main(
+        [
+            "uninstall",
+            "--home",
+            str(personal_home),
+            "--remove-data",
+            "--dry-run",
+        ]
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["would_remove"] == [str(launch_agent), str(personal_home)]
+    assert result["removed"] == []
+    assert result["data_kept"] is True
+    assert result["would_keep_data"] is False
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {
+        "inspect_previewed_removals",
+        "stop_local_launch_agent_if_running",
+        "back_up_or_export_local_data",
+        "rerun_uninstall_intentionally",
+    } <= actions
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<ardur-home>" in next_steps_json
+    assert "<backup-location>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+    assert raw_token not in next_steps_json
+    assert launch_agent.exists()
+    assert data_file.exists()
+
+
+def test_uninstall_dry_run_without_remove_data_guides_launch_agent_only_preview(
+    tmp_path, monkeypatch
+):
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    data_file = personal_home / "receipt.json"
+    data_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    result = personal_hub.uninstall_personal(
+        Namespace(home=personal_home, remove_data=False, dry_run=True)
+    )
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["would_remove"] == [str(launch_agent)]
+    assert result["removed"] == []
+    assert result["data_kept"] is True
+    assert result["would_keep_data"] is True
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {
+        "inspect_previewed_removals",
+        "stop_local_launch_agent_if_running",
+        "rerun_uninstall_intentionally",
+    } <= actions
+    assert "back_up_or_export_local_data" not in actions
+    next_steps_json = json.dumps(result["next_steps"])
+    next_step_commands_json = json.dumps([step["command"] for step in result["next_steps"]])
+    assert "<ardur-home>" in next_steps_json
+    assert "--remove-data" not in next_step_commands_json
+    assert str(tmp_path) not in next_steps_json
+    assert launch_agent.exists()
+    assert data_file.exists()
+
+
+def test_uninstall_default_removes_only_launch_agent_and_keeps_data(tmp_path, monkeypatch):
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    data_file = personal_home / "receipt.json"
+    data_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    result = personal_hub.uninstall_personal(
+        Namespace(home=personal_home, remove_data=False, dry_run=False)
+    )
+
+    assert result == {
+        "ok": True,
+        "removed": [str(launch_agent)],
+        "data_kept": True,
+    }
+    assert not launch_agent.exists()
+    assert data_file.exists()
+
+
+def test_uninstall_remove_data_removes_only_temp_launch_agent_and_temp_home(
+    tmp_path, monkeypatch
+):
+    user_home = tmp_path / "user-home"
+    launch_agents = user_home / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    launch_agent = launch_agents / "dev.ardur.personal-hub.plist"
+    launch_agent.write_text("plist", encoding="utf-8")
+
+    personal_home = tmp_path / "ardur-home"
+    personal_home.mkdir()
+    (personal_home / "receipt.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(personal_hub.Path, "home", lambda: user_home)
+
+    result = personal_hub.uninstall_personal(
+        Namespace(home=personal_home, remove_data=True, dry_run=False)
+    )
+
+    assert result == {
+        "ok": True,
+        "removed": [str(launch_agent), str(personal_home)],
+        "data_kept": False,
+    }
+    assert not launch_agent.exists()
+    assert not personal_home.exists()
+
+
+def test_doctor_reports_next_steps_for_missing_setup_without_path_leaks(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    missing_home = tmp_path / "missing-home"
+
+    result = personal_hub.doctor_personal(
+        Namespace(home=missing_home, hub_url="http://127.0.0.1:8765", hub_token=None)
+    )
+
+    assert result["ok"] is False
+    assert {check["name"] for check in result["checks"]} >= {"home", "config", "hub_token", "hub"}
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+    assert checks_by_name["home"]["detail"] == "<ardur-home>"
+    assert checks_by_name["config"]["detail"] == "<ardur-config>"
+    assert any(step["action"] == "run_setup" for step in result["next_steps"])
+    assert any(step["action"] == "rerun_doctor" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    result_json = json.dumps(result)
+    assert "<ardur-home>" in next_steps_json
+    assert "<ardur-config>" in result_json
+    assert "ardur setup" in next_steps_json
+    assert str(tmp_path) not in result_json
+
+
+def test_doctor_cli_missing_setup_stdout_is_placeholder_safe(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    missing_home = tmp_path / "missing-home"
+
+    rc = cli_module.cmd_doctor(
+        Namespace(home=missing_home, hub_url="http://127.0.0.1:9", hub_token=None)
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["checks"]
+    assert result["next_steps"]
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+    assert checks_by_name["home"]["detail"] == "<ardur-home>"
+    assert checks_by_name["config"]["detail"] == "<ardur-config>"
+    stdout_stderr = captured.out + captured.err
+    for marker in (
+        "/Users/",
+        "/home/",
+        "/private/var/folders/",
+        "/tmp/",
+        str(tmp_path),
+        "<ABSOLUTE_PATH:",
+        "example-raw-token-value",
+        "http://user:",
+    ):
+        assert marker not in stdout_stderr
+
+
+def test_doctor_cli_redacts_hub_url_credentials_from_check_detail(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error_code": "hub_unavailable",
+        },
+    )
+    raw_secret = "example-raw-token-value"
+    hub_url = f"http://user:{raw_secret}@127.0.0.1:9/status?token={raw_secret}"
+
+    rc = cli_module.cmd_doctor(
+        Namespace(home=tmp_path / "missing-home", hub_url=hub_url, hub_token=None)
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+
+    assert rc == 1
+    assert captured.err == ""
+    assert checks_by_name["hub"]["detail"] == "http://127.0.0.1:9/status?token=<redacted>"
+    stdout_stderr = captured.out + captured.err
+    assert raw_secret not in stdout_stderr
+    assert "http://user:" not in stdout_stderr
+
+
+def test_doctor_reports_hub_next_steps_when_configured_hub_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "ardur.personal.config.v0.1",
+                "home": str(tmp_path),
+                "hub_url": "http://127.0.0.1:18765",
+                "hub_token": "test-token-placeholder",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    result = personal_hub.doctor_personal(
+        Namespace(home=tmp_path, hub_url="http://127.0.0.1:18765", hub_token=None)
+    )
+
+    assert result["ok"] is False
+    assert any(step["action"] == "start_personal_hub" for step in result["next_steps"])
+    assert not any(step["action"] == "run_setup" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<hub-url>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_doctor_shows_resolved_hub_url_when_default_passed(tmp_path, monkeypatch):
+    """doctor hub check detail must show the configured URL, not the default.
+
+    The ``--hub-url`` CLI argument defaults to the plain-HTTP
+    :data:`DEFAULT_HUB_URL`; ``hub_request`` resolves the real URL from the
+    Personal home config internally, and the doctor display must mirror that
+    so an HTTPS Hub serving on a custom port is reported correctly.
+    """
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_TOKEN", raising=False)
+    monkeypatch.delenv("ARDUR_PERSONAL_HUB_URL", raising=False)
+    configured_url = "https://127.0.0.1:18443"
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "ardur.personal.config.v0.1",
+                "home": str(tmp_path),
+                "hub_url": configured_url,
+                "hub_token": "test-token-placeholder",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+
+    result = personal_hub.doctor_personal(
+        Namespace(
+            home=tmp_path,
+            hub_url=personal_hub.DEFAULT_HUB_URL,
+            hub_token=None,
+        )
+    )
+
+    assert result["ok"] is True
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+    assert checks_by_name["hub"]["ok"] is True
+    # The detail must reflect the configured TLS URL, not the plain-HTTP default.
+    assert checks_by_name["hub"]["detail"] == configured_url
+    assert checks_by_name["hub"]["detail"] != personal_hub.DEFAULT_HUB_URL
+
+
+@pytest.mark.parametrize(
+    "hub_url",
+    [
+        "ftp://127.0.0.1:8765",
+        "file:///tmp/ardur-hub",
+        "http:///missing-host",
+        "http://[",
+        "http://127.0.0.1:bad",
+    ],
+)
+def test_doctor_invalid_hub_url_reports_specific_placeholder_next_steps(tmp_path, capsys, hub_url):
+    from vibap import cli as cli_module
+
+    missing_home = tmp_path / "missing-home"
+
+    rc = cli_module.cmd_doctor(Namespace(home=missing_home, hub_url=hub_url, hub_token=None))
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    checks_by_name = {check["name"]: check for check in result["checks"]}
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert checks_by_name["hub"]["detail"] == "hub_url_invalid"
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"run_setup", "supply_or_rotate_hub_token", "check_hub_url", "rerun_doctor"} <= actions
+    assert "start_personal_hub" not in actions
+    encoded = json.dumps(result)
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert hub_url not in encoded
+    assert str(tmp_path) not in encoded
+    assert "/tmp/ardur-hub" not in encoded
+
+
+def test_doctor_healthy_core_setup_has_empty_next_steps(tmp_path):
+    with _running_hub(tmp_path) as (_, base_url):
+        result = personal_hub.doctor_personal(
+            Namespace(home=tmp_path, hub_url=base_url, hub_token=None)
+        )
+
+    assert result["ok"] is True
+    assert result["next_steps"] == []
+    assert {check["name"] for check in result["checks"]} >= {"home", "config", "hub_token", "hub"}
+
+
+def test_status_reports_next_steps_for_unavailable_hub_without_path_leaks(tmp_path, monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    monkeypatch.setattr(
+        cli_module,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    rc = cli_module.cmd_status(
+        Namespace(home=tmp_path, hub_url="http://127.0.0.1:8765", hub_token=None)
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert result["ok"] is False
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"run_setup_if_needed", "start_personal_hub", "supply_or_rotate_hub_token", "rerun_status_or_doctor"} <= actions
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<ardur-home>" in next_steps_json
+    assert "<hub-url>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+@pytest.mark.parametrize(
+    "hub_url",
+    [
+        "ftp://127.0.0.1:8765",
+        "file:///tmp/ardur-hub",
+        "http:///missing-host",
+        "http://[",
+        "http://127.0.0.1:bad",
+    ],
+)
+def test_status_invalid_hub_url_reports_placeholder_next_steps(tmp_path, capsys, hub_url):
+    from vibap import cli as cli_module
+
+    rc = cli_module.cmd_status(Namespace(home=tmp_path, hub_url=hub_url, hub_token=None))
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_url_invalid"
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"check_hub_url", "rerun_status_or_doctor"} <= actions
+    encoded = json.dumps(result)
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert hub_url not in encoded
+    assert str(tmp_path) not in encoded
+    assert "/tmp/ardur-hub" not in encoded
+
+
+def test_status_reports_token_next_steps_without_raw_secret(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    raw_secret = "example-token-placeholder"
+    monkeypatch.setattr(
+        cli_module,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    rc = cli_module.cmd_status(
+        Namespace(home=None, hub_url="http://127.0.0.1:8765", hub_token=raw_secret)
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert any(step["action"] == "supply_or_rotate_hub_token" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "<hub-token>" in next_steps_json
+    assert raw_secret not in next_steps_json
+
+
+def test_status_success_preserves_hub_response_shape(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    response = {
+        "ok": True,
+        "schema_version": "ardur.personal.hub.v0.1",
+        "sessions": 0,
+        "session_reviews": 0,
+        "adapters": {"browser": "available"},
+    }
+    monkeypatch.setattr(cli_module, "hub_request", lambda *_args, **_kwargs: response)
+
+    rc = cli_module.cmd_status(
+        Namespace(home=None, hub_url="http://127.0.0.1:8765", hub_token=None)
+    )
+    result = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert result == response
+    assert "next_steps" not in result
+
+
+@pytest.mark.parametrize(
+    "proxy_url",
+    [
+        "http://[",
+        "http://127.0.0.1:notaport",
+        "file:///tmp/ardur-proxy",
+        "http:///missing-host",
+        "ftp://127.0.0.1:8765",
+    ],
+)
+def test_kill_switch_invalid_proxy_url_reports_placeholder_next_steps_without_raw_input(
+    monkeypatch,
+    capsys,
+    proxy_url,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-proxy-api-token-placeholder"
+
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("invalid kill-switch proxy URL should fail before urlopen")
+
+    monkeypatch.setattr(urlrequest, "urlopen", fail_if_called)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url=proxy_url, api_token=raw_token)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "proxy_url_invalid"
+    assert response["error_code"] == "proxy_url_invalid"
+    assert response["condition"] == "proxy_url_invalid"
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"check_proxy_url", "start_or_check_governance_proxy"} <= actions
+    encoded = json.dumps(response)
+    assert "<proxy-url>" in encoded
+    assert "<proxy-port>" in encoded
+    assert "<api-token>" in encoded
+    assert proxy_url not in encoded
+    assert raw_token not in encoded
+    assert "/tmp/ardur-proxy" not in encoded
+    assert "notaport" not in encoded
+    assert "Invalid IPv6 URL" not in encoded
+    assert "urlopen error" not in encoded
+
+
+def test_kill_switch_empty_proxy_url_returns_invalid(monkeypatch, capsys):
+    """An explicitly-passed empty --proxy-url must not silently fall back to the
+    default URL and reach the network layer; it must return proxy_url_invalid
+    with no urlopen call, matching the behavior of every other invalid URL.
+
+    Regression guard for the ``or`` fallback chain that treated '' as falsy.
+    """
+    from vibap import cli as cli_module
+
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("empty kill-switch proxy URL should fail before urlopen")
+
+    monkeypatch.setattr(urlrequest, "urlopen", fail_if_called)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="", api_token=None)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "proxy_url_invalid"
+    assert response["error_code"] == "proxy_url_invalid"
+    assert response["condition"] == "proxy_url_invalid"
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"check_proxy_url", "start_or_check_governance_proxy"} <= actions
+    encoded = json.dumps(response)
+    assert "urlopen error" not in encoded
+
+
+def test_kill_switch_valid_loopback_proxy_unavailable_keeps_proxy_unavailable_guidance(
+    monkeypatch,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    def raise_unavailable(*_args, **_kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_unavailable)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="http://127.0.0.1:18765", api_token=None)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert response["ok"] is False
+    assert response["error"] != "proxy_url_invalid"
+    assert any(step["condition"] == "proxy_unavailable" for step in response["next_steps"])
+
+
+def test_kill_switch_unavailable_proxy_reports_placeholder_next_steps_without_token_leaks(
+    monkeypatch,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-proxy-token-placeholder"
+    raw_url_password = "url-password-placeholder"
+
+    def raise_unavailable(*_args, **_kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_unavailable)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(
+            deactivate=False,
+            proxy_url=f"https://user:{raw_url_password}@127.0.0.1:8443",
+            api_token=raw_token,
+        )
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert response["ok"] is False
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {
+        "start_or_check_governance_proxy",
+        "check_proxy_url_scheme",
+        "rerun_kill_switch_or_health_check",
+    } <= actions
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "<proxy-url>" in next_steps_json
+    assert "<proxy-port>" in next_steps_json
+    assert "<api-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+    assert raw_url_password not in next_steps_json
+
+
+def test_kill_switch_tls_setup_failure_reports_scheme_next_steps(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    def raise_tls_failure(*_args, **_kwargs):
+        raise OSError("[SSL: WRONG_VERSION_NUMBER] wrong version number")
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_tls_failure)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://127.0.0.1:8443", api_token=None)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert any(step["condition"] == "proxy_tls_setup" for step in response["next_steps"])
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "--tls-cert/--tls-key" in next_steps_json
+    assert "--no-tls" in next_steps_json
+
+
+def test_kill_switch_auth_failure_reports_token_next_steps_without_raw_secret(
+    monkeypatch,
+    capsys,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-proxy-auth-token-placeholder"
+    error_payload = io.BytesIO(json.dumps({"error": "missing bearer token"}).encode("utf-8"))
+
+    def raise_http_error(*_args, **_kwargs):
+        raise urlerror.HTTPError(
+            url="https://127.0.0.1:8443/admin/kill-switch",
+            code=401,
+            msg="Unauthorized",
+            hdrs=Message(),
+            fp=error_payload,
+        )
+
+    monkeypatch.setattr(urlrequest, "urlopen", raise_http_error)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=True, proxy_url="https://127.0.0.1:8443", api_token=raw_token)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 1
+    assert response["status"] == 401
+    assert any(step["action"] == "supply_proxy_api_token" for step in response["next_steps"])
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "--api-token <api-token>" in next_steps_json
+    assert "ARDUR_API_TOKEN=<api-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+
+
+def test_kill_switch_loopback_proxy_allows_self_signed_tls(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    captured: dict[str, ssl.SSLContext] = {}
+    proxy_response = {"kill_switch": "activated"}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return False
+
+        def read(self):
+            return json.dumps(proxy_response).encode("utf-8")
+
+    def fake_urlopen(*_args, **kwargs):
+        captured["context"] = kwargs["context"]
+        return FakeResponse()
+
+    monkeypatch.setattr(urlrequest, "urlopen", fake_urlopen)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://127.0.0.1:8443", api_token=None)
+    )
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == proxy_response
+    assert captured["context"].verify_mode == ssl.CERT_NONE
+    assert captured["context"].check_hostname is False
+
+
+def test_kill_switch_remote_proxy_requires_verified_tls(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    captured: dict[str, ssl.SSLContext] = {}
+    proxy_response = {"kill_switch": "activated"}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return False
+
+        def read(self):
+            return json.dumps(proxy_response).encode("utf-8")
+
+    def fake_urlopen(*_args, **kwargs):
+        captured["context"] = kwargs["context"]
+        return FakeResponse()
+
+    monkeypatch.setattr(urlrequest, "urlopen", fake_urlopen)
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://proxy.example.com:8443", api_token=None)
+    )
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == proxy_response
+    assert captured["context"].verify_mode == ssl.CERT_REQUIRED
+    assert captured["context"].check_hostname is True
+
+
+def test_kill_switch_success_preserves_proxy_response_shape(monkeypatch, capsys):
+    from vibap import cli as cli_module
+
+    proxy_response = {"kill_switch": "activated"}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc_info):
+            return False
+
+        def read(self):
+            return json.dumps(proxy_response).encode("utf-8")
+
+    monkeypatch.setattr(urlrequest, "urlopen", lambda *_args, **_kwargs: FakeResponse())
+
+    rc = cli_module.cmd_kill_switch(
+        Namespace(deactivate=False, proxy_url="https://127.0.0.1:8443", api_token=None)
+    )
+    response = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert response == proxy_response
+    assert "next_steps" not in response
+
+
+def test_desktop_observe_unavailable_hub_reports_placeholder_next_steps_without_path_leaks(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    result = personal_hub.desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=None,
+            session_id=None,
+            hub_url="http://127.0.0.1:9",
+            hub_token=None,
+            home=tmp_path,
+        )
+    )
+
+    assert result["ok"] is False
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {
+        "run_setup_if_needed",
+        "start_personal_hub",
+        "supply_or_rotate_hub_token",
+        "rerun_desktop_observe_or_doctor",
+    } <= actions
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "ardur desktop-observe" in next_steps_json
+    assert "<ardur-home>" in next_steps_json
+    assert "<hub-url>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+@pytest.mark.parametrize(
+    "hub_url",
+    [
+        "ftp://127.0.0.1:8765",
+        "file:///tmp/ardur-hub",
+        "http:///missing-host",
+        "http://[",
+        "http://127.0.0.1:bad",
+    ],
+)
+def test_desktop_observe_invalid_hub_url_reports_placeholder_next_steps(
+    tmp_path,
+    capsys,
+    hub_url,
+):
+    from vibap import cli as cli_module
+
+    observation_text = "intentional visible observation placeholder"
+
+    rc = cli_module.cmd_desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=observation_text,
+            session_id=None,
+            hub_url=hub_url,
+            hub_token=None,
+            home=tmp_path,
+        )
+    )
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert result["ok"] is False
+    assert result["condition"] == "hub_url_invalid"
+    assert result["error_code"] == "hub_url_invalid"
+    actions = {step["action"] for step in result["next_steps"]}
+    assert {"check_hub_url", "rerun_desktop_observe_or_doctor"} <= actions
+    commands = [step["command"] for step in result["next_steps"]]
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in commands
+    assert any(command.startswith("ardur desktop-observe ") for command in commands)
+    encoded = json.dumps(result)
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert "<app-name>" in encoded
+    assert "<window-title>" in encoded
+    assert hub_url not in encoded
+    assert str(tmp_path) not in encoded
+    assert "/tmp/ardur-hub" not in encoded
+    assert observation_text not in encoded
+    assert "Traceback" not in encoded
+
+
+def test_desktop_observe_auth_failure_reports_token_next_steps_without_raw_secret(
+    tmp_path,
+    monkeypatch,
+):
+    raw_token = "example-hub-token-placeholder"
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    result = personal_hub.desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=None,
+            session_id=None,
+            hub_url="http://127.0.0.1:8765",
+            hub_token=raw_token,
+            home=tmp_path,
+        )
+    )
+
+    assert result["ok"] is False
+    assert any(step["action"] == "supply_or_rotate_hub_token" for step in result["next_steps"])
+    next_steps_json = json.dumps(result["next_steps"])
+    assert "--hub-token <hub-token>" in next_steps_json
+    assert "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_desktop_observe_success_preserves_hub_response_shape(monkeypatch):
+    response = {
+        "ok": True,
+        "receipt": {"receipt_id": "desktop-receipt-placeholder"},
+        "session_review": {"provider": "ExampleApp"},
+    }
+    monkeypatch.setattr(personal_hub, "hub_request", lambda *_args, **_kwargs: response)
+
+    result = personal_hub.desktop_observe(
+        Namespace(
+            app="ExampleApp",
+            title="ExampleTitle",
+            text=None,
+            session_id=None,
+            hub_url="http://127.0.0.1:8765",
+            hub_token=None,
+            home=None,
+        )
+    )
+
+    assert result == response
+    assert "next_steps" not in result
+
+
+def test_hub_json_state_writes_private_fsynced_files(tmp_path, monkeypatch):
+    fsync_calls: list[int] = []
+    open_calls: list[tuple[str, int, int]] = []
+    real_open = personal_hub.os.open
+
+    def fake_fsync(fd: int) -> None:
+        fsync_calls.append(fd)
+
+    def tracked_open(file: str | os.PathLike[str], flags: int, mode: int = 0o600) -> int:
+        open_calls.append((os.fspath(file), flags, mode))
+        return real_open(file, flags, mode)
+
+    monkeypatch.setattr(personal_hub.os, "fsync", fake_fsync)
+    monkeypatch.setattr(personal_hub.os, "open", tracked_open)
+    state_path = tmp_path / "state.json"
+    legacy_tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+    legacy_tmp.write_text("legacy temp must not be reused", encoding="utf-8")
+    old_umask = os.umask(0o022)
+    try:
+        personal_hub._write_json(state_path, {"token": "placeholder-value", "ok": True})
+    finally:
+        os.umask(old_umask)
+
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {
+        "ok": True,
+        "token": "placeholder-value",
+    }
+    assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
+    assert fsync_calls, "Personal Hub JSON state must be fsynced before rename"
+    assert legacy_tmp.read_text(encoding="utf-8") == "legacy temp must not be reused"
+    assert open_calls
+    tmp_name, flags, mode = open_calls[0]
+    assert tmp_name != os.fspath(legacy_tmp)
+    assert tmp_name.endswith(".tmp")
+    assert ".json." in tmp_name
+    assert flags & os.O_EXCL
+    assert mode == 0o600
+    assert not os.path.exists(tmp_name)
+
+
+def test_hub_session_state_files_remain_private_with_permissive_umask(tmp_path):
+    old_umask = os.umask(0o022)
+    try:
+        hub = PersonalHub(tmp_path)
+        hub.observe(_browser_payload("private session state"))
+    finally:
+        os.umask(old_umask)
+
+    for state_path in (hub.paths.config, hub.paths.sessions_index, hub.paths.reviews):
+        assert state_path.exists()
+        assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
 
 
 def test_hub_http_auth_protects_export_and_mutations(tmp_path):
@@ -198,13 +1936,45 @@ def test_hub_query_token_only_authorizes_dashboard_get(tmp_path):
 
 
 def test_hub_log_redacts_full_query_token():
-    message = 'GET /dashboard?token=abcsefg123&next=/ HTTP/1.1'
+    message = 'GET /dashboard?token=abcsefg123&api_key=secret123&next=/ HTTP/1.1'
 
     redacted = _redact_url_tokens(message)
 
     assert "abcsefg123" not in redacted
     assert "sefg123" not in redacted
-    assert "?token=<redacted>&next=/" in redacted
+    assert "secret123" not in redacted
+    assert "?token=<redacted>&api_key=<redacted>&next=/" in redacted
+
+
+def test_hub_auth_uses_fixed_width_token_compare_material(monkeypatch):
+    from vibap import personal_hub
+
+    short = personal_hub._hub_token_compare_material("x")
+    longer = personal_hub._hub_token_compare_material("expected-token")
+    assert short is not None and longer is not None
+    assert len(short) == len(longer) == 4 + personal_hub._HUB_TOKEN_COMPARE_MAX_BYTES
+    assert short[:4] != longer[:4]
+
+    handler = object.__new__(_HubRequestHandler)
+    setattr(handler, "server", SimpleNamespace(hub=SimpleNamespace(hub_token="expected-token")))
+    setattr(handler, "headers", {"authorization": "Bearer x"})
+    setattr(handler, "path", "/v1/export")
+    seen: dict[str, object] = {}
+
+    def fake_compare(left, right):
+        seen["types"] = (type(left), type(right))
+        seen["lengths"] = (len(left), len(right))
+        seen["left"] = left
+        seen["right"] = right
+        return left == right
+
+    monkeypatch.setattr(personal_hub.secrets, "compare_digest", fake_compare)
+
+    assert handler._is_authorized() is False
+    assert seen["types"] == (bytes, bytes)
+    assert seen["lengths"] == (4 + personal_hub._HUB_TOKEN_COMPARE_MAX_BYTES,) * 2
+    assert seen["left"] != b"x"
+    assert seen["right"] != b"expected-token"
 
 
 def test_hub_accepts_dashboard_token_query(tmp_path):
@@ -233,6 +2003,952 @@ def test_native_host_uses_custom_home_for_hub_token(tmp_path):
     assert response["ok"] is True
 
 
+def test_native_host_unavailable_hub_reports_placeholder_next_steps_without_path_or_token_leaks(
+    tmp_path,
+    monkeypatch,
+):
+    raw_token = "example-native-host-token-placeholder"
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    response = native_host.handle_native_host_message(
+        {
+            "type": HOST_OBSERVATION_TYPE,
+            "hub_event": _browser_payload("native bridge failure"),
+        },
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    assert response["ok"] is False
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {
+        "run_setup_if_needed",
+        "start_personal_hub",
+        "supply_or_rotate_hub_token",
+        "rerun_personal_native_host_or_doctor",
+    } <= actions
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "ardur personal-native-host" in next_steps_json
+    assert "<native-message.json>" in next_steps_json
+    assert "<ardur-home>" in next_steps_json
+    assert "<hub-url>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+    assert raw_token not in next_steps_json
+
+
+def test_native_host_auth_failure_reports_token_next_steps_without_raw_secret(
+    tmp_path,
+    monkeypatch,
+):
+    raw_token = "example-native-host-auth-token-placeholder"
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    response = native_host.handle_native_host_message(
+        {
+            "type": HOST_OBSERVATION_TYPE,
+            "hub_event": _browser_payload("native bridge auth failure"),
+        },
+        hub_url="http://127.0.0.1:8765",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    assert response["ok"] is False
+    assert any(step["action"] == "supply_or_rotate_hub_token" for step in response["next_steps"])
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "--hub-token <hub-token>" in next_steps_json
+    assert "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>" in next_steps_json
+    assert raw_token not in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+def test_native_host_success_preserves_hub_response_shape(monkeypatch):
+    response = {
+        "ok": True,
+        "receipt": {"receipt_id": "native-host-receipt-placeholder"},
+        "session_review": {"provider": "Browser extension"},
+    }
+    monkeypatch.setattr(native_host, "hub_request", lambda *_args, **_kwargs: response)
+
+    result = native_host.handle_native_host_message(
+        {
+            "type": HOST_OBSERVATION_TYPE,
+            "hub_event": _browser_payload("native bridge success"),
+        },
+        hub_url="http://127.0.0.1:8765",
+        home=None,
+    )
+
+    assert result == response
+    assert "next_steps" not in result
+
+
+def test_native_host_unsupported_message_type_reports_placeholder_next_steps_without_payload_leaks(
+    tmp_path,
+):
+    raw_token = "example-native-host-unsupported-token-placeholder"
+    raw_type = "example.unsupported.native.message"
+    response = native_host.handle_native_host_message(
+        {
+            "type": raw_type,
+            "hub_event": {
+                "path": str(tmp_path / "private-native-message.json"),
+                "token": raw_token,
+            },
+        },
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_host_message_type_unsupported"
+    assert response["condition"] == "personal_native_host_message_type_unsupported"
+    assert response["message"]
+    assert response["detail"]
+    actions = {step["action"] for step in response["next_steps"]}
+    assert {"create_supported_native_message", "rerun_personal_native_host_or_doctor"} <= actions
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_type not in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in encoded
+    assert "<ABSOLUTE_PATH:" not in encoded
+
+
+@pytest.mark.parametrize(
+    ("browser", "extension_id"),
+    [
+        ("chrome", "not a valid extension id"),
+        ("chrome-for-testing", "abcdefghijklmnopabcdefghijklmnopa"),
+        ("chromium", "q" * 32),
+        ("edge", "   "),
+        ("firefox", ""),
+        ("firefox", "   "),
+    ],
+)
+def test_personal_native_manifest_extension_id_errors_are_structured(
+    tmp_path,
+    capsys,
+    browser,
+    extension_id,
+):
+    from vibap import cli as cli_module
+
+    rc = cli_module.cmd_personal_native_manifest(
+        Namespace(host_path=tmp_path / "host.py", extension_id=extension_id, browser=browser)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_manifest_extension_id_invalid"
+    assert response["condition"] == "personal_native_manifest_extension_id_invalid"
+    assert response["next_steps"]
+    assert "ardur personal-native-manifest" in encoded
+    assert "<native-host-path>" in encoded
+    assert "<extension-id>" in encoded
+    assert "<browser>" in encoded
+    assert str(tmp_path) not in combined
+    assert "Traceback" not in combined
+    assert "<ABSOLUTE_PATH:" not in combined
+    if extension_id.strip():
+        assert extension_id not in combined
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["empty", "whitespace", "directory", "missing_file", "non_executable_file"],
+)
+def test_personal_native_manifest_host_path_errors_are_structured(tmp_path, capsys, case):
+    from vibap import cli as cli_module
+
+    if case == "empty":
+        host_path: str | os.PathLike[str] = ""
+        raw_input = ""
+    elif case == "whitespace":
+        host_path = "   "
+        raw_input = "   "
+    elif case == "directory":
+        host_path = tmp_path
+        raw_input = str(tmp_path)
+    elif case == "missing_file":
+        host_path = tmp_path / "missing-native-host"
+        raw_input = str(host_path)
+    else:
+        host_file = tmp_path / "native-host"
+        host_file.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        host_path = host_file
+        raw_input = str(host_file)
+
+    rc = cli_module.cmd_personal_native_manifest(
+        Namespace(
+            host_path=host_path,
+            extension_id="abcdefghijklmnopabcdefghijklmnop",
+            browser="chrome",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_manifest_host_path_invalid"
+    assert response["condition"] == "personal_native_manifest_host_path_invalid"
+    assert response["next_steps"]
+    assert "ardur personal-native-manifest" in encoded
+    assert "<native-host-path>" in encoded
+    assert "<extension-id>" in encoded
+    assert "<browser>" in encoded
+    assert str(tmp_path) not in combined
+    if raw_input.strip():
+        assert raw_input not in combined
+    assert "Traceback" not in combined
+    assert "<ABSOLUTE_PATH:" not in combined
+
+
+@pytest.mark.parametrize(
+    ("browser", "extension_id", "manifest_field", "expected_value"),
+    [
+        (
+            "chrome",
+            "abcdefghijklmnopabcdefghijklmnop",
+            "allowed_origins",
+            ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"],
+        ),
+        ("firefox", "ardur@example.com", "allowed_extensions", ["ardur@example.com"]),
+    ],
+)
+def test_personal_native_manifest_preserves_valid_success_output(
+    tmp_path,
+    capsys,
+    browser,
+    extension_id,
+    manifest_field,
+    expected_value,
+):
+    from vibap import cli as cli_module
+
+    host_path = tmp_path / "host.py"
+    host_path.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    host_path.chmod(host_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    rc = cli_module.cmd_personal_native_manifest(
+        Namespace(host_path=host_path, extension_id=extension_id, browser=browser)
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+
+    assert rc == 0
+    assert captured.err == ""
+    assert response["name"] == native_host.NATIVE_HOST_NAME
+    assert response["path"] == str(host_path.resolve())
+    assert response[manifest_field] == expected_value
+    assert "ok" not in response
+
+
+@pytest.mark.parametrize(
+    ("payload", "condition"),
+    [
+        ("{not-json", "personal_native_host_once_json_malformed"),
+        ("[]", "personal_native_host_once_json_not_object"),
+    ],
+)
+def test_personal_native_host_once_json_input_errors_are_structured(
+    tmp_path,
+    capsys,
+    payload,
+    condition,
+):
+    from vibap import cli as cli_module
+
+    message_path = tmp_path / "native-message.json"
+    message_path.write_text(payload, encoding="utf-8")
+    raw_token = "example-native-host-once-json-token-placeholder"
+
+    rc = cli_module.cmd_personal_native_host(
+        Namespace(
+            once_json=message_path,
+            hub_url="http://127.0.0.1:9",
+            hub_token=raw_token,
+            home=tmp_path / "ardur-home",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == condition
+    assert response["condition"] == condition
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_token not in combined
+    assert str(tmp_path) not in combined
+    assert payload not in combined
+    assert "Traceback" not in combined
+    assert "<ABSOLUTE_PATH:" not in combined
+
+
+def test_personal_native_host_once_json_preserves_valid_hub_failure_next_steps(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-native-host-valid-once-json-token-placeholder"
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    message_path = tmp_path / "valid-native-message.json"
+    message_path.write_text(
+        json.dumps(
+            {
+                "type": HOST_OBSERVATION_TYPE,
+                "hub_event": _browser_payload("valid once-json message"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli_module.cmd_personal_native_host(
+        Namespace(
+            once_json=message_path,
+            hub_url="http://127.0.0.1:9",
+            hub_token=raw_token,
+            home=tmp_path / "ardur-home",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert any(step["action"] == "rerun_personal_native_host_or_doctor" for step in response["next_steps"])
+    assert "<native-message.json>" in encoded
+    assert "<hub-token>" in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+
+
+@pytest.mark.parametrize(
+    ("hub_url", "exception_text"),
+    [
+        ("http://[", "Invalid IPv6 URL"),
+        ("http://127.0.0.1:bad", "nonnumeric port"),
+        ("ftp://127.0.0.1:8765", "urlopen error"),
+        ("file:///tmp/ardur-hub", "/tmp/ardur-hub"),
+        ("http:///missing-host", "no host given"),
+    ],
+)
+def test_personal_native_host_once_json_invalid_hub_url_is_structured(
+    tmp_path,
+    capsys,
+    hub_url,
+    exception_text,
+):
+    from vibap import cli as cli_module
+
+    raw_token = "example-native-host-invalid-hub-url-token-placeholder"
+    message_path = tmp_path / "valid-native-message.json"
+    message_path.write_text(
+        json.dumps(
+            {
+                "type": HOST_OBSERVATION_TYPE,
+                "hub_event": _browser_payload("valid once-json invalid hub url"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli_module.cmd_personal_native_host(
+        Namespace(
+            once_json=message_path,
+            hub_url=hub_url,
+            hub_token=raw_token,
+            home=tmp_path / "ardur-home",
+        )
+    )
+    captured = capsys.readouterr()
+    response = json.loads(captured.out)
+    encoded = json.dumps(response, sort_keys=True)
+    combined = captured.out + captured.err
+
+    assert rc == 1
+    assert captured.err == ""
+    assert response["ok"] is False
+    assert response["error"] == "hub_url_invalid"
+    assert response["condition"] == "hub_url_invalid"
+    assert response["message"]
+    assert response["detail"]
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_token not in combined
+    assert hub_url not in combined
+    assert str(tmp_path) not in combined
+    assert "Traceback" not in combined
+    assert exception_text not in combined
+    assert "InvalidURL" not in combined
+    assert "ValueError" not in combined
+
+
+def test_run_native_host_binary_framing_includes_next_steps_on_hub_setup_failure(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        native_host,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "connection refused",
+            "error_code": "hub_unavailable",
+        },
+    )
+    message = {
+        "type": HOST_OBSERVATION_TYPE,
+        "hub_event": _browser_payload("native bridge framed failure"),
+    }
+    data = json.dumps(message).encode("utf-8")
+    stdin = io.BytesIO(struct.pack("<I", len(data)) + data)
+    stdout = io.BytesIO()
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token="example-native-host-framed-token-placeholder",
+        home=tmp_path,
+    )
+
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    assert response["ok"] is False
+    next_steps_json = json.dumps(response["next_steps"])
+    assert "ardur personal-native-host" in next_steps_json
+    assert "<native-message.json>" in next_steps_json
+    assert "<hub-token>" in next_steps_json
+    assert str(tmp_path) not in next_steps_json
+
+
+@pytest.mark.parametrize(
+    ("payload", "condition"),
+    [
+        (b'{"type": ', "personal_native_host_framed_json_malformed"),
+        (b"[]", "personal_native_host_framed_json_not_object"),
+    ],
+)
+def test_run_native_host_binary_framing_input_errors_are_structured(
+    tmp_path,
+    payload,
+    condition,
+):
+    stdin = io.BytesIO(struct.pack("<I", len(payload)) + payload)
+    stdout = io.BytesIO()
+    raw_token = "example-native-host-framed-input-token-placeholder"
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == condition
+    assert response["condition"] == condition
+    assert response["message"]
+    assert response["detail"]
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert payload.decode("utf-8", errors="ignore") not in encoded
+    assert "Traceback" not in encoded
+    assert "Expecting value" not in response["error"]
+
+
+def test_run_native_host_binary_framing_rejects_oversized_message_before_body_read(
+    tmp_path,
+    monkeypatch,
+):
+    class HeaderOnlyNativeMessage(io.BytesIO):
+        def __init__(self, claimed_length: int) -> None:
+            super().__init__(struct.pack("<I", claimed_length))
+            self.read_sizes: list[int] = []
+
+        def read(self, size: int | None = -1) -> bytes:
+            self.read_sizes.append(-1 if size is None else size)
+            if len(self.read_sizes) > 1:
+                raise AssertionError("oversized native message body must not be read")
+            return super().read(size)
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("oversized native message must fail before Hub forwarding")
+
+    monkeypatch.setattr(native_host, "hub_request", fail_hub_request)
+    claimed_length = native_host.MAX_NATIVE_MESSAGE_BYTES + 1
+    stdin = HeaderOnlyNativeMessage(claimed_length)
+    stdout = io.BytesIO()
+    raw_token = "example-native-host-oversized-token-placeholder"
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    assert stdin.read_sizes == [4]
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_host_framed_message_too_large"
+    assert response["condition"] == "personal_native_host_framed_message_too_large"
+    assert str(claimed_length) in response["detail"]
+    assert str(native_host.MAX_NATIVE_MESSAGE_BYTES) in response["detail"]
+    assert "<native-message.json>" in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in encoded
+
+
+def test_run_native_host_binary_framing_unsupported_message_type_is_structured(tmp_path):
+    raw_token = "example-native-host-framed-unsupported-token-placeholder"
+    raw_type = "example.unsupported.native.message"
+    payload = json.dumps(
+        {
+            "type": raw_type,
+            "hub_event": {
+                "path": str(tmp_path / "private-native-message.json"),
+                "token": raw_token,
+            },
+        }
+    ).encode("utf-8")
+    stdin = io.BytesIO(struct.pack("<I", len(payload)) + payload)
+    stdout = io.BytesIO()
+
+    native_host.run_native_host(
+        stdin,
+        stdout,
+        hub_url="http://127.0.0.1:9",
+        hub_token=raw_token,
+        home=tmp_path,
+    )
+
+    framed = stdout.getvalue()
+    assert len(framed) >= 4
+    length = struct.unpack("<I", framed[:4])[0]
+    assert length == len(framed) - 4
+    response = json.loads(framed[4:].decode("utf-8"))
+    encoded = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is False
+    assert response["error"] == "personal_native_host_message_type_unsupported"
+    assert response["condition"] == "personal_native_host_message_type_unsupported"
+    assert response["message"]
+    assert response["detail"]
+    assert response["next_steps"]
+    assert "ardur personal-native-host" in encoded
+    assert "<native-message.json>" in encoded
+    assert "<ardur-home>" in encoded
+    assert "<hub-url>" in encoded
+    assert raw_type not in encoded
+    assert raw_token not in encoded
+    assert str(tmp_path) not in encoded
+    assert "Traceback" not in encoded
+
+
+@pytest.mark.parametrize("command", ([], [""], ["   "], ["\t\n"]))
+def test_run_under_hub_missing_command_reports_placeholder_next_steps(
+    tmp_path,
+    capsys,
+    monkeypatch,
+    command,
+):
+    sentinel = tmp_path / "child-ran.txt"
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("missing command must fail before Hub calls")
+
+    def fail_stream_subprocess(_command):
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("missing command must not execute a child process")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=command,
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert "ardur run requires a command after --" in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur run -- <command>" in remediation
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in remediation
+    assert "<hub-token>" in remediation
+    assert "example-hub-token-placeholder" not in remediation
+    assert str(tmp_path) not in remediation
+
+
+def test_run_under_hub_unavailable_hub_reports_placeholder_next_steps(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    sentinel = tmp_path / "child-ran.txt"
+    raw_error = f"connection refused at {tmp_path}?token=raw-hub-token-placeholder"
+
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": raw_error,
+            "error_code": "hub_unavailable",
+        },
+    )
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(sentinel)!r}).write_text('ran')",
+            ],
+            hub_url="http://127.0.0.1:9",
+            hub_token=None,
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert "Ardur Hub unavailable: hub_unavailable" in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "ardur setup --home <ardur-home>" in remediation
+    assert "ardur hub --home <ardur-home>" in remediation
+    assert "ardur doctor --home <ardur-home> --hub-url <hub-url>" in remediation
+    assert "<hub-token>" in remediation
+    assert raw_error not in captured.err
+    assert "raw-hub-token-placeholder" not in captured.err
+    assert str(tmp_path) not in remediation
+
+
+def test_run_under_hub_policy_check_failure_sanitizes_support_error(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    sentinel = tmp_path / "child-ran.txt"
+    raw_error = f"policy backend failed at {tmp_path} with token=raw-policy-token-placeholder"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": False, "error": raw_error, "error_code": "policy_backend_failed"}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        sentinel.write_text("ran", encoding="utf-8")
+        raise AssertionError("policy check failure must not execute a child process")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", f"from pathlib import Path; Path({str(sentinel)!r}).write_text('ran')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert captured.out == ""
+    assert not sentinel.exists()
+    assert "Ardur policy check failed: run_policy_check_failed" in captured.err
+    assert "Next steps:" in captured.err
+    assert raw_error not in captured.err
+    assert "raw-policy-token-placeholder" not in captured.err
+    assert str(tmp_path) not in captured.err
+
+
+def test_run_under_hub_auth_failure_reports_token_next_steps_without_raw_secret(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    raw_token = "example-hub-token-placeholder"
+
+    monkeypatch.setattr(
+        personal_hub,
+        "hub_request",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "Ardur Personal Hub token required",
+            "error_code": "hub_auth_required",
+            "status": 401,
+        },
+    )
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token=raw_token,
+            home=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 127
+    assert captured.out == ""
+    assert "Ardur Hub unavailable: hub_token_required" in captured.err
+    assert "Next steps:" in captured.err
+    remediation = captured.err.split("Next steps:", 1)[1]
+    assert "--hub-token <hub-token>" in remediation
+    assert "ARDUR_PERSONAL_HUB_TOKEN=<hub-token>" in remediation
+    assert raw_token not in remediation
+    assert str(tmp_path) not in remediation
+
+
+def test_run_under_hub_blocked_policy_keeps_126_receipt_and_no_remediation(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+    with _running_hub(tmp_path) as (_, base_url):
+        exit_code = run_under_hub(
+            Namespace(
+                command=["sudo", "rm", "-rf", "/"],
+                hub_url=base_url,
+                hub_token=None,
+                home=tmp_path,
+            )
+        )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert "Ardur blocked command:" in captured.err
+    assert "receipt:" in captured.err
+    assert "Next steps:" not in captured.err
+
+
+def test_run_under_hub_blocked_policy_sanitizes_reason_and_preserves_receipt_reference(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    raw_reason = f"blocked raw path {tmp_path} token=raw-block-token-placeholder"
+    receipt_reference = "receipt:0123456789abcdef0123456789abcdef"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": raw_reason}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert "Ardur blocked command: policy_blocked" in captured.err
+    assert f"receipt: {receipt_reference}" in captured.err
+    assert "Next steps:" not in captured.err
+    assert raw_reason not in captured.err
+    assert "raw-block-token-placeholder" not in captured.err
+    assert str(tmp_path) not in captured.err
+
+
+def test_run_under_hub_blocked_policy_receipt_output_avoids_print_sink(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    receipt_reference = "receipt:0123456789abcdef0123456789abcdef"
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": "deny"}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    real_print = builtins.print
+
+    def receipt_print_guard(*args, **kwargs):
+        if kwargs.get("file") is sys.stderr and args and str(args[0]).startswith("receipt:"):
+            raise AssertionError("receipt reference output must not use print as a log sink")
+        return real_print(*args, **kwargs)
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+    monkeypatch.setattr(builtins, "print", receipt_print_guard)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert f"receipt: {receipt_reference}" in captured.err
+    assert "Next steps:" not in captured.err
+
+
+def test_run_under_hub_blocked_policy_redacts_unsafe_receipt_reference(
+    tmp_path,
+    capfd,
+    monkeypatch,
+):
+    unsafe_receipt_reference = ".".join(("eyJhbGciOiJub25lIn0", "e30", "signature"))
+
+    def fake_hub_request(_method, path, *_args, **_kwargs):
+        if path == "/v1/sessions/start":
+            return {"ok": True}
+        if path == "/v1/policy/check":
+            return {"ok": True, "policy": {"verdict": "blocked", "reason": "deny"}}
+        if path == "/v1/events/observe":
+            return {"ok": True, "receipt": {"receipt_id": unsafe_receipt_reference}}
+        raise AssertionError(f"unexpected Hub request path: {path}")
+
+    def fail_stream_subprocess(_command):
+        raise AssertionError("blocked commands must not execute")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+    monkeypatch.setattr(personal_hub, "_stream_subprocess", fail_stream_subprocess)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=[sys.executable, "-c", "print('should-not-run')"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home=tmp_path,
+        )
+    )
+
+    captured = capfd.readouterr()
+    assert exit_code == 126
+    assert "Ardur blocked command: policy_blocked" in captured.err
+    assert "receipt: <receipt>" in captured.err
+    assert unsafe_receipt_reference not in captured.err
+    assert "Next steps:" not in captured.err
+
+
 def test_run_under_hub_streams_output_without_subprocess_run(tmp_path, capfd, monkeypatch):
     def fail_subprocess_run(*_args, **_kwargs):
         raise AssertionError("run_under_hub must not buffer output with subprocess.run")
@@ -256,6 +2972,114 @@ def test_run_under_hub_streams_output_without_subprocess_run(tmp_path, capfd, mo
     assert exit_code == 0
     assert "stream-out" in captured.out
     assert "stream-err" in captured.err
+    assert "Next steps:" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# run --home empty/whitespace pre-validation
+#
+# ``--home`` is ``type=str`` on the CLI parser so that empty/whitespace-only
+# values reach the handler instead of being silently normalised to
+# ``Path('.')`` by argparse.  These tests verify the handler-side guard.
+# ---------------------------------------------------------------------------
+
+
+def test_run_under_hub_empty_home_rejected(tmp_path, capsys, monkeypatch):
+    """``home=""`` exits 2 before any Hub I/O."""
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("empty home must fail before Hub calls")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=["echo", "hello"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home="",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "non-empty path" in captured.err
+
+
+def test_run_under_hub_whitespace_home_rejected(tmp_path, capsys, monkeypatch):
+    """``home="   "`` exits 2 before any Hub I/O."""
+
+    def fail_hub_request(*_args, **_kwargs):
+        raise AssertionError("whitespace home must fail before Hub calls")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=["echo", "hello"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token="example-hub-token-placeholder",
+            home="   ",
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "non-empty path" in captured.err
+
+
+def test_run_under_hub_none_home_not_rejected(tmp_path, capsys, monkeypatch):
+    """``home=None`` (flag omitted) proceeds to Hub I/O (not validation exit 2)."""
+
+    def fail_hub_request(*_args, **_kwargs):
+        # Simulate connection refused so we get exit 127, not 2.
+        raise ConnectionError("hub unreachable")
+
+    monkeypatch.setattr(personal_hub, "hub_request", fail_hub_request)
+
+    try:
+        exit_code = run_under_hub(
+            Namespace(
+                command=["echo", "hello"],
+                hub_url="http://127.0.0.1:8765",
+                hub_token=None,
+                home=None,
+            )
+        )
+    except ConnectionError:
+        # If the monkeypatched Hub raises before run_under_hub maps the error,
+        # that still proves the validation guard did not fire.
+        return
+
+    # If we got an exit code it must NOT be 2 (the validation rejection code).
+    assert exit_code != 2
+
+
+def test_run_under_hub_valid_home_not_rejected(tmp_path, capfd, monkeypatch):
+    """``home=<real-dir>`` proceeds past validation to Hub I/O."""
+
+    sentinel = tmp_path / "hub-called.txt"
+
+    def fake_hub_request(method, path, *_args, **_kwargs):
+        sentinel.write_text("called", encoding="utf-8")
+        return {"ok": False, "error": "simulated_start_failure"}
+
+    monkeypatch.setattr(personal_hub, "hub_request", fake_hub_request)
+
+    exit_code = run_under_hub(
+        Namespace(
+            command=["echo", "hello"],
+            hub_url="http://127.0.0.1:8765",
+            hub_token=None,
+            home=str(tmp_path),
+        )
+    )
+
+    assert sentinel.exists()
+    # Exit 127 = Hub failure, not 2 = validation rejection
+    assert exit_code != 2
 
 
 @contextmanager

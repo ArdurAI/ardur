@@ -16,6 +16,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,18 +54,19 @@ type AgentPassportReconciler struct {
 
 // NewAgentPassportReconciler creates a reconciler with the signing key and issuer pipeline.
 //
-// FIX-R9-6 (round-9, 2026-04-29): when ``signingKeyPath`` is empty,
-// the constructor refuses to start unless ``allowEphemeralKey=true``
+// FIX-R9-6 (round-9, 2026-04-29): when signingKeyPath is empty,
+// the constructor refuses to start unless allowEphemeralKey=true
 // is passed explicitly. Round-8 audit (LOW-NEW-6) flagged that the
 // previous warn-only path silently issued credentials no consumer
 // could verify across pod restarts — same shape as the Authority's
-// ``--no-require-auth`` foot-gun, just with no opt-in flag making
+// --no-require-auth foot-gun, just with no opt-in flag making
 // the choice visible. Now ephemeral behaviour requires an opt-in.
 func NewAgentPassportReconciler(c client.Client, scheme *runtime.Scheme, signingKeyPath, issuerURI string, allowEphemeralKey bool) (*AgentPassportReconciler, error) {
 	var signingKey *credential.SigningKey
 
-	if signingKeyPath != "" {
-		key, err := loadSigningKey(signingKeyPath)
+	trimmedPath := strings.TrimSpace(signingKeyPath)
+	if trimmedPath != "" {
+		key, err := loadSigningKey(trimmedPath)
 		if err != nil {
 			return nil, fmt.Errorf("loading signing key: %w", err)
 		}
@@ -192,9 +194,15 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 		return r.setFailed(ctx, ap, "PolicyMissing", err)
 	}
 
-	agentID := ap.Spec.Identity.SPIFFEID
-	if agentID == "" {
-		agentID = fmt.Sprintf("spiffe://ardur.dev/ns/%s/agent/%s", ap.Namespace, ap.Name)
+	spiffeID := ap.Spec.Identity.SPIFFEID
+	agentID := spiffeID
+	if spiffeID == "" {
+		agentID = fmt.Sprintf("%s/%s", ap.Namespace, ap.Name)
+		setCondition(ap, vibapv1alpha1.ConditionIdentityUnverified, metav1.ConditionTrue,
+			vibapv1alpha1.ReasonMissingSPIFFEID,
+			"No SPIFFE ID was supplied; the credential omits spiffe_id and workload identity remains unverified")
+	} else {
+		removeCondition(ap, vibapv1alpha1.ConditionIdentityUnverified)
 	}
 
 	if err := r.ensureAgentRegistered(ctx, agentID, ap.Spec.Trust); err != nil {
@@ -207,17 +215,18 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 	}
 
 	issueReq := issuer.IssueRequest{
-		SPIFFEID:          agentID,
-		OwnerID:           ap.Spec.Identity.OwnerID,
-		A2ACardRef:        ap.Spec.Identity.A2ACardRef,
-		PolicyText:        policyText,
-		SystemPrompt:      ap.Spec.Intent.SystemPrompt,
-		ToolManifest:      ap.Spec.Intent.ToolManifest,
-		PermittedActions:  ap.Spec.Intent.PermittedActions,
-		AgentID:           agentID,
-		TTL:               ttl,
-		SelectiveDisclose: ap.Spec.Credential.SelectiveDisclosure,
-		StatusURI:         ap.Spec.Credential.StatusListURI,
+		SPIFFEID:                spiffeID,
+		OwnerID:                 ap.Spec.Identity.OwnerID,
+		A2ACardRef:              ap.Spec.Identity.A2ACardRef,
+		AllowUnverifiedIdentity: spiffeID == "",
+		PolicyText:              policyText,
+		SystemPrompt:            ap.Spec.Intent.SystemPrompt,
+		ToolManifest:            ap.Spec.Intent.ToolManifest,
+		PermittedActions:        ap.Spec.Intent.PermittedActions,
+		AgentID:                 agentID,
+		TTL:                     ttl,
+		SelectiveDisclose:       ap.Spec.Credential.SelectiveDisclosure,
+		StatusURI:               ap.Spec.Credential.StatusListURI,
 	}
 
 	if ap.Spec.Provenance != nil {
@@ -252,6 +261,15 @@ func (r *AgentPassportReconciler) issueCredential(ctx context.Context, ap *vibap
 	if result.Credential != nil && result.Credential.Claims.Trust != nil {
 		ap.Status.TrustTier = result.Credential.Claims.Trust.AuthorizationTier
 		ap.Status.CompositeScore = result.Credential.Claims.Trust.CompositeScore
+	}
+
+	// REQUIRES_CLUSTER: apply the per-tier NetworkPolicy so egress enforcement
+	// reflects the current trust tier immediately after every credential issuance.
+	if npErr := r.applyNetworkPolicyForTier(ctx, ap.Namespace, ap.Status.TrustTier); npErr != nil {
+		logger.Error(npErr, "failed to apply tier NetworkPolicy",
+			"namespace", ap.Namespace, "tier", ap.Status.TrustTier)
+		r.recordEvent(ap, corev1.EventTypeWarning, "NetworkPolicyFailed",
+			"Failed to apply egress NetworkPolicy for tier %s: %v", ap.Status.TrustTier, npErr)
 	}
 
 	governanceErr := r.reconcileGovernance(ctx, ap)
@@ -294,6 +312,44 @@ func (r *AgentPassportReconciler) ensureAgentRegistered(ctx context.Context, age
 		trustSpec.StaticCapabilityScore,
 		trustSpec.HistoricalReputation,
 	)
+}
+
+// applyNetworkPolicyForTier creates or updates the NetworkPolicy for the given
+// trust tier in the given namespace.
+//
+// REQUIRES_CLUSTER: calls the K8s networking API (Get + Create/Update).
+// No-op when tier is empty (pre-issue state).
+func (r *AgentPassportReconciler) applyNetworkPolicyForTier(ctx context.Context, namespace, tier string) error {
+	if tier == "" {
+		return nil
+	}
+	desired := trust.NetworkPolicyForTier(tier, namespace)
+	return applyNetworkPolicy(ctx, r.Client, desired)
+}
+
+// applyNetworkPolicy creates or updates np via the K8s API.
+// REQUIRES_CLUSTER: calls the K8s networking API.
+func applyNetworkPolicy(ctx context.Context, c client.Client, desired *networkingv1.NetworkPolicy) error {
+	existing := &networkingv1.NetworkPolicy{}
+	key := client.ObjectKey{Namespace: desired.Namespace, Name: desired.Name}
+
+	err := c.Get(ctx, key, existing)
+	if apierrors.IsNotFound(err) {
+		if createErr := c.Create(ctx, desired); createErr != nil {
+			return fmt.Errorf("creating NetworkPolicy %s: %w", desired.Name, createErr)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("getting NetworkPolicy %s: %w", desired.Name, err)
+	}
+
+	existing.Spec = desired.Spec
+	existing.Labels = desired.Labels
+	if updateErr := c.Update(ctx, existing); updateErr != nil {
+		return fmt.Errorf("updating NetworkPolicy %s: %w", desired.Name, updateErr)
+	}
+	return nil
 }
 
 func (r *AgentPassportReconciler) loadPolicyFromConfigMap(ctx context.Context, ns string, ref *vibapv1alpha1.PolicyReference) (string, error) {
@@ -377,8 +433,35 @@ func (r *AgentPassportReconciler) recordEvent(ap *vibapv1alpha1.AgentPassport, e
 }
 
 func needsCredential(ap *vibapv1alpha1.AgentPassport) bool {
-	return ap.Status.Credential == "" ||
-		ap.Status.ObservedGeneration != ap.Generation
+	if ap.Status.Credential == "" || ap.Status.ObservedGeneration != ap.Generation {
+		return true
+	}
+	return needsUnverifiedIdentityMigration(ap)
+}
+
+// needsUnverifiedIdentityMigration forces one reissuance for credentials
+// written before empty SPIFFE IDs were represented honestly in the signed
+// artifact and status. The caller guarantees that a credential is present.
+func needsUnverifiedIdentityMigration(ap *vibapv1alpha1.AgentPassport) bool {
+	if ap.Spec.Identity.SPIFFEID != "" {
+		return false
+	}
+	// Status is controller-owned. Decode classifies the artifact conservatively;
+	// it is not treated as independent proof of signature authenticity.
+	decoded, err := credential.Decode(ap.Status.Credential)
+	if err != nil || decoded.Claims.Identity != nil ||
+		strings.Contains(strings.ToLower(decoded.Claims.Subject), "spiffe://") {
+		return true
+	}
+	for _, condition := range ap.Status.Conditions {
+		if condition.Type == vibapv1alpha1.ConditionIdentityUnverified &&
+			condition.Status == metav1.ConditionTrue &&
+			condition.Reason == vibapv1alpha1.ReasonMissingSPIFFEID &&
+			condition.ObservedGeneration == ap.Generation {
+			return false
+		}
+	}
+	return true
 }
 
 func needsRenewal(ap *vibapv1alpha1.AgentPassport) bool {
@@ -416,6 +499,15 @@ func setCondition(ap *vibapv1alpha1.AgentPassport, condType string, status metav
 		Message:            message,
 		ObservedGeneration: ap.Generation,
 	})
+}
+
+func removeCondition(ap *vibapv1alpha1.AgentPassport, condType string) {
+	for i, condition := range ap.Status.Conditions {
+		if condition.Type == condType {
+			ap.Status.Conditions = append(ap.Status.Conditions[:i], ap.Status.Conditions[i+1:]...)
+			return
+		}
+	}
 }
 
 func (r *AgentPassportReconciler) reconcileGovernance(ctx context.Context, ap *vibapv1alpha1.AgentPassport) error {

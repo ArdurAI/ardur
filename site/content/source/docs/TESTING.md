@@ -2,7 +2,7 @@
 title: "Testing"
 description: "The public tree includes curated Python and Go runtime code under `python/`"
 source_path: "docs/TESTING.md"
-source_sha256: "01e8f0c3cc2e4f631f20d0b4241848cb0cbe833c5c1e57d078ba36414c2beca2"
+source_sha256: "fc592e341f182abe5b125aa0f47ef44cc59c5c3502583fc1f7471a253c9404be"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -21,27 +21,156 @@ The public tree includes curated Python and Go runtime code under `python/`
 and `go/`. GitHub Actions now covers runtime tests, repository hygiene,
 structured-file parsing, link checks, secret scanning, and CodeQL.
 
+When changing external runtime-evidence correlation, run:
+
+```bash
+python -m pytest python/tests/test_runtime_evidence.py -q
+```
+
+This focused suite generates ephemeral P-256 receipts, exercises normalized,
+Tetragon, and Falco JSONL adapters, and proves deterministic matching,
+ambiguity, parser bounds, redaction, symlink handling, CLI behavior, public
+fixture generation, and owner-only report output without network access or
+private credentials.
+
+When changing verified receipt telemetry or OTLP export, run:
+
+```bash
+PYTHONPATH=python python -m pytest python/tests/test_receipt_telemetry.py -q
+```
+
+This suite verifies signed PERMIT/DENY chain projection, parent linkage,
+stable policy rule IDs, conservative no-content export, the canonical golden
+event, deterministic OTLP IDs and nanosecond timestamps, partial rejection,
+HTTPS/loopback endpoint policy, environment-header injection resistance,
+owner-only output, symlink rejection, and CLI behavior. The generated trace and
+log requests are also checked manually against the official
+`opentelemetry-proto` protobuf JSON parser during release evidence review.
+
+When changing governance performance paths or the Linux benchmark report, run:
+
+```bash
+python -m pytest python/tests/test_linux_benchmark.py -q
+python scripts/run-linux-governance-benchmark.py \
+  --mode smoke --source-ref "$(git rev-parse HEAD)" \
+  --output-dir /tmp/ardur-linux-benchmark
+```
+
+The focused suite verifies the canonical/embedded schema pair, nearest-rank
+percentiles, production policy/proxy/receipt paths, owner-only artifacts,
+non-Linux claim gating, strict paired-command parsing, redaction, and stable
+subprocess failures. The dedicated `linux-benchmark` workflow runs smoke on
+relevant pull requests and offers manual Linux stress dispatch; it is not
+scheduled. See the
+[benchmark guide](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/) for interpretation.
+
+When changing opt-in Linux agent recognition, daemon health accounting, or the
+recognition benchmark contract, run:
+
+```bash
+cd go
+go test -race -count=1 \
+  ./pkg/kernelcapture \
+  ./cmd/ardur-kernelcaptured \
+  ./cmd/ardur-agent-recognition-eval \
+  ./cmd/ardur-agent-recognition-benchmark \
+  ./cmd/ardur-agent-recognition-workload
+```
+
+The evaluator tests account for all 36 maintained samples while keeping the 28
+name-only cases and eight synthetic content-fingerprint transitions separate.
+They fail on name-only threshold drift, missing native/launcher content
+coverage, any reviewed content-transition mismatch, or any confidence
+promotion after a digest mismatch. Launcher cases bind an independently supplied
+observed interpreter instead of inheriting it from the fixture registry.
+Fingerprint-worker panic tests also require the same one-worker pool to complete
+a second job after recovery and exclusive terminal accounting for an observer
+panic.
+
+The dedicated `agent-recognition-benchmark` workflow builds the exact candidate
+daemon, controller, and native workload plus an exact target-branch reference
+daemon. It runs one warm-up plus 20 three-arm groups on one fresh privileged
+`ubuntu-24.04` runner, rotating through all six baseline/reference/candidate
+orders. The report binds both source SHAs and both copied daemon digests,
+records bounded CPU/scheduling identity, retains three diagnostic process-CPU
+calibration samples, and uploads privacy-bounded raw JSON. CI fails on median
+wall drift, same-VM candidate/reference daemon-CPU p50 drift, an unsupported
+runner class, RSS drift, loss or
+partial accounting in either enabled arm, rejection, unavailable fingerprint
+work, schema drift, or digest mismatch. Automatic CI does not retry into a
+pass. It requires the reviewed v0.4 budget before measurement; a missing or
+invalid budget fails instead of silently reverting performance to
+`not_evaluated`. Only an explicit manual `ci` dispatch may collect
+budget-independent replacement evidence, and correctness still fails closed.
+The reviewed budget binds three original AMD reports, two preserved Intel
+first-attempt reports including the v0.3 falsification, and three independent
+fresh exact-head v0.4 reports. Any later replacement likewise requires at least
+three independent fresh exact-head reports. The larger release profile is
+manual and never substitutes for required CI. See the
+[agent-recognition benchmark guide](/__ardur_internal__/source/docs/benchmarks/agent-recognition-overhead/).
+
+When changing the AuditBench evaluation-protocol artifact pipeline, run:
+
+```bash
+make bench-protocol-test
+```
+
+This exercises strict and duplicate-name JSON parsing, raw-capture replay,
+oracle/evidence separation, blind annotator roles, bundle provenance,
+disagreement adjudication, protocol and corpus sealing, symlink/path/drift
+rejection, held-out coverage, and tri-state score metrics. The test fixtures are
+pipeline fixtures, not evidence from an externally governed annotation study.
+
 Do not claim broader coverage than the workflows provide. If a feature needs a
 manual smoke test, list the exact command and the observed result in the PR.
 
 ## What Runs Today
 
-Five GitHub Actions workflows. Most run on push to `dev`/`main` and on every
-pull request; `link-check` runs on PRs and a weekly cron only.
+The repository uses dedicated GitHub Actions workflows for runtime, security,
+format, site, link, package, OCI, kernel, and benchmark gates. Most run on push
+to `dev`/`main` and on every pull request; `link-check` alone has a weekly cron,
+while Linux benchmark stress is manual.
+
+### `linux-benchmark` — shape smoke + manual stress
+
+[`/.github/workflows/linux-benchmark.yml`](/__ardur_internal__/repo/.github/workflows/linux-benchmark.yml)
+
+- Relevant pull requests run the focused benchmark tests and Linux smoke profile.
+- Manual dispatch defaults to stress and uploads the JSON/Markdown report for seven days.
+- No scheduled performance run exists; shared-runner variance and CI cost would make those numbers misleading.
+
+### `agent-recognition-benchmark` — reference-paired real-Linux loss and budget gate
+
+[`/.github/workflows/agent-recognition-benchmark.yml`](/__ardur_internal__/repo/.github/workflows/agent-recognition-benchmark.yml)
+
+- Relevant pull requests and pushes to `dev` run the bounded CI profile with
+  one warm-up and 20 deterministic three-arm groups.
+- The required job uses authenticated daemon health to enforce exclusive
+  lifecycle, classification, and fingerprint accounting; any unreported or
+  unavailable work in either enabled arm fails the reviewed budget gate. The
+  hard CPU signal is the candidate/exact-reference ratio on one VM; synthetic
+  process-CPU calibration remains diagnostic without weakening those ledgers.
+- Manual dispatch defaults to the longer release profile. There is no schedule,
+  because privileged performance work consumes runner CPU and shared-runner
+  variation is not longitudinal evidence.
 
 ### `secret-scan` — gitleaks + forbidden-term gate
 
 [`/.github/workflows/secret-scan.yml`](/__ardur_internal__/repo/.github/workflows/secret-scan.yml)
 
-- **gitleaks** scans the full git history (`fetch-depth: 0`) for secrets — API keys, tokens, private key material. Pinned to commit SHA `ff98106e...`.
+- **gitleaks** scans the full git history (`fetch-depth: 0`) for secrets — API keys, tokens, private key material. It downloads the `gitleaks` v8.18.0 release tarball over HTTPS and verifies it against the published SHA-256 checksum before scanning.
 - **forbidden-terms** is a custom `grep -RInE` job. The configured pattern is defined inline in [`/.github/workflows/secret-scan.yml`](/__ardur_internal__/repo/.github/workflows/secret-scan.yml) — read the workflow file for the authoritative regex (this page deliberately doesn't reproduce the pattern, because doing so would self-trip the gate). The pattern targets a small set of historical-internal references the repo cannot leak. Excludes `.github/`, `.git/`, `artifacts/`. Includes Markdown, YAML, JSON, asciinema casts, TOML, Python, Go, shell, `.gitignore`, `.env*`, `Dockerfile*`, `Makefile*`.
 
 ### `link-check` — lychee on Markdown links
 
 [`/.github/workflows/link-check.yml`](/__ardur_internal__/repo/.github/workflows/link-check.yml)
 
-- Runs on PRs touching `**/*.md` and weekly via cron. Uses `lycheeverse/lychee-action@v2.8.0` (commit-pinned).
-- Currently excludes one URL pattern that 404s for an unauthenticated checker: `security/advisories/new` (the page requires being signed in to GitHub). The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
+- Runs on every pull request and weekly via cron, scanning `**/*.md`. Uses `lycheeverse/lychee-action@v2.9.0` (commit-pinned).
+- Currently excludes five URL patterns/domains. One (`security/advisories/new`) requires being signed in to GitHub, so an unauthenticated checker gets a 404. Four bot-blocking domains (`developers.redhat.com`, `medium.com`, `answers.uillinois.edu`, `theregister.com`) return 403 to automated requests; these are legitimate research citations excluded rather than removed. The earlier Discussions-tab exclude was removed once Discussions was enabled on the repo.
+- Timeouts remain failures. Prefer an immutable upstream primary reference over
+  excluding a slow mirror or enabling `--accept-timeouts`; exclusions are for
+  sources that are legitimate but structurally unavailable to automation, not
+  a substitute for maintaining citations.
 
 ### `validate-formats` — JSON and YAML parsers
 
@@ -56,7 +185,7 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 [`/.github/workflows/codeql.yml`](/__ardur_internal__/repo/.github/workflows/codeql.yml)
 
 - A pre-flight job (`detect-languages`) checks whether `python/` or `go/` carries source files. With the current dev tree, the matrix detects Python and Go and runs analysis per language.
-- Pinned to `github/codeql-action@ce64ddcb` (commit-pinned; `v3` is an annotated tag whose tag-object is `865f5f5c...` and whose underlying commit is `ce64ddcb...`). Same pin discipline as the rest of the workflow set.
+- The CodeQL actions (`init`, `autobuild`, and `analyze`) are pinned to full commit SHAs in the workflow file, with the human-readable `v4` series noted in comments. Treat `.github/workflows/codeql.yml` as the authority for the exact pins so this testing guide does not drift when the pin is updated.
 - Pairs with the `code_quality` ruleset rule on `main`: that rule reads from GitHub's code-scanning alerts table, so it passes vacuously while the matrix is empty and substantively once code lands. The CI job name (`codeql`) is intentionally **not** in the required-status-checks list — the ruleset already gates merges via the alerts mechanism.
 
 ### `tests` — Python and Go runtime tests
@@ -65,12 +194,30 @@ This workflow exists because a misplaced comma in a JSON schema or a stray inden
 
 - **Python job**: installs `python/` with dev extras and runs
   `python -m pytest tests/ -q --tb=short` from the `python/` directory on
-  Python 3.10 and Python 3.13.
+  Python 3.10 and Python 3.13. Because this runs the full `python/tests/`
+  tree, it includes `python/tests/test_examples_smoke.py` for the offline,
+  no-key examples smoke. That test covers checked-in mission fixtures and the
+  examples claim ledger; it does **not** prove live-provider framework demos.
+  The job then fails if pytest changed tracked files or left untracked files in
+  the checkout; runtime keys, tokens, hooks, and reports belong in pytest temp
+  directories unless a test explicitly directs output elsewhere. Coverage data
+  and the uploaded XML report are written to the GitHub runner temp directory.
 - **Go job**: runs `go test -count=1 ./...` and `go vet ./...` from `go/`.
+- **Windows portability compile**: the Go job also cross-compiles
+  `pkg/kernelcapture`, `ardur-kernelcaptured`, and the agent-recognition
+  benchmark command for `windows/amd64` without executing them. This guards
+  portable import boundaries; it does not claim Windows kernel capture or
+  enforcement support.
+- **Demo stack smoke**: starts the exact `make demo` target from fresh Compose
+  volumes in detached/wait mode, then runs `scripts/verify-mvp.sh`. The job
+  requires healthy public endpoints, authenticated issue/start, one `PERMIT`,
+  one `DENY`, a signed attestation, session end, and authenticated metrics.
+  Failure logs are emitted before containers and volumes are removed. The
+  aggregate `tests` check requires this job to succeed.
 
 ### What's Not Enforced By CI Today
 
-Honest list, so the gap is visible:
+Explicit list, so the gap is visible:
 
 - No content-fact verification (article claims, ADR cross-references) — caught only by review rounds and the cool-off re-read in the `dev → main` PR template.
 - No Markdown lint — `markdownlint` adds noise we don't want yet, and the earlier table-pipe heuristic was removed.
@@ -81,20 +228,29 @@ Honest list, so the gap is visible:
 ## Local Development Setup
 
 ```bash
-# First-run setup — Python 3.13 required
-cd /path/to/ardur/python
-python3.13 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+# First-run setup — defaults to python3.13, upgrades pip, installs .[dev]
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 # Run the curated test suite
-.venv/bin/pytest tests/ -q
+(cd python && python -m pytest tests/ -q)
 
 # Run a specific module
-.venv/bin/pytest tests/test_passport.py -v
+(cd python && python -m pytest tests/test_passport.py -v)
 
-# End-to-end reproduce (Z3 proofs, signed proof bundle, corpus consistency)
-make reproduce
+# Full local gate, including the runtime suites and optional installed scanners
+./scripts/check-local.sh --full --with-network
+
+# Release-oriented protocol and maintained recognition-corpus gates
+make bench-protocol-test
+(cd go && go run ./cmd/ardur-agent-recognition-eval)
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 ## Module-Specific Gotchas
 
@@ -104,20 +260,26 @@ make reproduce
 
 ## Go AAT Test Suite
 
-The `go/pkg/aat` package has 49 tests covering the full AAT specification:
+The `go/pkg/aat` package has 76 named tests covering the draft-00 DG v0.1
+contract and the version-dispatched draft-01 DG v0.2 profile. The fixture
+command has an additional byte-for-byte artifact regression:
 
 ```bash
-cd go && go test ./pkg/aat/... -v
+cd go && go test ./pkg/aat ./cmd/aat-draft01-fixture -v
 ```
 
-Covers: all 13 constraint Check/Subsumes functions, IssueRoot validation,
-DeriveChild depth/TTL/capability enforcement, BuildPoPJWT/VerifyPoPJWT
-round-trips, full §7 chain verification scenarios, and Registry operations.
+Covers: all 13 draft-00 constraint Check/Subsumes functions, the nine
+draft-01 core constraints, IssueRoot validation, DeriveChild
+depth/TTL/capability enforcement, BuildPoPJWT/VerifyPoPJWT round-trips, full
+chain verification, revision dispatch, audience and approval enforcement,
+holder/receipt-key separation, deterministic fixtures, and Registry operations.
 
 ## Cloud Model Governance Tests
 
 Real-world integration tests proving governance proxy enforcement with live
-LLMs. Results are in `python/tests/test-results/`.
+LLMs can be run locally when provider credentials are available. The redacted
+public tree keeps the runnable harnesses and aggregate reports, but does not
+ship raw per-model result fixtures.
 
 ```bash
 ARDUR_OLLAMA_API_KEY="<key>" python tests/run_cloud_model_test.py <model_name>
@@ -129,13 +291,14 @@ production models.
 
 ## Ardur Personal And Claude Code RC
 
-When touching the Hub, browser adapter, Claude Code hook, or `ARDUR.md`
-profile setup, run:
+When touching the Hub, browser adapter, Claude Code hook, posture index, or
+`ARDUR.md` profile setup, run:
 
 ```bash
 PYTHONPATH=python python -m pytest -q \
   python/tests/test_claude_code_hook.py \
   python/tests/test_claude_code_telemetry.py \
+  python/tests/test_posture_index.py \
   python/tests/test_ardur_personal_hub.py \
   python/tests/test_ardur_profile.py
 PYTHONPATH=python python plugins/claude-code/scripts/smoke.py
@@ -149,7 +312,9 @@ node examples/ardur-personal-extension/scripts/auth-header-smoke.mjs
 The Hub test confirms browser observations produce standard Ardur Execution
 Receipts through `GovernanceProxy`, CLI policy can block a controllable command,
 the export path includes Session Reviews, and authenticated Hub endpoints reject
-untrusted browser-origin requests.
+untrusted browser-origin requests. The posture-index tests cover valid and broken
+receipt chains, missing telemetry, unknown tool boundaries, CLI JSON/Markdown
+rendering, and redaction of credential-like values plus local path placeholders.
 
 ## Coverage Targets
 

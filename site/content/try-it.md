@@ -3,8 +3,8 @@ title: "Try It"
 description: "The shortest source-backed local path through Ardur today."
 weight: 30
 maturity: ["public-now"]
-claim_types: ["orientation", "runtime-boundary"]
-surfaces: ["python", "examples", "docs"]
+claim_types: ["orientation", "runtime-boundary", "evidence-semantics"]
+surfaces: ["python", "examples", "docs", "scripts"]
 frameworks: ["framework-agnostic", "claude-code"]
 evidence_levels: ["code-and-doc"]
 ---
@@ -22,16 +22,28 @@ The fastest current path has two tracks:
 Start with the one-screen source-backed walkthrough:
 
 - {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "Claude Code MVP quickstart" >}}
+- {{< repo-link "docs/guides/phase1-demo-packet.md" "Phase 1 demo packet" >}}
+- {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Evidence-bundle reader" >}}
 
 The protocol-only path below remains useful when you just want to check mission
 issuance and verification without the Claude Code plugin.
 
 ```bash
-cd python
-pip install -e .
-ardur issue --from-file ../examples/missions/minimal-mission.json
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
+ardur issue \
+  --agent-id alice \
+  --mission "summarize sales from sales/q1.csv into reports/" \
+  --allowed-tools read_file write_report \
+  --resource-scope 'sales/*' 'reports/*'
 ardur verify --token '<token-from-issue-output>'
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 That path covers mission compilation, passport issuance, signing, and
 verification. For local product usage, start with the Personal Hub and Claude
@@ -45,8 +57,11 @@ Code plugin docs.
 - {{< repo-link "examples/langchain-quickstart/README.md" "LangChain quickstart" >}}
 - {{< repo-link "examples/langgraph-quickstart/README.md" "LangGraph quickstart" >}}
 - {{< repo-link "examples/autogen-quickstart/README.md" "AutoGen quickstart" >}}
+- {{< repo-link "examples/openai-agents-sdk/README.md" "OpenAI Agents SDK no-key fixture" >}}
+- {{< repo-link "examples/google-adk/README.md" "Google ADK no-key fixture" >}}
 
 ## Keep In Mind
 
-OpenAI Agents SDK and Google ADK are currently deferred adapter specs, not
-runnable examples. Rerunnable proof media is also not public yet.
+OpenAI Agents SDK and Google ADK are runnable no-key fixtures for visible local
+tool-dispatch governance, not live-provider wrappers. Rerunnable proof media is
+also not public yet.

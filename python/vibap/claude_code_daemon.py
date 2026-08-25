@@ -23,19 +23,30 @@ import time
 from pathlib import Path
 from typing import Any
 
-DAEMON_ENABLE_ENV_VAR = "ARDUR_CC_HOOK_DAEMON"
-DAEMON_SOCKET_ENV_VAR = "ARDUR_CC_HOOK_DAEMON_SOCKET"
-DAEMON_TIMEOUT_MS_ENV_VAR = "ARDUR_CC_HOOK_DAEMON_TIMEOUT_MS"
+from . import claude_code_daemon_client as _daemon_client
 
-_DEFAULT_DAEMON_TIMEOUT_MS = 5.0
-_DEFAULT_SOCKET_BASENAME = "claude-code-hook-daemon.sock"
-_DEFAULT_SOCKET_DIRNAME = "daemon"
+DAEMON_ENABLE_ENV_VAR = _daemon_client.DAEMON_ENABLE_ENV_VAR
+DAEMON_SOCKET_ENV_VAR = _daemon_client.DAEMON_SOCKET_ENV_VAR
+DAEMON_TIMEOUT_MS_ENV_VAR = _daemon_client.DAEMON_TIMEOUT_MS_ENV_VAR
+_daemon_timeout_seconds = _daemon_client._daemon_timeout_seconds
+_read_json_line = _daemon_client._read_json_line
+_vibap_home_dir = _daemon_client._vibap_home_dir
+_write_json_line = _daemon_client._write_json_line
+daemon_enabled = _daemon_client.daemon_enabled
+dispatch_pre_tool_use = _daemon_client.dispatch_pre_tool_use
+extract_valid_pre_tool_use_output = _daemon_client.extract_valid_pre_tool_use_output
+is_valid_pre_tool_use_output = _daemon_client.is_valid_pre_tool_use_output
+resolve_daemon_socket_path = _daemon_client.resolve_daemon_socket_path
+
 _PRIVATE_SOCKET_DIR_MODE = 0o700
 _PRIVATE_SOCKET_MODE = 0o600
+_ACTIVE_SOCKET_STARTUP_GRACE_S = 0.05
+_ACTIVE_SOCKET_PROBE_INTERVAL_S = 0.01
 
 # Installed native fast path command for Claude Code PreToolUse hooks.
 _NATIVE_PRE_TOOL_USE_COMMAND_BASENAME = "claude-code-pre_tool_use"
 _NATIVE_PRE_TOOL_USE_COMMAND_MODE = 0o700
+_NATIVE_PRE_TOOL_USE_STAMP_MODE = 0o600
 
 
 def _native_pre_tool_use_client_c_source() -> str:
@@ -46,6 +57,20 @@ def _native_pre_tool_use_client_c_source() -> str:
     output dict or ``{"ok": true, "output": ...}`` envelope), writes only the
     hook output dict to stdout, and exits non-zero on any malformed/error
     daemon payload so callers can safely fall back to local Python handling.
+
+    Native exit-code contract:
+      - 2: missing socket path argument
+      - 3..5: stdin payload read errors
+      - 6..12: socket/connect/write/read/empty-response transport errors
+      - 11 specifically: response-read error (now emits sanitized
+        ``stage=response-read errno=N name=SYMBOL desc=...`` on stderr before
+        exiting; preserves the original errno instead of collapsing all
+        negative reads into an empty-stderr exit)
+      - 13..18: malformed/invalid daemon protocol envelope (unchanged)
+      - 19..20: stdout write errors
+      - 21: ``setsockopt(SO_RCVTIMEO)`` failed (visible diagnostic on stderr;
+        previous code ignored the return value and silently ran without a
+        receive timeout)
     """
     return r'''
 #include <ctype.h>
@@ -57,6 +82,140 @@ def _native_pre_tool_use_client_c_source() -> str:
 #include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+static const char *ardur_errno_symbol(int errnum) {
+    switch (errnum) {
+        case EINTR: return "EINTR";
+        case EIO: return "EIO";
+        case EAGAIN: return "EAGAIN";
+#if EWOULDBLOCK != EAGAIN
+        case EWOULDBLOCK: return "EWOULDBLOCK";
+#endif
+        case ETIMEDOUT: return "ETIMEDOUT";
+        case ECONNRESET: return "ECONNRESET";
+        case ENOTCONN: return "ENOTCONN";
+        case ECONNREFUSED: return "ECONNREFUSED";
+        case EBADF: return "EBADF";
+        case EINVAL: return "EINVAL";
+        default: return "UNKNOWN";
+    }
+}
+
+/* Emit a sanitized diagnostic to stderr containing ONLY: the operation
+ * stage, numeric errno, a portable symbolic errno name, and strerror text.
+ * No request bodies, mission passports, tokens, tool arguments, socket
+ * paths, temp paths, env dumps, or host-specific data are ever emitted. */
+static void ardur_emit_diag(const char *stage, int errnum) {
+    const char *desc = strerror(errnum);
+    if (!desc) {
+        desc = "unknown";
+    }
+    (void)fprintf(stderr, "ardur-native: stage=%s errno=%d name=%s desc=%s\n",
+                  stage, errnum, ardur_errno_symbol(errnum), desc);
+    (void)fflush(stderr);
+}
+
+#ifdef ARDUR_NATIVE_FAULT_HOOK
+/* ---- Test-only fault injection seam (never compiled into production) ----
+ *
+ * When compiled with -DARDUR_NATIVE_FAULT_HOOK, response-read and setsockopt
+ * calls route through deterministic fault hooks controlled by environment
+ * variables. This lets tests inject EINTR / EIO / EAGAIN / setsockopt-failure
+ * without relying on scheduler timing.
+ *
+ * ARDUR_NATIVE_TEST_FAULT: comma-separated fault script for response reads.
+ *   Tokens: EINTR, EIO, EAGAIN, ETIMEDOUT, ECONNRESET, OK (pass-through).
+ *   After the script is exhausted, calls fall through to the real syscall.
+ *
+ * ARDUR_NATIVE_TEST_SOCKOPT_FAIL: when set (any non-empty value), the
+ *   setsockopt call for SO_RCVTIMEO fails with EINVAL.
+ *
+ * Production builds (no -DARDUR_NATIVE_FAULT_HOOK) compile these macros to
+ * direct syscall calls with zero overhead. */
+enum {
+    ARDUR_FLT_NONE = 0,
+    ARDUR_FLT_EINTR,
+    ARDUR_FLT_EIO,
+    ARDUR_FLT_EAGAIN,
+    ARDUR_FLT_ETIMEDOUT,
+    ARDUR_FLT_ECONNRESET,
+    ARDUR_FLT_PASS
+};
+
+#define ARDUR_FLT_MAX 256
+
+static ssize_t ardur_fault_read(int fd, void *buf, size_t count) {
+    static int faults[ARDUR_FLT_MAX];
+    static int fault_count = -1;
+    static int fault_index = 0;
+
+    if (fault_count < 0) {
+        fault_count = 0;
+        const char *spec = getenv("ARDUR_NATIVE_TEST_FAULT");
+        if (spec && *spec) {
+            const char *p = spec;
+            while (*p && fault_count < ARDUR_FLT_MAX) {
+                while (*p && (*p == ',' || isspace((unsigned char)*p))) {
+                    p++;
+                }
+                if (!*p) {
+                    break;
+                }
+                const char *beg = p;
+                while (*p && *p != ',' && !isspace((unsigned char)*p)) {
+                    p++;
+                }
+                size_t tok_len = (size_t)(p - beg);
+                if (tok_len == 5 && strncmp(beg, "EINTR", 5) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_EINTR;
+                } else if (tok_len == 3 && strncmp(beg, "EIO", 3) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_EIO;
+                } else if (tok_len == 6 && strncmp(beg, "EAGAIN", 6) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_EAGAIN;
+                } else if (tok_len == 9 && strncmp(beg, "ETIMEDOUT", 9) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_ETIMEDOUT;
+                } else if (tok_len == 10 && strncmp(beg, "ECONNRESET", 10) == 0) {
+                    faults[fault_count++] = ARDUR_FLT_ECONNRESET;
+                } else {
+                    faults[fault_count++] = ARDUR_FLT_PASS;
+                }
+            }
+        }
+    }
+
+    if (fault_index < fault_count) {
+        int f = faults[fault_index++];
+        switch (f) {
+            case ARDUR_FLT_EINTR:      errno = EINTR;      return -1;
+            case ARDUR_FLT_EIO:        errno = EIO;        return -1;
+            case ARDUR_FLT_EAGAIN:     errno = EAGAIN;     return -1;
+            case ARDUR_FLT_ETIMEDOUT:  errno = ETIMEDOUT;  return -1;
+            case ARDUR_FLT_ECONNRESET: errno = ECONNRESET; return -1;
+            default: break;  /* PASS: fall through to real read */
+        }
+    }
+
+    return read(fd, buf, count);
+}
+
+static int ardur_fault_setsockopt(int sockfd, int level, int optname,
+                                  const void *optval, socklen_t optlen) {
+    const char *fail = getenv("ARDUR_NATIVE_TEST_SOCKOPT_FAIL");
+    if (fail && *fail && optname == SO_RCVTIMEO) {
+        errno = EINVAL;
+        return -1;
+    }
+    return setsockopt(sockfd, level, optname, optval, optlen);
+}
+
+#define ARDUR_READ(fd, buf, count) ardur_fault_read((fd), (buf), (count))
+#define ARDUR_SETSOCKOPT(fd, lvl, opt, val, len) \
+    ardur_fault_setsockopt((fd), (lvl), (opt), (val), (len))
+#else
+#define ARDUR_READ(fd, buf, count) read((fd), (buf), (count))
+#define ARDUR_SETSOCKOPT(fd, lvl, opt, val, len) \
+    setsockopt((fd), (lvl), (opt), (val), (len))
+#endif
 
 #define MAX_PAYLOAD_BYTES 1048576
 #define MAX_RESPONSE_BYTES 1048576
@@ -353,7 +512,12 @@ static int connect_and_roundtrip(
     struct timeval tv;
     tv.tv_sec = timeout_ms / 1000;
     tv.tv_usec = (timeout_ms % 1000) * 1000;
-    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (ARDUR_SETSOCKOPT(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+        int saved_errno = errno;
+        ardur_emit_diag("setsockopt-rcvtimeo", saved_errno);
+        close(fd);
+        return 21;
+    }
     (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     struct sockaddr_un addr;
@@ -386,10 +550,34 @@ static int connect_and_roundtrip(
         return 10;
     }
 
+    /* Bounded EINTR retry policy. Repeated interruptions must not extend the
+     * configured overall response budget indefinitely. The deadline is
+     * derived from the configured timeout_ms; a hard retry cap provides a
+     * second guarantee independent of clock drift. EAGAIN / EWOULDBLOCK /
+     * ETIMEDOUT / EIO / ECONNRESET / ENOTCONN and any other read error
+     * remain terminal (non-retried) outcomes and preserve their errno.
+     *
+     * The hard retry cap is deliberately smaller than ARDUR_FLT_MAX (256)
+     * so fault-injection tests can overrun the cap with a script longer
+     * than 64 entries and still reach the deterministic terminal path
+     * without exhausting the fault array first. */
     size_t out_len = 0;
+    int read_errno = 0;
+    int eintr_retries = 0;
+    const int eintr_retry_cap = 64;
+    time_t deadline_sec = (timeout_ms > 0) ? time(NULL) + (timeout_ms / 1000) + 1 : 0;
+
     while (out_len < MAX_RESPONSE_BYTES) {
-        ssize_t n = read(fd, buf + out_len, MAX_RESPONSE_BYTES - out_len);
+        ssize_t n = ARDUR_READ(fd, buf + out_len, MAX_RESPONSE_BYTES - out_len);
         if (n < 0) {
+            read_errno = errno;
+            if (errno == EINTR
+                && eintr_retries < eintr_retry_cap
+                && (deadline_sec == 0 || time(NULL) < deadline_sec)) {
+                eintr_retries++;
+                continue;
+            }
+            ardur_emit_diag("response-read", read_errno);
             free(buf);
             close(fd);
             return 11;
@@ -610,11 +798,16 @@ def _native_pre_tool_use_stamp_matches(command_path: Path, expected_source_diges
     return observed_binary_digest == binary_digest
 
 
+_KNOWN_CC_BASENAMES = frozenset({"cc", "clang", "gcc", "clang++", "g++"})
+
+
 def _candidate_native_compilers() -> list[str]:
     candidates: list[str] = []
     explicit = os.environ.get("ARDUR_HOOK_CC", "").strip()
     if explicit:
-        candidates.append(explicit)
+        basename = os.path.basename(explicit.rstrip("/"))
+        if basename in _KNOWN_CC_BASENAMES:
+            candidates.append(explicit)
     candidates.extend(["cc", "clang", "gcc"])
 
     discovered: list[str] = []
@@ -629,6 +822,174 @@ def _candidate_native_compilers() -> list[str]:
         if resolved:
             discovered.append(resolved)
     return discovered
+
+
+def _copy_to_destination_staging_file(
+    source: Path,
+    destination: Path,
+    *,
+    mode: int,
+    purpose: str,
+) -> Path:
+    """Copy source into a private, durable staging file beside destination."""
+    fd = -1
+    staged: Path | None = None
+    try:
+        fd, raw_path = tempfile.mkstemp(
+            prefix=f".{destination.name}.{purpose}.",
+            suffix=".tmp",
+            dir=destination.parent,
+        )
+        staged = Path(raw_path)
+        with source.open("rb") as source_handle, os.fdopen(fd, "wb") as staged_handle:
+            fd = -1
+            shutil.copyfileobj(source_handle, staged_handle)
+            staged_handle.flush()
+            os.fchmod(staged_handle.fileno(), mode)
+            os.fsync(staged_handle.fileno())
+        return staged
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        if staged is not None:
+            try:
+                staged.unlink()
+            except FileNotFoundError:
+                # Another cleanup path already established the desired absence.
+                pass
+        raise
+
+
+def _stage_existing_destination(path: Path) -> tuple[bool, Path | None]:
+    """Snapshot an existing regular destination for transactional rollback."""
+    if path.is_symlink():
+        raise OSError(f"refusing to replace symlinked native hook artifact: {path}")
+    if not path.exists():
+        return False, None
+    if not path.is_file():
+        raise OSError(f"native hook artifact is not a regular file: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    backup = _copy_to_destination_staging_file(
+        path,
+        path,
+        mode=mode,
+        purpose="rollback",
+    )
+    return True, backup
+
+
+def _remove_staging_file(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        # Staging cleanup is intentionally idempotent.
+        pass
+
+
+def _restore_destination(path: Path, *, existed: bool, backup: Path | None) -> None:
+    if backup is not None:
+        os.replace(backup, path)
+    elif not existed:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            # A missing destination already matches the pre-transaction state.
+            pass
+
+
+def _fsync_directory_best_effort(path: Path) -> None:
+    """Persist directory entries where the host filesystem supports it."""
+    directory_fd = -1
+    try:
+        directory_fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        os.fsync(directory_fd)
+    except OSError:
+        # Windows and some network filesystems do not support directory fsync.
+        pass
+    finally:
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def _install_native_pre_tool_use_artifacts(
+    *,
+    built_command: Path,
+    built_stamp: Path,
+    target: Path,
+    target_stamp: Path,
+) -> None:
+    """Install the command and stamp atomically per file with pair rollback."""
+    staged_command: Path | None = None
+    staged_stamp: Path | None = None
+    command_backup: Path | None = None
+    stamp_backup: Path | None = None
+    command_existed = False
+    stamp_existed = False
+    command_replaced = False
+    stamp_replaced = False
+
+    try:
+        staged_command = _copy_to_destination_staging_file(
+            built_command,
+            target,
+            mode=_NATIVE_PRE_TOOL_USE_COMMAND_MODE,
+            purpose="install",
+        )
+        staged_stamp = _copy_to_destination_staging_file(
+            built_stamp,
+            target_stamp,
+            mode=_NATIVE_PRE_TOOL_USE_STAMP_MODE,
+            purpose="install",
+        )
+        command_existed, command_backup = _stage_existing_destination(target)
+        stamp_existed, stamp_backup = _stage_existing_destination(target_stamp)
+
+        os.replace(staged_command, target)
+        staged_command = None
+        command_replaced = True
+        os.replace(staged_stamp, target_stamp)
+        staged_stamp = None
+        stamp_replaced = True
+        _fsync_directory_best_effort(target.parent)
+    except Exception as exc:
+        rollback_errors: list[OSError] = []
+        if stamp_replaced:
+            try:
+                _restore_destination(
+                    target_stamp,
+                    existed=stamp_existed,
+                    backup=stamp_backup,
+                )
+                stamp_backup = None
+            except OSError as rollback_error:
+                rollback_errors.append(rollback_error)
+        if command_replaced:
+            try:
+                _restore_destination(
+                    target,
+                    existed=command_existed,
+                    backup=command_backup,
+                )
+                command_backup = None
+            except OSError as rollback_error:
+                rollback_errors.append(rollback_error)
+        _fsync_directory_best_effort(target.parent)
+        if rollback_errors and hasattr(exc, "add_note"):
+            exc.add_note(
+                "native hook rollback also failed: "
+                + "; ".join(str(error) for error in rollback_errors)
+            )
+        raise
+    finally:
+        for path in (
+            staged_command,
+            staged_stamp,
+            command_backup,
+            stamp_backup,
+        ):
+            _remove_staging_file(path)
 
 
 def install_native_pre_tool_use_command(
@@ -691,149 +1052,68 @@ def install_native_pre_tool_use_command(
                 + "\n",
                 encoding="utf-8",
             )
-            out.replace(target)
-            target.chmod(_NATIVE_PRE_TOOL_USE_COMMAND_MODE)
-            stamp.replace(target_stamp)
+            _install_native_pre_tool_use_artifacts(
+                built_command=out,
+                built_stamp=stamp,
+                target=target,
+                target_stamp=target_stamp,
+            )
             return target
 
     return None
 
 
-def _vibap_home_dir() -> Path:
-    explicit = os.environ.get("VIBAP_HOME", "").strip()
-    if explicit:
-        return Path(explicit).expanduser()
+def build_fault_injection_native_client(target_dir: Path) -> Path | None:
+    """Compile a test-only native client with the fault-injection seam enabled.
 
-    local_home = Path.cwd() / ".vibap"
-    if local_home.exists():
-        return local_home
+    The resulting binary is identical to the production client except that
+    ``ARDUR_NATIVE_FAULT_HOOK`` is defined at compile time, so response
+    ``read()`` and ``setsockopt(SO_RCVTIMEO)`` calls route through env-var
+    controlled fault hooks. Tests set ``ARDUR_NATIVE_TEST_FAULT`` and
+    ``ARDUR_NATIVE_TEST_SOCKOPT_FAIL`` to inject deterministic EINTR / EIO /
+    EAGAIN / ETIMEDOUT / ECONNRESET / setsockopt-failure.
 
-    return Path.home() / ".vibap"
-
-
-def resolve_daemon_socket_path(*, home: Path | None = None) -> Path:
-    """Resolve the daemon Unix socket path from env/defaults."""
-    explicit = os.environ.get(DAEMON_SOCKET_ENV_VAR, "").strip()
-    if explicit:
-        return Path(explicit).expanduser()
-    resolved_home = (home or _vibap_home_dir()).expanduser()
-    return resolved_home / _DEFAULT_SOCKET_DIRNAME / _DEFAULT_SOCKET_BASENAME
-
-
-def daemon_enabled() -> bool:
-    """Return whether daemon-first dispatch is enabled for the hook client."""
-    raw = os.environ.get(DAEMON_ENABLE_ENV_VAR, "1").strip().lower()
-    return raw not in {"0", "false", "off", "no"}
-
-
-def _daemon_timeout_seconds() -> float:
-    raw = os.environ.get(DAEMON_TIMEOUT_MS_ENV_VAR, "").strip()
-    if not raw:
-        return _DEFAULT_DAEMON_TIMEOUT_MS / 1000.0
-    try:
-        return max(0.001, float(raw) / 1000.0)
-    except ValueError:
-        return _DEFAULT_DAEMON_TIMEOUT_MS / 1000.0
-
-
-def _read_json_line(conn: socket.socket, *, max_bytes: int = 1_000_000) -> dict[str, Any]:
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = conn.recv(8192)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > max_bytes:
-            raise ValueError("daemon response exceeded max_bytes")
-        if b"\n" in chunk:
-            break
-
-    payload = b"".join(chunks)
-    line = payload.splitlines()[0] if payload else b""
-    if not line:
-        raise ValueError("daemon returned empty payload")
-
-    parsed = json.loads(line.decode("utf-8"))
-    if not isinstance(parsed, dict):
-        raise TypeError("daemon payload must be a JSON object")
-    return parsed
-
-
-def _write_json_line(conn: socket.socket, payload: dict[str, Any]) -> None:
-    message = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
-    conn.sendall(message.encode("utf-8"))
-
-
-def is_valid_pre_tool_use_output(payload: object) -> bool:
-    """Return whether payload is a valid Claude Code PreToolUse hook output."""
-    if not isinstance(payload, dict):
-        return False
-    if "continue" in payload and isinstance(payload.get("continue"), bool):
-        return True
-    hook_specific = payload.get("hookSpecificOutput")
-    if not isinstance(hook_specific, dict):
-        return False
-    if hook_specific.get("hookEventName") != "PreToolUse":
-        return False
-    if "permissionDecision" not in hook_specific:
-        return True
-    return isinstance(hook_specific.get("permissionDecision"), str)
-
-
-def extract_valid_pre_tool_use_output(response: dict[str, Any]) -> dict[str, Any] | None:
-    """Parse daemon response and return only valid PreToolUse output dicts.
-
-    Supports both daemon wire contracts:
-    - passthrough output dict
-    - envelope {"ok": true, "output": <hook output dict>}
+    Returns the executable path on success, ``None`` if no compiler/build is
+    available. This helper is intended exclusively for the test suite; the
+    production install path never defines ``ARDUR_NATIVE_FAULT_HOOK``.
     """
-    if not isinstance(response, dict):
-        return None
-    if "ok" in response:
-        if response.get("ok") is not True:
-            return None
-        output = response.get("output")
-    else:
-        output = response
-    if not is_valid_pre_tool_use_output(output):
-        return None
-    return dict(output)
+    source_text = _native_pre_tool_use_client_c_source()
+    target = target_dir / "pre_tool_use_client_fault"
+    target_dir.mkdir(parents=True, exist_ok=True)
 
+    for compiler in _candidate_native_compilers():
+        with tempfile.TemporaryDirectory(prefix="ardur-hook-native-fault-") as tmpdir:
+            tmp_root = Path(tmpdir)
+            src = tmp_root / "pre_tool_use_client.c"
+            out = tmp_root / "pre_tool_use_client_fault"
+            src.write_text(source_text, encoding="utf-8")
 
-def dispatch_pre_tool_use(
-    hook_input: dict[str, Any],
-    *,
-    keys_dir: Path | None = None,
-) -> dict[str, Any] | None:
-    """Try daemon-backed PreToolUse handling.
+            cmd = [
+                compiler,
+                "-O3",
+                "-std=c99",
+                "-Wall",
+                "-Wextra",
+                "-DARDUR_NATIVE_FAULT_HOOK",
+                "-o",
+                str(out),
+                str(src),
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0 or not out.is_file():
+                continue
 
-    Returns a hook output dict when daemon dispatch succeeds.
-    Returns None when daemon mode is disabled, unavailable, or yields an
-    invalid response so callers can safely fall back to local handling.
-    """
-    if not daemon_enabled():
-        return None
+            out.chmod(_NATIVE_PRE_TOOL_USE_COMMAND_MODE)
+            shutil.copy2(out, target)
+            target.chmod(_NATIVE_PRE_TOOL_USE_COMMAND_MODE)
+            return target
 
-    payload = {
-        "phase": "pre",
-        "hook_input": dict(hook_input or {}),
-        "keys_dir": str(keys_dir) if keys_dir is not None else None,
-    }
-
-    socket_path = resolve_daemon_socket_path()
-    timeout_s = _daemon_timeout_seconds()
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-            conn.settimeout(timeout_s)
-            conn.connect(str(socket_path))
-            _write_json_line(conn, payload)
-            response = _read_json_line(conn)
-    except (FileNotFoundError, ConnectionRefusedError, TimeoutError, OSError, ValueError, TypeError, json.JSONDecodeError):
-        return None
-
-    return extract_valid_pre_tool_use_output(response)
+    return None
 
 
 def _nearest_rank(values: list[float], percentile: int) -> float:
@@ -929,19 +1209,27 @@ def _ensure_private_socket_parent(path: Path) -> None:
 
 
 def _socket_path_is_active(path: Path, *, timeout_s: float) -> bool:
-    """Return True when a Unix socket path is currently accepting connections."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
-        probe.settimeout(max(timeout_s, 0.001))
-        try:
-            probe.connect(str(path))
-        except (FileNotFoundError, ConnectionRefusedError):
-            return False
-        except TimeoutError:
-            # Treat timeout as active/contended to avoid unlinking a live socket.
-            return True
-        except OSError:
-            return False
-    return True
+    """Return True when a Unix socket path is active or still starting."""
+    deadline = time.monotonic() + max(timeout_s, _ACTIVE_SOCKET_STARTUP_GRACE_S)
+    while True:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            remaining = max(deadline - time.monotonic(), 0.001)
+            probe.settimeout(max(min(timeout_s, remaining), 0.001))
+            try:
+                probe.connect(str(path))
+            except FileNotFoundError:
+                return False
+            except ConnectionRefusedError:
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(min(_ACTIVE_SOCKET_PROBE_INTERVAL_S, remaining))
+                continue
+            except TimeoutError:
+                # Treat timeout as active/contended to avoid unlinking a live socket.
+                return True
+            except OSError:
+                return False
+        return True
 
 
 def _cleanup_stale_socket(path: Path, *, timeout_s: float) -> None:
@@ -961,7 +1249,10 @@ def _handle_daemon_request(request: dict[str, Any], *, default_keys_dir: Path | 
     # to avoid JSON envelope construction overhead on the hot path.
     raw_phase = request.get("phase")
     if raw_phase is None:
-        output = handle_pre_tool_use(dict(request or {}), keys_dir=default_keys_dir)
+        hook_input = dict(request or {})
+        if not hook_input.get("tool_name") or not hook_input.get("tool_input"):
+            raise RuntimeError("passthrough request missing required hook fields (tool_name, tool_input)")
+        output = handle_pre_tool_use(hook_input, keys_dir=default_keys_dir)
         if not is_valid_pre_tool_use_output(output):
             raise RuntimeError("pre hook handler returned invalid passthrough output")
         return output
@@ -1023,7 +1314,13 @@ def serve_pre_tool_use_daemon(
                     request = _read_json_line(conn)
                     response = _handle_daemon_request(request, default_keys_dir=keys_dir)
                 except Exception as exc:  # noqa: BLE001 - daemon boundary
-                    response = {"ok": False, "error": f"daemon request failed: {type(exc).__name__}: {exc}"}
+                    # Never leak raw exception text (paths, errno, Python
+                    # internals) to hook clients over the Unix socket.
+                    if isinstance(exc, OSError):
+                        safe_error = "daemon request failed: filesystem error"
+                    else:
+                        safe_error = "daemon request failed: internal error"
+                    response = {"ok": False, "error": safe_error}
                 try:
                     _write_json_line(conn, response)
                 except OSError:
@@ -1044,13 +1341,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vibap.claude_code_daemon")
     parser.add_argument(
         "--socket-path",
-        type=Path,
+        # Keep raw strings through argparse so explicit "" / whitespace values
+        # are rejected before Path("") collapses to Path(".").
+        type=str,
         default=None,
         help=f"unix socket path (default: ${DAEMON_SOCKET_ENV_VAR} or derived VIBAP_HOME path)",
     )
     parser.add_argument(
         "--keys-dir",
-        type=Path,
+        # Same pre-validation pattern as cli.py: parse as str, reject empty or
+        # whitespace-only values, then coerce back to Path for downstream code.
+        type=str,
         default=None,
         help="keys directory passed to hook handler (default: hook resolver)",
     )
@@ -1062,9 +1363,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Validate before any Path() conversion or daemon startup; argparse's
+    # Path type would turn an explicit empty string into Path(".").
+    if isinstance(args.socket_path, str) and not args.socket_path.strip():
+        parser.error("--socket-path must be a non-empty path after trimming whitespace")
+    if isinstance(args.keys_dir, str) and not args.keys_dir.strip():
+        parser.error("--keys-dir must be a non-empty path after trimming whitespace")
+
+    if args.max_requests is not None and args.max_requests <= 0:
+        parser.error(
+            "--max-requests must be a positive integer (got {})".format(
+                args.max_requests
+            )
+        )
+
+    socket_path = Path(args.socket_path) if isinstance(args.socket_path, str) else None
+    keys_dir = Path(args.keys_dir) if isinstance(args.keys_dir, str) else None
+
     serve_pre_tool_use_daemon(
-        socket_path=args.socket_path,
-        keys_dir=args.keys_dir,
+        socket_path=socket_path,
+        keys_dir=keys_dir,
         max_requests=args.max_requests,
     )
     return 0

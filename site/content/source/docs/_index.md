@@ -17,12 +17,14 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 
 - [`README.md`](/__ardur_internal__/source/docs/readme/)
 - [`TESTING.md`](/__ardur_internal__/source/docs/testing/)
+- [`conductor-bootstrap.md`](/__ardur_internal__/source/docs/conductor-bootstrap/)
 - [`coverage-map.md`](/__ardur_internal__/source/docs/coverage-map/)
 - [`engineering-standards.md`](/__ardur_internal__/source/docs/engineering-standards/)
 - [`known-limitations.md`](/__ardur_internal__/source/docs/known-limitations/)
 - [`mvp-evaluator-guide.md`](/__ardur_internal__/source/docs/mvp-evaluator-guide/)
 - [`protocol-roots.md`](/__ardur_internal__/source/docs/protocol-roots/)
 - [`public-import-plan.md`](/__ardur_internal__/source/docs/public-import-plan/)
+- [`release-evidence-v0.2.0.md`](/__ardur_internal__/source/docs/release-evidence-v0.2.0/)
 - [`security-model.md`](/__ardur_internal__/source/docs/security-model/)
 
 ## Child Sections
@@ -30,8 +32,12 @@ This section lists hosted documentation and mirrored artifacts generated from `d
 - [`agent-instructions/`](/__ardur_internal__/source/docs/agent-instructions/)
 - [`articles/`](/__ardur_internal__/source/docs/articles/)
 - [`audit/`](/__ardur_internal__/source/docs/audit/)
+- [`benchmarks/`](/__ardur_internal__/source/docs/benchmarks/)
 - [`comparisons/`](/__ardur_internal__/source/docs/comparisons/)
 - [`decisions/`](/__ardur_internal__/source/docs/decisions/)
+- [`demo/`](/__ardur_internal__/source/docs/demo/)
 - [`guides/`](/__ardur_internal__/source/docs/guides/)
 - [`reference/`](/__ardur_internal__/source/docs/reference/)
+- [`research/`](/__ardur_internal__/source/docs/research/)
+- [`roadmap/`](/__ardur_internal__/source/docs/roadmap/)
 - [`specs/`](/__ardur_internal__/source/docs/specs/)

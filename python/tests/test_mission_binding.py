@@ -11,11 +11,10 @@ import jwt
 import pytest
 
 import vibap.mission as mission_module
-from vibap.mission import MissionStatusUnavailableError, load_mission_declaration
 from vibap.passport import MissionPassport, issue_passport
 from vibap.proxy import Decision
 
-from tests.conftest import v01_required_md_extras
+from conftest import v01_required_md_extras
 
 
 def _b64url(data: bytes) -> str:
@@ -59,6 +58,7 @@ def _status_list_token(private_key, *, idx: int, revoked: bool) -> str:
 def _issue_md(private_key, *, mission_id: str, revocation_ref: str) -> str:
     mission = MissionPassport(
         agent_id="md-authority",
+        mission_id=mission_id,
         mission="authoritative report mission",
         allowed_tools=["read_file"],
         forbidden_tools=["delete_file"],
@@ -91,7 +91,9 @@ def _issue_dg(private_key, *, mission_ref: dict[str, str] | str) -> str:
         delegation_allowed=False,
         max_delegation_depth=0,
     )
-    return issue_passport(dg, private_key, ttl_s=120, extra_claims={"mission_ref": mission_ref})
+    return issue_passport(
+        dg, private_key, ttl_s=120, extra_claims={"mission_ref": mission_ref}
+    )
 
 
 class _Response:
@@ -136,16 +138,24 @@ def _install_fetch_map(monkeypatch, mapping: dict[str, str | Exception]) -> list
 def _receipt_entries(path: Path) -> list[dict[str, object]]:
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
-def test_proxy_verifies_md_and_emits_receipt(proxy, private_key, public_key, monkeypatch):
+def test_proxy_verifies_md_and_emits_receipt(
+    proxy, private_key, public_key, monkeypatch
+):
     mission_id = "urn:ardur:mission:test:permit"
     md_url = "https://issuer.example/md/permit.jwt"
     status_url = "https://issuer.example/status/permit.jwt"
     revocation_ref = status_url + "#idx=4"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=revocation_ref)
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=revocation_ref
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
         mission_ref={
@@ -177,15 +187,23 @@ def test_proxy_verifies_md_and_emits_receipt(proxy, private_key, public_key, mon
     assert receipts[0]["verdict"] == "compliant"
 
 
-def test_md_policy_is_authoritative_over_dg_scope(proxy, private_key, public_key, monkeypatch):
+def test_md_policy_is_authoritative_over_dg_scope(
+    proxy, private_key, public_key, monkeypatch
+):
     mission_id = "urn:ardur:mission:test:scope"
     md_url = "https://issuer.example/md/scope.jwt"
     status_url = "https://issuer.example/status/scope.jwt"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=1")
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=1"
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
     _install_fetch_map(
         monkeypatch,
@@ -196,7 +214,9 @@ def test_md_policy_is_authoritative_over_dg_scope(proxy, private_key, public_key
     )
 
     session = proxy.start_session(dg_token)
-    decision, reason = proxy.evaluate_tool_call(session, "read_file", {"path": "/wide/report.txt"})
+    decision, reason = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/wide/report.txt"}
+    )
 
     assert decision == Decision.DENY
     assert "outside resource_scope" in reason
@@ -206,11 +226,17 @@ def test_revoked_md_returns_violation(proxy, private_key, public_key, monkeypatc
     mission_id = "urn:ardur:mission:test:revoked"
     md_url = "https://issuer.example/md/revoked.jwt"
     status_url = "https://issuer.example/status/revoked.jwt"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=7")
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=7"
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
     _install_fetch_map(
         monkeypatch,
@@ -221,13 +247,19 @@ def test_revoked_md_returns_violation(proxy, private_key, public_key, monkeypatc
     )
 
     session = proxy.start_session(dg_token)
-    decision, reason = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/report.txt"})
+    decision, reason = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/allowed/report.txt"}
+    )
 
     assert decision == Decision.VIOLATION
     assert reason == "revoked"
 
-def test_tampered_md_returns_chain_invalid(tmp_path, private_key, public_key, session_keys_dir, monkeypatch):
+
+def test_tampered_md_returns_chain_invalid(
+    tmp_path, private_key, public_key, session_keys_dir, monkeypatch
+):
     from vibap.proxy import GovernanceProxy
+
     proxy = GovernanceProxy(
         log_path=tmp_path / "tampered_log.jsonl",
         state_dir=tmp_path / "tampered_state",
@@ -237,12 +269,18 @@ def test_tampered_md_returns_chain_invalid(tmp_path, private_key, public_key, se
     mission_id = "urn:ardur:mission:test:tampered"
     md_url = "https://issuer.example/md/tampered.jwt"
     status_url = "https://issuer.example/status/tampered.jwt"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=2")
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=2"
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     tampered = _tamper_jwt_payload(md_token, {"mission": "tampered mission"})
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
     _install_fetch_map(
         monkeypatch,
@@ -253,21 +291,31 @@ def test_tampered_md_returns_chain_invalid(tmp_path, private_key, public_key, se
     )
 
     session = proxy.start_session(dg_token)
-    decision, reason = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/report.txt"})
+    decision, reason = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/allowed/report.txt"}
+    )
 
     assert decision == Decision.VIOLATION
     assert reason == "chain_invalid"
 
 
-def test_status_list_network_error_fails_closed(proxy, private_key, public_key, monkeypatch):
+def test_status_list_network_error_fails_closed(
+    proxy, private_key, public_key, monkeypatch
+):
     mission_id = "urn:ardur:mission:test:network"
     md_url = "https://issuer.example/md/network.jwt"
     status_url = "https://issuer.example/status/network.jwt"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=5")
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=5"
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
     _install_fetch_map(
         monkeypatch,
@@ -278,7 +326,9 @@ def test_status_list_network_error_fails_closed(proxy, private_key, public_key, 
     )
 
     session = proxy.start_session(dg_token)
-    decision, reason = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/report.txt"})
+    decision, reason = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/allowed/report.txt"}
+    )
 
     assert decision == Decision.INSUFFICIENT_EVIDENCE
     assert reason == "revocation_unavailable"
@@ -288,11 +338,17 @@ def test_oversized_status_list_rejected(proxy, private_key, public_key, monkeypa
     mission_id = "urn:ardur:mission:test:oversized-status-list"
     md_url = "https://issuer.example/md/oversized.jwt"
     status_url = "https://issuer.example/status/oversized.jwt"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=0")
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=0"
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
 
     oversized_body = b"x" * ((2 << 20) + 1)
@@ -305,11 +361,15 @@ def test_oversized_status_list_rejected(proxy, private_key, public_key, monkeypa
     )
 
     session = proxy.start_session(dg_token)
-    decision, reason = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/report.txt"})
+    decision, reason = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/allowed/report.txt"}
+    )
 
     assert decision == Decision.INSUFFICIENT_EVIDENCE
     assert reason == "status_list_too_large"
-    with pytest.raises(MissionStatusUnavailableError, match="size limit"):
+    with pytest.raises(
+        mission_module.MissionStatusUnavailableError, match="size limit"
+    ):
         mission_module._fetch_text(status_url)
 
 
@@ -318,11 +378,17 @@ def test_zip_bomb_rejected(proxy, private_key, public_key, monkeypatch):
     md_url = "https://issuer.example/md/zip-bomb.jwt"
     status_url = "https://issuer.example/status/zip-bomb.jwt"
     revocation_ref = status_url + "#idx=0"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=revocation_ref)
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=revocation_ref
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
 
     compressed = zlib.compress(b"\x00" * (mission_module.MAX_DECOMPRESSED_BYTES + 1024))
@@ -349,23 +415,35 @@ def test_zip_bomb_rejected(proxy, private_key, public_key, monkeypatch):
     )
 
     session = proxy.start_session(dg_token)
-    decision, reason = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/report.txt"})
+    decision, reason = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/allowed/report.txt"}
+    )
 
     assert decision == Decision.INSUFFICIENT_EVIDENCE
     assert reason == "status_list_too_large"
-    with pytest.raises(MissionStatusUnavailableError, match="decompression limit"):
+    with pytest.raises(
+        mission_module.MissionStatusUnavailableError, match="decompression limit"
+    ):
         mission_module.mission_is_revoked(md, public_key)
 
 
-def test_mission_cache_avoids_refetching_md(proxy, private_key, public_key, monkeypatch):
+def test_mission_cache_avoids_refetching_md(
+    proxy, private_key, public_key, monkeypatch
+):
     mission_id = "urn:ardur:mission:test:cache"
     md_url = "https://issuer.example/md/cache.jwt"
     status_url = "https://issuer.example/status/cache.jwt"
-    md_token = _issue_md(private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=3")
-    md = load_mission_declaration(md_token, public_key)
+    md_token = _issue_md(
+        private_key, mission_id=mission_id, revocation_ref=status_url + "#idx=3"
+    )
+    md = mission_module.load_mission_declaration(md_token, public_key)
     dg_token = _issue_dg(
         private_key,
-        mission_ref={"uri": md_url, "mission_id": mission_id, "mission_digest": md.payload_digest},
+        mission_ref={
+            "uri": md_url,
+            "mission_id": mission_id,
+            "mission_digest": md.payload_digest,
+        },
     )
     calls = _install_fetch_map(
         monkeypatch,
@@ -377,7 +455,9 @@ def test_mission_cache_avoids_refetching_md(proxy, private_key, public_key, monk
 
     session = proxy.start_session(dg_token)
     first = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/one.txt"})
-    second = proxy.evaluate_tool_call(session, "read_file", {"path": "/allowed/two.txt"})
+    second = proxy.evaluate_tool_call(
+        session, "read_file", {"path": "/allowed/two.txt"}
+    )
 
     assert first[0] == Decision.PERMIT
     assert second[0] == Decision.PERMIT
@@ -400,15 +480,13 @@ def test_mission_cache_avoids_refetching_md(proxy, private_key, public_key, monk
 def test_fetch_rejects_ssrf_target_ip_classes(url, reason):
     """M1 regression: _assert_public_target must reject IP-literal URLs
     pointing at loopback, RFC1918, link-local, and IMDS ranges."""
-    from vibap.mission import MissionBindingError, _assert_public_target
-    with pytest.raises(MissionBindingError, match="non-public IP"):
-        _assert_public_target(url)
+    with pytest.raises(mission_module.MissionBindingError, match="non-public IP"):
+        mission_module._assert_public_target(url)
 
 
 def test_fetch_accepts_public_ip_literal():
     """M1 sanity: a public IP literal must NOT be blocked by _assert_public_target."""
-    from vibap.mission import _assert_public_target
-    _assert_public_target("https://8.8.8.8/foo")  # should not raise
+    mission_module._assert_public_target("https://8.8.8.8/foo")  # should not raise
 
 
 # --- FIX-3 from S2 hostile audit (2026-04-28): MD loader fail-closed
@@ -417,6 +495,7 @@ def test_fetch_accepts_public_ip_literal():
 # members as "use safe defaults" — exactly the silent-permit pattern the
 # project guards against. These tests lock in that the always-on guard
 # now rejects MDs missing any of the six audit-flagged spec members.
+
 
 class TestMissionDeclarationSchemaGuard:
     @pytest.mark.parametrize(
@@ -436,10 +515,11 @@ class TestMissionDeclarationSchemaGuard:
     def test_load_fails_closed_on_missing_required_member(
         self, private_key, public_key, missing_field
     ):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
+            mission_id="urn:test:guard",
             mission="schema guard test",
             allowed_tools=["read"],
             forbidden_tools=[],
@@ -458,15 +538,16 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match=f"missing required v0.1 member: {missing_field}",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_load_fails_closed_on_invalid_conformance_profile(
         self, private_key, public_key
     ):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
+            mission_id="urn:test:bad-profile",
             mission="bad profile test",
             allowed_tools=["read"],
             forbidden_tools=[],
@@ -486,15 +567,16 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="conformance_profile",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_load_fails_closed_on_invalid_tool_manifest_digest(
         self, private_key, public_key
     ):
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
+            mission_id="urn:test:bad-digest",
             mission="bad digest test",
             allowed_tools=["read"],
             forbidden_tools=[],
@@ -512,16 +594,17 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="tool_manifest_digest",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
     def test_load_fails_closed_on_mic_evidence_with_minimal_receipts(
         self, private_key, public_key
     ):
         """Profile/receipt-level interaction: MIC-Evidence forbids minimal receipts."""
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
+            mission_id="urn:test:mic-vs-minimal",
             mission="mic-evidence test",
             allowed_tools=["read"],
             forbidden_tools=[],
@@ -542,19 +625,18 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="MIC-Evidence",
         ):
-            load_mission_declaration(md_token, public_key)
+            mission_module.load_mission_declaration(md_token, public_key)
 
-    def test_strict_schema_rejects_legacy_field_mixing(
-        self, private_key, public_key
-    ):
+    def test_strict_schema_rejects_legacy_field_mixing(self, private_key, public_key):
         """Opt-in strict_schema=True applies the full v0.1 schema, which has
         ``additionalProperties: false`` at the root. Existing MDs from
         :func:`issue_passport` carry legacy fields like ``allowed_tools``
         — they must be rejected when the caller opts into strict mode."""
-        from tests.conftest import v01_required_md_extras
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
+            mission_id="urn:test:strict",
             mission="strict schema test",
             allowed_tools=["read"],
             forbidden_tools=[],
@@ -571,7 +653,9 @@ class TestMissionDeclarationSchemaGuard:
             mission_module.MissionBindingError,
             match="violates v0.1 schema",
         ) as excinfo:
-            load_mission_declaration(md_token, public_key, strict_schema=True)
+            mission_module.load_mission_declaration(
+                md_token, public_key, strict_schema=True
+            )
         assert excinfo.value.reason == "schema_invalid"
 
 
@@ -584,14 +668,12 @@ class TestMissionDeclarationSchemaGuard:
 # _PinnedIPHTTPSConnection: resolve once, validate once, connect to the
 # exact IP that passed validation.
 
+
 class TestPinnedIPSSRFDefense:
-    def test_resolve_to_pinned_public_ip_rejects_all_private_dns(
-        self, monkeypatch
-    ):
+    def test_resolve_to_pinned_public_ip_rejects_all_private_dns(self, monkeypatch):
         """If every IP a hostname resolves to is private, the pinned-IP
         helper must raise — never silently return a private IP for the
         connection to walk into."""
-        from vibap import mission as mission_module
 
         def fake_getaddrinfo(host, port, *args, **kwargs):
             # All-private resolution (IMDS + RFC1918)
@@ -607,17 +689,14 @@ class TestPinnedIPSSRFDefense:
         ):
             mission_module._resolve_to_pinned_public_ip("evil.example", 443)
 
-    def test_resolve_to_pinned_public_ip_picks_first_public_ip(
-        self, monkeypatch
-    ):
+    def test_resolve_to_pinned_public_ip_picks_first_public_ip(self, monkeypatch):
         """Mixed resolution → return the first public IP, skipping any
         leading private entries that would have been rejected."""
-        from vibap import mission as mission_module
 
         def fake_getaddrinfo(host, port, *args, **kwargs):
             return [
-                (None, None, None, None, ("10.0.0.1", port)),       # private, skip
-                (None, None, None, None, ("8.8.8.8", port)),        # public, take
+                (None, None, None, None, ("10.0.0.1", port)),  # private, skip
+                (None, None, None, None, ("8.8.8.8", port)),  # public, take
                 (None, None, None, None, ("169.254.169.254", port)),
             ]
 
@@ -625,9 +704,7 @@ class TestPinnedIPSSRFDefense:
         ip = mission_module._resolve_to_pinned_public_ip("mixed.example", 443)
         assert ip == "8.8.8.8"
 
-    def test_pinned_urlopen_uses_resolved_ip_not_dns_at_connect(
-        self, monkeypatch
-    ):
+    def test_pinned_urlopen_uses_resolved_ip_not_dns_at_connect(self, monkeypatch):
         """Production path: _pinned_urlopen resolves once, validates,
         then constructs a _PinnedIPHTTPSConnection with that IP. Any
         re-resolution happening at connect time would defeat FIX-7's
@@ -637,8 +714,6 @@ class TestPinnedIPSSRFDefense:
         We mock create_connection to capture what address the
         connection would have used, and confirm it's the pinned IP.
         """
-        from vibap import mission as mission_module
-
         # Force resolution to a known public IP
         monkeypatch.setattr(
             mission_module,
@@ -658,9 +733,7 @@ class TestPinnedIPSSRFDefense:
         )
 
         with pytest.raises(mission_module.URLError):
-            mission_module._pinned_urlopen(
-                "https://attacker.example/path", timeout=5.0
-            )
+            mission_module._pinned_urlopen("https://attacker.example/path", timeout=5.0)
         # Confirm the TCP layer used the pinned IP, not the hostname.
         assert captured["addr"] == ("203.0.113.7", 443)
 
@@ -709,9 +782,7 @@ class TestPinnedURLOpenResponseSemantics:
             def close(self):
                 pass
 
-        monkeypatch.setattr(
-            mission_module, "_PinnedIPHTTPSConnection", _StubConn
-        )
+        monkeypatch.setattr(mission_module, "_PinnedIPHTTPSConnection", _StubConn)
         # And short-circuit IP resolution so the test does not touch DNS.
         monkeypatch.setattr(
             mission_module,
@@ -725,34 +796,18 @@ class TestPinnedURLOpenResponseSemantics:
             status=302,
             headers={"Location": "https://elsewhere.example/new"},
         )
-        with pytest.raises(
-            mission_module.URLError, match="refused redirect"
-        ):
-            mission_module._pinned_urlopen(
-                "https://example.test/md.jwt", timeout=5.0
-            )
+        with pytest.raises(mission_module.URLError, match="refused redirect"):
+            mission_module._pinned_urlopen("https://example.test/md.jwt", timeout=5.0)
 
     def test_status_4xx_raises_httperror(self, monkeypatch):
-        self._stub_pinned_connection(
-            monkeypatch, status=404, body=b"not found"
-        )
-        with pytest.raises(
-            urllib.error.HTTPError, match="HTTP 404"
-        ):
-            mission_module._pinned_urlopen(
-                "https://example.test/md.jwt", timeout=5.0
-            )
+        self._stub_pinned_connection(monkeypatch, status=404, body=b"not found")
+        with pytest.raises(urllib.error.HTTPError, match="HTTP 404"):
+            mission_module._pinned_urlopen("https://example.test/md.jwt", timeout=5.0)
 
     def test_status_5xx_raises_httperror(self, monkeypatch):
-        self._stub_pinned_connection(
-            monkeypatch, status=503, body=b"upstream sad"
-        )
-        with pytest.raises(
-            urllib.error.HTTPError, match="HTTP 503"
-        ):
-            mission_module._pinned_urlopen(
-                "https://example.test/md.jwt", timeout=5.0
-            )
+        self._stub_pinned_connection(monkeypatch, status=503, body=b"upstream sad")
+        with pytest.raises(urllib.error.HTTPError, match="HTTP 503"):
+            mission_module._pinned_urlopen("https://example.test/md.jwt", timeout=5.0)
 
     def test_status_200_passes_through(self, monkeypatch):
         body = b"hello"
@@ -770,6 +825,7 @@ class TestPinnedURLOpenResponseSemantics:
 # signer could mint MDs/passports/AATs with iat=year_3000 + exp=year_3001
 # that the verifier accepted forever. These tests pin the
 # generalization so the gap doesn't reopen silently.
+
 
 class _ShimResponse:
     """Minimal urlopen-like response shim for status-list mock tests."""
@@ -797,6 +853,7 @@ class TestStatusListIatSkewGuard:
     ):
         mission = MissionPassport(
             agent_id="md-authority",
+            mission_id="urn:test:status-list-iat",
             mission="status-list iat-skew test",
             allowed_tools=["read"],
             forbidden_tools=[],
@@ -816,7 +873,7 @@ class TestStatusListIatSkewGuard:
                 revocation_ref=f"{status_url}#idx=0",
             ),
         )
-        md = load_mission_declaration(md_token, public_key)
+        md = mission_module.load_mission_declaration(md_token, public_key)
 
         # Mint a status list whose iat is far in the future.
         far_future = int(time.time()) + 365 * 86400
@@ -847,10 +904,8 @@ class TestStatusListIatSkewGuard:
 
 
 class TestMissionDeclarationIatSkewGuard:
-    def test_md_with_iat_in_far_future_fails_closed(
-        self, private_key, public_key
-    ):
-        from tests.conftest import v01_required_md_extras
+    def test_md_with_iat_in_far_future_fails_closed(self, private_key, public_key):
+        from conftest import v01_required_md_extras
 
         mission = MissionPassport(
             agent_id="md-authority",
@@ -872,6 +927,7 @@ class TestMissionDeclarationIatSkewGuard:
             "iat": far_future,
             "exp": far_future + 600,
             "jti": "md-far-future",
+            "mission_id": "urn:test:far-future",
             **v01_required_md_extras(mission_id="urn:test:far-future"),
             "allowed_tools": list(mission.allowed_tools),
             "forbidden_tools": list(mission.forbidden_tools),
@@ -886,4 +942,4 @@ class TestMissionDeclarationIatSkewGuard:
             mission_module.MissionBindingError,
             match="MD iat lies more than",
         ):
-            load_mission_declaration(token, public_key)
+            mission_module.load_mission_declaration(token, public_key)

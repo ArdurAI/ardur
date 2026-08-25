@@ -15,6 +15,8 @@ This section lists hosted documentation and mirrored artifacts generated from `e
 
 ## Hosted Artifacts
 
+- [`claude-project-context-no-key-mission.json`](/__ardur_internal__/repo/examples/missions/claude-project-context-no-key-mission.json)
 - [`delegation-mission.json`](/__ardur_internal__/repo/examples/missions/delegation-mission.json)
 - [`minimal-mission.json`](/__ardur_internal__/repo/examples/missions/minimal-mission.json)
+- [`provider-adapter-no-key-mission.json`](/__ardur_internal__/repo/examples/missions/provider-adapter-no-key-mission.json)
 - [`three-backend-compose-mission.json`](/__ardur_internal__/repo/examples/missions/three-backend-compose-mission.json)

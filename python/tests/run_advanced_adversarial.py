@@ -23,7 +23,6 @@ import json
 import os
 import ssl
 import sys
-import textwrap
 import threading
 import time
 import urllib.error
@@ -45,14 +44,18 @@ RESULTS_DIR = Path(__file__).resolve().parent / "test-results" / "advanced"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _free_port() -> int:
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
-def _post_tls(base: str, path: str, body: dict | None = None, timeout: int = 15) -> tuple[int, dict, bytes]:
+def _post_tls(
+    base: str, path: str, body: dict | None = None, timeout: int = 15
+) -> tuple[int, dict, bytes]:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -73,8 +76,11 @@ def _post_tls(base: str, path: str, body: dict | None = None, timeout: int = 15)
         return exc.code, json.loads(raw) if raw else {}, b""
 
 
-def _start_proxy(port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_dir: Path) -> tuple[Any, threading.Thread, str]:
+def _start_proxy(
+    port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_dir: Path
+) -> tuple[Any, threading.Thread, str]:
     import signal as _signal
+
     _signal.signal = lambda *_a, **_kw: None
 
     from vibap.passport import generate_keypair
@@ -126,6 +132,7 @@ def _start_proxy(port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_di
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class AdvancedTestResult:
@@ -190,7 +197,9 @@ class AdvancedSuiteReport:
         if self.failed == 0:
             lines.append("VERDICT: All enforcement points operating correctly.")
         else:
-            lines.append(f"VERDICT: {self.failed} enforcement gap(s) found — review immediately.")
+            lines.append(
+                f"VERDICT: {self.failed} enforcement gap(s) found — review immediately."
+            )
 
         return "\n".join(lines)
 
@@ -199,8 +208,10 @@ class AdvancedSuiteReport:
 # Test builder helpers
 # ---------------------------------------------------------------------------
 
-def _issue_and_start(proxy_base: str, private_key, mission_kwargs: dict,
-                     extra_claims: dict | None = None) -> tuple[str | None, str | None]:
+
+def _issue_and_start(
+    proxy_base: str, private_key, mission_kwargs: dict, extra_claims: dict | None = None
+) -> tuple[str | None, str | None]:
     """Issue a passport and start a session. Returns (session_id, None) or (None, error).
 
     ``mission_kwargs`` maps to ``MissionPassport`` constructor fields.
@@ -212,9 +223,15 @@ def _issue_and_start(proxy_base: str, private_key, mission_kwargs: dict,
     defaults = {
         "agent_id": f"adv-{uuid.uuid4().hex[:8]}",
         "mission": "Advanced adversarial test",
-        "allowed_tools": ["read_file", "write_file", "list_directory", "search_files", "delete_file"],
+        "allowed_tools": [
+            "read_file",
+            "write_file",
+            "list_directory",
+            "search_files",
+            "delete_file",
+        ],
         "forbidden_tools": ["execute_shell"],
-        "resource_scope": [],
+        "resource_scope": ["**"],
         "max_tool_calls": 50,
         "max_duration_s": 300,
     }
@@ -234,6 +251,7 @@ def _issue_and_start(proxy_base: str, private_key, mission_kwargs: dict,
 
 # --- Approval Policy Tests ---
 
+
 def test_approval_operator_required(proxy_base: str, private_key) -> AdvancedTestResult:
     """Call without operator_id when approval_policy requires one → INSUFFICIENT_EVIDENCE."""
     result = AdvancedTestResult(
@@ -244,7 +262,9 @@ def test_approval_operator_required(proxy_base: str, private_key) -> AdvancedTes
         expected_decision="INSUFFICIENT_EVIDENCE",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key,
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
         {"allowed_tools": ["read_file", "write_file"]},
         extra_claims={"approval_policy": {"max_approvals_per_hour_per_operator": 5}},
     )
@@ -253,11 +273,15 @@ def test_approval_operator_required(proxy_base: str, private_key) -> AdvancedTes
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
-    status, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "write_file",
-        "arguments": {"path": "test.txt", "content": "hello"},
-    })
+    status, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "write_file",
+            "arguments": {"path": "test.txt", "content": "hello"},
+        },
+    )
     result.http_status = status
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
@@ -281,7 +305,9 @@ def test_approval_fatigue_threshold(proxy_base: str, private_key) -> AdvancedTes
         expected_decision="INSUFFICIENT_EVIDENCE (fatigue threshold)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key,
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
         {"allowed_tools": ["read_file", "write_file"]},
         extra_claims={"approval_policy": {"max_approvals_per_hour_per_operator": 2}},
     )
@@ -292,26 +318,37 @@ def test_approval_fatigue_threshold(proxy_base: str, private_key) -> AdvancedTes
 
     decisions = []
     for i in range(5):
-        _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-            "session_id": sid,
-            "tool_name": "write_file",
-            "arguments": {"path": f"test{i}.txt", "content": "x", "operator_id": "op-1"},
-        })
+        _, decision, _ = _post_tls(
+            proxy_base,
+            "/evaluate",
+            {
+                "session_id": sid,
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": f"test{i}.txt",
+                    "content": "x",
+                    "operator_id": "op-1",
+                },
+            },
+        )
         decisions.append((decision.get("decision"), decision.get("reason", "")))
 
     permits = [d for d, _ in decisions if d == "PERMIT"]
     denials = [r for d, r in decisions[2:] if d != "PERMIT" and "fatigue" in r.lower()]
 
-    result.actual_decision = f"{len(permits)} PERMIT, {len(denials)} non-PERMIT(post-budget)"
+    result.actual_decision = (
+        f"{len(permits)} PERMIT, {len(denials)} non-PERMIT(post-budget)"
+    )
     result.actual_reason = "; ".join(r[:80] for _, r in decisions if r)
     result.passed = len(permits) == 2 and len(denials) >= 1
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Got {len(permits)} permits, {len(denials)} denials. Full: {[(d,r[:50]) for d,r in decisions]}"
+        result.details = f"Got {len(permits)} permits, {len(denials)} denials. Full: {[(d, r[:50]) for d, r in decisions]}"
     return result
 
 
 # --- Delegation Tests ---
+
 
 def test_delegation_tool_escalation(proxy_base: str, private_key) -> AdvancedTestResult:
     """Child tries to use a tool NOT in parent's allowed set → DENY."""
@@ -332,7 +369,7 @@ def test_delegation_tool_escalation(proxy_base: str, private_key) -> AdvancedTes
         mission="Delegation escalation test",
         allowed_tools=["read_file", "write_file"],
         forbidden_tools=["execute_shell"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=100,
         max_duration_s=300,
         delegation_allowed=True,
@@ -349,13 +386,17 @@ def test_delegation_tool_escalation(proxy_base: str, private_key) -> AdvancedTes
     parent_sid = pb["session_id"]
 
     # Delegate through proxy with escalated tools
-    ds, db, _ = _post_tls(proxy_base, "/delegate", {
-        "session_id": parent_sid,
-        "child_agent_id": f"child-{uuid.uuid4().hex[:8]}",
-        "child_allowed_tools": ["read_file", "write_file", "execute_shell"],
-        "child_mission": "Attempt tool escalation via delegation",
-        "child_max_tool_calls": 5,
-    })
+    ds, db, _ = _post_tls(
+        proxy_base,
+        "/delegate",
+        {
+            "session_id": parent_sid,
+            "child_agent_id": f"child-{uuid.uuid4().hex[:8]}",
+            "child_allowed_tools": ["read_file", "write_file", "execute_shell"],
+            "child_mission": "Attempt tool escalation via delegation",
+            "child_max_tool_calls": 5,
+        },
+    )
     result.http_status = ds
 
     if ds == 200 and "token" in db.get("child", db):
@@ -364,14 +405,22 @@ def test_delegation_tool_escalation(proxy_base: str, private_key) -> AdvancedTes
             cs, cb, _ = _post_tls(proxy_base, "/session/start", {"token": child_token})
             if cs == 200:
                 child_sid = cb["session_id"]
-                es, eb, _ = _post_tls(proxy_base, "/evaluate", {
-                    "session_id": child_sid,
-                    "tool_name": "execute_shell",
-                    "arguments": {"command": "whoami"},
-                })
+                es, eb, _ = _post_tls(
+                    proxy_base,
+                    "/evaluate",
+                    {
+                        "session_id": child_sid,
+                        "tool_name": "execute_shell",
+                        "arguments": {"command": "whoami"},
+                    },
+                )
                 result.actual_decision = eb.get("decision", "UNKNOWN")
                 result.actual_reason = eb.get("reason", "")
-                result.passed = result.actual_decision in ("DENY", "VIOLATION", "INSUFFICIENT_EVIDENCE")
+                result.passed = result.actual_decision in (
+                    "DENY",
+                    "VIOLATION",
+                    "INSUFFICIENT_EVIDENCE",
+                )
             else:
                 result.actual_decision = f"child session HTTP {cs}"
                 result.passed = True
@@ -385,11 +434,14 @@ def test_delegation_tool_escalation(proxy_base: str, private_key) -> AdvancedTes
 
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Child was able to use escalated tool: {result.actual_decision}"
+        result.details = (
+            f"Child was able to use escalated tool: {result.actual_decision}"
+        )
     return result
 
 
 # --- Memory Governance Tests ---
+
 
 def test_memory_fix8_write_rejected(proxy_base: str, private_key) -> AdvancedTestResult:
     """Supply actor_private_key_pem in memory_store_write → rejected (FIX-8)."""
@@ -401,30 +453,40 @@ def test_memory_fix8_write_rejected(proxy_base: str, private_key) -> AdvancedTes
         expected_decision="DENY (actor_private_key_pem rejected)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file", "memory_store_write"],
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file", "memory_store_write"],
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # Try memory write with actor_private_key_pem (should be rejected per FIX-8)
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "memory_store_write",
-        "arguments": {
-            "store_id": "test-store",
-            "content": "sensitive data",
-            "actor_private_key_pem": "-----BEGIN EC PRIVATE KEY-----\nfake\n-----END EC PRIVATE KEY-----",
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "memory_store_write",
+            "arguments": {
+                "store_id": "test-store",
+                "content": "sensitive data",
+                "actor_private_key_pem": "redacted credential marker",
+            },
         },
-    })
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = "FIX-8 regression: actor_private_key_pem was accepted for memory write"
+        result.details = (
+            "FIX-8 regression: actor_private_key_pem was accepted for memory write"
+        )
     return result
 
 
@@ -438,33 +500,44 @@ def test_memory_fix8_read_rejected(proxy_base: str, private_key) -> AdvancedTest
         expected_decision="DENY (verifier_public_key_pem rejected)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file", "memory_store_read"],
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file", "memory_store_read"],
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "memory_store_read",
-        "arguments": {
-            "store_id": "test-store",
-            "record_id": str(uuid.uuid4()),
-            "verifier_public_key_pem": "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "memory_store_read",
+            "arguments": {
+                "store_id": "test-store",
+                "record_id": str(uuid.uuid4()),
+                "verifier_public_key_pem": "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
+            },
         },
-    })
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = "FIX-8 regression: verifier_public_key_pem was accepted for memory read"
+        result.details = (
+            "FIX-8 regression: verifier_public_key_pem was accepted for memory read"
+        )
     return result
 
 
 # --- Token Replay Tests ---
+
 
 def test_jti_replay_rejected(proxy_base: str, private_key) -> AdvancedTestResult:
     """Reuse the same passport JWT for a second session → rejected."""
@@ -484,7 +557,7 @@ def test_jti_replay_rejected(proxy_base: str, private_key) -> AdvancedTestResult
         mission="Token replay test",
         allowed_tools=["read_file", "write_file"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=10,
         max_duration_s=300,
     )
@@ -511,7 +584,10 @@ def test_jti_replay_rejected(proxy_base: str, private_key) -> AdvancedTestResult
 
 # --- Kill Switch Tests ---
 
-def test_kill_switch_blocks_evaluate(proxy_base: str, private_key) -> AdvancedTestResult:
+
+def test_kill_switch_blocks_evaluate(
+    proxy_base: str, private_key
+) -> AdvancedTestResult:
     """Activate kill switch, attempt /evaluate → HTTP 503."""
     result = AdvancedTestResult(
         test_id="kill-switch-evaluate",
@@ -521,20 +597,28 @@ def test_kill_switch_blocks_evaluate(proxy_base: str, private_key) -> AdvancedTe
         expected_decision="HTTP 503",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # Verify normal operation first
-    status_ok, _, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "write_file",
-        "arguments": {"path": "ok.txt", "content": "before kill"},
-    })
+    status_ok, _, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "write_file",
+            "arguments": {"path": "ok.txt", "content": "before kill"},
+        },
+    )
     if status_ok != 200:
         result.details = f"Pre-kill evaluate returned {status_ok} (expected 200)"
         result.elapsed_ms = (time.time() - t0) * 1000
@@ -545,11 +629,15 @@ def test_kill_switch_blocks_evaluate(proxy_base: str, private_key) -> AdvancedTe
     result.actual_reason = f"kill switch activation: HTTP {ks_status} {ks_body}"
 
     # Try evaluate under kill switch
-    status, body, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "write_file",
-        "arguments": {"path": "should-fail.txt", "content": "x"},
-    })
+    status, body, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "write_file",
+            "arguments": {"path": "should-fail.txt", "content": "x"},
+        },
+    )
     result.http_status = status
     result.actual_decision = f"HTTP {status}"
     result.passed = status == 503
@@ -563,7 +651,9 @@ def test_kill_switch_blocks_evaluate(proxy_base: str, private_key) -> AdvancedTe
     return result
 
 
-def test_kill_switch_blocks_session_start(proxy_base: str, private_key) -> AdvancedTestResult:
+def test_kill_switch_blocks_session_start(
+    proxy_base: str, private_key
+) -> AdvancedTestResult:
     """Activate kill switch, attempt /session/start → HTTP 503."""
     result = AdvancedTestResult(
         test_id="kill-switch-session",
@@ -578,12 +668,13 @@ def test_kill_switch_blocks_session_start(proxy_base: str, private_key) -> Advan
     _post_tls(proxy_base, "/admin/kill-switch", {})
 
     from vibap.passport import MissionPassport, issue_passport
+
     mission = MissionPassport(
         agent_id=f"ks-{uuid.uuid4().hex[:8]}",
         mission="Kill switch session test",
         allowed_tools=["read_file"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=5,
         max_duration_s=60,
     )
@@ -600,13 +691,18 @@ def test_kill_switch_blocks_session_start(proxy_base: str, private_key) -> Advan
 
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Kill switch did not block /session/start: HTTP {status} {body}"
+        result.details = (
+            f"Kill switch did not block /session/start: HTTP {status} {body}"
+        )
     return result
 
 
 # --- Per-Class Budget Tests ---
 
-def test_per_class_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTestResult:
+
+def test_per_class_budget_exhaustion(
+    proxy_base: str, private_key
+) -> AdvancedTestResult:
     """max_tool_calls_per_class={"internal_write": 1}, call 2 delete_file → DENY on 2nd.
     Note: delete_file is classified as internal_write (not state_change) per
     _policy_side_effect_class — filesystem writes short-circuit before the
@@ -619,11 +715,15 @@ def test_per_class_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTe
         expected_decision="DENY on second internal_write call",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file", "delete_file"],
-        "max_tool_calls_per_class": {"internal_write": 1},
-        "max_tool_calls": 50,
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file", "delete_file"],
+            "max_tool_calls_per_class": {"internal_write": 1},
+            "max_tool_calls": 50,
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
@@ -631,11 +731,15 @@ def test_per_class_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTe
 
     decisions = []
     for i in range(3):
-        _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-            "session_id": sid,
-            "tool_name": "delete_file",
-            "arguments": {"path": f"test{i}.txt"},
-        })
+        _, decision, _ = _post_tls(
+            proxy_base,
+            "/evaluate",
+            {
+                "session_id": sid,
+                "tool_name": "delete_file",
+                "arguments": {"path": f"test{i}.txt"},
+            },
+        )
         decisions.append((decision.get("decision"), decision.get("reason", "")))
 
     permits = sum(1 for d, _ in decisions if d == "PERMIT")
@@ -646,11 +750,13 @@ def test_per_class_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTe
     result.passed = permits == 1 and denials == 2
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Per-class budget not enforced. Permits: {permits}, Denials: {denials} (decisions: {[(d,r[:60]) for d,r in decisions]})"
+        result.details = f"Per-class budget not enforced. Permits: {permits}, Denials: {denials} (decisions: {[(d, r[:60]) for d, r in decisions]})"
     return result
 
 
-def test_side_effect_class_restriction(proxy_base: str, private_key) -> AdvancedTestResult:
+def test_side_effect_class_restriction(
+    proxy_base: str, private_key
+) -> AdvancedTestResult:
     """allowed_side_effect_classes=["none"] only, try delete_file (internal_write) → DENY."""
     result = AdvancedTestResult(
         test_id="side-effect-class",
@@ -660,31 +766,44 @@ def test_side_effect_class_restriction(proxy_base: str, private_key) -> Advanced
         expected_decision="DENY (side_effect_class not allowed)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file", "delete_file"],
-        "allowed_side_effect_classes": ["none"],  # delete_file is internal_write → DENY
-        "max_tool_calls": 50,
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file", "delete_file"],
+            "allowed_side_effect_classes": [
+                "none"
+            ],  # delete_file is internal_write → DENY
+            "max_tool_calls": 50,
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "delete_file",
-        "arguments": {"path": "test.txt"},
-    })
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "delete_file",
+            "arguments": {"path": "test.txt"},
+        },
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = "delete_file was PERMIT-ed despite not being in allowed_side_effect_classes"
+        result.details = (
+            "delete_file was PERMIT-ed despite not being in allowed_side_effect_classes"
+        )
     return result
 
 
 # --- CWD Confinement Tests ---
+
 
 def test_cwd_absolute_escape(proxy_base: str, private_key) -> AdvancedTestResult:
     """cwd="/tmp/test", try read /etc/passwd → DENY (outside cwd)."""
@@ -696,28 +815,38 @@ def test_cwd_absolute_escape(proxy_base: str, private_key) -> AdvancedTestResult
         expected_decision="DENY (outside CWD)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "resource_scope": ["/tmp/test/*"],
-        "cwd": "/tmp/test",
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "resource_scope": ["/tmp/test/*"],
+            "cwd": "/tmp/test",
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # Try reading /etc/passwd (outside cwd and resource_scope)
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "read_file",
-        "arguments": {"path": "/etc/passwd"},
-    })
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "read_file",
+            "arguments": {"path": "/etc/passwd"},
+        },
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = "Read of /etc/passwd was PERMIT-ed despite CWD/resource_scope restrictions"
+        result.details = (
+            "Read of /etc/passwd was PERMIT-ed despite CWD/resource_scope restrictions"
+        )
     return result
 
 
@@ -731,22 +860,30 @@ def test_cwd_path_traversal(proxy_base: str, private_key) -> AdvancedTestResult:
         expected_decision="DENY (path traversal)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "resource_scope": ["/workspace/*"],
-        "cwd": "/workspace",
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "resource_scope": ["/workspace/*"],
+            "cwd": "/workspace",
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # Try path traversal
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "read_file",
-        "arguments": {"path": "../../../etc/passwd"},
-    })
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "read_file",
+            "arguments": {"path": "../../../etc/passwd"},
+        },
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
@@ -757,6 +894,7 @@ def test_cwd_path_traversal(proxy_base: str, private_key) -> AdvancedTestResult:
 
 
 # --- ForbidRules Backend Tests ---
+
 
 def test_forbid_rules_blocks_tool(proxy_base: str, private_key) -> AdvancedTestResult:
     """Include forbid_rules policy blocking delete_file → DENY."""
@@ -774,33 +912,49 @@ def test_forbid_rules_blocks_tool(proxy_base: str, private_key) -> AdvancedTestR
     rules_json = json.dumps(rules, sort_keys=True, separators=(",", ":"))
     rules_sha256 = hashlib.sha256(rules_json.encode()).hexdigest()
 
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file", "delete_file"],
-        "additional_policies": [{
-            "backend": "forbid_rules",
-            "label": "security-team",
-            "policy_inline": "",
-            "policy_sha256": rules_sha256,
-            "data_inline": rules,
-        }],
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file", "delete_file"],
+            "additional_policies": [
+                {
+                    "backend": "forbid_rules",
+                    "label": "security-team",
+                    "policy_inline": "",
+                    "policy_sha256": rules_sha256,
+                    "data_inline": rules,
+                }
+            ],
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # First: a permitted tool should work
-    _, perm_body, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid, "tool_name": "write_file",
-        "arguments": {"path": "ok.txt", "content": "x"},
-    })
+    _, perm_body, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "write_file",
+            "arguments": {"path": "ok.txt", "content": "x"},
+        },
+    )
     write_ok = perm_body.get("decision") == "PERMIT"
 
     # Second: delete_file should be blocked by forbid_rules
-    _, deny_body, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid, "tool_name": "delete_file",
-        "arguments": {"path": "important.txt"},
-    })
+    _, deny_body, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "delete_file",
+            "arguments": {"path": "important.txt"},
+        },
+    )
     result.actual_decision = deny_body.get("decision", "UNKNOWN")
     result.actual_reason = deny_body.get("reason", "")
 
@@ -816,6 +970,7 @@ def test_forbid_rules_blocks_tool(proxy_base: str, private_key) -> AdvancedTestR
 
 # --- Forbidden Tool Tests ---
 
+
 def test_forbidden_tool_denied(proxy_base: str, private_key) -> AdvancedTestResult:
     """Direct call to forbidden_tool → DENY."""
     result = AdvancedTestResult(
@@ -826,20 +981,28 @@ def test_forbidden_tool_denied(proxy_base: str, private_key) -> AdvancedTestResu
         expected_decision="DENY",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "forbidden_tools": ["execute_shell", "delete_file"],
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "forbidden_tools": ["execute_shell", "delete_file"],
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "execute_shell",
-        "arguments": {"command": "whoami"},
-    })
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "execute_shell",
+            "arguments": {"command": "whoami"},
+        },
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
@@ -851,6 +1014,7 @@ def test_forbidden_tool_denied(proxy_base: str, private_key) -> AdvancedTestResu
 
 # --- Resource Scope Tests ---
 
+
 def test_resource_scope_violation(proxy_base: str, private_key) -> AdvancedTestResult:
     """resource_scope=["/tmp/safe/*"], try to write to /etc/cron.d/evil → DENY."""
     result = AdvancedTestResult(
@@ -861,31 +1025,45 @@ def test_resource_scope_violation(proxy_base: str, private_key) -> AdvancedTestR
         expected_decision="DENY (outside resource_scope)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "resource_scope": ["/tmp/safe/*"],
-        "cwd": "/tmp/safe",
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "resource_scope": ["/tmp/safe/*"],
+            "cwd": "/tmp/safe",
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "write_file",
-        "arguments": {"path": "/etc/cron.d/evil", "content": "* * * * * root /tmp/backdoor"},
-    })
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "write_file",
+            "arguments": {
+                "path": "/etc/cron.d/evil",
+                "content": "* * * * * root /tmp/backdoor",
+            },
+        },
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = "Write to /etc/cron.d/evil was PERMIT-ed despite resource_scope"
+        result.details = (
+            "Write to /etc/cron.d/evil was PERMIT-ed despite resource_scope"
+        )
     return result
 
 
 # --- Budget Exhaustion Tests ---
+
 
 def test_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTestResult:
     """max_tool_calls=3, make 5 calls → DENY on calls 4+."""
@@ -897,10 +1075,14 @@ def test_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTestResult:
         expected_decision="DENY after 3 calls",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "max_tool_calls": 3,
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "max_tool_calls": 3,
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
@@ -908,11 +1090,15 @@ def test_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTestResult:
 
     decisions = []
     for i in range(5):
-        _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-            "session_id": sid,
-            "tool_name": "write_file",
-            "arguments": {"path": f"file{i}.txt", "content": f"content {i}"},
-        })
+        _, decision, _ = _post_tls(
+            proxy_base,
+            "/evaluate",
+            {
+                "session_id": sid,
+                "tool_name": "write_file",
+                "arguments": {"path": f"file{i}.txt", "content": f"content {i}"},
+            },
+        )
         decisions.append(decision.get("decision"))
 
     permits = sum(1 for d in decisions if d == "PERMIT")
@@ -922,11 +1108,14 @@ def test_budget_exhaustion(proxy_base: str, private_key) -> AdvancedTestResult:
     result.passed = permits == 3 and denials_after == 2
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Budget not enforced. Permits: {permits}/5, decisions: {decisions}"
+        result.details = (
+            f"Budget not enforced. Permits: {permits}/5, decisions: {decisions}"
+        )
     return result
 
 
 # --- Session End Tests ---
+
 
 def test_ended_session_rejects(proxy_base: str, private_key) -> AdvancedTestResult:
     """End a session, then try /evaluate → DENY (session already ended)."""
@@ -938,10 +1127,14 @@ def test_ended_session_rejects(proxy_base: str, private_key) -> AdvancedTestResu
         expected_decision="DENY (session already ended)",
     )
     t0 = time.time()
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "max_tool_calls": 50,
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "max_tool_calls": 50,
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
@@ -951,11 +1144,15 @@ def test_ended_session_rejects(proxy_base: str, private_key) -> AdvancedTestResu
     end_status, end_body, _ = _post_tls(proxy_base, "/session/end", {"session_id": sid})
 
     # Try evaluate on ended session
-    _, decision, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "write_file",
-        "arguments": {"path": "after-end.txt", "content": "late"},
-    })
+    _, decision, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "write_file",
+            "arguments": {"path": "after-end.txt", "content": "late"},
+        },
+    )
     result.actual_decision = decision.get("decision", "UNKNOWN")
     result.actual_reason = decision.get("reason", "")
     result.passed = result.actual_decision != "PERMIT"
@@ -967,6 +1164,7 @@ def test_ended_session_rejects(proxy_base: str, private_key) -> AdvancedTestResu
 
 # --- Token Validation Tests ---
 
+
 def test_invalid_token_session_start(proxy_base: str) -> AdvancedTestResult:
     """Start session with garbage token → HTTP 401."""
     result = AdvancedTestResult(
@@ -977,7 +1175,9 @@ def test_invalid_token_session_start(proxy_base: str) -> AdvancedTestResult:
         expected_decision="HTTP 401",
     )
     t0 = time.time()
-    status, body, _ = _post_tls(proxy_base, "/session/start", {"token": "not.a.valid.jwt"})
+    status, body, _ = _post_tls(
+        proxy_base, "/session/start", {"token": "not.a.valid.jwt"}
+    )
     result.http_status = status
     result.actual_decision = f"HTTP {status}"
     result.actual_reason = str(body)[:200]
@@ -996,11 +1196,15 @@ def test_nonexistent_session_evaluate(proxy_base: str) -> AdvancedTestResult:
         expected_decision="HTTP 400",
     )
     t0 = time.time()
-    status, body, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": str(uuid.uuid4()),
-        "tool_name": "write_file",
-        "arguments": {"path": "test.txt", "content": "x"},
-    })
+    status, body, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": str(uuid.uuid4()),
+            "tool_name": "write_file",
+            "arguments": {"path": "test.txt", "content": "x"},
+        },
+    )
     result.http_status = status
     result.actual_decision = f"HTTP {status}"
     result.actual_reason = str(body)[:200]
@@ -1011,52 +1215,106 @@ def test_nonexistent_session_evaluate(proxy_base: str) -> AdvancedTestResult:
 
 # --- Unicode / Obfuscation Attacks ---
 
+
 def test_unicode_confusable_path(proxy_base: str, private_key) -> AdvancedTestResult:
-    """Unicode confusable characters in path → properly handled (no bypass)."""
+    """Null-byte and dot-confusable path injections are all rejected.
+
+    Three attack vectors are gated:
+
+    1. Null-byte injection (``/etc/passwd\\x00.txt``) — caught by step-1
+       null-byte check in ``_sanitize_value``; must not be PERMIT.
+
+    2. Dot-confusable traversal (``[U+2024][U+2024]/etc/passwd``) — U+2024
+       ONE DOT LEADER, U+FE52 SMALL FULL STOP, and U+FF0E FULLWIDTH FULL STOP
+       are folded to ASCII ``.`` in ``_sanitize_value`` step-2b, BEFORE the
+       ``..`` segment check (step-3).  NFKC normalisation maps all three to
+       ``.`` (empirically verified), so a tool performing NFKC before path
+       resolution would turn a PERMIT'd ``[U+2024][U+2024]/…`` into a real
+       ``../../…`` traversal.  The proxy now folds these explicitly and must
+       return DENY for this input.
+
+    3. Single-codepoint traversal (``[U+2025]/etc/passwd``) — U+2025 TWO DOT
+       LEADER and U+FE30 VERTICAL TWO DOT LEADER each NFKC-decompose to a
+       full ``..`` in ONE codepoint, which the per-char ``.`` fold in step-2b
+       cannot express.  The step-2c NFKC-form backstop checks the NFKC
+       normalisation of the value for a ``..`` segment and must return DENY.
+    """
     result = AdvancedTestResult(
         test_id="unicode-confusable",
-        title="unicode confusable path handled correctly",
+        title="null-byte and dot-confusable path injections rejected",
         category="Input Sanitization",
         passed=False,
-        expected_decision="Should not bypass scope via unicode tricks",
+        expected_decision="All three paths must not be PERMIT",
     )
     t0 = time.time()
 
-    # Use a path with unicode chars that might confound matching
-    sid, err = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "resource_scope": ["/tmp/safe/*"],
-        "cwd": "/tmp/safe",
-    })
+    sid, err = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "resource_scope": ["/tmp/safe/*"],
+            "cwd": "/tmp/safe",
+        },
+    )
     if err:
         result.details = f"Setup error: {err}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
-    # Try path with null byte
-    _, decision1, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "read_file",
-        "arguments": {"path": "/etc/passwd\x00.txt"},
-    })
-    # Try path with unicode homoglyphs
-    _, decision2, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid,
-        "tool_name": "read_file",
-        "arguments": {"path": "․․/etc/passwd"},
-    })
+    # Null-byte injection: /etc/passwd\x00.txt must never be PERMIT.
+    _, decision1, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "read_file",
+            "arguments": {"path": "/etc/passwd\x00.txt"},
+        },
+    )
+    # U+2024 dot-confusable traversal: step-2b folds to '../etc/passwd',
+    # which step-3 rejects.  Must be DENY.
+    _, decision2, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "read_file",
+            "arguments": {"path": "․․/etc/passwd"},
+        },
+    )
+    # U+2025 TWO DOT LEADER: a SINGLE codepoint that NFKC expands to '..'.
+    # The step-2b per-char '.' fold cannot express it; the step-2c NFKC-form
+    # backstop catches it.  Must be DENY (else a NFKC-normalising tool turns a
+    # PERMIT'd '‥/etc/passwd' into a real '../etc/passwd').
+    _, decision3, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid,
+            "tool_name": "read_file",
+            "arguments": {"path": "‥/etc/passwd"},
+        },
+    )
 
     d1 = decision1.get("decision", "UNKNOWN")
     d2 = decision2.get("decision", "UNKNOWN")
-    result.actual_decision = f"null-byte: {d1}, unicode: {d2}"
-    result.passed = d1 != "PERMIT" and d2 != "PERMIT"
+    d3 = decision3.get("decision", "UNKNOWN")
+    result.actual_decision = (
+        f"null-byte: {d1}, dot-confusable: {d2}, two-dot-leader: {d3}"
+    )
+    result.passed = d1 != "PERMIT" and d2 != "PERMIT" and d3 != "PERMIT"
     result.elapsed_ms = (time.time() - t0) * 1000
     if not result.passed:
-        result.details = f"Unicode/encoding bypass: null-byte={d1}, unicode={d2}"
+        result.details = (
+            f"Path injection not rejected: null-byte={d1}, "
+            f"dot-confusable={d2}, two-dot-leader={d3}"
+        )
     return result
 
 
 # --- Multiple Sessions Coexistence ---
+
 
 def test_multiple_sessions_coexist(proxy_base: str, private_key) -> AdvancedTestResult:
     """Two independent sessions can operate simultaneously."""
@@ -1070,34 +1328,52 @@ def test_multiple_sessions_coexist(proxy_base: str, private_key) -> AdvancedTest
     t0 = time.time()
 
     # Session A
-    sid_a, err_a = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file"],
-        "max_tool_calls": 5,
-    })
+    sid_a, err_a = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file"],
+            "max_tool_calls": 5,
+        },
+    )
     if err_a:
         result.details = f"Session A setup error: {err_a}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # Session B
-    sid_b, err_b = _issue_and_start(proxy_base, private_key, {
-        "allowed_tools": ["read_file", "write_file", "delete_file"],
-        "max_tool_calls": 5,
-    })
+    sid_b, err_b = _issue_and_start(
+        proxy_base,
+        private_key,
+        {
+            "allowed_tools": ["read_file", "write_file", "delete_file"],
+            "max_tool_calls": 5,
+        },
+    )
     if err_b:
         result.details = f"Session B setup error: {err_b}"
         result.elapsed_ms = (time.time() - t0) * 1000
         return result
 
     # Operate on both
-    _, da, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid_a, "tool_name": "write_file",
-        "arguments": {"path": "from-a.txt", "content": "A"},
-    })
-    _, db, _ = _post_tls(proxy_base, "/evaluate", {
-        "session_id": sid_b, "tool_name": "write_file",
-        "arguments": {"path": "from-b.txt", "content": "B"},
-    })
+    _, da, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid_a,
+            "tool_name": "write_file",
+            "arguments": {"path": "from-a.txt", "content": "A"},
+        },
+    )
+    _, db, _ = _post_tls(
+        proxy_base,
+        "/evaluate",
+        {
+            "session_id": sid_b,
+            "tool_name": "write_file",
+            "arguments": {"path": "from-b.txt", "content": "B"},
+        },
+    )
 
     dec_a = da.get("decision", "UNKNOWN")
     dec_b = db.get("decision", "UNKNOWN")
@@ -1110,6 +1386,7 @@ def test_multiple_sessions_coexist(proxy_base: str, private_key) -> AdvancedTest
 
 
 # --- Health Endpoint ---
+
 
 def test_health_endpoint(proxy_base: str) -> AdvancedTestResult:
     """GET /health returns 200 with status ok."""
@@ -1180,6 +1457,7 @@ ALL_TESTS: list[Callable] = [
 # Main runner
 # ---------------------------------------------------------------------------
 
+
 def main():
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1200,7 +1478,11 @@ def main():
 
     port = _free_port()
     proxy, proxy_thread, base = _start_proxy(
-        port, str(cert_path_obj), str(key_path_obj), keys_dir, work_dir,
+        port,
+        str(cert_path_obj),
+        str(key_path_obj),
+        keys_dir,
+        work_dir,
     )
 
     print("=" * 72)
@@ -1285,7 +1567,7 @@ def main():
     }
     json_path.write_text(json.dumps(json_results, indent=2))
 
-    print(f"\nResults written to:")
+    print("\nResults written to:")
     print(f"  {summary_path}")
     print(f"  {json_path}")
 

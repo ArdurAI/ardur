@@ -1,0 +1,418 @@
+name: kernel-enforce
+
+# Privileged Linux CI for the two-tier kernel enforcement bridge
+# (go/pkg/kernelcapture/process_guard.bpf.c — BPF-LSM; seccomp_notify_linux.go
+# — seccomp user-notify). Four jobs:
+#
+#   bpf-generate — compiles process_guard.bpf.c with the same toolchain
+#     (Ubuntu 24.04 default clang, currently 18.x) used to produce the
+#     committed processguard_bpfel.{go,o} / processexec_bpfel.{go,o} /
+#     launcheridentity_bpfel.{go,o}, fails
+#     if regeneration drifts from what's committed, then builds/vets/tests
+#     the whole Go module with the real generated symbols present. This is
+#     the check that would have caught PR #92's original compile blockers
+#     (missing struct sockaddr / vmlinux.h, decide()'s 6-arg BPF-to-BPF call)
+#     and the ringbuf.Record.LostSamples API-surface bug found while fixing
+#     them — none of that is visible from the darwin-only "Go" workflow,
+#     which excludes every //go:build linux file in this package.
+#
+#   kernel-smoke — boots the runner's own kernel inside a disposable
+#     KVM+virtme-ng VM with BPF-LSM explicitly enabled on the command line,
+#     then runs ardur-guard-smoke as root inside it, three scenarios:
+#     (a) apply an OP_EXEC:DENY policy to a fresh cgroup, spawn a child
+#     directly into it, assert its execve fails EPERM and a matching DENY
+#     record lands on enforce_events; (b) apply an OP_FILE_WRITE:ALLOWLIST
+#     policy scoped to one directory, assert a write under that directory
+#     succeeds (ALLOW event) and a write outside it fails (DENY event) — this
+#     is the Slice 4.1/4.2 reconciliation proof that guard_file_open's
+#     sleepable hook, which cannot use the cgroup_path_allow LPM trie the
+#     other hooks use, actually enforces path_allow via cgroup_file_allow
+#     instead of failing every allowlisted file op closed; (c) issue #124 —
+#     apply an OP_EXEC:DENY policy through a *pinned* guard load, simulate a
+#     daemon restart (Close, then load again from the same bpffs pins with no
+#     re-apply), assert execve is still denied. This is the one thing
+#     bpf-generate cannot prove: that the compiled program actually enforces
+#     — and keeps enforcing across a restart — on a live kernel, not just
+#     that it loads. In the same VM boot, a strict `ardur run --enforce`
+#     workload proves the post-exec ptrace stop, root-only runtime reads,
+#     exact governance endpoint, denied child exec, signed receipt, lifecycle
+#     metric, and offline attestation-chain match on the real BPF stream.
+#
+#   seccomp-smoke — the seccomp user-notify tier's equivalent proof (plan
+#     E4, the common-case fallback for hosts where BPF-LSM never loads).
+#     Unlike kernel-smoke this needs no KVM/virtme-ng custom kernel boot:
+#     seccomp(SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_NEW_LISTENER, ...)
+#     works under an ordinary PR_SET_NO_NEW_PRIVS-only process, confirmed
+#     empirically during E4's development — a plain runner is enough. Runs
+#     ardur-seccomp-smoke, which starts a real ardur-kernelcaptured (with no
+#     BPF-LSM available, so it falls back to seccomp), runs ardur-exec-shim
+#     against a real target process, and asserts a policy-denied connect(2)
+#     gets EPERM while a policy-allowed one reaches the kernel's real connect
+#     handling. This exact harness caught two real bugs no pure-Go test
+#     surfaced (see ardur-seccomp-smoke's package doc comment) — losing it
+#     would mean losing the only thing that can catch a regression in either.
+#
+#   ardur-run-e2e-seccomp — issue #104's "no ardur run full-flow e2e in CI"
+#     gap, seccomp half: builds the docs/demo/enforce-e2e Docker image (real
+#     ardur-kernelcaptured + ardur-exec-shim + the ardur CLI with
+#     biscuit-python) and runs run-seccomp.sh in both enforce and permissive
+#     mode, asserting the real `ardur run --enforce` CLI actually routes the
+#     agent through ardur-exec-shim on a seccomp-only host
+#     (--disable-bpf-lsm), a policy-denied connect(2) gets EPERM, the
+#     hash-chained enforce_events receipt reflects the denial, and the
+#     attestation commits to it — verified offline via enforce-verify. This
+#     is the exact test class whose absence let issue #104 (apply_policy
+#     reporting success while nothing actually wrapped the agent) go
+#     unnoticed: piecewise ardur-seccomp-smoke drives the shim directly and
+#     would never have caught run_bridge.py failing to invoke it at all.
+#
+# kernel-smoke starts as continue-on-error: true — promote it to a required
+# check once a burn-in period confirms the virtme-ng invocation and kernel
+# cmdline handling are stable on GitHub-hosted runners (its real-BPF metric
+# step is verified only when the fail-fast workflow emits a signed non-empty
+# result — see that step's own comment). seccomp-smoke and
+# ardur-run-e2e-seccomp need no such
+# VM and have been verified directly (the latter by hand, reproducing the
+# exact commands this job runs, against a real kernel before this workflow
+# job existed), so they are required checks from the start.
+#
+# This workflow is also the gate for the cilium/ebpf dependency: any future
+# version bump that touches go/go.mod must pass bpf-generate (compiles
+# against the real generated BPF objects) before merging.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "go/pkg/kernelcapture/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/cmd/ardur-guard-smoke/**"
+      - "go/cmd/ardur-exec-shim/**"
+      - "go/cmd/ardur-seccomp-smoke/**"
+      - "go/cmd/enforce-verify/**"
+      - "go/go.mod"
+      - "go/go.sum"
+      - "python/vibap/run_bridge.py"
+      - "python/vibap/kernel_correlation.py"
+      - "python/vibap/bpf_lower.py"
+      - "python/vibap/bpf_types.py"
+      - "docs/demo/enforce-e2e/**"
+      - ".github/workflows/kernel-enforce.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "go/pkg/kernelcapture/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/cmd/ardur-guard-smoke/**"
+      - "go/cmd/ardur-exec-shim/**"
+      - "go/cmd/ardur-seccomp-smoke/**"
+      - "go/cmd/enforce-verify/**"
+      - "go/go.mod"
+      - "go/go.sum"
+      - "python/vibap/run_bridge.py"
+      - "python/vibap/kernel_correlation.py"
+      - "python/vibap/bpf_lower.py"
+      - "python/vibap/bpf_types.py"
+      - "docs/demo/enforce-e2e/**"
+      - ".github/workflows/kernel-enforce.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bpf-generate:
+    name: bpf-generate
+    # Pinned (not ubuntu-latest): the drift check below only means anything
+    # if every run compiles process_guard.bpf.c with the same clang the
+    # committed .o files were built with. If GitHub silently moves
+    # ubuntu-latest to a new default, this job should be re-pinned in the
+    # same PR that regenerates and re-commits the artifacts.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          # Must match the `go` directive in go/go.mod (currently 1.26.6).
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Install BPF build toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev linux-libc-dev
+          clang --version
+
+      - name: go generate ./go/pkg/kernelcapture/...
+        working-directory: go/pkg/kernelcapture
+        run: go generate ./...
+
+      - name: Fail if generated BPF objects drifted from committed artifacts
+        run: |
+          if ! git diff --exit-code -- \
+              go/pkg/kernelcapture/processguard_bpfel.go \
+              go/pkg/kernelcapture/processguard_bpfel.o \
+              go/pkg/kernelcapture/processexec_bpfel.go \
+              go/pkg/kernelcapture/processexec_bpfel.o \
+              go/pkg/kernelcapture/launcheridentity_bpfel.go \
+              go/pkg/kernelcapture/launcheridentity_bpfel.o; then
+            echo "::error::go generate produced output that differs from what's committed. Run 'go generate ./go/pkg/kernelcapture/...' on Linux (clang + libbpf-dev) and commit the regenerated files."
+            exit 1
+          fi
+
+      - name: go build ./...
+        working-directory: go
+        run: go build ./...
+
+      - name: go vet ./...
+        working-directory: go
+        run: go vet ./...
+
+      # Runs with the real generated processGuardObjects/loadProcessGuardObjects
+      # present, unlike the darwin-only "Go" workflow — this is what proves
+      # the nil-policyMaps guard, the double-buffer slot logic, and the rest
+      # of the Slice 4.2 review's fixes hold together on the platform they
+      # actually ship on.
+      - name: go test ./...
+        working-directory: go
+        run: go test -count=1 -race ./...
+
+  kernel-smoke:
+    name: kernel-smoke
+    needs: bpf-generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Soft gate for now: promote to a required check once a burn-in period
+    # confirms the virtme-ng invocation (kernel cmdline flag names, guest
+    # privilege model) is stable on GitHub-hosted runners. Until then this
+    # job reports its result without blocking merges.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Check KVM is available
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm not present on this runner; kernel-smoke requires a KVM-capable host."
+            exit 1
+          fi
+          ls -la /dev/kvm
+
+      - name: Install BPF toolchain, QEMU, and virtme-ng
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm libbpf-dev linux-libc-dev \
+            qemu-system-x86 python3-pip
+          # Installed as root (not --user): the smoke boot below needs sudo
+          # for /dev/kvm, and a `sudo vng` invocation only sees packages on
+          # root's own Python path — a --user install under the `runner`
+          # account is invisible to it (confirmed by CI: vng resolved but
+          # `from virtme_ng.run import main` raised ModuleNotFoundError).
+          # --break-system-packages: Ubuntu 24.04's system Python is PEP 668
+          # externally-managed; virtme-ng has no apt package here.
+          sudo python3 -m pip install --break-system-packages virtme-ng
+
+      - name: go generate ./go/pkg/kernelcapture/...
+        working-directory: go/pkg/kernelcapture
+        run: go generate ./...
+
+      - name: Build ardur-guard-smoke
+        working-directory: go
+        run: go build -o /tmp/ardur-guard-smoke ./cmd/ardur-guard-smoke
+
+# Also build + install what the real-BPF observability workload
+# (docs/demo/enforce-e2e/run.sh) needs, so the vng boot below can exercise
+# the `ardur run` bridge in addition to the piecewise ardur-guard-smoke.
+# This proves issue #39's metric path and #241's BPF-LSM enforce bootstrap.
+# virtme-ng's guest shares the runner's own
+      # root filesystem (a different kernel over the same userspace, not a
+      # separate image) — confirmed by ardur-guard-smoke above already being
+      # visible to vng's --exec without copying it into any guest-specific
+      # location — so anything built or installed here on the runner, before
+      # the boot step, is exactly what the guest sees. Installed as root with
+      # the system Python (not actions/setup-python, and not --user) for the
+      # same reason the virtme-ng install above is: `sudo vng` only sees
+      # root's own Python path, and sudo does not inherit a non-root PATH
+      # that actions/setup-python would have modified.
+      - name: Install the ardur CLI + biscuit-python
+        run: |
+          # Ubuntu 24.04 ships PyJWT 2.7.0 as the debian-managed python3-jwt,
+          # which has no RECORD file — so pip's attempt to upgrade it to the
+          # ardur requirement (PyJWT>=2.12.0,<3) during the editable install
+          # below fails: "Cannot uninstall PyJWT 2.7.0, RECORD file not found".
+          # Pre-install the required PyJWT with --ignore-installed so pip owns
+          # a satisfying version and the editable install never tries to touch
+          # the debian one.
+          sudo python3 -m pip install --break-system-packages --no-cache-dir --ignore-installed "PyJWT>=2.12.0,<3"
+          sudo python3 -m pip install --break-system-packages --no-cache-dir -e python
+          sudo python3 -m pip install --break-system-packages --no-cache-dir biscuit-python
+          sudo ardur --version || true
+
+      - name: Build ardur-kernelcaptured and enforce-verify
+        working-directory: go
+        run: |
+          go build -o /tmp/ardur-kernelcaptured ./cmd/ardur-kernelcaptured
+          go build -o /tmp/enforce-verify ./cmd/enforce-verify
+          # /usr/local/bin (root-owned) so it's on root's PATH for the sudo
+          # vng invocation below and for run.sh's own PATH-based lookup —
+          # the same reason ardur (installed as root above) needs to be
+          # there rather than left under the runner user's own PATH.
+          sudo cp /tmp/ardur-kernelcaptured /tmp/enforce-verify /usr/local/bin/
+
+      # `vng --run` (bare, no argument) boots "the same kernel running on the
+      # host" per `vng --help`'s Action section — this is "the runner kernel"
+      # per the task, not a custom build; a bare `vng` (no --run at all)
+      # instead assumes it's invoked from inside a built Linux kernel source
+      # tree and looks for ./arch/x86/boot/bzImage, which doesn't exist here
+      # (confirmed by CI). There is no --kernel flag (also confirmed by CI —
+      # "unrecognized arguments"); commands run inside the guest via --exec,
+      # not a trailing `--` positional (that syntax doesn't exist either).
+      # --append adds to that boot's kernel command line only; it does not
+      # touch the host. virtme-ng's guest runs as root by design, which is
+      # what loading a BPF-LSM program and creating a cgroup requires.
+      #
+      # lsm=bpf only, not the full Ubuntu default stack (landlock/apparmor/
+      # yama/lockdown/integrity): a first attempt requested the full stack
+      # plus bpf and the boot's *actual* active order came back as
+      # "lockdown,capability,landlock,yama,apparmor,bpf,ima,evm" — capability
+      # wasn't even requested, confirming the kernel enforces its own
+      # ordering for LSMs with fixed relative-position constraints regardless
+      # of this list, so asking for a specific order here buys nothing. What
+      # it does buy is confounding variables: guard_bprm_check's
+      # `if (ret != 0) return ret;` short-circuits before evaluating our
+      # policy (and before emit_event ever runs) if any earlier LSM in the
+      # chain denies first, for a reason unrelated to this test. Keeping only
+      # "bpf" isolates that.
+      - name: Boot with BPF-LSM active and run the smoke test
+        run: |
+          VNG="$(command -v vng)"
+          test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }
+          sudo "$VNG" \
+            --verbose \
+            --run \
+            --append "lsm=bpf" \
+            --exec /tmp/ardur-guard-smoke
+
+      # Issues #39 and #241 share one strict full-flow proof: the target is
+      # held at PTRACE_EVENT_EXEC until cgroup registration and policy apply,
+      # then performs one governed call before its child exec is denied EPERM.
+      - name: Boot with BPF-LSM active and verify strict ardur-run E2E
+        run: |
+          VNG="$(command -v vng)"
+          test -x "$VNG" || { echo "::error::vng not found on PATH after pip install"; exit 1; }
+          sudo "$VNG" \
+            --verbose \
+            --run \
+            --append "lsm=bpf" \
+            --exec "$PWD/docs/demo/enforce-e2e/ci-vng-observability-gap.sh"
+
+  seccomp-smoke:
+    name: seccomp-smoke
+    needs: bpf-generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Install BPF build toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev linux-libc-dev
+          clang --version
+
+      # pkg/kernelcapture also contains the BPF-LSM tier's generated
+      # bindings; regenerate them here the same way bpf-generate and
+      # kernel-smoke do so this job never depends on a build-artifact cache
+      # or job ordering to see a consistent tree — bpf-generate's own drift
+      # check (needs: bpf-generate, above) is what actually guards that
+      # what's committed matches what this regenerates.
+      - name: go generate ./go/pkg/kernelcapture/...
+        working-directory: go/pkg/kernelcapture
+        run: go generate ./...
+
+      - name: Build ardur-kernelcaptured, ardur-exec-shim, ardur-seccomp-smoke
+        working-directory: go
+        run: |
+          go build -o /tmp/ardur-kernelcaptured ./cmd/ardur-kernelcaptured
+          go build -o /tmp/ardur-exec-shim ./cmd/ardur-exec-shim
+          go build -o /tmp/ardur-seccomp-smoke ./cmd/ardur-seccomp-smoke
+
+      # ardur-kernelcaptured's custody plan requires its run/state dirs under
+      # /run/ardur and /var/lib/ardur (daemon_custody.go) — not configurable
+      # to an arbitrary tmp path — so this needs root to create/write them,
+      # the same reason kernel-smoke's boot step above runs under sudo. No
+      # KVM, no custom kernel: seccomp(SECCOMP_SET_MODE_FILTER,
+      # SECCOMP_FILTER_FLAG_NEW_LISTENER, ...) works on the runner's own
+      # kernel with no special privilege beyond PR_SET_NO_NEW_PRIVS, which
+      # ardur-exec-shim sets itself.
+      - name: Run the seccomp tier smoke test
+        run: |
+          sudo /tmp/ardur-seccomp-smoke \
+            --daemon-bin /tmp/ardur-kernelcaptured \
+            --shim-bin /tmp/ardur-exec-shim
+
+  ardur-run-e2e-seccomp:
+    name: ardur-run-e2e-seccomp
+    needs: bpf-generate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # docs/demo/enforce-e2e/Dockerfile builds ardur-kernelcaptured,
+      # ardur-exec-shim, and enforce-verify from source, and installs the
+      # ardur CLI + biscuit-python — everything run-seccomp.sh needs.
+      - name: Build the enforce-e2e demo image
+        run: docker build -f docs/demo/enforce-e2e/Dockerfile -t ardur-enforce-demo .
+
+      # --privileged --pid=host matches docs/demo/enforce-e2e.md's
+      # documented invocation: privileged for cgroup v2 + the seccomp
+      # install, --pid=host so the daemon's exec/exit correlation sees host
+      # PIDs. -disable-bpf-lsm forces the seccomp fallback tier regardless of
+      # what this runner's kernel would otherwise pick (GitHub-hosted
+      # runners may or may not have "bpf" in their active lsm= list; this
+      # job exists specifically to prove the seccomp tier, so it does not
+      # rely on that being one way or the other).
+      #
+      # Both modes run: enforce must show DENIED_EPERM and a hash-chain that
+      # verifies offline; permissive must show the connect reaching the
+      # kernel's real handling (logged, not blocked) — the same
+      # positive/negative pair docs/demo/enforce-e2e.md's BPF-LSM demo
+      # already establishes for that tier.
+      - name: Run the seccomp-tier ardur run --enforce demo
+        run: |
+          mkdir -p /tmp/ardur-demo-out/enforce
+          docker run --rm --privileged --pid=host \
+            -v /tmp/ardur-demo-out/enforce:/out \
+            ardur-enforce-demo \
+            bash /opt/ardur/demo/run-seccomp.sh enforce | tee /tmp/seccomp-enforce.log
+          grep -q "RESULT=DENIED_EPERM" /tmp/seccomp-enforce.log
+          grep -q "chain intact    = true" /tmp/seccomp-enforce.log
+          grep -q "attestation digest match = true" /tmp/seccomp-enforce.log
+          grep -q "ardur-exec-shim" /tmp/seccomp-enforce.log
+
+      - name: Run the seccomp-tier ardur run permissive control
+        run: |
+          mkdir -p /tmp/ardur-demo-out/permissive
+          docker run --rm --privileged --pid=host \
+            -v /tmp/ardur-demo-out/permissive:/out \
+            ardur-enforce-demo \
+            bash /opt/ardur/demo/run-seccomp.sh permissive | tee /tmp/seccomp-permissive.log
+          grep -q "RESULT=DENIED_ECONNREFUSED" /tmp/seccomp-permissive.log
+          grep -q "denied verdicts = 0" /tmp/seccomp-permissive.log

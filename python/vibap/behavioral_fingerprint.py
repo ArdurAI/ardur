@@ -17,18 +17,17 @@ the intervening steps.
 
 ## The mechanism
 
-At session start, the proxy poses a short set of **canary challenges** —
+The prototype poses a short set of **canary challenges** at session start —
 questions whose answers behaviorally fingerprint the specific
-(base_model, fine_tune_adapter, system_prompt) combination. The proxy
-hashes the responses and compares against a per-model expected
-fingerprint registered in the fingerprint registry. Mismatch → session
-refused BEFORE any real tool call fires.
+(base_model, fine_tune_adapter, system_prompt) combination. The challenger
+hashes the responses and compares against a per-model expected fingerprint.
+A custom caller can refuse the session before any real tool call fires.
 
 ## Adversarial robustness
 
 Three design points keep this honest:
 
-1. **Canary pools rotate.** The proxy picks N challenges from a pool of
+1. **Canary pools rotate.** The caller picks N challenges from a pool of
    M (N << M); an attacker who only sees one issuance can't enumerate
    the entire pool. Attackers who control a long-running session can
    observe responses, but responses are hashed per-challenge, so the
@@ -40,20 +39,21 @@ Three design points keep this honest:
    something else. E.g., the canonical refusal word, a specific word
    count, a classification outcome.
 
-3. **Fail-open by default; fail-closed per policy.** The env gate
-   ``ARDUR_BEHAVIORAL_FINGERPRINT`` controls activation. Unset →
-   no challenge issued (backward-compatible). Set to ``anthropic`` →
-   issued and a mismatch rejects the session. Operators who want the
-   strongest posture set it; noisy first-party dev environments don't.
+3. **Fail-open by default; fail-closed per library call.** The env gate
+   ``ARDUR_BEHAVIORAL_FINGERPRINT`` permits construction of the Anthropic
+   challenger, but does not wire this module into the production proxy.
+   ``enforce_fingerprint`` defaults to ``policy="fail_open"``: a definite
+   mismatch rejects, while provider uncertainty proceeds with diagnostics.
+   A custom integration must pass ``policy="fail_closed"`` to reject both.
 
 ## Integration with Lane E (semantic_judge)
 
-The sibling's `semantic_judge` Lane E has the same shape: an
-env-gated Anthropic-backed advisor called during session life. A
+The sibling's `semantic_judge` Lane E has the same prototype shape: an
+env-gated Anthropic-backed advisor intended for session-life calls. A
 future consolidation could unify both under one `anthropic_advisor`
 subsystem. For now they stay separate — fingerprinting is session-
-start-gate (blocking); semantic judging is per-tool-call advisory
-(non-blocking).
+start-gate logic, while semantic judging is per-tool-call advisory logic.
+Neither module is currently called by ``python/vibap/proxy.py``.
 
 ## Non-goals
 
@@ -63,7 +63,7 @@ start-gate (blocking); semantic judging is per-tool-call advisory
   closest related direction 3 (training-time attestation).
 - Not replacing Biscuit SPIFFE binding. This is a LAYER, not a
   substitute: a passing SPIFFE + Biscuit check is necessary but no
-  longer sufficient when fingerprinting is enabled.
+  longer sufficient in an integration that makes fingerprinting a gate.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ class CanaryChallenge:
     (lowercased, stripped) that a benign model produces.
 
     ``pool_tag`` groups challenges by the behavior they probe —
-    ``refusal``, ``arithmetic``, ``classification`` — so the proxy can
+    ``refusal``, ``arithmetic``, ``classification`` — so a caller can
     pick at least one from each pool on every challenge round, keeping
     the coverage uniform even as the pool rotates.
     """
@@ -112,7 +112,7 @@ class CanaryChallenge:
 
 @dataclass(frozen=True)
 class ChallengeResponse:
-    """The agent's answer to a single challenge plus proxy-side metadata."""
+    """The agent's answer to a single challenge plus caller-side metadata."""
 
     challenge_id: str
     answer_raw: str
@@ -148,7 +148,7 @@ class FingerprintVerdict:
 
 @runtime_checkable
 class BehavioralChallenger(Protocol):
-    """The session-start behavioral-check surface the proxy calls.
+    """The session-start behavioral-check surface a custom integration calls.
 
     Implementations must:
       1. Pose each challenge exactly once to the model.
@@ -156,12 +156,12 @@ class BehavioralChallenger(Protocol):
          per-challenge responses, and latency.
       3. Fail-open on any exception — never propagate; return
          ``FingerprintVerdict(verdict='UNSURE', ...)`` with the error
-         captured in ``reason``. The proxy decides what to do with
+         captured in ``reason``. The caller decides what to do with
          UNSURE based on policy (see ``enforce_fingerprint``).
     """
 
     def run(self, challenges: list[CanaryChallenge]) -> FingerprintVerdict:
-        ...
+        raise NotImplementedError
 
 
 class NullChallenger:
@@ -169,9 +169,8 @@ class NullChallenger:
 
     Used in tests and in environments where behavioral fingerprinting is
     deliberately disabled (``ARDUR_BEHAVIORAL_FINGERPRINT`` unset).
-    The proxy's fingerprint gate short-circuits to 'accept' for this
-    implementation, which preserves backward compatibility with every
-    session today.
+    A caller's fingerprint gate short-circuits to 'accept' for this
+    implementation. The production proxy does not currently call this module.
     """
 
     def run(self, challenges: list[CanaryChallenge]) -> FingerprintVerdict:
@@ -374,7 +373,11 @@ def enforce_fingerprint(
     seed: int | None = None,
     policy: str = "fail_open",
 ) -> FingerprintVerdict:
-    """The public entry point the proxy calls at session start.
+    """Library entry point for a custom session-start integration.
+
+    The production proxy does not call this helper. Passing an enforcement
+    policy here has no effect unless the caller consumes the returned verdict
+    as a gate.
 
     ``policy`` semantics:
       - ``fail_open`` (default): only FAIL rejects; OK and UNSURE proceed.

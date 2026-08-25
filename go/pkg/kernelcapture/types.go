@@ -8,6 +8,10 @@ type ProcessEventType string
 const (
 	ProcessEventExec ProcessEventType = "exec"
 	ProcessEventExit ProcessEventType = "exit"
+	// ProcessEventEnforce marks a BPF-LSM enforcement decision (deny/allowlist
+	// miss) projected into the generic ProcessEvent shape so it can be routed
+	// through the same Correlator as exec/exit events.
+	ProcessEventEnforce ProcessEventType = "enforce"
 )
 
 // ProcessEvent captures one kernel-observed process lifecycle observation.
@@ -28,9 +32,27 @@ type ProcessEvent struct {
 	ProcessStartMonotonicNS uint64
 	CgroupID                uint64
 	Comm                    string
+	ExecutableBasename      string
+	InterpreterBacked       bool                   `json:"-"`
+	LauncherScript          bool                   `json:"-"`
+	LauncherIdentity        LauncherObjectIdentity `json:"-"`
+	LauncherInterpreter     string                 `json:"-"`
 	ExitCode                int32
 	ObservedAt              time.Time
 	ObservedMonotonicNS     uint64
+}
+
+// LauncherObjectIdentity is the bounded, non-path identity captured for the
+// original script object before the kernel replaces the live executable with
+// its interpreter. It is internal evidence for locator equality, not public
+// provenance and not serialized into receipts or fingerprint observations.
+type LauncherObjectIdentity struct {
+	Present     bool
+	DeviceMajor uint32
+	DeviceMinor uint32
+	Inode       uint64
+	MountID     uint64
+	LinkCount   uint32
 }
 
 // ToolReceipt is the synthetic tool-call receipt we correlate kernel events to.
@@ -185,6 +207,37 @@ type CorrelatorOptions struct {
 	RestartGrace     time.Duration
 	CorrelationGrace time.Duration
 }
+
+// SyntheticKernelReceiptVerdict values for the Verdict field.
+const (
+	// SyntheticKernelReceiptVerdictCompliant means the observed kernel behaviour
+	// matched the active mission policy without intervention.
+	SyntheticKernelReceiptVerdictCompliant = "compliant"
+
+	// SyntheticKernelReceiptVerdictInsufficientEvidence means the correlator
+	// could not establish attribution with sufficient confidence.
+	SyntheticKernelReceiptVerdictInsufficientEvidence = "insufficient_evidence"
+
+	// SyntheticKernelReceiptVerdictDenied means the BPF-LSM enforcement layer
+	// returned -EPERM to the agent process (the syscall was blocked).
+	SyntheticKernelReceiptVerdictDenied = "denied"
+
+	// SyntheticKernelReceiptVerdictBlocked means an allowed but allowlisted op
+	// was observed targeting a path/network destination outside the allowlist;
+	// the event was logged but the syscall was not killed (permissive mode).
+	SyntheticKernelReceiptVerdictBlocked = "blocked"
+
+	// SyntheticKernelReceiptVerdictUnknown means the correlator observed the
+	// event but evidence is structurally outside the capture boundary — the
+	// daemon was down (restart gap) or coverage is otherwise unknowable. This
+	// mirrors the Python receipt's first-class "unknown" verdict for honest
+	// observation-gap abstention: the verifier genuinely cannot tell what
+	// happened. Callers MUST treat UNKNOWN as DENY (fail-closed). The
+	// distinction from INSUFFICIENT_EVIDENCE is that UNKNOWN records a genuine
+	// structural visibility gap, while INSUFFICIENT_EVIDENCE means the
+	// verifier tried but could not evaluate (transient operational failure).
+	SyntheticKernelReceiptVerdictUnknown = "unknown"
+)
 
 // SyntheticKernelReceipt is the kernel-effect synthetic receipt projection.
 type SyntheticKernelReceipt struct {

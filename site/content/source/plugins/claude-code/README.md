@@ -2,7 +2,7 @@
 title: "Ardur Claude Code Plugin"
 description: "This plugin protects Claude Code at the local tool boundary. `PreToolUse` runs"
 source_path: "plugins/claude-code/README.md"
-source_sha256: "ed8084415397e0e0e577667278ef59e5be6a2926a507dc7b5406d0dee255453f"
+source_sha256: "36197f3af657957f00b34d5945bcb38b9cda78a1572fe2b10651cba460801042"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -40,8 +40,21 @@ guardrail file:
 
 ```bash
 cd <ardur-repo>
-pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur profile init --template read-only --path ARDUR.md
+```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
+
+To see the conservative personal flow before configuring Claude Code, run:
+
+```bash
+ardur personal-firewall demo
 ```
 
 Open `ARDUR.md` in any text editor:
@@ -78,6 +91,41 @@ environment where Ardur is installed. It will look like:
 VIBAP_HOME=/path/to/.vibap claude --plugin-dir /path/to/plugins/claude-code
 ```
 
+Child delegation is disabled by default. To govern Claude Code child agents,
+create a private operator registry:
+
+```json
+{
+  "schema_version": "ardur.claude_code.child_policies.v1",
+  "agent_types": {
+    "Explore": {
+      "child_agent_id": "claude-code:explore",
+      "mission": "Read project evidence needed for the assigned question.",
+      "allowed_tools": ["Glob", "Grep", "Read"],
+      "resource_scope": ["/path/to/project", "/path/to/project/*"],
+      "max_tool_calls": 20,
+      "ttl_s": 900
+    }
+  }
+}
+```
+
+Then validate and enable exactly one delegation level:
+
+```bash
+chmod 600 ./claude-code-child-policies.json
+ardur protect claude-code \
+  --scope /path/to/project \
+  --child-policy-file ./claude-code-child-policies.json
+```
+
+The printed launch command includes `ARDUR_CC_CHILD_POLICY_FILE` with the
+resolved registry path. Setup rejects symlinks, non-regular or group/world
+accessible files, malformed/empty registries, nested `Agent`/`Task` authority,
+wildcard child tool authority, parent/child budget conflicts, and profiles that
+explicitly forbid `Agent`.
+Do not place credentials, prompts, or user data in this registry.
+
 ## Low-latency PreToolUse path
 
 `ardur protect claude-code` also tries to build a native PreToolUse daemon
@@ -85,6 +133,10 @@ client at `$VIBAP_HOME/claude-code-pre_tool_use` when a local C compiler is
 available. The hook wrapper attempts the fast path first, then falls back to
 Python handling when no daemon is listening, the native client is missing, or
 the daemon response is invalid.
+
+When `ARDUR_CC_CHILD_POLICY_FILE` is set, Ardur deliberately bypasses the
+parent-only daemon and uses the binding-aware Python path for every pre-hook.
+This avoids trading child reservation and `agent_id` enforcement for latency.
 
 To use the daemon path, start the daemon from the same Python environment where
 Ardur is installed before launching Claude Code:
@@ -112,13 +164,23 @@ Operational toggles:
   client when benchmarking or diagnosing the fast path; do not use it if you
   want Python fallback behavior.
 
-Claim boundary: the gated release test targets the native daemon-client path.
-Shell wrapper latency is recorded as telemetry because `/bin/bash` startup and
-workstation scheduler tails can dominate p95 even when the native hot path is
-fast.
+Claim boundary — per-platform numbers:
+
+- **In-process compute** (passport validation + scope check + receipt emit,
+  no IPC): p95 **<10ms**. Gated by `test_claude_code_daemon_hot_path_latency_target`.
+- **Full native daemon-client path** (native binary exec + Unix-socket
+  send/recv + response parse): p95 **<20ms**, measured ~15-17ms on Apple
+  Silicon macOS. Gated by `test_claude_code_native_daemon_client_latency_target`.
+- **Shell wrapper path**: latency recorded as telemetry only. `/bin/bash`
+  startup and workstation scheduler tails can dominate p95 even when the
+  native hot path is fast; enforcing a gate here would measure shell overhead,
+  not Ardur overhead.
 
 ## Built-In Options
 
+- `ardur profile init --template personal-firewall`: workspace-scoped reads
+  and edits, common secret-like argument blocks, no shell/network tools, and a
+  signed 40-action session cap.
 - `ardur profile init --template read-only`: safest first run. Allows reading
   and searching only.
 - `ardur profile init --template safe-coding`: allows local file edits inside
@@ -127,6 +189,12 @@ fast.
   a Markdown profile.
 - `ardur protect claude-code --scope . --mode safe-coding`: flag-based setup
   for technical users.
+- `ardur protect claude-code --scope . --mode personal-firewall`: the same
+  native capability defaults without a Markdown profile; use the profile when
+  you also want its secret-like argument rules.
+
+The action cap is enforced in governed tool calls. Ardur does not infer a
+dollar cost when Claude Code supplies no trusted signed billing telemetry.
 
 Advanced users can still use `ardur issue`, `ARDUR_MISSION_PASSPORT`,
 `ARDUR_CC_HOOK_DIR`, and custom Mission Passport fields directly. The Markdown
@@ -137,17 +205,47 @@ profile is a friendly layer over the same capabilities, not a replacement.
 1. `PreToolUse` fires.
 2. Ardur maps the Claude Code tool input into declared telemetry.
 3. Ardur checks the active Mission Passport: allowed tools, forbidden tools,
-   resource scope, cwd, and relevant policy backends.
+   resource scope, cwd, and relevant policy backends. Absolute local scope
+   paths are canonicalized so an in-scope symlink that resolves outside is
+   denied. This pre-dispatch check cannot distinguish hard-link aliases or
+   prevent path replacement before the tool's later filesystem operation.
 4. If permitted, Ardur appends a compliant receipt and lets Claude Code continue
    its normal permission flow.
 5. If denied, Ardur appends a violation receipt and returns
    `hookSpecificOutput.permissionDecision = "deny"`.
 6. `PostToolUse` records the SHA-256 digest of permitted tool responses as a
    chained evidence receipt.
-7. `SubagentStart` / `SubagentStop` record signed lifecycle receipts and append
-   per-trace subagent registry events. Tool receipts are attributed only when
-   Claude Code exposes an exact agent id or when transcript evidence binds one
-   child; otherwise they remain trace-level and are reported as unattributed.
+7. For a configured `Agent` call, the blockable pre-hook reserves a strictly
+   narrower child grant before dispatch. Unknown agent types, insufficient
+   parent budget, missing operation ids, and attenuation failures are denied.
+8. `SubagentStart` binds Claude's `agent_id` to one pending opaque reservation.
+   Because Claude does not provide the originating `tool_use_id` to this hook,
+   concurrent children of the same type are interchangeable only when their
+   normalized policies are identical. Any policy ambiguity, missing agent id,
+   stop-before-start sequence, or state uncertainty quarantines authority.
+9. Bound child `PreToolUse` calls are evaluated against the child grant; there
+   is no fallback to the parent passport. `PostToolUse` settles the exact
+   operation once. `PostToolUseFailure` hashes the failure evidence and
+   quarantines the child so an uncertain effect cannot be replayed.
+10. `SubagentStop` closes the exact bound handle and records a signed lifecycle
+    receipt. Reports attribute tools to a child only through the opaque
+    `agent_id` binding; otherwise they honestly report trace-only coverage.
+
+The durable binding registry stores opaque handles, hashes, policy
+fingerprints, states, and expiry timestamps only. It never uses prompt text,
+model output, platform event timestamps, transcript paths, or transcript
+contents as child identity. Agent dispatch receipt telemetry records only the
+agent type and argument hash, never prompt or description text. Private
+adapter/proxy state is kept under the trace's mode-0700
+`.child-authority/` directory; binding files use mode 0600. Recovery after a
+hook-process restart preserves pending/bound/closed/quarantined/expired state
+and fails closed on uncertain operations.
+
+The platform contract behind this design is documented by Anthropic's primary
+references: [Hooks reference](https://code.claude.com/docs/en/hooks) and
+[Subagents](https://code.claude.com/docs/en/sub-agents). `PreToolUse` can block;
+`SubagentStart`, `SubagentStop`, and post hooks are evidence/reconciliation
+points after the relevant platform event.
 
 ## Where receipts live
 
@@ -188,7 +286,7 @@ print('chain ok:', len(jwts), 'receipts')
 
 This plugin captures at the **tool-call boundary** — every Claude Code tool
 invocation (`Read`, `Edit`, `Write`, `Bash`, `WebFetch`, `WebSearch`,
-`Task`, MCP tools) is signed and chained.
+`Agent`, MCP tools) is signed and chained.
 
 What is **not** captured today:
 

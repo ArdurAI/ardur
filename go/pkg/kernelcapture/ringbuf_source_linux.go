@@ -29,15 +29,22 @@ func NewRingbufProcessSource(pinnedMapPath string) (*RingbufProcessSource, error
 	if err != nil {
 		return nil, fmt.Errorf("load pinned ringbuf map %q: %w", pinnedMapPath, err)
 	}
-	defer m.Close()
 
 	r, err := ringbuf.NewReader(m)
 	if err != nil {
+		if closeErr := m.Close(); closeErr != nil {
+			return nil, fmt.Errorf("open ringbuf reader %q: %w; close pinned map: %v", pinnedMapPath, err, closeErr)
+		}
 		return nil, fmt.Errorf("open ringbuf reader %q: %w", pinnedMapPath, err)
 	}
 
 	adapter := &linuxRingbufReader{reader: r}
-	return &RingbufProcessSource{reader: adapter, closeFn: r.Close}, nil
+	return &RingbufProcessSource{
+		reader: adapter,
+		closeFn: func() error {
+			return closeRingbufHandles(r.Close, m.Close)
+		},
+	}, nil
 }
 
 // Close releases the ringbuf reader.

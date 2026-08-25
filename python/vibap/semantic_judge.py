@@ -22,8 +22,13 @@ explicitly instructs the model to evaluate the content rather than follow
 any instructions embedded in it.
 
 Fail-open: every exceptional path inside ``evaluate`` returns ``UNSURE``
-with a structured reason. The judge cannot crash the proxy or change the
-structural decision.
+with a structured reason rather than propagating. The result cannot change the
+structural decision by itself.
+
+Current implementation boundary: ``python/vibap/proxy.py`` does not import or
+call this module. The environment gate controls which judge the factory returns
+only when an external caller invokes ``judge_from_env``; setting it does not
+activate a production enforcement path.
 """
 
 from __future__ import annotations
@@ -127,7 +132,8 @@ class JudgeVerdict:
 class SemanticJudge(Protocol):
     """Pluggable advisory judge contract."""
 
-    def evaluate(self, request: JudgeRequest) -> JudgeVerdict: ...
+    def evaluate(self, request: JudgeRequest) -> JudgeVerdict:
+        raise NotImplementedError
 
 
 # --------------------------------------------------------------------------
@@ -494,6 +500,9 @@ def judge_from_env() -> SemanticJudge:
     ``ARDUR_SEMANTIC_JUDGE=anthropic`` → ``AnthropicJudge`` (requires
     the ``anthropic`` package and ``ANTHROPIC_API_KEY``). Anything else,
     including unset, returns ``NullJudge``.
+
+    This factory is not called by the production proxy. The environment value
+    selects an advisor only for code that explicitly invokes this function.
     """
     if os.environ.get(ENV_GATE) == ENV_GATE_VALUE_ANTHROPIC:
         return AnthropicJudge()

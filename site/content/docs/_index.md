@@ -59,7 +59,7 @@ claim to source paths, tests, specs, or explicit limitations.
 
 {{< resource-grid >}}
 {{< resource-card title="Examples index" path="examples/README.md" status="public-now" meta="examples" >}}
-Runnable quickstarts, adapter specs, and protocol-only examples.
+Runnable quickstarts, no-key provider fixtures, and protocol-only examples.
 {{< /resource-card >}}
 {{< resource-card title="Testing guide" path="docs/TESTING.md" status="public-now" meta="validation" >}}
 Local and CI checks used to keep public claims honest.

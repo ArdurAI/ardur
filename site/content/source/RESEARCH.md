@@ -2,7 +2,7 @@
 title: "Research Notes"
 description: "This public repo shape is based on a scan of strong public AI infrastructure"
 source_path: "RESEARCH.md"
-source_sha256: "5644a2a302ee76624c8ba4976ab20888122ce53c7c3a21f244f6f2cf733abe97"
+source_sha256: "1a4c69977b6c18dbf3005e5ea0532e143e8d4e3e64bdf82df81f654e3061a32e"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -63,13 +63,9 @@ the implementation lineage, evidence model, or protocol research roots. The
 public repo should preserve those names when they are technically meaningful
 and avoid obsolete product codenames in public-facing copy.
 
-## Why This Repo Opens In Phases
+## What Is Public Now
 
-This repo opens in phases so the public surface stays understandable and
-truthful while code, deployment material, proof artifacts, and examples are
-curated into the public layout.
-
-The repo now includes:
+The repo includes:
 
 - intent
 - status
@@ -78,11 +74,13 @@ The repo now includes:
 - curated Python and Go runtime imports
 - the Ardur Personal Hub service and Claude Code plugin
 - runnable LangChain, LangGraph, and AutoGen framework examples plus the
-  Ardur Personal browser extension, desktop-observe adapter, and native-host
+  Ardur Personal browser extension, desktop-observe adapter, native-host, and
+  offline/no-key OpenAI Agents SDK and Google ADK fixtures
 - dedicated Python and Go CI workflows
 - the Hugo public evidence-site source
 - selected archival recordings
 
 The remaining work is a tagged packaged distribution, end-to-end proof paths
-that retire the archival-only media caveat, OpenAI Agents SDK and Google ADK
-adapter lifts, and broader deployment validation.
+that retire the archival-only media caveat, live-provider OpenAI Agents SDK and
+Google ADK wrapper evidence beyond the current no-key fixtures, and broader
+deployment validation.

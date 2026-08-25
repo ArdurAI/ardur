@@ -1,6 +1,6 @@
 # Comparisons and engineering responses
 
-A reader doing due diligence on Ardur ends up with the same set of questions every time. This directory is where those questions get serious technical answers — not marketing comparisons, but engineering documents that describe trade-offs honestly.
+A reader doing due diligence on Ardur ends up with the same set of questions every time. This directory is where those questions get serious technical answers — not marketing comparisons, but engineering documents that describe trade-offs directly.
 
 ## In this directory
 

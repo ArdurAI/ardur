@@ -2,7 +2,7 @@
 title: "Security Policy"
 description: "This file is the public reporting policy for Ardur."
 source_path: "SECURITY.md"
-source_sha256: "935c67e2d1a6d652875824cffee2bb4183d9a33f5be5fef63d8862c33aeffdd8"
+source_sha256: "d4869a975418372e438bdf8cd19325badb0796c21903b4e4a5ca39acf720c006"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -21,8 +21,8 @@ This file is the public reporting policy for Ardur.
 
 ## Supported versions
 
-Until Ardur has tagged releases, only the latest default branch is treated
-as supported for security fixes.
+The latest tagged release (v0.1.0+) and the default branch are supported
+for security fixes.
 
 ## Reporting a vulnerability
 

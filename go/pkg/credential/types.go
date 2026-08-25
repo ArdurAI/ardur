@@ -40,7 +40,7 @@ type Claims struct {
 	// Standard JWT claims
 	JWTID     string `json:"jti,omitempty"` // Unique credential identifier (prevents replay)
 	Issuer    string `json:"iss"`           // VIBAP Authority identifier
-	Subject   string `json:"sub"`           // Agent SPIFFE ID
+	Subject   string `json:"sub"`           // Agent identifier; SPIFFE ID when one is present
 	IssuedAt  int64  `json:"iat"`           // Unix timestamp of issuance
 	ExpiresAt int64  `json:"exp"`           // Unix timestamp of expiration
 	NotBefore int64  `json:"nbf,omitempty"` // Unix timestamp, not valid before
@@ -55,7 +55,7 @@ type Claims struct {
 	SD          []string `json:"_sd,omitempty"`     // Array of disclosure hashes
 
 	// VIBAP credential layers
-	Identity   *IdentityClaims   `json:"identity,omitempty"`   // Layer 1 — always disclosed
+	Identity   *IdentityClaims   `json:"identity,omitempty"`   // Layer 1 — optional; always disclosed when present
 	Provenance *ProvenanceClaims `json:"provenance,omitempty"` // Layer 2 — selectively disclosable
 	Intent     *IntentClaims     `json:"intent,omitempty"`     // Layer 3 — always disclosed
 	Baseline   *BaselineClaims   `json:"baseline,omitempty"`   // Layer 4 — selectively disclosable
@@ -114,6 +114,39 @@ func (s StatusValue) String() string {
 
 // --- VIBAP Credential Layers ---
 
+// OwnerIDAssurance describes how the owner/deployer attribution was proven.
+// Only self-asserted attribution is implemented. A verified state must not be
+// added until issuance verifies owner-controlled proof against configured
+// trust anchors.
+type OwnerIDAssurance string
+
+const (
+	// OwnerIDAssuranceSelfAsserted means the issuer signed the configured owner
+	// string as attribution but did not authenticate the ownership relation.
+	OwnerIDAssuranceSelfAsserted OwnerIDAssurance = "self_asserted"
+)
+
+// SPIFFEIDAssurance records how the workload SPIFFE ID entered the credential.
+// It is signed with the rest of the identity layer so that a relying party
+// holding only the credential can tell whether the issuer authenticated the
+// workload or merely signed a string it was handed.
+type SPIFFEIDAssurance string
+
+const (
+	// SPIFFEIDAssuranceCallerProvided means the issuer signed configured input
+	// but did not authenticate it against a workload identity provider. Every
+	// credential this codebase issues today carries this value.
+	SPIFFEIDAssuranceCallerProvided SPIFFEIDAssurance = "caller_provided"
+	// SPIFFEIDAssuranceProviderVerified means an identity provider resolved the
+	// workload identity before issuance.
+	//
+	// No issuance path emits this value yet. It is defined so that verifiers can
+	// implement the distinction now and so that binding issuance to SPIRE (S3,
+	// EPIC J #396 / EPIC K #397) is a change to the issuer alone rather than a
+	// second change to the credential format.
+	SPIFFEIDAssuranceProviderVerified SPIFFEIDAssurance = "identity_provider_verified"
+)
+
 // IdentityClaims represents Layer 1: Agent Identity.
 // Always disclosed — verifiers need to know who the agent is.
 //
@@ -123,13 +156,38 @@ type IdentityClaims struct {
 	// Per-instance SPIFFE ID: spiffe://ardur.dev/ns/{ns}/sa/{sa}/instance/{pod-uid}
 	SPIFFEID string `json:"spiffe_id"`
 
-	// SPIFFE ID of the deploying human or service account.
-	// Implements dual-identity binding per draft-ni-wimse-ai-agent-identity-02.
+	// Assurance for SPIFFEID. Verifiers must not treat caller-provided input as
+	// workload-provider-authenticated identity. Use SPIFFEIDProviderVerified
+	// rather than comparing this field directly, so that an absent or
+	// unrecognised value can never read as authenticated. Verification requires
+	// a recognised value, mirroring ADR-024 for owner_id_assurance.
+	SPIFFEIDAssurance SPIFFEIDAssurance `json:"spiffe_id_assurance"`
+
+	// SPIFFE-formatted deploying human or service-account attribution.
+	// This value is not an authenticated dual-identity binding.
 	OwnerID string `json:"owner_id"`
+
+	// Assurance for OwnerID. It is signed as part of the credential so a
+	// consumer cannot mistake configured attribution for SPIRE verification.
+	OwnerIDAssurance OwnerIDAssurance `json:"owner_id_assurance"`
 
 	// URL to the agent's A2A Agent Card (Google A2A protocol).
 	// Optional — only set if the agent participates in A2A discovery.
 	A2ACardRef string `json:"a2a_card_ref,omitempty"`
+}
+
+// SPIFFEIDProviderVerified reports whether the workload SPIFFE ID in this
+// identity layer was authenticated by a workload identity provider before
+// issuance.
+//
+// Only the exact SPIFFEIDAssuranceProviderVerified label qualifies. A
+// caller-provided label, an unrecognised label, an absent label — which is how
+// a credential issued before this field existed decodes — and a nil identity
+// layer all report false. Callers deciding whether to trust the SPIFFE ID as an
+// authenticated workload identity must use this, never a direct comparison, so
+// that no missing or unknown value can be read as authenticated.
+func (i *IdentityClaims) SPIFFEIDProviderVerified() bool {
+	return i != nil && i.SPIFFEIDAssurance == SPIFFEIDAssuranceProviderVerified
 }
 
 // ProvenanceClaims represents Layer 2: Supply Chain Provenance.

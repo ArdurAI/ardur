@@ -1,16 +1,18 @@
 .PHONY: help demo demo-down test test-python test-go lint lint-python lint-go \
-        build build-proxy build-hub clean cert
+        build build-proxy build-hub clean cert bench bench-protocol-test \
+        gen-agent-docs gen-agent-docs-check
 
 ARDUROOT := $(shell pwd)
 PYDIR   := python
 GODIR   := go
+DEMO_UP_ARGS ?=
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 	 awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 demo: ## Start the full MVP stack (docker compose up --build)
-	docker compose up --build
+	docker compose up --build $(DEMO_UP_ARGS)
 
 demo-down: ## Stop and remove the full MVP stack
 	docker compose down -v
@@ -54,7 +56,26 @@ cert: ## Generate self-signed TLS certs for local dev
 		print(f'cert: {cp}\nkey: {kp}\nfingerprint: {fp}')" 2>/dev/null || \
 	cd $(PYDIR) && python -c "from vibap.tls import resolve_tls_paths; r=resolve_tls_paths(); print(r if r else 'TLS disabled via ARDUR_NO_TLS')"
 
+# ── Benchmark ────────────────────────────────────────────────────────────────
+
+bench: ## Run the AuditBench evaluation harness and write results to bench-results/
+	cd $(GODIR) && go run ./cmd/benchcheck -- ./benchmark/testdata
+
+bench-protocol-test: ## Test the AuditBench evaluation protocol (no real annotation study)
+	cd $(GODIR) && go test -race -count=1 ./benchmark/independent ./cmd/auditbench-oracle ./cmd/auditbench-label ./cmd/auditbench-score
+
+# ── Agent docs ───────────────────────────────────────────────────────────────
+
+gen-agent-docs: ## Regenerate the generated command block in AGENTS.md
+	python3 scripts/gen-agent-docs.py
+
+gen-agent-docs-check: ## Fail if the AGENTS.md command block is stale (local equivalent of the CI gate)
+	python3 scripts/gen-agent-docs.py --check
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+
 clean: ## Remove build artifacts
 	find $(PYDIR) -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find $(PYDIR) -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find $(PYDIR) -type d -name '*.egg-info' -exec rm -rf {} + 2>/dev/null || true
+	rm -rf $(GODIR)/bench-results

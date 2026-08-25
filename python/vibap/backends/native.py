@@ -28,12 +28,14 @@ class NativeBackend:
         t0 = time.perf_counter()
         passport_dict = context.get("passport") or {}
         session_state = context.get("session") or {}
+        policy_metadata = context.get("policy_metadata")
         reasons = evaluate_native_denials(
             dict(passport_dict),
             tool_name,
             arguments,
             target,
             dict(session_state),
+            dict(policy_metadata) if isinstance(policy_metadata, dict) else None,
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         if reasons:

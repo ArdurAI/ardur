@@ -2,7 +2,7 @@
 title: "Security Model"
 description: "Ardur security is based on least privilege, explicit declaration, runtime"
 source_path: "docs/security-model.md"
-source_sha256: "32b173d46f52711b10ca8e0ef1aabafe2ea14f83d81acfa197e693fe329067b1"
+source_sha256: "c9acdfe5b9810cb3f802b6f65e80d1de31980fe893bda2cd0a45da4418db42a7"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["security-model"]
@@ -20,21 +20,32 @@ This page is generated from the public repository source file. Edit the source f
 Ardur security is based on least privilege, explicit declaration, runtime
 enforcement, and verifiable evidence.
 
-> **Conformance scope (updated 2026-05-14):** This page describes the
-> *design intent* of the protocol. The reference proxy in `python/vibap/`
-> implements all three conformance profiles — **Delegation-Core**,
-> **MIC-State**, and **MIC-Evidence** — as of the 2026-05-14 hardening
-> round. All four design-only gaps identified in the 2026-04-28 audit
-> are closed. See `docs/specs/verifier-contract-v0.1.md` Section 13
-> ("Reference Implementation Conformance Notes") for the current map.
+> **Conformance scope (2026-05-19 update):** The reference proxy in
+> `python/vibap/` implements all three conformance profiles of
+> `verifier-contract-v0.1`: **Delegation-Core**, **MIC-State**, and
+> **MIC-Evidence**. The four design-only gaps identified in the 2026-04-28
+> hostile audit are closed. See `docs/specs/verifier-contract-v0.1.md`
+> Section 13 ("Reference Implementation Conformance Notes") for the
+> conformance map and `python/tests/test_mic_conformance.py` for the
+> 29-test validation suite.
 
 ## Core security gates (enforced by the reference proxy)
 
 - tool calls must match declared tools
-- resource access must match declared scopes
+- resource access must match declared scopes; absent or empty
+  `resource_scope` grants no resource authority, and unrestricted access
+  requires the sole signed sentinel `["**"]`
 - delegated child authority must be a subset of parent authority
 - per-session passport replay defense (jti single-use)
-- KB-JWT nonce replay store and AAT proof-of-possession default-on
+- workload identity claims carry a signed `spiffe_id_assurance`. Every
+  credential this repository issues is `caller_provided`: the issuer signed a
+  configured SPIFFE ID, it did not authenticate the workload. The stronger
+  `identity_provider_verified` value is defined for verifiers but no issuance
+  path emits it yet. Missing and unrecognised values both fail verification
+  closed, on the same reasoning ADR-024 applies to `owner_id_assurance`
+- KB-JWT nonce replay store, AAT audience validation, and `cnf`-required
+  proof-of-possession by default; bearer compatibility requires an explicit
+  constructor opt-out
 - per-session and per-mission revocation via signed status lists
 - receipt chains emit and verify (hash-linked, JWS-signed)
 - declared-telemetry absence yields `insufficient_evidence`, not a
@@ -42,18 +53,35 @@ enforcement, and verifiable evidence.
 - approval-rate-limit when the Mission Declaration declares an approval
   policy
 
-## Additional conformance gates (enforced as of 2026-05-14)
+## Design-only gates (NOT yet enforced by the reference proxy)
 
-These checks are active under MIC-State and MIC-Evidence profiles:
+All `MUST` clauses from `verifier-contract-v0.1.md` that were previously
+design-only are now enforced as of the 2026-05-19 hardening round
+(t_dcbf560b). The reference proxy now implements:
 
-- visibility check (`visibility != "full"` → `insufficient_evidence`)
-- envelope-signature verification (fail-closed: absent or non-True → violation)
 - runtime-observed `observed_manifest_digest == MD.tool_manifest_digest`
-- per-grant `last_seen_receipts` tracking
-- MIC-Evidence hidden-hop detection and missing-parent-receipt detection
+- per-grant `last_seen_receipts` tracking with replay across proxy restarts
+- MIC-Evidence hidden-hop detection via visible receipt linkage
+- explicit invocation-envelope signature verification
 
-See `docs/specs/verifier-contract-v0.1.md` Section 13 for the full conformance
-map and `python/tests/test_mic_conformance.py` for the 29-test validation suite.
+No additional verifier layers are required for MIC-State or MIC-Evidence
+conformance.
+
+## Advisory AI controls (not proxy gates)
+
+`python/vibap/semantic_judge.py` and
+`python/vibap/behavioral_fingerprint.py` are experimental library surfaces,
+not reference-proxy gates. Neither module is imported by
+`python/vibap/proxy.py`. Their environment variables permit provider-backed
+object construction for an explicit caller; setting them does not activate an
+authoritative enforcement path.
+
+The semantic judge converts provider, parsing, and runtime exceptions into an
+advisory `UNSURE`. The fingerprint helper defaults to `policy="fail_open"`:
+raw `FAIL` rejects, while raw `UNSURE` proceeds with its diagnostic preserved.
+A custom caller can choose `policy="fail_closed"`, which rejects every result
+other than `OK`, but must own the resulting provider-availability, latency, and
+cost risks. See the [Advisory AI Controls reference](/__ardur_internal__/source/docs/reference/advisory-ai-controls/).
 
 ## Threats in scope
 
@@ -82,6 +110,19 @@ proven protections until their proof entries reach L5 for the claimed scope.
 
 ## Network and secrets posture
 
+Before enablement, `ardur preflight tool-server` can inspect strict JSON MCP and
+tool-server configuration for broad filesystem/network grants, shell execution,
+secret-like environment exposure, instruction-like metadata, missing content
+pins, and ungated side effects. It opens bounded input without following a
+final-component symlink and never starts the server, imports its code, reads
+referenced secrets, or contacts configured endpoints. Evidence is redacted and
+the generated policy skeleton keeps resource/network scopes empty by default.
+
+This scanner is advisory and incomplete by design. Tool annotations and
+descriptions are untrusted hints, and a clean static report does not establish
+runtime behavior, dependency safety, binary provenance, or endpoint identity.
+See [`Tool-Server Preflight v0.1`](/__ardur_internal__/source/docs/specs/tool-server-preflight-v0.1/).
+
 - SSRF-sensitive destinations should be denied by policy where the capability
   is claimed as release-gated.
 - Official artifacts and recordings should be reviewed for secrets before being
@@ -95,12 +136,32 @@ proven protections until their proof entries reach L5 for the claimed scope.
 | `standard_jws` | default receipt path for ordinary governed actions |
 | `strong_eat_tee` | required for high-risk delegated or side-effecting actions |
 
+## Decision taxonomy
+
+The reference proxy returns one of five governance decisions for every
+evaluated tool call. Only `PERMIT` allows execution; all others block
+the call (fail-closed discipline).
+
+| Decision | Meaning | Fail-closed? |
+|---|---|---|
+| `PERMIT` | Tool call is within declared scope, budget, and delegation policy. | N/A (allows execution) |
+| `DENY` | Tool call violates a mission-declared boundary (tool, resource, budget, or delegation). | Yes |
+| `VIOLATION` | A governance invariant is broken (mission tampering, passport revoked, memory integrity failure, delegation splice). More severe than `DENY` — indicates compromised credentials. | Yes |
+| `INSUFFICIENT_EVIDENCE` | The verifier cannot make a confident decision due to a transient operational failure (approval operator unavailable, state file corrupted, network error). Might be retried. | Yes |
+| `UNKNOWN` | The verifier observed the call but the evidence is structurally outside the capture boundary (visibility is not "full", tool-call descriptor is incomplete). The honest "I cannot know what happened" outcome. | Yes |
+
+The distinction between `INSUFFICIENT_EVIDENCE` and `UNKNOWN` matters for
+audit trails: `INSUFFICIENT_EVIDENCE` records a retryable operational
+failure, while `UNKNOWN` records a genuine observation gap. Both
+fail-closed as `DENY`. Public receipt verdicts map `INSUFFICIENT_EVIDENCE`
+to `insufficient_evidence` and `UNKNOWN` to `unknown`.
+
 ## Required posture
 
 When Ardur lacks evidence, it must deny or return `unknown` rather than
 claim safe success.
 
-## Honesty boundary
+## Enforcement boundary
 
 This document and the comparison docs under `docs/comparisons/` describe
 what the protocol guarantees and what the reference proxy enforces today.

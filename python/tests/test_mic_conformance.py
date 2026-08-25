@@ -16,13 +16,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from vibap.denial import DenialReason
-from vibap.passport import MissionPassport, issue_passport
-from vibap.proxy import Decision, GovernanceProxy
+from vibap.passport import (
+    MissionPassport,
+    derive_child_passport,
+    issue_passport,
+    verify_passport,
+)
+from vibap.proxy import Decision
 
-from tests.conftest import v01_required_md_extras
+from conftest import v01_required_md_extras
 
 DIGEST = "sha-256:" + hashlib.sha256(b"test-manifest").hexdigest()
 WRONG_DIGEST = "sha-256:" + hashlib.sha256(b"wrong-manifest").hexdigest()
@@ -42,6 +45,9 @@ def _issue_passport(
     parent_jti: str | None = None,
     mission_id: str | None = None,
     allowed_tools: list[str] | None = None,
+    delegation_allowed: bool = False,
+    max_delegation_depth: int = 0,
+    receipt_level: str = "minimal",
     extra: dict[str, Any] | None = None,
 ) -> str:
     """Issue a passport. ``tool_manifest_digest=None`` means use the
@@ -49,16 +55,20 @@ def _issue_passport(
     pass ``""`` to remove it from claims entirely."""
     mission = MissionPassport(
         agent_id="mic-test-agent",
+        mission_id=mission_id or FAKE_MISSION_ID,
         mission="MIC conformance test",
         allowed_tools=allowed_tools or ["read_file", "write_file"],
         forbidden_tools=["delete_file"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=10,
         max_duration_s=60,
+        delegation_allowed=delegation_allowed,
+        max_delegation_depth=max_delegation_depth,
     )
     extras = v01_required_md_extras(
         mission_id=mission_id or FAKE_MISSION_ID,
         conformance_profile=conformance_profile,
+        receipt_level=receipt_level,
     )
     if tool_manifest_digest is not None:
         if tool_manifest_digest:
@@ -247,7 +257,7 @@ class TestVisibilityCheck:
         )
         session = proxy.start_session(token)
         decision, reason = _call(proxy, session, visibility="partial")
-        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert decision == Decision.UNKNOWN
 
     def test_hidden_denied(self, proxy, private_key):
         token = _issue_passport(
@@ -257,7 +267,7 @@ class TestVisibilityCheck:
         )
         session = proxy.start_session(token)
         decision, reason = _call(proxy, session, visibility="hidden")
-        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert decision == Decision.UNKNOWN
 
     def test_missing_denied(self, proxy, private_key):
         token = _issue_passport(
@@ -269,7 +279,7 @@ class TestVisibilityCheck:
         args = _base_telemetry()
         del args["visibility"]
         decision, reason = proxy.evaluate_tool_call(session, "read_file", args)
-        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert decision == Decision.UNKNOWN
 
     def test_delegation_core_skips(self, proxy, private_key):
         token = _issue_passport(
@@ -320,7 +330,9 @@ class TestLastSeenReceiptsTracking:
         with proxy._last_seen_receipts_lock:
             assert s1.jti in proxy._last_seen_receipts
             assert s2.jti in proxy._last_seen_receipts
-            assert proxy._last_seen_receipts[s1.jti] != proxy._last_seen_receipts[s2.jti]
+            assert (
+                proxy._last_seen_receipts[s1.jti] != proxy._last_seen_receipts[s2.jti]
+            )
 
     def test_parent_receipt_required_for_child(self, proxy, private_key):
         # Inject parent_jti + delegation_chain into claims after session
@@ -397,6 +409,49 @@ class TestHiddenHopDetection:
         assert decision == Decision.INSUFFICIENT_EVIDENCE
         assert "missing_parent_receipt" in reason
 
+    def test_signed_mic_evidence_child_requires_parent_receipt(
+        self,
+        proxy,
+        private_key,
+        public_key,
+    ):
+        parent_token = _issue_passport(
+            private_key,
+            conformance_profile="MIC-Evidence",
+            tool_manifest_digest=DIGEST,
+            allowed_tools=["read_file"],
+            delegation_allowed=True,
+            max_delegation_depth=1,
+            receipt_level="counter_signed",
+        )
+        parent_session = proxy.start_session(parent_token)
+        child_token = derive_child_passport(
+            parent_token=parent_token,
+            public_key=public_key,
+            private_key=private_key,
+            child_agent_id="mic-evidence-child",
+            child_allowed_tools=["read_file"],
+            child_mission="perform evidence-governed work",
+        )
+        child_claims = verify_passport(
+            child_token,
+            public_key,
+            parent_token=parent_token,
+        )
+        assert child_claims["conformance_profile"] == "MIC-Evidence"
+        assert child_claims["receipt_policy"] == {"level": "counter_signed"}
+        assert child_claims["tool_manifest_digest"] == DIGEST
+        child_session = proxy.start_session(child_token)
+
+        decision, reason = _call(proxy, child_session)
+        assert decision == Decision.INSUFFICIENT_EVIDENCE
+        assert reason == f"missing_parent_receipt:{parent_session.jti}"
+
+        parent_decision, _ = _call(proxy, parent_session)
+        assert parent_decision == Decision.PERMIT
+        child_decision, _ = _call(proxy, child_session)
+        assert child_decision == Decision.PERMIT
+
     def test_mic_state_skips_hidden_hop(self, proxy, private_key):
         token = _issue_passport(
             private_key,
@@ -457,10 +512,11 @@ class TestConformanceProfileGating:
     def test_missing_profile_defaults_to_delegation_core(self, proxy, private_key):
         mission = MissionPassport(
             agent_id="no-profile-agent",
+            mission_id="urn:ardur:mission:mic:no-profile",
             mission="No conformance profile set",
             allowed_tools=["read_file"],
             forbidden_tools=[],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=5,
             max_duration_s=60,
         )
@@ -495,7 +551,9 @@ class TestReceiptDenialReasons:
         receipts = _read_receipts(proxy.receipts_log_path)
         assert len(receipts) >= 1
         assert receipts[0]["verdict"] == "violation"
-        assert receipts[0].get("internal_denial_code") == DenialReason.MANIFEST_DRIFT.value
+        assert (
+            receipts[0].get("internal_denial_code") == DenialReason.MANIFEST_DRIFT.value
+        )
 
     def test_receipt_records_envelope_tampered(self, proxy, private_key):
         token = _issue_passport(
@@ -508,7 +566,10 @@ class TestReceiptDenialReasons:
 
         receipts = _read_receipts(proxy.receipts_log_path)
         assert len(receipts) >= 1
-        assert receipts[0].get("internal_denial_code") == DenialReason.ENVELOPE_TAMPERED.value
+        assert (
+            receipts[0].get("internal_denial_code")
+            == DenialReason.ENVELOPE_TAMPERED.value
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -519,4 +580,8 @@ class TestReceiptDenialReasons:
 def _read_receipts(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]

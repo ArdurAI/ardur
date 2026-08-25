@@ -1,20 +1,80 @@
-FROM python:3.13-slim
+ARG PYTHON_IMAGE=python:3.13.14-slim-trixie@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
 
-LABEL org.opencontainers.image.title="Ardur Governance Proxy"
-LABEL org.opencontainers.image.description="Runtime governance proxy for AI agents"
-LABEL org.opencontainers.image.version="0.1.0"
+FROM ${PYTHON_IMAGE} AS wheel-builder
 
-RUN groupadd -r ardur --gid 65532 && useradd -r -g ardur --uid 65532 ardur
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+WORKDIR /build
+COPY python/ /build/python/
+RUN python -m pip wheel \
+    --no-cache-dir \
+    --no-deps \
+    --wheel-dir /wheels \
+    /build/python
 
-COPY python/ /home/ardur/python/
-WORKDIR /home/ardur/python
-RUN pip install --no-cache-dir . && \
-    mkdir -p /home/ardur/.ardur/tls /home/ardur/.ardur/sessions && \
-    chown -R ardur:ardur /home/ardur
+FROM ${PYTHON_IMAGE}
 
-USER ardur
+ARG OCI_VERSION=dev
+ARG OCI_REVISION=unknown
+ARG OCI_SOURCE=https://github.com/ArdurAI/ardur
+ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
+ARG BSDUTILS_VERSION=1:2.41.5-0+deb13u1
+ARG LOGIN_VERSION=1:4.16.0-2+really2.41.5-0+deb13u1
+
+LABEL org.opencontainers.image.title="Ardur Governance Proxy" \
+      org.opencontainers.image.description="Runtime governance and signed evidence for AI agent tool calls" \
+      org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.revision="${OCI_REVISION}" \
+      org.opencontainers.image.version="${OCI_VERSION}" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.vendor="ArdurAI"
+
+ENV HOME=/home/ardur \
+    VIBAP_HOME=/home/ardur/.ardur \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Remove this targeted upgrade once the base includes the CVE-2026-53615 fix.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --only-upgrade \
+      bsdutils=${BSDUTILS_VERSION} \
+      libblkid1=${UTIL_LINUX_VERSION} \
+      liblastlog2-2=${UTIL_LINUX_VERSION} \
+      libmount1=${UTIL_LINUX_VERSION} \
+      libsmartcols1=${UTIL_LINUX_VERSION} \
+      libuuid1=${UTIL_LINUX_VERSION} \
+      login=${LOGIN_VERSION} \
+      mount=${UTIL_LINUX_VERSION} \
+      util-linux=${UTIL_LINUX_VERSION} && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 65532 --system ardur && \
+    useradd --key UID_MAX=65532 --gid ardur --home-dir /home/ardur --no-create-home \
+      --shell /usr/sbin/nologin --uid 65532 ardur
+
+COPY packaging/oci/runtime-requirements.lock /tmp/runtime-requirements.lock
+RUN python -m pip install \
+      --no-cache-dir \
+      --require-hashes \
+      --requirement /tmp/runtime-requirements.lock && \
+    rm /tmp/runtime-requirements.lock
+
+COPY --from=wheel-builder /wheels/ardur-*.whl /tmp/
+RUN python -m pip install --no-cache-dir --no-deps /tmp/ardur-*.whl && \
+    python -m pip check && \
+    rm /tmp/ardur-*.whl && \
+    mkdir -p /home/ardur/.ardur/keys /home/ardur/.ardur/sessions /home/ardur/.ardur/tls && \
+    chown -R 65532:65532 /home/ardur
+
+WORKDIR /home/ardur
+USER 65532:65532
+VOLUME ["/home/ardur/.ardur"]
 EXPOSE 8443
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python3 -c "import urllib.request,ssl;c=ssl.create_default_context();c.check_hostname=False;c.verify_mode=ssl.CERT_NONE;urllib.request.urlopen('https://localhost:8443/health',context=c)" || exit 1
+STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["ardur", "start", "--host", "0.0.0.0", "--port", "8443"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python3", "-c", "import os,ssl,urllib.request;s='http' if os.environ.get('ARDUR_NO_TLS','').lower() in ('1','true','yes') else 'https';c=ssl.create_default_context();c.check_hostname=False;c.verify_mode=ssl.CERT_NONE;urllib.request.urlopen(f'{s}://localhost:8443/health',context=c,timeout=3)"]
+
+ENTRYPOINT ["ardur", "start", "--host", "0.0.0.0", "--port", "8443", "--keys-dir", "/home/ardur/.ardur/keys", "--state-dir", "/home/ardur/.ardur/sessions", "--log-path", "/home/ardur/.ardur/governance.jsonl"]

@@ -21,6 +21,9 @@ FRIENDLY_TOOL_ALIASES = {
     "shell commands": ["Bash"],
     "run commands": ["Bash"],
     "bash": ["Bash"],
+    "external network access": ["WebFetch", "WebSearch"],
+    "external network": ["WebFetch", "WebSearch"],
+    "network access": ["WebFetch", "WebSearch"],
 }
 
 PROFILE_TEMPLATES = {
@@ -69,7 +72,95 @@ Duration: 1d
 #   resource is Resource
 # ) when { resource.path like "/data/*" };
 """,
+    "personal-firewall": """# Ardur Personal Action Firewall
+Mode: personal firewall
+Mission: Help inside this project while keeping risky actions local and reviewable.
+Protect folder: .
+Max tool calls: 40
+Duration: 4h
+
+## Allow
+- Read files
+- Search files
+- Edit files
+- Write files
+
+## Block
+- Run shell commands
+- External network access
+
+## Forbid Rules
+- personal_secret_like_argument: forbid_when arg_contains api_key=, api-key=, access_token=, authorization: bearer, password=, BEGIN PRIVATE KEY, AKIA, ghp_, github_pat_, xoxb-
+""",
 }
+
+
+class InvalidProfilePathError(ValueError):
+    """Raised when a profile path is empty, whitespace-only, or escapes intended scope."""
+
+
+def _validate_profile_parent_path(target: Path) -> None:
+    """Fail before mkdir can turn parent-path failures into profile collisions."""
+
+    for parent in (target.parent, *target.parent.parents):
+        try:
+            parent.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise OSError("could not inspect Ardur profile parent path") from exc
+        if not parent.is_dir():
+            raise NotADirectoryError("Ardur profile parent path is not a directory")
+        return
+
+
+def _validate_profile_path(target: Path) -> None:
+    """Reject empty, whitespace-only, or traversal-escaping profile paths.
+
+    Runs before any filesystem operation so that invalid inputs cannot create
+    files with whitespace names or directory structures outside intended scope.
+    """
+
+    # Normalize the raw parts the caller supplied. We must NOT call resolve()
+    # first because resolve() on a non-existent relative path anchors to cwd and
+    # can mask the caller's intent; we inspect the literal path string instead.
+    parts = target.parts
+
+    # Reject empty path. Path("") has parts == ("",) on POSIX; treat that and a
+    # genuinely empty parts tuple both as invalid.
+    if not parts or all(part == "" for part in parts):
+        raise InvalidProfilePathError("Ardur profile path is empty")
+
+    # Reject whitespace-only paths and whitespace-only path components.
+    # Path("   ") has parts == ("   ",); Path(" foo/ARDUR.md") has leading space.
+    if all(part.strip() == "" for part in parts):
+        raise InvalidProfilePathError("Ardur profile path must not be whitespace-only")
+
+    for part in parts:
+        if part != "" and part.strip() == "":
+            raise InvalidProfilePathError(
+                "Ardur profile path must not contain whitespace-only components"
+            )
+        # Catch leading/trailing whitespace in a non-empty component.
+        if part != part.strip():
+            raise InvalidProfilePathError(
+                "Ardur profile path components must not have leading or trailing whitespace"
+            )
+
+    # Reject relative path traversal that escapes the current working directory.
+    # ``..`` components in a relative path can create directories outside the
+    # intended scope before the profile write fails; reject them up front.
+    if not target.is_absolute():
+        depth = 0
+        for part in parts:
+            if part == "..":
+                depth -= 1
+                if depth < 0:
+                    raise InvalidProfilePathError(
+                        "Ardur profile relative path must not escape the current directory"
+                    )
+            elif part not in ("", "."):
+                depth += 1
 
 
 _SCALAR_KEYS = {
@@ -172,8 +263,22 @@ def write_profile_template(
     if template not in PROFILE_TEMPLATES:
         raise ValueError(f"unknown Ardur profile template: {template}")
     target = Path(path).expanduser()
+    # Validate path shape before ANY filesystem operation so that empty,
+    # whitespace-only, or traversal-escaping inputs cannot create artifacts.
+    _validate_profile_path(target)
+    if target.exists() and target.is_dir():
+        raise IsADirectoryError(f"{target} is a directory; choose a Markdown file path")
+    # Reject non-regular files (devices, FIFOs, sockets) that exist but are
+    # neither directories nor regular files.  Suggesting --force for these
+    # would be destructive and misleading.
+    if target.exists() and not target.is_file():
+        raise InvalidProfilePathError(
+            "profile path exists but is not a regular file; "
+            "choose a writable Markdown file path such as ARDUR.md"
+        )
     if target.exists() and not force:
         raise FileExistsError(f"{target} already exists; use --force to replace it")
+    _validate_profile_parent_path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(PROFILE_TEMPLATES[template], encoding="utf-8")
     return target
@@ -219,7 +324,7 @@ def _parse_forbid_rule_items(items: list[str]) -> list[dict[str, Any]]:
 
 
 def _set_predicate(dst: dict[str, Any], key: str, raw: str) -> None:
-    if key == "tool_name_in":
+    if key in {"tool_name_in", "arg_contains"}:
         dst[key] = [v.strip() for v in raw.split(",") if v.strip()]
     else:
         dst[key] = raw.rstrip(",")

@@ -1,0 +1,135 @@
+# Tool-Server Preflight v0.1
+
+**Status:** implemented static-analysis contract
+
+**Report schema:**
+[`tool-server-preflight-report-v0.1.schema.json`](./tool-server-preflight-report-v0.1.schema.json)
+
+## 1. Purpose
+
+Tool-server configuration can grant an agent filesystem, network, secret, and
+command authority before Ardur sees a runtime call. The v0.1 preflight scanner
+examines that configuration before enablement and emits:
+
+1. stable risk findings with severity, redacted evidence, and remediation;
+2. deterministic JSON or Markdown;
+3. a deny-by-default Ardur capability-token and policy skeleton.
+
+The scanner is advisory. Runtime policy gates, resolved-argument authorization,
+receipts, and external observation remain separate controls.
+
+## 2. Accepted input
+
+The input MUST be one UTF-8 strict JSON object in one of these shapes:
+
+- an MCP client object containing `mcpServers`;
+- a VS Code-style object containing `servers`;
+- a static manifest containing `name` and `tools`.
+
+Per-server `tools` may be an array or object. `includeTools` is accepted as a
+closed list when a host config does not embed definitions. A server config with
+neither field receives `TS015 tool_surface_not_declared`; the scanner does not
+connect to the server to discover the missing catalog.
+
+For embedded tool definitions, `TS010` checks the tool-level `description` and
+inline description annotations under `inputSchema` or legacy `parameters`.
+Traversal follows JSON Schema 2020-12 schema-bearing applicators and common
+earlier-draft equivalents. Instance values under `default`, `examples`, and
+`const` are not treated as schemas. External `$ref` targets and custom
+vocabulary subschema locations are not resolved by this static scanner. An
+inline schema `description` with a non-string value fails the scan as invalid
+metadata rather than being silently ignored.
+
+YAML, JSON with duplicate members, non-finite numbers, empty server
+collections, oversized/deep documents, final-component symlinks, unsafe
+identifiers, and unsupported root shapes fail closed.
+
+## 3. Non-execution boundary
+
+The scanner MUST NOT:
+
+- launch commands, shells, packages, or containers;
+- import server implementation code;
+- interpolate or read environment-variable values;
+- load `envFile` contents;
+- resolve dependencies, query vulnerability databases, or verify signatures;
+- connect to configured URLs or probe network endpoints.
+
+The input is opened read-only with no-follow semantics, verified against the
+pre-opened inode, bounded to 1 MiB, and parsed with duplicate-key, depth, node,
+string-length, and finite-number checks. Reports omit the input path, literal
+environment values, descriptions, full command paths, arguments, and URLs.
+Unsafe schema-member names in evidence paths are replaced by their SHA-256.
+Sensitive evidence is represented by stable indicators and, where useful,
+SHA-256.
+
+## 4. Rules
+
+| Rule | Default severity | Indicator |
+|---|---:|---|
+| `TS001` | critical | shell interpreter used as the server command |
+| `TS002` | medium/high | package or image lacks an immutable pin |
+| `TS003` | medium | local command has no declared integrity value |
+| `TS004` | high | secret-like environment key references an external value |
+| `TS005` | critical | secret-like environment key has a literal/computed value |
+| `TS006` | high | broad environment file loading |
+| `TS007` | critical | host confirmation bypass (`trust: true`) |
+| `TS008` | high | broad filesystem root in scope or arguments |
+| `TS009` | high | remote transport without a domain allowlist |
+| `TS010` | high | instruction-like or concealed behavior in a tool or inline parameter-schema description |
+| `TS011` | medium | tool risk annotations are absent |
+| `TS012` | critical/high | generic shell/command tool, adjusted when a gate exists |
+| `TS013` | high | open-world/network tool without a domain allowlist |
+| `TS014` | high | write/destructive tool without an explicit policy gate |
+| `TS015` | medium | tool catalog is unavailable to static analysis |
+
+Protocol annotations are untrusted hints. Their presence may improve analysis,
+but it never proves behavior or replaces Ardur enforcement.
+
+## 5. Suggested controls
+
+The report's skeleton starts with:
+
+- `deny_by_default: true`;
+- only statically discovered tools in `allowed_tools`;
+- empty filesystem and network grants;
+- delegation disabled;
+- a bounded tool-call budget;
+- explicit approval for discovered shell, network, or side-effecting tools;
+- required content pins and runtime receipts.
+
+Operators MUST review and narrow this skeleton before compiling authority. The
+scanner never automatically enables a tool or grants resources.
+
+## 6. CLI and CI contract
+
+```text
+ardur preflight tool-server --config FILE
+    [--format json|markdown]
+    [--output FILE]
+    [--fail-on critical|high|medium|low|none]
+```
+
+Exit codes are stable:
+
+- `0`: scan completed and the selected threshold was not reached;
+- `1`: input/output/analysis failure;
+- `2`: scan completed and the selected severity threshold was reached.
+
+`--output` uses Ardur's atomic owner-only writer and prints a small JSON status
+envelope. Without `--output`, the report is written to stdout. JSON reports
+conform to the versioned schema and are deterministically ordered.
+
+## 7. Limits and non-claims
+
+A clean report does not demonstrate that a server is safe, that declared tools
+are complete, or that runtime behavior matches metadata. v0.1 does not provide
+dependency CVE lookup, binary provenance, signature verification, endpoint
+attestation, dynamic sandboxing, semantic prompt-injection detection, or live
+MCP interoperability evidence. Package-version checks are syntactic and do not
+verify a lockfile, registry artifact, or package digest.
+
+Representative fixtures live under
+[`examples/tool-server-preflight/`](../../examples/tool-server-preflight/), and
+the executable contract is covered by
+[`python/tests/test_tool_preflight.py`](../../python/tests/test_tool_preflight.py).

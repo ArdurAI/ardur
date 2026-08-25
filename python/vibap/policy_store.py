@@ -107,7 +107,7 @@ class PolicyStore(Protocol):
             non-empty  — the authoritative policy set for this mission.
                          Always overrides credential-supplied policies.
         """
-        ...
+        raise NotImplementedError
 
     def put_policies(
         self,
@@ -123,7 +123,7 @@ class PolicyStore(Protocol):
         proxy NEVER calls this method; only administrative tooling
         and tests do.
         """
-        ...
+        raise NotImplementedError
 
 
 @dataclass

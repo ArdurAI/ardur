@@ -2,7 +2,7 @@
 title: "Claude Agent Instructions"
 description: "Claude and Claude Code should follow the [Shared Agent Contract](shared.md),"
 source_path: "docs/agent-instructions/claude.md"
-source_sha256: "e674a89d2abb2b9c3a23ad2d016a060b30d218f5183d4af060a72565c822a3cb"
+source_sha256: "86d99ce5c67aa048f302a13b008c265aa4dd92154f039140995c8a7e13e6b427"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -29,9 +29,11 @@ plus the Claude-specific rules below.
 Then read:
 
 1. `.context/ARDUR_CONTEXT.md`
-2. `.context/ardur-graph.md`
-3. `AGENTS.md`
-4. `docs/engineering-standards.md`
+2. Graph artifacts only when its **Generated Graph** status is `available`
+3. When its graph status is `unavailable`, use the live source and applicable
+   workflow files; missing graph artifacts are optional in this path
+4. `AGENTS.md`
+5. `docs/engineering-standards.md`
 
 ## Claude-Specific Rules
 

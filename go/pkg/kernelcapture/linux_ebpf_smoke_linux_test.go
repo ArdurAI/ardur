@@ -4,9 +4,14 @@ package kernelcapture
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/cilium/ebpf/rlimit"
 )
 
 func TestLinuxEBPFExecSmoke(t *testing.T) {
@@ -256,6 +261,72 @@ func TestLinuxEBPFCgroupFilterPositiveSmoke(t *testing.T) {
 	)
 }
 
+func TestLinuxEBPFAgentRecognitionSmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF agent-recognition smoke")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := RunLinuxEBPFAgentRecognitionSmoke(ctx, 10*time.Second)
+	if err != nil {
+		t.Fatalf("RunLinuxEBPFAgentRecognitionSmoke failed: %v", err)
+	}
+	if result.Platform != "linux" || !result.BTFAvailable {
+		t.Fatalf("unexpected platform evidence: platform=%q btf=%t", result.Platform, result.BTFAvailable)
+	}
+	if result.AttachedTracepoint != linuxEBPFExecTracepoint {
+		t.Fatalf("tracepoint = %q, want %q", result.AttachedTracepoint, linuxEBPFExecTracepoint)
+	}
+	if result.Event.Type != ProcessEventExec || result.Event.ExecutableBasename != "codex" {
+		t.Fatalf("event = %+v, want script-backed codex exec", result.Event)
+	}
+	if !result.NegativeTimedOut || result.UnexpectedNegativeEvent {
+		t.Fatalf("hard negative evidence = timeout %t unexpected event %t", result.NegativeTimedOut, result.UnexpectedNegativeEvent)
+	}
+	t.Logf("kernel=%s basename=%q comm=%q pid=%d negative=%q negative_pid=%d negative_timeout=%t",
+		result.KernelRelease,
+		result.Event.ExecutableBasename,
+		result.Event.Comm,
+		result.Event.PID,
+		result.NegativeCommand,
+		result.NegativePID,
+		result.NegativeTimedOut,
+	)
+}
+
+func TestLinuxEBPFLauncherIdentitySmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF launcher-identity smoke")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := RunLinuxEBPFLauncherIdentitySmoke(ctx, 15*time.Second)
+	if err != nil {
+		t.Fatalf("RunLinuxEBPFLauncherIdentitySmoke failed: %v", err)
+	}
+	if result.Platform != "linux" || !result.LSMObserverAttached {
+		t.Fatalf("launcher observer labels = platform %q attached %t, want linux/true", result.Platform, result.LSMObserverAttached)
+	}
+	if result.PositiveMethod != AgentFingerprintMethodSHA256KernelLauncher || result.PositiveOutcome != AgentFingerprintOutcomeSuccess || result.PositiveObjectState != AgentFingerprintObjectLinked || result.PositiveMatchedRuleCount != 1 {
+		t.Fatalf("positive labels = method %q outcome %q object_state %q matched_rules %d", result.PositiveMethod, result.PositiveOutcome, result.PositiveObjectState, result.PositiveMatchedRuleCount)
+	}
+	if result.SpoofMethod != AgentFingerprintMethodSHA256KernelLauncher || result.SpoofOutcome != AgentFingerprintOutcomeLocatorMismatch || result.SpoofObjectState != AgentFingerprintObjectLinked {
+		t.Fatalf("spoof labels = method %q outcome %q object_state %q", result.SpoofMethod, result.SpoofOutcome, result.SpoofObjectState)
+	}
+	t.Logf("launcher_observer_attached=%t positive_method=%q positive_outcome=%q positive_object_state=%q positive_matched_rules=%d spoof_method=%q spoof_outcome=%q spoof_object_state=%q",
+		result.LSMObserverAttached,
+		result.PositiveMethod,
+		result.PositiveOutcome,
+		result.PositiveObjectState,
+		result.PositiveMatchedRuleCount,
+		result.SpoofMethod,
+		result.SpoofOutcome,
+		result.SpoofObjectState,
+	)
+}
+
 func TestLinuxEBPFCgroupFilterNegativeSmoke(t *testing.T) {
 	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
 		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF cgroup-filter smoke")
@@ -298,4 +369,166 @@ func TestLinuxEBPFCgroupFilterNegativeSmoke(t *testing.T) {
 		result.NegativeTargetPID,
 		result.NegativeTimedOut,
 	)
+}
+
+// TestLinuxEBPFPinnedRestartSmoke proves LoadAndAttachProcessExecEBPFPinned's
+// restart path: a second load against the same bpffs paths must bind its
+// ringbuf reader to the exact map the still-attached (pinned) programs write
+// into, not a freshly created map that nothing feeds. See issue #95.
+func TestLinuxEBPFPinnedRestartSmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF pinned-restart smoke")
+	}
+
+	_ = rlimit.RemoveMemlock()
+
+	dir := filepath.Join("/sys/fs/bpf", fmt.Sprintf("ardur-test-restart-%d", os.Getpid()))
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	paths := PinnedEBPFPaths{
+		ExecLinkPath:          filepath.Join(dir, "exec_tp_link"),
+		ExitLinkPath:          filepath.Join(dir, "exit_tp_link"),
+		EventsMapPath:         filepath.Join(dir, "process_lifecycle_events"),
+		DroppedEventsMapPath:  filepath.Join(dir, "process_lifecycle_events_dropped"),
+		FilterControlMapPath:  filepath.Join(dir, "process_lifecycle_filter_control"),
+		AllowedCgroupsMapPath: filepath.Join(dir, "process_lifecycle_allowed_cgroups"),
+	}
+
+	// ── First "boot": fresh load, attach, and pin. ──────────────────────
+	first, err := LoadAndAttachProcessExecEBPFPinned(paths)
+	if err != nil {
+		t.Fatalf("first LoadAndAttachProcessExecEBPFPinned: %v", err)
+	}
+	for _, p := range pinnedProcessExecPaths(paths) {
+		// A plain open(2) on a pinned bpf_link returns EIO (links require
+		// the BPF_OBJ_GET syscall path, unlike pinned maps/regular files),
+		// so check pin existence with Lstat rather than fileReadable.
+		if _, statErr := os.Lstat(p); statErr != nil {
+			first.Close()
+			t.Fatalf("expected pin at %s after first load: %v", p, statErr)
+		}
+	}
+	testCgroupID, err := currentUnifiedCgroupID()
+	if err != nil {
+		first.Close()
+		t.Fatalf("resolve test cgroup: %v", err)
+	}
+	if err := first.AllowLifecycleCgroup(testCgroupID); err != nil {
+		first.Close()
+		t.Fatalf("allow test cgroup before restart: %v", err)
+	}
+	if err := first.SetLifecycleCgroupFilterEnabled(true); err != nil {
+		first.Close()
+		t.Fatalf("enable lifecycle cgroup filter before restart: %v", err)
+	}
+
+	// Close the Go-side handles WITHOUT unpinning: this simulates the daemon
+	// process exiting while the kernel keeps the pinned links (and thus the
+	// attached programs) alive, per the documented Close contract.
+	first.Close()
+
+	// ── "Restart": reload from the same pins. ───────────────────────────
+	second, err := LoadAndAttachProcessExecEBPFPinned(paths)
+	if err != nil {
+		t.Fatalf("second (restart) LoadAndAttachProcessExecEBPFPinned: %v", err)
+	}
+	defer second.Close()
+	var controlKey uint32
+	var controlValue uint8
+	if err := second.filterControl().Lookup(&controlKey, &controlValue); err != nil {
+		t.Fatalf("read reopened filter control map: %v", err)
+	}
+	if controlValue != processExecFilterEnabled {
+		t.Fatalf("reopened filter control = %d, want enabled", controlValue)
+	}
+	var allowedValue uint8
+	if err := second.allowedCgroups().Lookup(&testCgroupID, &allowedValue); err != nil {
+		t.Fatalf("read reopened allowed-cgroups map: %v", err)
+	}
+	if allowedValue != processExecAllowedMarker {
+		t.Fatalf("reopened allowed marker = %d, want %d", allowedValue, processExecAllowedMarker)
+	}
+
+	source := NewRingbufProcessSourceFromRingbufReader(second.Reader())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "/usr/bin/true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start restart-probe command: %v", err)
+	}
+	targetPID := uint32(cmd.Process.Pid)
+	scope := SessionScope{PIDs: map[uint32]struct{}{targetPID: {}}}
+
+	haveExec, haveExit := false, false
+	for !(haveExec && haveExit) {
+		evt, ok, err := source.Next(ctx, scope)
+		if err != nil {
+			t.Fatalf("read ringbuf event from restarted handles (exec=%t exit=%t): %v", haveExec, haveExit, err)
+		}
+		if !ok {
+			continue
+		}
+		switch evt.Type {
+		case ProcessEventExec:
+			haveExec = true
+		case ProcessEventExit:
+			haveExit = true
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("restart-probe command failed: %v", err)
+	}
+	if !haveExec || !haveExit {
+		t.Fatalf("restart handles observed no events for pid %d: exec=%t exit=%t", targetPID, haveExec, haveExit)
+	}
+}
+
+// TestLinuxEBPFGuardTamperAuditSmoke proves RunTamperAudit against a real
+// BPF-LSM guard load: a freshly attached guard reports no drift, and both
+// tamper vectors the audit claims to catch — a kill_switch value written
+// outside SetKillSwitch, and a force-detached LSM link — are actually
+// detected against the live kernel. Requires BPF-LSM (see
+// InspectBPFLSMPreflight); gated the same way as the other privileged smokes
+// in this file.
+func TestLinuxEBPFGuardTamperAuditSmoke(t *testing.T) {
+	if os.Getenv("ARDUR_RUN_EBPF_SMOKE") != "1" {
+		t.Skip("set ARDUR_RUN_EBPF_SMOKE=1 to run privileged Linux eBPF guard tamper-audit smoke")
+	}
+
+	handles, err := LoadAndAttachProcessGuardEBPF()
+	if err != nil {
+		t.Fatalf("LoadAndAttachProcessGuardEBPF: %v", err)
+	}
+	defer handles.Close()
+
+	baseline := RunTamperAudit(handles, false)
+	if baseline.Drift {
+		t.Fatalf("expected no drift on freshly attached guard, checks=%+v", baseline.Checks)
+	}
+
+	// Tamper vector 1: kill_switch written outside SetKillSwitch (e.g. a
+	// privileged external `bpftool map update`). SetKillSwitch is the closest
+	// available stand-in for that external write; what matters for the audit
+	// is that the map value diverges from what the daemon itself expects.
+	if err := SetKillSwitch(PolicyMapsFromHandles(handles), true); err != nil {
+		t.Fatalf("engage kill switch: %v", err)
+	}
+	killSwitchDrift := RunTamperAudit(handles, false) // still expects disengaged
+	if !killSwitchDrift.Drift {
+		t.Fatalf("expected drift after kill switch was engaged outside expectation, checks=%+v", killSwitchDrift.Checks)
+	}
+	if err := SetKillSwitch(PolicyMapsFromHandles(handles), false); err != nil {
+		t.Fatalf("restore kill switch: %v", err)
+	}
+
+	// Tamper vector 2: a force-detached LSM link (e.g. `bpftool link detach`).
+	// link.Link.Detach() is the Go-side equivalent of that external action.
+	if err := handles.bprmLink.Detach(); err != nil {
+		t.Fatalf("detach lsm/bprm_check_security link: %v", err)
+	}
+	detachDrift := RunTamperAudit(handles, false)
+	if !detachDrift.Drift {
+		t.Fatalf("expected drift after force-detaching lsm/bprm_check_security, checks=%+v", detachDrift.Checks)
+	}
 }

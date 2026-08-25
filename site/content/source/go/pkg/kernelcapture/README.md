@@ -2,7 +2,7 @@
 title: "kernelcapture proof harness"
 description: "This package is the Ardur Linux proof harness for process-exec capture with paired process-exit lifecycle metadata and kernel-effect synthetic receipts."
 source_path: "go/pkg/kernelcapture/README.md"
-source_sha256: "9981c8fe547bb96e4971b6457ba65fbc9551847b991088706a008f4064f3da00"
+source_sha256: "68a87b5acd7617ca0fc7538523bdae7d69680e61de6b2444cd64b37172f5092a"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -27,62 +27,231 @@ This package is the Ardur Linux proof harness for process-exec capture with pair
   - `correlation_confidence`
   - `coverage_status`
   - `capture_loss`
+- Exposes a session-window `lifecycle_capture` summary on daemon
+  `session_status` / `end_session` responses. Both in-kernel ringbuf reserve
+  failures and malformed userspace records degrade every session active during
+  the same monotonic loss epoch and are never charged to whichever session
+  produces the next valid event. Source-specific counters remain distinct.
+- Accepts bounded, deduplicated `register_receipt` requests only from the peer
+  that owns the active session, then emits a session-window
+  `observability_gap` summary for captured process exec/exit effects. Empty
+  samples are `not_measured`; capture loss produces `degraded`; ratios never
+  claim universal file, network, provider-hidden, or host-effect coverage.
 - Enforces honesty behavior:
   - ambiguous attribution => `insufficient_evidence`
   - degraded/unknown coverage => `insufficient_evidence`
   - capture loss / consumer lag => degraded `insufficient_evidence`
   - daemon restart gap => unknown `insufficient_evidence`
 - Includes a Linux-only Phase 2 eBPF MVP smoke path that:
-  - loads the embedded `sched/sched_process_exec` + `sched/sched_process_exit` eBPF tracepoint programs.
+  - loads the embedded raw `sched_process_exec` + `sched/sched_process_exit` eBPF programs.
   - reads scoped process exec+exit lifecycle samples from a ringbuf.
   - runs deterministic root and child commands.
   - projects the observed exec and exit events through the same correlator.
-- Includes a local-only daemon custody scaffold and read-only preflight
-  inspector for the future root-owned config/state/socket/bpffs boundary
-  without installing, starting, binding, or pinning anything.
-- Defines the local JSON-line launch-wrapper-to-daemon protocol contract as
-  deterministic types/tests only; no server, listener, or socket bind exists.
+- Includes an opt-in exact-name agent-recognition foundation:
+  - validates and digests an embedded, release-bound four-agent registry;
+  - applies operator allow/deny overrides before installing separate bounded
+    Linux `comm` and successful-exec basename maps in the BPF prefilter;
+  - emits recognized exec candidates without weakening cgroup-scoped lifecycle
+    capture, while dropping noncandidate host execs and all host-wide exits;
+  - labels exact-name matches low-confidence and observe-only, with no
+    attestation, policy selection, process adoption, or enforcement.
+  - optionally validates a daemon-owned native-executable SHA-256 registry,
+    binds candidate PIDs with pidfds, and resolves bounded regular executable
+    objects through `/proc/<pid>/exe` in a fixed non-blocking worker pool;
+  - exposes only bounded outcome counters and canonical registry metadata,
+    never computed executable digests, full paths, argv, environment, or file
+    content; matches remain heuristic and observe-only.
+  - provides a separate [real-Linux paired overhead
+    harness](../../../docs/benchmarks/agent-recognition-overhead.md) with
+    deterministic CI/release profiles, raw six-order
+    baseline/reference/candidate observations, same-VM daemon CPU ratios, peak
+    RSS, authenticated health, exclusive capture/classification/fingerprint
+    ledgers, artifact digests, and fail-closed reviewed-budget enforcement; the
+    [strict report tests](https://github.com/ArdurAI/ardur/blob/__ARDUR_SOURCE_REF__/go/pkg/kernelcapture/agent_recognition_benchmark_test.go) bind those claims
+    to the committed evidence and budgets.
+- Includes a deterministic maintained-corpus evaluation gate:
+  - validates versioned samples, reviewed thresholds, sanitized provenance,
+    stable IDs, and explicit signal availability;
+  - reports confusion cells, per-class and aggregate ratios with numerator,
+    denominator, and 95% Wilson intervals, plus exact corpus/registry digests;
+  - gates supported-shape recall at 0.90 and hard-negative false positives at
+    zero without claiming population accuracy or identity assurance.
+- Includes a local-only dry-run daemon custody scaffold and read-only preflight
+  inspector for the root-owned config/state/socket/bpffs boundary, plus bounded
+  Linux Slice 2 installer surfaces: a privileged `ardur-sensor install`
+  command, TOCTOU-resistant custody path/config creation, a systemd unit with
+  `sd_notify`/watchdog integration, and BPF link pinning for restart survival.
+  These are development proof points, not production daemon readiness.
+- Defines the local JSON-line launch-wrapper-to-daemon protocol contract,
+  daemon-observed peer authorization, protocol/peer handshake contract, a Linux
+  SO_PEERCRED retrieval seam, a dry-run accept-loop plan, and a bounded
+  Unix-domain socket server for local daemon-control protocol tests. The server
+  binds only a local Unix socket, observes OS peer credentials before dispatch,
+  and enforces bounded request bytes/read timeout/concurrency. The socket proof
+  seam itself does not install/start a daemon, manage service lifecycle, create
+  daemon-owned directories, pin BPF maps, create cgroups, or perform live
+  enforcement.
+- Adds an in-memory `DaemonSessionRegistry` authorized-handler seam for
+  `register_session`, `session_status`, and `end_session`: it records bounded
+  session metadata only after protocol validation and peer authorization,
+  expires sessions by TTL, enforces a maximum active-session cap, rejects
+  duplicate active session ids, prunes/reuses inactive ids when admitting new
+  sessions, fails closed for unknown, ended, or expired sessions, and exposes a
+  safe active-session lookup, no-mutation handoff-plan builder,
+  daemon-internal status snapshot wrapper, in-memory snapshot retention handler,
+  narrow local `session_status` client proof, no-write status evidence-log
+  planning seam, in-memory JSONL evidence-log entry builder, injected
+  in-memory append/rotation planner, injected filesystem append/rotation
+  adapter, and daemon-side status evidence-log append handler for internal
+  daemon status/handoff code. It is not persistent
+  storage, not a production daemon session manager, and not live kernel
+  enforcement.
+- Adds a no-mutation `BuildDaemonSessionHandoffPlan` seam that projects active
+  registered session metadata into daemon-owned hashed state/runtime paths and a
+  cgroup allowlist precondition sequence. It validates custody roots and a
+  non-zero cgroup id but does not create files/directories, assign cgroups,
+  mutate BPF maps, or enable live enforcement.
+- Adds a local launch-wrapper session proof seam that converts generic CLI
+  boundary metadata into a validated `register_session` request and a
+  correlator seed receipt for the root process; it does not run commands,
+  start a daemon, or capture subprocess/file/network side effects.
 
 ## Capture sources
 
 1. `RunLinuxEBPFExecSmoke` (Linux only, privileged/gated)
-   - Loads the generated eBPF object with `github.com/cilium/ebpf`.
-   - Attaches `sched/sched_process_exec` and `sched/sched_process_exit` through tracefs/debugfs.
-   - Emits metadata-only lifecycle events: PID, PPID, TID, PID namespace id, cgroup id, monotonic timestamp, `comm`, and `exit_code` on exit events.
-   - Does not collect argv, env, file contents, network destinations, or raw command payloads.
+   - Loads the generated lifecycle eBPF object with `github.com/cilium/ebpf`.
+   - Attaches successful exec through the raw `sched_process_exec` tracepoint and exit through `sched/sched_process_exit`.
+   - Emits metadata-only lifecycle events: PID, PPID, TID, PID namespace id, cgroup id, monotonic timestamp, `comm`, bounded executable basename on recognized execs, optional bounded script-object/interpreter identity for private fingerprint resolution, and `exit_code` on exit events.
+   - Does not collect argv, full executable paths, env, file contents, network destinations, or raw command payloads.
 
-2. `RingbufProcessSource` (Linux only)
+2. `RunLinuxEBPFLauncherIdentitySmoke` (Linux only, privileged/gated)
+   - Attaches the separate non-enforcing BPF-LSM launcher observer to the lifecycle object's shared bounded state map.
+   - Proves a real script-backed positive through kernel observation and userspace hashing, then proves a live rewritten-cmdline spoof ends as `locator_mismatch` even when the named file has trusted content.
+   - Returns and logs only bounded method, outcome, object-state, attachment, and matched-rule-count labels; temporary paths, argv, environment, object IDs, computed digests, and file content are never result fields.
+
+3. `RingbufProcessSource` (Linux only)
    - Uses `github.com/cilium/ebpf` ringbuf reader.
    - Supports an already-pinned ringbuf map path for future daemon integration.
    - Reads a fixed process-lifecycle sample layout.
    - Carries kernel monotonic sample timestamps separately from wall clock.
 
-3. `ReplayEventSource` (fallback)
+4. `ReplayEventSource` (fallback)
    - Unprivileged deterministic source for local tests/demos.
    - Used to prove correlation/loss/restart behavior when privileged loading is unavailable.
 
-4. `BuildDaemonCustodyPlan` (local-only scaffold)
+5. `BuildDaemonCustodyPlan` (local-only scaffold)
    - Validates root-owned daemon custody defaults for `/etc/ardur`, `/var/lib/ardur`, `/run/ardur`, and `/sys/fs/bpf/ardur`.
    - Rejects repository-controlled privileged paths when repository-root validation context is provided, plus daemon installation flags, daemon startup flags, permissive modes, and non-permission mode bits.
    - Returns a dry-run plan only. It does not create directories, bind sockets, pin maps, install service units, or start a privileged process.
 
-5. `InspectDaemonCustodyPreflight` (read-only preflight)
+6. `InspectDaemonCustodyPreflight` (read-only preflight)
    - Uses an injectable stat/realpath interface so tests do not depend on host `/etc`, `/var`, `/run`, or `/sys/fs/bpf`.
    - Reports structured findings with check name, path category, expected and observed owner/mode, verdict, and remediation text.
    - Distinguishes missing paths, symlinks, wrong type, wrong owner, wrong mode, non-permission mode bits, symlink-aware realpath escape, and repository-controlled privileged paths.
    - Treats setuid, setgid, and sticky bits as fail-closed custody failures in this scaffold. That strictness is intentional: inherited special bits must be investigated before a future privileged daemon trusts the path.
    - Does not repair paths, create directories, bind sockets, pin maps, install services, or start a daemon.
 
-6. `DaemonProtocolRequest` / `DecodeDaemonProtocolRequest` (contract only)
+7. `DaemonProtocolRequest` / `DecodeDaemonProtocolRequest` / `DecodeDaemonProtocolResponse` (contract only)
    - Specifies newline-delimited deterministic JSON for `health`, `register_session`, `end_session`, and `session_status`.
    - Accepts unprivileged session/mission/trace identity plus observed root PID, PID namespace, cgroup id, event class, and bounded TTL.
-   - Rejects unknown protocol versions, unknown event classes, missing session ids, unbounded TTLs, trailing non-JSON data, and client-supplied daemon-owned privileged path fields.
-   - Applies the privileged-field guard recursively and case-insensitively so future clients cannot hide daemon-owned filesystem authority inside metadata.
-   - Keeps daemon-owned config/socket/bpffs paths out of client messages.
+   - Rejects unknown protocol versions, unknown event classes, missing session ids, missing root PID, missing cgroup id, unbounded TTLs, trailing non-JSON data, and client-supplied daemon-owned privileged path fields.
+   - Decodes client-visible responses with unknown-field rejection so daemon-internal fields such as handoff plans, root PID, or cgroup data cannot accidentally become accepted wire response fields.
+   - Applies the daemon-controlled field guard recursively and case-insensitively so future clients cannot hide daemon-owned filesystem authority or OS-observed peer identity inside metadata.
+   - Keeps daemon-owned config/socket/bpffs paths and observed peer credentials out of client messages.
+
+8. `AuthorizeObservedDaemonPeer` (contract only)
+   - Authorizes daemon-observed local socket peer credentials, including UID/GID/PID plus process-start ticks, against an explicit UID/GID allowlist.
+   - Fails closed when the daemon has no allowlist, when PID observation is missing, when process-start identity is missing or zero, or when the observed UID/GID does not match policy.
+   - Does not retrieve peer credentials, open sockets, inspect process trees, or accept client-supplied identity or process-start evidence.
+
+9. `AuthorizeDaemonProtocolPeerFromAcceptedUnixConnection` (contract bridge)
+   - Reads exactly one request from an already-accepted `*net.UnixConn` and decodes it via `DecodeDaemonProtocolRequest`.
+   - Observes peer identity from the same connection via `ObserveLinuxUnixPeerCredentials` (Linux SO_PEERCRED plus bounded `/proc/<pid>/stat` start-time seam).
+   - Joins request, peer credentials, and daemon-observed process-start identity through `AuthorizeDaemonProtocolPeer` for fail-closed authorization before any future handler runs.
+   - Fails closed for malformed payloads, credential-observation failures, missing or zero process-start identity, unsupported custody context, fabricated custody plans, or unauthorized peers.
+   - Does not bind, listen, accept, install/start, or mutate privileged filesystem state.
+
+10. `BuildDaemonAcceptLoopPlan` (dry-run contract only)
+   - Validates the future accept-loop invariants before runtime implementation: valid daemon custody plan, explicit UID/GID allowlist, bounded request bytes, bounded read timeout, and bounded concurrency.
+   - Records the sequence a later daemon must follow: read-only custody preflight, bind only the validated local socket path, accept bounded local connections, observe OS peer credentials, decode one bounded JSON-line request, authorize request+peer, then dispatch a validated protocol method.
+   - Marks every step as not executed so the plan remains reviewable data, not daemon behavior.
+   - Does not open, bind, listen on, accept, install, start, expose a daemon, manage session state, or perform live enforcement.
+
+11. `DaemonUnixSocketServer` (local Unix socket server)
+   - Binds the validated custody-plan socket path, or a test-only override path, as a Unix-domain socket with restrictive `0600`/`0660` mode.
+   - Runs a bounded accept loop with maximum request bytes, read timeout, and maximum concurrent connections.
+   - Reads one JSON-line daemon protocol request, observes peer credentials from the accepted Unix connection, authorizes request+peer against the daemon custody plan and explicit UID/GID allowlist, then dispatches only authorized requests to an injected handler.
+   - Fails closed for malformed requests, peer-observation failure, unauthorized peers, socket-path mismatch, invalid config, or concurrency exhaustion.
+   - Does not install or start a daemon service, create/repair daemon custody directories, pin maps, create cgroups, manage persistent/production session state, or perform live enforcement.
+
+12. `DaemonSessionRegistry` plus session-status snapshot retention helpers (in-memory authorized handler)
+   - Handles authorized `register_session`, `session_status`, and `end_session` requests after `DaemonUnixSocketServer` or another caller has joined the request to daemon-observed peer credentials and process-start identity.
+   - Stores bounded metadata in memory: session/mission/trace ids, root PID, PID namespace, cgroup id, event classes, sanitized handoff metadata, registration/expiry/end timestamps, and peer-observation evidence including `PeerProcessStartTimeTicks`.
+   - Fails closed for duplicate active sessions, active-session capacity exhaustion, missing sessions, expired sessions, ended sessions, invalid protocol payloads, canceled request contexts, invalid custody for status snapshots, and missing snapshot sinks when the snapshot-retention handler is used.
+   - Rejects `session_status` and `end_session` attempts from the same UID/GID/PID when the daemon-observed process-start identity differs, so PID reuse cannot satisfy ownership by PID alone.
+   - Exposes `ActiveSession`, `BuildActiveSessionHandoffPlan`, and `HandleAuthorizedSessionStatusSnapshot` so internal daemon status/handoff code can reuse the same active-session lookup before projecting a no-mutation handoff plan from daemon-owned custody paths.
+   - Adds `DaemonSessionStatusSnapshotSink` and `DaemonSessionStatusSnapshotHandler` so a bounded local socket handler can retain detached daemon-internal status snapshots in memory while returning only a narrow protocol response.
+   - Adds `SendDaemonSessionStatusRequest`, a narrow local Unix-socket client proof for `session_status` responses that decodes only the bounded `DaemonProtocolResponse` schema and rejects unknown response fields.
+   - Keeps daemon-internal status snapshots out of the client-visible JSON-line protocol response: the runtime daemon may add reviewed `enforcement` and `lifecycle_capture` evidence summaries, but not custody paths, handoff plans, raw process metadata, or internal snapshot state.
+   - Does not persist state across daemon restarts, install/start a service, create/assign cgroups, pin maps, execute commands, or perform live kernel enforcement.
+
+13. `BuildDaemonSessionStatusEvidenceLogPlan` (no-write evidence-log plan)
+   - Projects a retained daemon-internal `DaemonSessionStatusSnapshot` into daemon-owned evidence-log plan data: schema version, entry kind, session-id-hashed evidence-log path under the validated state directory, snapshot entry digest, and bounded retention/rotation parameters.
+   - Fails closed for invalid custody, non-`session_status` or non-OK protocol responses, inactive/mismatched snapshot status, mismatched session IDs, zero `AsOf`, missing or already-executed handoff plan steps, custody-path escapes, forbidden raw/secret/path metadata, and invalid retention bounds.
+   - Marks every evidence-log step as `Executed=false` and does not write evidence-log files, create directories, rotate logs, persist snapshots, expand the client protocol, mutate BPF maps, assign cgroups, or enable live enforcement.
+
+14. `BuildDaemonSessionStatusEvidenceLogEntry` (in-memory JSONL entry builder)
+   - Converts a reviewed no-write evidence-log plan plus its retained daemon-internal status snapshot into one newline-terminated JSONL entry in memory.
+   - Revalidates the plan shape and snapshot integrity, recomputes the snapshot digest, fails closed on digest/session mismatch or max-entry overflow, and preserves the no-write/no-append/no-rotation boundary in the entry metadata.
+   - Does not create evidence-log files, append/write records, create directories, rotate logs, persist snapshots, expand the client protocol, mutate BPF maps, assign cgroups, or enable live enforcement.
+
+15. `NewDaemonSessionStatusEvidenceLogAppendState` / `PlanDaemonSessionStatusEvidenceLogAppend` (in-memory append/rotation planner)
+   - Opens an injected fake evidence-log state from a reviewed plan and computes append, rotate-then-append, or reject decisions against detached in-memory JSONL entries.
+   - Revalidates the no-write plan and canonical entry bytes, bounds byte accounting with overflow guards, derives simulated rotation paths inside the evidence-log directory, and retains accepted entries only as copied memory.
+   - Does not open files, create directories, create evidence-log files, perform a real append/write path, execute rotation, persist state, expand the client protocol, mutate BPF maps, assign cgroups, or enable live enforcement.
+
+16. `ApplyDaemonSessionStatusEvidenceLogFilesystemAppend` (injected filesystem append/rotation adapter)
+   - Reuses the in-memory append planner, then executes a minimal `MkdirAll` + append or `MkdirAll` + rotate-rename + append sequence through a caller-injected filesystem surface.
+   - Uses the reviewed daemon-owned logical evidence-log paths, restrictive `0700`/`0600` modes, canonical JSONL validation, and state commit only after injected filesystem operations succeed; rotation append failure attempts rollback before returning a fail-closed error.
+   - Test coverage maps those daemon-owned logical paths into `t.TempDir()`; the package does not provide production daemon wiring, ownership changes, fsync/crash recovery, restart-safe persistence, service lifecycle, protocol expansion, BPF map mutation, cgroup assignment, or live enforcement.
+
+17. `DaemonSessionStatusEvidenceLogHandler` (daemon-side injected evidence-log wiring)
+   - For successful authorized `session_status` requests, composes the daemon-internal snapshot, no-write evidence-log plan, JSONL entry builder, per-session append state, and injected filesystem append adapter before retaining the snapshot.
+   - Forwards health/register requests to the registry without snapshot or evidence-log side effects.
+   - On successful `end_session`, removes the session's in-memory evidence-log append state without touching the evidence-log filesystem.
+   - On failed `session_status` with status `ended` or `expired`, also removes stale in-memory append state.
+   - Fails closed when the snapshot sink or filesystem is missing, and returns only the narrow `DaemonProtocolResponse` without evidence-log paths, digests, handoff plans, root PID, or cgroup fields.
+   - Provides `RemoveEvidenceLogAppendState` as a public lifecycle hygiene seam for external daemon code.
+   - Uses caller-provided filesystem implementations and temp-dir path-mapping tests; it does not install/start a daemon, provide a default production filesystem writer, change ownership, fsync, provide crash recovery, mutate cgroups/BPF maps, or enable live enforcement.
+
+18. `BuildDaemonSessionHandoffPlan` (no-mutation plan)
+   - Projects an active daemon registry record into daemon-owned hashed session state/runtime paths under the validated custody plan, plus a cgroup allowlist precondition sequence for the non-zero observed cgroup id.
+   - Fails closed for inactive/expired/ended sessions, missing session/root PID/cgroup id, missing process-lifecycle event class, invalid custody plan, mismatched socket path, missing daemon-observed peer evidence, unsupported credential source, or forbidden raw/secret/path metadata.
+   - Marks every handoff step as `Executed=false` and does not write checkpoint files, create runtime directories, create/assign cgroups, mutate BPF maps, pin maps, or enable live enforcement.
+
+19. `AuthorizeDaemonProtocolPeer` (contract only)
+   - Joins a validated daemon protocol request to daemon-observed peer credentials before future socket handling.
+   - Requires the observation source to be explicit (`linux_so_peercred` today) and the observed socket path to match the validated dry-run daemon custody plan.
+   - Fails closed for invalid protocol messages, missing/unsupported credential sources, socket-path mismatches, invalid custody plans, or unauthorized UID/GID policy.
+   - Does not open, bind, listen on, accept, or inspect a socket; it does not perform the peer-credential syscall itself.
+
+20. `ObserveLinuxUnixPeerCredentials` (Linux seam)
+   - Reads SO_PEERCRED from an already-open `*net.UnixConn` and returns the daemon-owned `DaemonSocketPeerObservation` used by the handshake contract.
+   - Requires the caller to supply the daemon-owned socket path and records `linux_so_peercred` as the explicit credential source.
+   - Fails closed for a nil connection, missing socket path, SO_PEERCRED errors, or missing peer PID.
+   - Does not open, bind, listen on, accept, install, start, or expose a daemon; Linux socketpair coverage exercises the retrieval seam without creating a public service.
+
+21. `BuildLaunchWrapperSessionProof` (contract only)
+   - Converts no-privilege launch-wrapper metadata for a generic CLI boundary into a validated daemon `register_session` request.
+   - Seeds userspace correlation with the launched root PID, optional PID namespace, optional process-start monotonic timestamp, required cgroup id, and launch wall-clock time.
+   - Adds redacted handoff metadata, including command argv digest and argc, without storing raw argv, working directory text, executable paths, or environment values in the proof.
+   - Rejects missing session id, empty command, missing root PID, missing cgroup id, missing start time, unbounded TTL, daemon-owned path or peer-credential fields, and raw command/path/environment handoff fields.
+   - Does not execute a command, open sockets, retrieve SO_PEERCRED, start/install a daemon, mutate cgroups or BPF maps, or capture subprocess/file/network side effects.
 
 ## Generate the eBPF object
 
-The generated object is committed with the package so ordinary unit tests do not require clang.
+The generated lifecycle, launcher-identity, and guard objects are committed with
+the package so ordinary unit tests do not require clang.
 Regenerate only in a Linux dev image with clang/LLVM/libbpf headers available:
 
 ```bash
@@ -118,15 +287,18 @@ Rootless privileged containers can still fail if memlock cannot be raised or tra
 
 ## Privileged boundary
 
-This package does not install a daemon, persist maps, open a service, or manage system startup.
-`BuildDaemonCustodyPlan` records the local-only future daemon boundary as validated data:
+This package now contains bounded Linux-only Slice 2 daemon installer, systemd service, and link-pinning surfaces, but they remain development proof points rather than production daemon readiness. The `ardur-sensor install` path runs kernel capability checks, calls `InstallDaemonCustody` to create root-owned config/state custody paths with fd-anchored TOCTOU protections, installs a systemd unit, and can run `systemctl daemon-reload` plus `systemctl enable --now` unless `--no-enable` is supplied. The systemd unit declares `Type=notify`, watchdog timing, restrictive runtime/state/log directories, and BPF-related capability bounds. `LoadAndAttachProcessExecEBPFPinned` pins tracepoint links, the ringbuf, its monotonic producer-drop counter, the cgroup filter maps, and the opt-in recognition maps as one restart-surviving generation; stale partial generations are removed before fresh attach. The only live socket behavior in this package remains the bounded local Unix-domain `DaemonUnixSocketServer` test/proof seam described above; the only daemon session state remains the in-memory `DaemonSessionRegistry` proof seam, which binds ownership to daemon-observed UID/GID/PID plus process-start ticks for status/end requests; the daemon session/cgroup handoff remains a no-mutation plan seam. These are not release packages, cross-platform installers, persistent production session managers, cgroup assignment mechanisms, universal agent identity, auto-attestation, auto-governance, file/network side-effect capture, or production lifecycle guarantees.
+`BuildDaemonCustodyPlan` records the local-only dry-run daemon custody boundary as validated data:
 
 - config path: `/etc/ardur/kernelcapture-daemon.toml`, `0600`, root-owned
 - state dir: `/var/lib/ardur/kernelcapture`, `0700`, root-owned
 - runtime dir/socket: `/run/ardur/kernelcapture/control.sock`, socket `0600` or `0660`, root-owned
-- bpffs dir/map: `/sys/fs/bpf/ardur/process_lifecycle_events`, root-owned
+- bpffs dir/maps: `/sys/fs/bpf/ardur/process_lifecycle_events` and
+  `/sys/fs/bpf/ardur/process_lifecycle_events_dropped`, root-owned
 
-It rejects repository-controlled privileged paths when repository-root validation context is supplied, and it rejects any request to install or start a daemon in this scaffold slice. `InspectDaemonCustodyPreflight` adds the read-only on-disk inspection layer: symlink-aware realpath checks, owner/mode/type observations, and structured remediation text. The scaffold records the future daemon-boundary requirement that repo/mission config must not select privileged map paths; integration with mission config remains future work. For the future daemon path:
+It rejects repository-controlled privileged paths when repository-root validation context is supplied, and the dry-run plan itself rejects any request to install or start a daemon. The separate Slice 2 installer path is explicitly Linux/root-gated and documented above. `InspectDaemonCustodyPreflight` adds the read-only on-disk inspection layer: symlink-aware realpath checks, owner/mode/type observations, and structured remediation text. `AuthorizeObservedDaemonPeer` adds the fail-closed local-client authorization contract: peer identity must be observed by daemon-owned socket code, include non-zero process-start ticks, and match an explicit UID/GID allowlist; it is never supplied by JSON clients. `AuthorizeDaemonProtocolPeer` adds the no-mutation handshake contract: a decoded protocol request is not considered ready for handling until it is paired with daemon-observed peer credentials from an explicit OS source, carries the same process-start identity, and the observed socket path matches the dry-run custody plan. `ObserveLinuxUnixPeerCredentials` is the Linux SO_PEERCRED retrieval seam for an accepted Unix connection and reads the bounded `/proc/<pid>/stat` start-time field for PID-reuse hardening. `BuildDaemonAcceptLoopPlan` records accept-loop invariants as dry-run data: a valid custody plan, explicit peer allowlist, bounded request bytes, bounded read timeout, bounded concurrency, and not-yet-executed steps for preflight, bind, accept, peer observation, request decoding, authorization, and dispatch. `DaemonUnixSocketServer` implements the bounded local Unix-domain socket proof seam around those invariants for protocol/authorization testing, but it still does not install/start a daemon service, create custody directories, pin maps, create cgroups, manage persistent/production daemon session state, or perform live enforcement. `BuildDaemonSessionHandoffPlan` projects an active registry record into daemon-owned hashed state/runtime paths and a non-zero cgroup allowlist precondition sequence, but it remains reviewable plan data and does not write filesystem state, assign cgroups, mutate BPF maps, pin maps, or enable live enforcement.
+
+`BuildLaunchWrapperSessionProof` records how a future `ardur run -- <cli>` launch wrapper can hand the daemon validated root-process metadata and a redacted correlator seed, but it does not execute commands, open sockets, or perform kernel capture. Repository/mission config still must not control privileged map paths; production daemon deployments also still require review beyond this proof surface:
 
 - `pinnedMapPath` must come from daemon-owned privileged config.
 - Repository / mission config must not control privileged map-path selection.
@@ -140,21 +312,28 @@ It rejects repository-controlled privileged paths when repository-root validatio
 ## Concurrency contract
 
 - `Correlator` is goroutine-safe and supports concurrent receipt registration and event correlation.
-- Race-safety is covered by `go test -race ./pkg/kernelcapture`.
+- Race-safety is covered by `go test -race ./...` on Linux, including daemon
+  policy-map publication, tier selection, in-flight use, withdrawal, and close
+  ordering.
 
 ## Current MVP claim boundary
 
 Allowed claim after the gated smoke passes:
 
-Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus a no-mutation daemon custody preflight inspector and local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary.
+Ardur has a local Linux eBPF process-lifecycle proof with optional daemon-populated cgroup allowlist filtering, plus bounded Slice 2 Linux daemon installer/systemd/link-pinning development surfaces: `ardur-sensor` preflight/install/status/uninstall commands, fd-anchored root custody path/config creation, a systemd unit with `sd_notify`/watchdog/capability/path boundaries, and BPF tracepoint-link/ringbuf-map pinning for restart survival. The boundary also includes a no-mutation daemon custody preflight inspector, fail-closed local peer authorization/handshake contracts with daemon-observed process-start identity binding and PID-reuse mismatch rejection, a Linux SO_PEERCRED retrieval seam that also reads bounded `/proc/<pid>/stat` start-time ticks, a dry-run accept-loop invariant plan, a bounded local Unix-domain socket server proof seam for authorized daemon protocol requests, a capped in-memory daemon session registry for `register_session`/`session_status`/`end_session` with safe active-session lookup and process-start-bound ownership checks, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots, in-memory snapshot retention through daemon-side handler/sink seams, a narrow local `session_status` client proof, a no-write status evidence-log planning seam with schema, digest, and rotation bounds, an in-memory JSONL evidence-log entry builder that revalidates digest/session/size before any future write path, an injected in-memory append/rotation planner that computes accept/rotate/reject decisions without filesystem writes, an injected filesystem append/rotation adapter that executes validated logical-path writes through caller-provided filesystem implementations with temp-dir test coverage, daemon-side `session_status` evidence-log wiring that appends successful status snapshots through that injected filesystem surface before retaining them without expanding the client protocol, a no-mutation daemon session handoff plan that derives hashed state/runtime paths and cgroup allowlist preconditions, a local JSON-line protocol contract scaffold for the future launch-wrapper-to-daemon boundary, and a no-privilege launch-wrapper session proof seam that turns generic CLI boundary metadata into a validated `register_session` request plus root-process correlator seed.
 
 Not claimed yet:
 
 - production daemon readiness
-- daemon installation or startup
-- socket server/listener implementation
-- daemon-created per-session cgroups
+- production daemon install/start/service-management readiness beyond the bounded Linux/systemd Slice 2 installer proof surface
+- persistent/production daemon session-state management or live enforcement wiring
+- production persistent status snapshot/evidence-log storage, fsync/crash recovery, or restart-safe evidence retention
+- daemon-owned evidence-log service wiring, ownership changes, or production append/rotation lifecycle
+- client-visible protocol expansion from daemon-internal status snapshots
+- daemon-created/assigned per-session cgroups
 - universal CLI capture
+- multi-signal or high-confidence agent identity, auto-attestation, process
+  adoption, or auto-governance
 - file/network/privilege side-effect capture
 - macOS/Windows kernel capture
 - unprivileged/no-install eBPF support

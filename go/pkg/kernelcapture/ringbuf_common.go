@@ -10,13 +10,24 @@ import (
 	"time"
 )
 
-const ringbufRecordMinSize = 60
+const ringbufRecordMinSize = 216
 
 const defaultRingbufPollInterval = 200 * time.Millisecond
 
 type ringbufSampleReader interface {
 	SetDeadline(time.Time)
 	ReadSample() ([]byte, error)
+}
+
+func closeRingbufHandles(readerClose, mapClose func() error) error {
+	var closeErr error
+	if readerClose != nil {
+		closeErr = errors.Join(closeErr, readerClose())
+	}
+	if mapClose != nil {
+		closeErr = errors.Join(closeErr, mapClose())
+	}
+	return closeErr
 }
 
 func nextRingbufProcessEvent(ctx context.Context, reader ringbufSampleReader, scope SessionScope, pollInterval time.Duration) (ProcessEvent, bool, error) {
@@ -32,7 +43,7 @@ func nextRingbufProcessEvent(ctx context.Context, reader ringbufSampleReader, sc
 
 	for {
 		deadline := time.Now().Add(pollInterval)
-		if ctxDeadline, ok := ctx.Deadline(); ok {
+		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
 		reader.SetDeadline(deadline)
@@ -88,7 +99,15 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 	if err := binary.Read(reader, binary.LittleEndian, &rawType); err != nil {
 		return ProcessEvent{}, err
 	}
-	if _, err := reader.Seek(7, 1); err != nil {
+	var launcherKind uint8
+	if err := binary.Read(reader, binary.LittleEndian, &launcherKind); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherIdentityPresent uint8
+	if err := binary.Read(reader, binary.LittleEndian, &launcherIdentityPresent); err != nil {
+		return ProcessEvent{}, err
+	}
+	if _, err := reader.Seek(5, 1); err != nil {
 		return ProcessEvent{}, err
 	}
 
@@ -124,21 +143,63 @@ func decodeRingbufRecord(raw []byte) (ProcessEvent, error) {
 	if err := binary.Read(reader, binary.LittleEndian, &exitCode); err != nil {
 		return ProcessEvent{}, err
 	}
+	var launcherLinkCount uint32
+	if err := binary.Read(reader, binary.LittleEndian, &launcherLinkCount); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherInode uint64
+	if err := binary.Read(reader, binary.LittleEndian, &launcherInode); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherMountID uint64
+	if err := binary.Read(reader, binary.LittleEndian, &launcherMountID); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherDeviceMajor uint32
+	if err := binary.Read(reader, binary.LittleEndian, &launcherDeviceMajor); err != nil {
+		return ProcessEvent{}, err
+	}
+	var launcherDeviceMinor uint32
+	if err := binary.Read(reader, binary.LittleEndian, &launcherDeviceMinor); err != nil {
+		return ProcessEvent{}, err
+	}
 
 	commBuf := make([]byte, 16)
 	if _, err := reader.Read(commBuf); err != nil {
 		return ProcessEvent{}, err
 	}
 	comm := strings.TrimRight(string(commBuf), "\x00")
+	executableBasenameBuf := make([]byte, 64)
+	if _, err := reader.Read(executableBasenameBuf); err != nil {
+		return ProcessEvent{}, err
+	}
+	executableBasename := strings.TrimRight(string(executableBasenameBuf), "\x00")
+	interpreterBasenameBuf := make([]byte, 64)
+	if _, err := reader.Read(interpreterBasenameBuf); err != nil {
+		return ProcessEvent{}, err
+	}
+	interpreterBasename := strings.TrimRight(string(interpreterBasenameBuf), "\x00")
 
 	return ProcessEvent{
-		Type:                decodeProcessEventType(rawType),
-		PID:                 pid,
-		PPID:                ppid,
-		TID:                 tid,
-		PIDNamespaceID:      uint64(pidNamespaceID),
-		CgroupID:            cgroupID,
-		Comm:                comm,
+		Type:               decodeProcessEventType(rawType),
+		PID:                pid,
+		PPID:               ppid,
+		TID:                tid,
+		PIDNamespaceID:     uint64(pidNamespaceID),
+		CgroupID:           cgroupID,
+		Comm:               comm,
+		ExecutableBasename: executableBasename,
+		InterpreterBacked:  launcherKind != 0,
+		LauncherScript:     launcherKind == 1,
+		LauncherIdentity: LauncherObjectIdentity{
+			Present:     launcherIdentityPresent == 1,
+			DeviceMajor: launcherDeviceMajor,
+			DeviceMinor: launcherDeviceMinor,
+			Inode:       launcherInode,
+			MountID:     launcherMountID,
+			LinkCount:   launcherLinkCount,
+		},
+		LauncherInterpreter: interpreterBasename,
 		ExitCode:            exitCode,
 		ObservedMonotonicNS: monotonicNS,
 	}, nil

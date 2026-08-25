@@ -1,0 +1,12 @@
+{
+  "agent_id": "provider-adapter-no-key-fixture",
+  "mission": "Exercise local no-key provider adapter fixtures through visible tool dispatch boundaries",
+  "allowed_tools": ["read_file", "summarize_text", "provider_opaque_tool"],
+  "forbidden_tools": ["write_file"],
+  "resource_scope": ["workspace/*"],
+  "max_tool_calls": 10,
+  "max_duration_s": 300,
+  "delegation_allowed": false,
+  "max_delegation_depth": 0,
+  "allowed_side_effect_classes": ["none"]
+}

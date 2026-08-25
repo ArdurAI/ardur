@@ -15,9 +15,16 @@ This section lists hosted documentation and mirrored artifacts generated from `.
 
 ## Hosted Artifacts
 
+- [`agent-docs.yml`](/__ardur_internal__/repo/.github/workflows/agent-docs.yml)
+- [`agent-recognition-benchmark.yml`](/__ardur_internal__/repo/.github/workflows/agent-recognition-benchmark.yml)
 - [`codeql.yml`](/__ardur_internal__/repo/.github/workflows/codeql.yml)
+- [`dependabot-workflow-mirrors.yml`](/__ardur_internal__/repo/.github/workflows/dependabot-workflow-mirrors.yml)
 - [`hugo-site.yml`](/__ardur_internal__/repo/.github/workflows/hugo-site.yml)
+- [`kernel-enforce.yml`](/__ardur_internal__/repo/.github/workflows/kernel-enforce.yml)
 - [`link-check.yml`](/__ardur_internal__/repo/.github/workflows/link-check.yml)
+- [`linux-benchmark.yml`](/__ardur_internal__/repo/.github/workflows/linux-benchmark.yml)
+- [`oci-proxy.yml`](/__ardur_internal__/repo/.github/workflows/oci-proxy.yml)
+- [`python-package.yml`](/__ardur_internal__/repo/.github/workflows/python-package.yml)
 - [`secret-scan.yml`](/__ardur_internal__/repo/.github/workflows/secret-scan.yml)
 - [`tests.yml`](/__ardur_internal__/repo/.github/workflows/tests.yml)
 - [`validate-formats.yml`](/__ardur_internal__/repo/.github/workflows/validate-formats.yml)

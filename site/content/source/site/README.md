@@ -2,7 +2,7 @@
 title: "Ardur Public Evidence Site"
 description: "This Hugo project renders Ardur's public evidence and documentation surface."
 source_path: "site/README.md"
-source_sha256: "8173550c7af3a9d6506914ca2d9e3647ee84a98131a4af9bc60b61043ad1b857"
+source_sha256: "dc495a11378eaf9f5bca0cf396ff3dc1102ab722b08043dac73a82a5a688c919"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["documentation"]
@@ -21,6 +21,16 @@ This Hugo project renders Ardur's public evidence and documentation surface.
 It is a publishing layer over the root repo, not a replacement for the source
 docs.
 
+## Published-site freshness
+
+The hosted GitHub Pages site reflects the last public Pages deployment, not
+necessarily the latest `dev` commit. Pushes to `dev` validate and build the site
+in CI, but the current workflow only uploads and deploys the Pages artifact from
+`main`. Treat the source-link commit shown on each hosted page as the freshness
+boundary: if it points at an older commit, use a clean source checkout or local
+Hugo build for newer `dev` documentation until a reviewed public deploy or main
+promotion happens.
+
 ## Local preview
 
 ```sh
@@ -35,11 +45,23 @@ Extended.
 ```sh
 python3 site/scripts/sync_source_docs.py --check
 python3 site/scripts/validate_claims.py
+python3 -m unittest discover -s site/tests -p 'test_*.py' -v
 hugo --source site --gc --minify
+python3 site/scripts/validate_rendered_docs_links.py site/public
+python3 site/scripts/validate_llms_output.py site/public
 ```
 
 `validate_claims.py` fails when a claim card is missing required evidence
 metadata or points at a repo path that does not exist.
+
+The build also generates `site/public/llms.txt` from Hugo's regular-page
+collection. It lists current public pages first, generated source-backed
+repository documentation second, and already-public pages without the
+`public-now` maturity label under the standard `Optional` section. Entries are
+ordered by their rendered routes; drafts and files outside Hugo's public
+content tree are not eligible. `validate_llms_output.py` checks the required
+plain-text structure, canonical HTTPS routes, duplicate URLs, rendered targets,
+path traversal, and source-provenance placeholders.
 
 `sync_source_docs.py` generates the `site/content/source/` mirrors from all
 public Markdown files in the repo, including root docs, articles, package

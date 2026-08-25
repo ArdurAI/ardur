@@ -14,6 +14,56 @@ SITE_ROOT = REPO_ROOT / "site"
 CLAIMS_PATH = SITE_ROOT / "data" / "claims.json"
 CONTENT_ROOT = SITE_ROOT / "content"
 
+REQUIRED_BOUNDARY_CLAIM_ID = "configured-tool-boundary"
+PUBLIC_FRAMING_PATHS = (
+    Path("README.md"),
+    Path("STATUS.md"),
+    Path("go/README.md"),
+    Path("site/content/_index.md"),
+    Path("site/content/build/python-go.md"),
+    Path("site/content/get-started.md"),
+    Path("site/content/how-it-works.md"),
+    Path("site/content/proof.md"),
+)
+AUDITBENCH_PROTOCOL_PATH = Path("docs/specs/auditbench-evaluation-protocol-v0.1.md")
+LEGACY_AUDITBENCH_PROFILE_PATH = Path(
+    "docs/specs/auditbench-independent-evaluation-v0.1.md"
+)
+AUDITBENCH_FRAMING_PATHS = (
+    Path("README.md"),
+    Path("ROADMAP.md"),
+    Path("STATUS.md"),
+    Path("REPRODUCE.md"),
+    Path("docs/TESTING.md"),
+    Path("docs/known-limitations.md"),
+    Path("docs/specs/README.md"),
+    Path("Makefile"),
+    Path("go/cmd/auditbench-score/main.go"),
+)
+FORBIDDEN_PUBLIC_PHRASES = (
+    "blocks anything outside that boundary",
+    "proof of every decision",
+    "no bypass, no direct access",
+    "the agent never touches resources it shouldn't",
+    "captures every claude code tool-call invocation",
+    "complete implementation of the attenuating authorization token",
+    "every single tool call went through ardur first",
+    "every `permit` was correct",
+)
+FORBIDDEN_AUDITBENCH_PATTERNS = (
+    re.compile(r"\bauditbench independent(?:[ -])evaluation\b"),
+    re.compile(r"\bindependent auditbench pipeline\b"),
+    re.compile(r"\bsealed independent(?:[ -])evaluation pipeline\b"),
+    re.compile(r"\bscores independently labeled studies\b"),
+)
+REQUIRED_AUDITBENCH_BOUNDARIES = (
+    "content-integrity seal",
+    "self-asserted identity strings",
+    "does not authenticate annotators",
+    "does not demonstrate evaluator independence",
+    "no real annotation study has been run",
+)
+
 REQUIRED_FIELDS = {
     "id",
     "title",
@@ -23,7 +73,7 @@ REQUIRED_FIELDS = {
     "claim_type",
     "surface",
     "framework",
-    "source_paths"
+    "source_paths",
 }
 
 ALLOWED_MATURITY = {"public-now", "in-progress", "not-public-yet"}
@@ -32,7 +82,7 @@ ALLOWED_EVIDENCE_LEVEL = {
     "code-and-doc",
     "doc-and-manifest",
     "limitation-backed",
-    "spec"
+    "spec",
 }
 
 
@@ -60,7 +110,9 @@ def validate_claim(claim: dict[str, object], seen: set[str]) -> str:
         fail(f"claim is missing required fields: {', '.join(missing)}")
 
     claim_id = claim["id"]
-    if not isinstance(claim_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]+", claim_id):
+    if not isinstance(claim_id, str) or not re.fullmatch(
+        r"[a-z0-9][a-z0-9-]+", claim_id
+    ):
         fail(f"invalid claim id: {claim_id!r}")
     if claim_id in seen:
         fail(f"duplicate claim id: {claim_id}")
@@ -100,6 +152,57 @@ def validate_claim(claim: dict[str, object], seen: set[str]) -> str:
     return claim_id
 
 
+def validate_public_framing(seen: set[str]) -> None:
+    if REQUIRED_BOUNDARY_CLAIM_ID not in seen:
+        fail(f"missing required boundary claim: {REQUIRED_BOUNDARY_CLAIM_ID}")
+
+    for relative_path in PUBLIC_FRAMING_PATHS:
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8").lower()
+        for phrase in FORBIDDEN_PUBLIC_PHRASES:
+            if phrase in text:
+                fail(f"{relative_path}: forbidden public overclaim phrase: {phrase!r}")
+
+
+def validate_auditbench_framing() -> None:
+    if (REPO_ROOT / LEGACY_AUDITBENCH_PROFILE_PATH).exists():
+        fail(
+            "legacy AuditBench independent-evaluation profile still exists: "
+            f"{LEGACY_AUDITBENCH_PROFILE_PATH}"
+        )
+    protocol_path = REPO_ROOT / AUDITBENCH_PROTOCOL_PATH
+    if not protocol_path.exists():
+        fail(f"missing AuditBench evaluation protocol: {AUDITBENCH_PROTOCOL_PATH}")
+
+    protocol_text = protocol_path.read_text(encoding="utf-8").lower()
+    for phrase in REQUIRED_AUDITBENCH_BOUNDARIES:
+        if phrase not in protocol_text:
+            fail(f"{AUDITBENCH_PROTOCOL_PATH}: missing proof boundary: {phrase!r}")
+
+    for relative_path in AUDITBENCH_FRAMING_PATHS:
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8").lower()
+        for pattern in FORBIDDEN_AUDITBENCH_PATTERNS:
+            if pattern.search(text):
+                fail(
+                    f"{relative_path}: forbidden AuditBench framing: "
+                    f"{pattern.pattern!r}"
+                )
+
+    reproduce = (REPO_ROOT / "REPRODUCE.md").read_text(encoding="utf-8")
+    if not reproduce.startswith("# Reproducing AuditBench Harness Fixtures\n"):
+        fail("REPRODUCE.md must identify the current outputs as harness fixtures")
+
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    if "bench-independent-test" in makefile or "bench-protocol-test" not in makefile:
+        fail("Makefile must expose bench-protocol-test without the legacy target")
+
+    score_cli = (REPO_ROOT / "go/cmd/auditbench-score/main.go").read_text(
+        encoding="utf-8"
+    )
+    for phrase in ("unsigned content-integrity seal", "local content-integrity seal"):
+        if phrase not in score_cli:
+            fail(f"auditbench-score output must disclose {phrase!r}")
+
+
 def main() -> int:
     seen: set[str] = set()
     claims = load_claims()
@@ -107,6 +210,8 @@ def main() -> int:
         if not isinstance(claim, dict):
             fail("every claim entry must be an object")
         validate_claim(claim, seen)
+    validate_public_framing(seen)
+    validate_auditbench_framing()
 
     print(f"validated {len(claims)} public-site claims")
     return 0

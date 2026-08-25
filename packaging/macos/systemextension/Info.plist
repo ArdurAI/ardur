@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Info.plist — System Extension bundle manifest for the Ardur Endpoint
+  Security client (Epic A #63, Slice 2 remainder).
+
+  This is a SCAFFOLD, not a buildable extension: it documents the bundle
+  shape a real Endpoint Security System Extension needs, for the day
+  com.apple.developer.endpoint-security.client is granted to the
+  ardur-kernelcaptured code-signing identity (tracking issue referenced from
+  the PR that introduced this file). See EndpointSecurityClient.swift for the
+  matching client-code scaffold and README.md for what is and isn't here.
+
+  A real build would place this at:
+      ArdurEndpointSecurity.systemextension/Contents/Info.plist
+  inside an app bundle's Contents/Library/SystemExtensions/, per Apple's
+  System Extension packaging requirements — System Extensions cannot be
+  distributed standalone; they must be embedded in a signed, notarized host
+  application.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>ai.ardur.kernelcaptured.esextension</string>
+	<key>CFBundleName</key>
+	<string>ArdurEndpointSecurity</string>
+	<key>CFBundleDisplayName</key>
+	<string>Ardur Endpoint Security Extension</string>
+	<key>CFBundlePackageType</key>
+	<string>SYSX</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleExecutable</key>
+	<string>ArdurEndpointSecurity</string>
+
+	<!-- NSExtension marks this bundle as a System Extension of the Endpoint
+	     Security type. NSExtensionPrincipalClass names the class that
+	     implements the extension's entry point (see
+	     EndpointSecurityClient.swift's ArdurEndpointSecurityExtension). -->
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.system_extension.endpoint_security</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>ArdurEndpointSecurityExtension</string>
+	</dict>
+
+	<key>LSMinimumSystemVersion</key>
+	<string>10.15</string>
+</dict>
+</plist>

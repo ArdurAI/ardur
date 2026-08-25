@@ -6,6 +6,14 @@
 __pycache__/
 *.pyc
 
+# Runtime artifacts that ardur protect writes to the project root or CWD.
+# These carry signed mission tokens and private key material — never commit.
+active_mission.jwt
+keys/
+claude-code-hook-python
+claude-code-pre_tool_use
+claude-code-pre_tool_use.sha256
+
 # AI-agent / LLM working context - handoff prompts, work logs, checkpoints,
 # local skills, graph indexes, and other artifacts produced by Claude / Codex /
 # Gemini / Cursor / Conductor / etc. while collaborating on this repo. NEVER
@@ -36,13 +44,68 @@ python/build/
 # Internal planning, engineering reports, and dev tooling — moved to _internal/
 # so the public tree stays clean for the open-source community.
 _internal/
-reports/
+/reports/
 
 # Go build artifacts when binaries land in the repo root rather than $GOBIN.
 go/operator
 go/webhook
+go/ardur-agent-recognition-benchmark
+go/ardur-agent-recognition-eval
+go/ardur-agent-recognition-workload
+go/ardur-exec-shim
+go/ardur-kernelcaptured
+go/auditbench-label
+go/auditbench-oracle
+
+# `make bench` output (go/cmd/benchcheck writes here; see the `bench` target).
+go/bench-results/
 
 # Hugo site build output.
 site/public/
 site/resources/_gen/
 site/.hugo_build.lock
+
+# Local git worktree checkouts. These are real Ardur repo clones used for
+# parallel development and should never appear in the public tree or be
+# picked up by the Hugo source-mirror sync script.
+worktrees/
+.worktrees/
+
+# Runtime-generated security artifacts produced by ardur commands (passport
+# keys, mission JWTs, compiled native hooks). These are never safe to commit
+# — they contain private keys or session-bound credentials. Listed explicitly
+# as defense-in-depth so an accidental `git add .` does not stage them even
+# if the gitleaks PEM rule were to miss a format variant.
+keys/
+*.pem
+*.key
+
+# Reviewed public-key fixtures remain normal source artifacts. Keep these
+# exceptions narrower than the generated-key rules so a new PEM elsewhere
+# requires an explicit security review before it can be added.
+!/docs/specs/**/*.pem
+!/site/static/repo/docs/specs/**/*.pem
+
+# Legacy/default-in-CWD proxy state. Standard managed state under `.ardur/`
+# and `.vibap/` is already ignored above; root anchors avoid hiding an
+# unrelated JSON fixture with the same basename in another source directory.
+/passport_state.lock
+/replay_cache.json
+/revoked.json
+/lineage_hashes.json
+
+active_mission.jwt
+claude-code-pre_tool_use
+claude-code-pre_tool_use.sha256
+claude-code-hook-python
+
+# Runtime receipt/state artifacts that ardur protect + the hook lifecycle write
+# to the project root. The claude-code-hook/ directory contains signed receipt
+# chains; governance_log.jsonl holds session decisions; state/ has budget and
+# session snapshots; the daemon socket and seccomp-ready markers are ephemeral.
+# Root-anchored so they don't hide unrelated source dirs with similar names.
+/claude-code-hook/
+/governance_log.jsonl
+/state/
+/claude-code-hook-daemon.sock
+/seccomp-ready-*

@@ -1,0 +1,708 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.dev/vibap/spec/execution-receipt-v0.2.schema.json",
+  "title": "Execution Receipt v0.2",
+  "description": "Ardur Execution Receipt v0.2 action-receipt claims set. The signed JWS payload is RFC 8785 canonical JSON; legacy unversioned receipts remain governed by v0.1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "canonicalization",
+    "receipt_kind",
+    "receipt_id",
+    "grant_id",
+    "parent_receipt_id",
+    "parent_receipt_hash",
+    "actor",
+    "verifier_id",
+    "trace_id",
+    "run_nonce",
+    "step_id",
+    "invocation_digest",
+    "tool",
+    "action_class",
+    "target",
+    "resource_family",
+    "side_effect_class",
+    "verdict",
+    "evidence_level",
+    "reason",
+    "policy_decisions",
+    "arguments_hash",
+    "budget_remaining",
+    "timestamp",
+    "iss",
+    "iat",
+    "exp",
+    "jti"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.execution_receipt.v0.2",
+      "description": "Explicit claims-set version. Unknown versions fail closed."
+    },
+    "canonicalization": {
+      "const": "jcs-rfc8785",
+      "description": "Canonicalization applied to the complete JWS payload before signing."
+    },
+    "receipt_kind": {
+      "const": "action",
+      "description": "v0.2 defines immutable per-action receipts; session-final integrity is bound by the behavioral attestation."
+    },
+    "receipt_id": {
+      "$ref": "#/$defs/idString",
+      "description": "Stable identifier for this receipt as an evidence object."
+    },
+    "grant_id": {
+      "$ref": "#/$defs/idString",
+      "description": "Identifier of the governing delegation grant. This is the AAT jti."
+    },
+    "parent_receipt_id": {
+      "description": "Identifier of the immediately preceding receipt in the same lineage. Null indicates the lineage root.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/idString"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent_receipt_hash": {
+      "description": "Hex SHA-256 digest of the immediately preceding signed receipt JWT. Null indicates the lineage root.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256HexString"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "actor": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Identity of the actor that executed the step."
+    },
+    "verifier_id": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Identity of the verifier that emitted the receipt."
+    },
+    "trace_id": {
+      "$ref": "#/$defs/idString",
+      "description": "Stable identifier for the governed run or trace segment."
+    },
+    "run_nonce": {
+      "$ref": "#/$defs/base64urlString",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Fresh per-run nonce used with trace_id and jti for replay detection."
+    },
+    "step_id": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Stable identifier for the evaluated step."
+    },
+    "invocation_digest": {
+      "$ref": "#/$defs/digestObject",
+      "description": "Digest of the normalized invocation envelope evaluated by the verifier."
+    },
+    "tool": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Tool, API, or capability invoked by the actor."
+    },
+    "action_class": {
+      "type": "string",
+      "enum": [
+        "search",
+        "read",
+        "write",
+        "query",
+        "delegate",
+        "send",
+        "summarize",
+        "observe",
+        "execute",
+        "dispatch",
+        "fetch",
+        "invoke"
+      ],
+      "description": "High-level action family for the evaluated step."
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "Normalized target string after tool-call projection."
+    },
+    "resource_family": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Coarse resource category used by MIC policy."
+    },
+    "side_effect_class": {
+      "type": "string",
+      "enum": [
+        "none",
+        "internal_write",
+        "external_send",
+        "state_change",
+        "filesystem_write",
+        "process_launch",
+        "network_read",
+        "subagent_launch"
+      ],
+      "description": "Class of side effect caused by the step."
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "compliant",
+        "violation",
+        "insufficient_evidence",
+        "unknown"
+      ],
+      "description": "Four-state verifier result."
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": [
+        "self_signed",
+        "counter_signed",
+        "transparency_logged"
+      ],
+      "description": "Assurance level of the emitted receipt."
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "Audit-facing explanation for the verifier decision. Public projections may redact this field."
+    },
+    "policy_decisions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/policyDecision"
+      },
+      "description": "Per-policy-engine decisions that contributed to the receipt verdict."
+    },
+    "arguments_hash": {
+      "$ref": "#/$defs/sha256HexString",
+      "description": "Hex SHA-256 digest of the normalized invocation arguments."
+    },
+    "budget_remaining": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Verifier-visible budget counters remaining after the decision, keyed by budget bucket."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Time at which the evaluated step occurred or was observed."
+    },
+    "iss": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Issuer of the receipt token."
+    },
+    "iat": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "JWT NumericDate issuance time."
+    },
+    "exp": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "JWT NumericDate expiration time."
+    },
+    "jti": {
+      "$ref": "#/$defs/idString",
+      "description": "Unique JWT identifier for replay detection."
+    },
+    "content_class": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Optional content classification used by MIC-Evidence deployments."
+    },
+    "content_provenance": {
+      "$ref": "#/$defs/contentProvenance",
+      "description": "Optional provenance summary for the content used in the decision."
+    },
+    "sensitivity": {
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "restricted",
+        "regulated",
+        "unknown"
+      ],
+      "description": "Optional sensitivity tier for the content touched by this step."
+    },
+    "instruction_bearing": {
+      "type": "boolean",
+      "description": "Whether the observed content contained actionable instructions that materially affected the step."
+    },
+    "budget_delta": {
+      "$ref": "#/$defs/budgetDelta",
+      "description": "Optional per-hop lineage budget change."
+    },
+    "result_hash": {
+      "$ref": "#/$defs/digestObject",
+      "description": "Optional digest of the result material or normalized verifier input."
+    },
+    "public_denial_reason": {
+      "type": "string",
+      "enum": [
+        "policy_denied",
+        "budget_exhausted",
+        "insufficient_evidence",
+        "revoked",
+        "chain_invalid",
+        "unknown"
+      ],
+      "description": "Coarse user-facing denial reason vocabulary. This MUST be absent for compliant receipts."
+    },
+    "internal_denial_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "description": "Audit-only denial code. Public projections MUST omit this field unless the caller is authorized for audit details."
+    },
+    "evidence_proof_ref": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        {
+          "$ref": "#/$defs/evidenceProofRef"
+        }
+      ],
+      "description": "Optional reference to countersignature, transparency inclusion proof, or detached evidence bundle."
+    },
+    "measurements": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/measurementEntry"
+      },
+      "description": "Optional ER-native measurement map used by the EAT/CWT profile to populate EAT submods."
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idString": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._:/-]+$"
+    },
+    "base64urlString": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "sha256HexString": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "digestObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "value"
+      ],
+      "properties": {
+        "alg": {
+          "type": "string",
+          "enum": [
+            "sha-256",
+            "sha-384",
+            "sha-512"
+          ]
+        },
+        "canonicalization": {
+          "type": "string",
+          "enum": [
+            "jcs-rfc8785",
+            "none"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "result",
+            "normalized_input",
+            "measurement",
+            "custom"
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/base64urlString"
+        }
+      }
+    },
+    "contentProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "user_input",
+            "tool_output",
+            "model_generated",
+            "policy_state",
+            "mixed",
+            "unknown"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/idString"
+          }
+        },
+        "transformed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "budgetDelta": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/legacyBudgetDelta"
+        },
+        {
+          "$ref": "#/$defs/lineageBudgetDelta"
+        },
+        {
+          "$ref": "#/$defs/spendBudgetDelta"
+        }
+      ]
+    },
+    "legacyBudgetDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bucket",
+        "unit",
+        "delta"
+      ],
+      "properties": {
+        "bucket": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "invocations",
+            "tokens",
+            "bytes",
+            "usd",
+            "custom"
+          ]
+        },
+        "delta": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining_after": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ceiling": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "lineageBudgetDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "resource",
+        "amount",
+        "unit"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "consume",
+            "reserve",
+            "reject",
+            "release"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "remaining_for_parent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining_after": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "used_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reserved_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "side_effect_class": {
+          "type": "string",
+          "enum": [
+            "none",
+            "internal_write",
+            "external_send",
+            "state_change"
+          ]
+        },
+        "delegation_request_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "idempotent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "spendBudgetDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "resource",
+        "requested",
+        "reserved",
+        "actual",
+        "refunded",
+        "remaining",
+        "currency",
+        "quote_digest",
+        "reservation_hash",
+        "reason_code"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": ["reserve", "reject", "release", "settle", "quarantine"]
+        },
+        "resource": {"const": "spend"},
+        "requested": {"$ref": "#/$defs/spendAmounts"},
+        "reserved": {"$ref": "#/$defs/spendAmounts"},
+        "actual": {"$ref": "#/$defs/spendAmounts"},
+        "refunded": {"$ref": "#/$defs/spendAmounts"},
+        "remaining": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session", "agent", "lineage"],
+          "properties": {
+            "session": {"$ref": "#/$defs/spendAmounts"},
+            "agent": {"$ref": "#/$defs/spendAmounts"},
+            "lineage": {"$ref": "#/$defs/spendAmounts"}
+          }
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "quote_digest": {"$ref": "#/$defs/sha256HexString"},
+        "reservation_hash": {"$ref": "#/$defs/sha256HexString"},
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "idempotent": {"type": "boolean"},
+        "reconciled": {"type": "boolean"}
+      }
+    },
+    "spendAmounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens", "currency_micros"],
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "currency_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "policyDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend",
+        "decision"
+      ],
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "decision": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_id": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Stable policy label or rule identifier selected by the policy configuration."
+        },
+        "eval_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "evidenceProofRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "uri": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "mission_ref": {},
+        "mission_digest": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "measurementEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "manifest_digest",
+            "envelope_binding",
+            "memory_integrity",
+            "telemetry",
+            "transparency_inclusion",
+            "runtime_state",
+            "custom"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "success",
+            "fail",
+            "not-run",
+            "absent"
+          ]
+        },
+        "digest": {
+          "$ref": "#/$defs/digestObject"
+        },
+        "collected_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detached": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "compliant"
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "public_denial_reason"
+              ]
+            },
+            {
+              "required": [
+                "internal_denial_code"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "enum": [
+              "violation",
+              "insufficient_evidence",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "verdict"
+        ]
+      },
+      "then": {
+        "required": [
+          "public_denial_reason",
+          "internal_denial_code"
+        ]
+      }
+    }
+  ]
+}

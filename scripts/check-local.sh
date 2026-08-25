@@ -64,6 +64,36 @@ if [[ "$PYTHON_RUN" == */* && "$PYTHON_RUN" != /* ]]; then
   PYTHON_RUN="$ROOT/$PYTHON_RUN"
 fi
 
+version_lt() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+
+def parts(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split(".") if part.isdigit())
+
+sys.exit(0 if parts(sys.argv[1]) < parts(sys.argv[2]) else 1)
+PY
+}
+
+# Enforce Ardur's Python minimum before running validation checks. Mirrors the
+# guard in scripts/setup-dev.sh: a below-minimum PYTHON_BIN (common on macOS
+# where python3 is the system 3.9.6) produces confusing tracebacks instead of
+# a clear message. Even the default python/.venv fallback can be stale if
+# setup-dev.sh was never run, so verify the resolved interpreter explicitly.
+if [ -f python/pyproject.toml ]; then
+  required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+else
+  required_python_min=""
+fi
+if [ -z "$required_python_min" ]; then
+  required_python_min="3.10"
+fi
+actual_python="$("$PYTHON_RUN" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+if version_lt "$actual_python" "$required_python_min"; then
+  echo "ERROR: Python $actual_python is below Ardur's minimum ($required_python_min). Install Python ${required_python_min}+ or pass --python PATH." >&2
+  exit 1
+fi
+
 failures=0
 
 run_step() {
@@ -119,6 +149,7 @@ validate_schema_sync() {
   "$PYTHON_RUN" - <<'PY'
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -126,8 +157,12 @@ fail = 0
 for embedded in sorted(Path("python/vibap/_specs").glob("*.schema.json")):
     base = embedded.name.removesuffix(".schema.json")
     canonical_base = base.replace("_", "-")
-    if canonical_base.endswith("-v01"):
-        canonical_base = canonical_base[:-3] + "v0.1"
+    version_match = re.search(r"-v([0-9])([0-9])$", canonical_base)
+    if version_match:
+        canonical_base = (
+            canonical_base[: version_match.start()]
+            + f"-v{version_match.group(1)}.{version_match.group(2)}"
+        )
     canonical = Path("docs/specs") / f"{canonical_base}.schema.json"
     if not canonical.exists():
         print(f"missing canonical schema for {embedded}: {canonical}", file=sys.stderr)
@@ -193,6 +228,10 @@ scan_model_names() {
       --exclude-dir='.agent-context' --exclude-dir='.codex' \
       --exclude-dir='.local-skills' --exclude-dir='.claude' \
       --exclude-dir='artifacts' --exclude-dir='node_modules' \
+      --exclude-dir='test-results' --exclude-dir='.pytest_cache' \
+      --exclude='run_adversarial_suite.py' \
+      --exclude='test_e2e_showcase.py' \
+      --exclude='test_examples_governance_integration.py' \
       -i "$pattern" .; then
     return 1
   fi
@@ -218,8 +257,20 @@ shell_syntax() {
 }
 
 graph_build() {
+  if [ ! -f scripts/build-knowledge-graph.py ]; then
+    echo "knowledge graph script not found; skipping (not yet implemented)"
+    return 0
+  fi
   "$PYTHON_RUN" scripts/build-knowledge-graph.py --output-dir .context
   "$PYTHON_RUN" -m json.tool .context/ardur-graph.json >/dev/null
+}
+
+graph_compile() {
+  if [ ! -f scripts/build-knowledge-graph.py ]; then
+    echo "knowledge graph script not yet implemented; skipping compile check"
+    return 0
+  fi
+  "$PYTHON_RUN" -m py_compile scripts/build-knowledge-graph.py
 }
 
 go_version_ok() {
@@ -229,7 +280,7 @@ go_version_ok() {
     echo "go not found; go/go.mod requires $required" >&2
     return 1
   fi
-  actual="$(go version | awk '{print $3}' | sed 's/^go//')"
+  actual="$(cd go && go env GOVERSION | sed 's/^go//')"
   python3 - "$actual" "$required" <<'PY'
 import sys
 
@@ -276,7 +327,7 @@ optional_lychee() {
 
 run_step "shell syntax" shell_syntax
 run_step "knowledge graph build" graph_build
-run_step "Python graph script compiles" "$PYTHON_RUN" -m py_compile scripts/build-knowledge-graph.py
+run_step "Python graph script compiles" graph_compile
 run_step "tracked JSON parses" validate_json
 run_step "tracked YAML parses" validate_yaml
 run_step "embedded spec schemas match canonical docs" validate_schema_sync

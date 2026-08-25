@@ -45,11 +45,11 @@ type ImageProvenance struct {
 // VerifyOptions configures how provenance verification is performed.
 type VerifyOptions struct {
 	// RequiredIdentity is the expected signer identity (e.g., OIDC email).
-	// If empty, any valid signature is accepted.
+	// It must be set together with RequiredIssuer.
 	RequiredIdentity string
 
 	// RequiredIssuer is the expected OIDC issuer (e.g., "https://accounts.google.com").
-	// If empty, any valid issuer is accepted.
+	// It must be set together with RequiredIdentity.
 	RequiredIssuer string
 
 	// TrustedRootPath overrides the default Sigstore public good TUF root.

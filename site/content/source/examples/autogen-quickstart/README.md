@@ -2,7 +2,7 @@
 title: "AutoGen + Ardur quickstart"
 description: "An AutoGen agent (v0.4+ architecture, `autogen-agentchat`) making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a smal"
 source_path: "examples/autogen-quickstart/README.md"
-source_sha256: "6a121815b1c4e5b1b0bc2db34e4b8470203c834cdfbc64b784c3b7a06ea1d5f3"
+source_sha256: "2c2620338334f09bea3465a2a7a9224e4084cf10c79786b3324972a1c0ee0601"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -39,8 +39,8 @@ autogen-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
-- `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
+- `python/` editable install (this repo, via `./scripts/setup-dev.sh --skip-go`; the CLI is `ardur`, module imports are `vibap`)
 - `autogen-agentchat ^0.4.0` plus `autogen-core` (transitive)
 - `autogen-ext[ollama,openai,anthropic]` for the multi-provider matrix
 - LLM access: local Ollama, an OpenAI-compatible gateway, or an Anthropic API key
@@ -51,17 +51,24 @@ autogen-quickstart/
 ## Running locally
 
 ```bash
-# 1. Install the runtime
-cd ../../python && pip install -e '.[dev]'
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
 # 2. Pick a provider + model id
 export ARDUR_PROVIDER=ollama
 export OLLAMA_MODEL='<your local model tag>'
 
 # 3. Run the demo from this directory
-cd ../examples/autogen-quickstart
+cd examples/autogen-quickstart
 PYTHONPATH=../_shared python demo.py
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
 `ARDUR_PROVIDER` selects the backend. The matching `*_MODEL` env var is required — no model identifiers are hard-coded in `demo_scenes.py` per the project rule (see [CONTRIBUTING.md](/__ardur_internal__/source/contributing/)).
 

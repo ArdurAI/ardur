@@ -23,19 +23,24 @@ INTERNAL_URL_PREFIX = "/__ardur_internal__/"
 
 PUBLIC_MARKDOWN_EXCLUDED_PREFIXES = (
     ".context/",
+    ".worktrees/",
     "_internal/",
     "logs/",
     "site/content/",
     "site/public/",
     "site/resources/",
     "python/tests/test-results/",
+    "worktrees/",
 )
 
 PUBLIC_MARKDOWN_EXCLUDED_DIR_NAMES = {
     ".git",
     "__pycache__",
+    "build",
+    "dist",
     "node_modules",
-    "vendor"
+    "vendor",
+    "worktrees",
 }
 
 PUBLIC_MARKDOWN_INCLUDED_HIDDEN_DIRS: set[str] = set()
@@ -44,8 +49,11 @@ PUBLIC_ARTIFACT_GLOBS = [
     ".github/ISSUE_TEMPLATE/*.yml",
     ".github/workflows/*.yml",
     "docs/**/*.json",
+    "docs/**/*.jsonl",
+    "docs/specs/fixtures/*.pem",
     "python/vibap/_specs/*.json",
     "go/spec/**/*.json",
+    "go/pkg/kernelcapture/testdata/agent-recognition-benchmark-*.json",
     "examples/**/*.json",
     "examples/_shared/*.py",
     "deploy/**/*.yaml",

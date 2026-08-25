@@ -6,20 +6,63 @@ The MCEP acronym was expanded as "Mission-bound Cryptographic Evidence Protocol"
 
 **Public-surface import caveat.** The migrated specs were authored in a private context and may reference implementation source paths (e.g. `vibap-prototype/vibap/passport.py`), private session artifacts (e.g. `docs/session-2026-04-XX/...`), or internal review trails that have not yet landed in this public repo. Treat such references as pointers to future work — the underlying code lands alongside the Phase 1 import per the [public import plan](../public-import-plan.md). Contributors cannot verify those referenced artifacts from the public tree today. Same caveat as the [decisions index](../decisions/README.md).
 
+**Runtime implementation caveat.** The v0.1 specs define intended protocol semantics for mission-declared `lineage_budgets`, but the current public runtime does not yet compile or verify those mission-level declarations. Today, delegation budget reservations use the file-backed `FileLineageBudgetLedger`, while non-empty mission-level `lineage_budgets` fail closed at compile/issue time instead of being silently accepted.
+
 ## Migration status
 
 | Spec | Status | Notes |
 |------|--------|-------|
 | [Conformance Profiles](./conformance-profiles-v0.1.md) | **migrated** | Public-import annotated |
 | [Delegation Grant (DG) Profile of AAT](./delegation-grant-profile-v0.1.md) | **migrated** | Public-import annotated |
+| [Delegation Grant v0.2 Profile of AAT draft-01](./delegation-grant-profile-v0.2.md) | **implemented self-test** | Explicit revision dispatch, profile safeguards, and deterministic fixture; independent interoperability not demonstrated |
+| [AAT draft-01 migration decision](./aat-draft-01-migration-decision.md) | **review completed** | Versioned DG v0.2 selected on 2026-07-11; draft-00 remains supported |
+| [AAT draft-00 to draft-01 change ledger](./aat-draft-00-to-01-change-ledger.json) | **audited** | Primary-source claims, roles, constraints, derivation, verification, algorithms, and security delta |
+| [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) | **mapping published** | Draft-10-pinned field ledger and B2 target shape; not an IETF conformance or interoperability claim |
+| [Ardur DRP Profile v0.1](./ardur-drp-profile-v0.1.md) | **implemented** | RFC 8785/P-256 emit, external-trust verifier, full transitive attenuation, and bounded DENY reasons |
+| [DRP implementation and interoperability note v0.1](./ardur-drp-implementation-interop-v0.1.md) | **implementation evidence published** | Draft-10 support ledger, portable signed scenarios, deterministic CI report, and explicit `not-demonstrated` independent status |
 | [Verifier Contract](./verifier-contract-v0.1.md) | **migrated** | Public-import annotated |
 | [Mission Declaration (MD)](./mission-declaration-v0.1.md) | **migrated** | Public-import annotated; clean-break protocol rename applied (`application/ardur.md+jwt`, `https://ardur.dev/...`) |
 | [Execution Receipt (ER)](./execution-receipt-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.er+jwt`) |
+| [Execution Receipt v0.2 hardening](./execution-receipt-v0.2.md) | **implemented** | Versioned RFC 8785 payloads, legacy verification, receipt-chain-head binding, and kernel loss/kill-switch finalization contract |
+| [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) | **implemented** | Immutable receipt sidecars, asynchronous pending queue, Rekor v1 and separately keyed self-hosted proof profiles, offline verifier |
+| [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) | **implemented** | Immutable receipt envelope, separate receiver ES256 signature, MCP receiver shim, exact request/response digest checks, offline verifier |
+| [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) | **implemented** | Full receipt-chain, transparency, and conditional receiver-evidence composition with redacted CLI/JSON/static HTML reports |
+| [Runtime Evidence Correlation Profile v0.1](./runtime-evidence-correlation-v0.1.md) | **implemented external-evidence inspection** | Verified receipt journal plus normalized/Tetragon/Falco JSONL adapters, explicit confidence/source assurance, and detached redacted reports; not sensor authenticity or complete coverage |
+| [Governance Telemetry Profile v0.1](./governance-telemetry-v0.1.md) | **implemented verified export** | Signed-chain-first redacted JSONL plus OTLP/HTTP JSON traces/logs with deterministic correlation IDs and explicit signer-claim versus SPIFFE-workload assurance; not a collector, SIEM, delivery guarantee, or vendor connector |
+| [Tool-Server Preflight v0.1](./tool-server-preflight-v0.1.md) | **implemented static analysis** | Strict JSON MCP/tool-server config scan, redacted deterministic report, CI threshold exits, and deny-oriented capability/policy skeleton; not runtime safety proof |
+| [Agentic Policy Conformance Profile v0.1](./agentic-policy-conformance-v0.1.md) | **implemented self-test** | Eight no-key runtime-policy/delegation scenarios with offline signed-receipt binding; provenance context is not semantic content detection |
 | [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [IDM Extension Profile](./idm-extension-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied (`application/ardur.idm+jwt`) |
 | [Revocation Model](./revocation-v0.1.md) | **migrated** | Public-import annotated; clean-break rename applied |
 | [Mission Declaration schema](./mission-declaration-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
 | [Execution Receipt schema](./execution-receipt-v0.1.schema.json) | **migrated** | JSON Schema; `$id` rebased to ardur.dev |
+| [Execution Receipt v0.2 schema](./execution-receipt-v0.2.schema.json) | **implemented** | Runtime-aligned action enums and required version/canonicalization claims |
+| [Tool-Server Preflight report schema](./tool-server-preflight-report-v0.1.schema.json) | **implemented** | Closed deterministic JSON contract for findings, discovered server metadata, and suggested controls |
+| [Execution Receipt v0.2 golden fixture](./fixtures/execution-receipt-v0.2-action.json) | **implemented** | Schema-validated claim set with pinned RFC 8785 canonical digest |
+| [Ardur DRP Profile v0.1 schema](./ardur-drp-profile-v0.1.schema.json) | **implemented** | Closed-world Authorization Object and critical extension contract |
+| [Ardur DRP Profile v0.1 fixture](./fixtures/ardur-drp-profile-v0.1-chain.json) | **implementation fixture** | Organic root/child/grandchild signatures, external public trust/context, and self-verification report; not independent conformance |
+| [DRP implementation fixture bundle schema](./drp-conformance-bundle-v0.1.schema.json) | **implemented** | Closed portable scenario, trust, expectation, and external-status contract |
+| [DRP implementation fixture report schema](./drp-implementation-fixture-report-v0.1.schema.json) | **implemented** | Closed deterministic scenario result, verifier status, and bundle-digest contract |
+| [Agentic policy conformance bundle schema](./policy-conformance-bundle-v0.1.schema.json) | **implemented** | Closed policy path, provenance, mission claim, action, expectation, and signed-receipt fixture contract |
+| [Agentic policy conformance report schema](./policy-conformance-report-v0.1.schema.json) | **implemented** | Closed scenario decision, reason, receipt-verification, diagnostics, and summary contract |
+| [Agentic policy portable fixtures](./conformance/policy-v0.1/README.md) | **implementation self-test** | Safe baseline plus seven risk classes; deterministic, no network or private fixture keys |
+| [DRP portable implementation fixtures](./conformance/drp-v0.1/README.md) | **implementation self-test** | Seven signed deterministic scenarios and report; no private keys, network dependency, IETF claim, or independent pass |
+| [AAT draft-01 DG v0.2 fixture](./conformance/aat-draft01-v0.2/README.md) | **implementation self-test** | Deterministic organic chain and audience-bound PoP; no private keys, IETF claim, or independent pass |
+| [Runtime evidence event schema](./runtime-evidence-event-v0.1.schema.json) | **implemented** | Closed private ingest event contract for process/file/network observations |
+| [Runtime evidence correlation report schema](./runtime-evidence-correlation-report-v0.1.schema.json) | **implemented** | Closed deterministic redacted association report; source assurance remains separate from match confidence |
+| [Governance telemetry event schema](./governance-telemetry-v0.1.schema.json) | **implemented** | Closed redacted event contract linking each export to a verified receipt, parent hash, signed decision, budget, source-journal digest, and explicit non-SPIFFE-verified identity assurance |
+| [Governance telemetry golden fixture](./conformance/governance-telemetry-v0.1/events.jsonl) | **implementation fixture** | Canonical redacted PERMIT event used for schema and OTLP projection regression |
+| [Linux governance benchmark report schema](./linux-governance-benchmark-report-v0.1.schema.json) | **implemented** | Closed smoke/stress report separating governance-only, imported evidence, sustained resources, and optional paired sensor measurements |
+| [AuditBench evaluation protocol v0.1](./auditbench-evaluation-protocol-v0.1.md) | **pipeline implemented; no real study** | Strict raw capture, blind two-view annotation, adjudication, local content-integrity sealing, held-out scoring, and explicit external-human proof boundary |
+| [Runtime evidence portable fixtures](./conformance/runtime-evidence-v0.1/README.md) | **implementation self-test** | Ephemeral-key signed journal plus normalized/Tetragon/Falco inputs and reports; no private keys, sensor deployment, network dependency, or source-authenticity claim |
+| [Transparency Anchor v0.1 schema](./transparency-anchor-v0.1.schema.json) | **implemented** | Strict pending/anchored state and backend proof shapes |
+| [Transparency Anchor v0.1 golden fixture](./fixtures/transparency-anchor-v0.1-local.json) | **implemented** | Signed local checkpoint, public trust keys, tamper and registration-window regressions |
+| [Receiver Attestation v0.1 schema](./receiver-attestation-v0.1.schema.json) | **implemented** | Strict self-attested/receiver-attested state invariant and exact-receipt binding |
+| [Receiver Attestation v0.1 golden fixture](./fixtures/receiver-attestation-v0.1.json) | **implemented** | Separately signed action/receiver evidence with public trust keys and offline verification |
+| [Offline Verification Bundle v0.1 schema](./offline-verification-bundle-v0.1.schema.json) | **implemented** | Strict full-evidence journal shape with no embedded trust-root fields |
+| [Offline Verification Report v0.1 schema](./offline-verification-report-v0.1.schema.json) | **implemented** | Closed explorer-report contract; `result` carries no failure value because failures raise instead of reporting, and a timeline `ERROR` is the `insufficient_evidence` governance verdict, not a verifier fault |
+| [Offline Verification Bundle v0.1 golden fixture](./fixtures/offline-verification-v0.1.json) | **implemented** | Three-receipt PERMIT/DENY/PERMIT chain, separate public trust roots, and redacted JSON/HTML explorer reports |
+| [Host adoption/governance source-semantic vectors](./source-semantic-vectors/) | **starter vectors** | No-key Codex, Claude Code, Gemini CLI, OpenAI Agents SDK, and ToolHive source-semantic rows; explicitly not live-host proof. |
 
 ## Protocol identifier rename (clean break, applied 2026-04-27)
 
@@ -38,18 +81,27 @@ The clean-break rationale: there are no v0.1 receipts, passports, or attestation
 
 1. [Mission Declaration (MD)](./mission-declaration-v0.1.md) — the signed scope envelope the agent starts with
 2. [Delegation Grant (DG) Profile](./delegation-grant-profile-v0.1.md) — how child agents get strictly narrower authority
-3. [Execution Receipt (ER)](./execution-receipt-v0.1.md) — the signed per-tool-call decision record
-4. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
-5. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
-6. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
-7. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
-8. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
+3. [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md) — field-by-field draft-10 mapping and proof boundaries
+4. [Ardur DRP Profile v0.1](./ardur-drp-profile-v0.1.md) — executable emit/verify, trust context, and reference-SDK comparison
+5. [DRP implementation and interoperability note v0.1](./ardur-drp-implementation-interop-v0.1.md) — exact support matrix, portable fixture evidence, and independent-status boundary
+6. [Execution Receipt v0.2](./execution-receipt-v0.2.md) — versioned, canonical signed action receipts and the v0.1 compatibility boundary
+7. [Execution Receipt EAT/CWT Profile](./execution-receipt-eat-profile-v0.1.md) — RFC 9711 binding for ER carriage
+8. [Transparency Anchor v0.1](./transparency-anchor-v0.1.md) — asynchronous third-party/self-hosted inclusion proofs without mutating signed receipts
+9. [Receiver Attestation v0.1](./receiver-attestation-v0.1.md) — separate called-service signatures without mutating signed receipts
+10. [Offline Verification Bundle v0.1](./offline-verification-bundle-v0.1.md) — skeptical-auditor composition and receipt-explorer output
+11. [Runtime Evidence Correlation Profile v0.1](./runtime-evidence-correlation-v0.1.md) — detached claim-vs-reality association over imported sensor evidence
+12. [Governance Telemetry Profile v0.1](./governance-telemetry-v0.1.md) — verified redacted JSONL and OTLP export without mutating receipts
+13. [Verifier Contract](./verifier-contract-v0.1.md) — what a conforming verifier must do
+14. [Conformance Profiles](./conformance-profiles-v0.1.md) — tiered conformance matrix (Delegation-Core, MIC-State, MIC-Evidence, IDM Extension)
+15. [Revocation Model](./revocation-v0.1.md) — layered revocation across delegation, session, credential, and transparency-log layers
+16. [IDM Extension Profile](./idm-extension-v0.1.md) — Intent-Declaration-Manifest experimental profile
 
 ## Relationship to adjacent standards
 
-- **AAT (Attenuating Authorization Tokens)** — IETF OAuth WG draft; MCEP's Delegation Grant is an AAT profile.
+- **AAT (Attenuating Authorization Tokens)** — individual Internet-Drafts with no formal IETF standing; MCEP preserves its draft-00 DG v0.1 wire contract and adds the explicitly discriminated draft-01 DG v0.2 profile. The 2026-07-11 review and field ledger are recorded in [issue #246](https://github.com/ArdurAI/ardur/issues/246); independent interoperability remains not demonstrated.
+- **DRP (Delegation Receipt Protocol)** — individual Internet-Draft with no formal IETF standing; Ardur implements its draft-10-pinned profile and publishes portable implementation self-test fixtures, while raw RFC 3161 proof integration and independent interoperability remain not demonstrated.
 - **EAT (Entity Attestation Token, RFC 9711)** — used by the ER EAT/CWT profile to carry Execution Receipts.
-- **SPIFFE** — workload identity substrate; MCEP binds mission credentials to SVIDs.
+- **SPIFFE** — workload identity substrate. The implemented Python S0–S2 path can obtain its service SVID and can verify a peer JWT-SVID when configured, but Mission Passport issuance does not yet resolve identity from SPIRE. Credential `spiffe_id` values remain caller-provided and self-asserted.
 - **Biscuit** — first-party-attenuation credential format; the DG profile's narrowing semantics rely on Biscuit's append-only block model (see [ADR-017](../decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md)).
 
 These are real artifacts, not codenames. Their names stay in the specs as technical lineage.

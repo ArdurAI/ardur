@@ -387,7 +387,7 @@ def build_mission(holder_spiffe_id: str):
         mission="Summarize Q1 sales. No email. No deletes. No PII.",
         allowed_tools=["read_file", "write_report"],
         forbidden_tools=["delete_file"],
-        resource_scope=[],
+        resource_scope=["**"],
         allowed_side_effect_classes=["none", "read", "internal_write"],
         max_tool_calls=8,
         max_duration_s=180,
@@ -546,7 +546,12 @@ def _coerce_tool_list(raw: Any) -> list[str]:
 
 
 class MultiagentLifecycleEngine:
-    """Framework-visible parent tools for the multiagent lifecycle profile."""
+    """Invocation-scoped governed-subagent tools shared by demo frameworks.
+
+    Frameworks and models see only opaque child handles. Credential resolution,
+    policy evaluation, replay suppression, persistence, and attestation remain
+    inside ``GovernedSubagentAdapter`` and ``GovernanceProxy``.
+    """
 
     def __init__(
         self,
@@ -562,21 +567,34 @@ class MultiagentLifecycleEngine:
     ):
         self.proxy = proxy
         self.parent_session = parent_session
-        self.parent_token = parent_token
         self.private_key = private_key
         self.workspace = workspace
         self.bundle_root = bundle_root
         self.framework = framework
         self.provider = provider
+        from vibap import GovernedSubagentAdapter
+
+        self.adapter = GovernedSubagentAdapter(
+            proxy=proxy,
+            parent_session=parent_session,
+            delegation_private_key=private_key,
+        )
         self.children: dict[str, dict[str, Any]] = {}
         self.tool_calls: list[dict[str, Any]] = []
 
     def _record_parent_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        canonical = json.dumps(
+            arguments,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
         self.tool_calls.append(
             {
                 "origin": "llm",
                 "tool_name": tool_name,
-                "arguments": arguments,
+                "argument_names": sorted(arguments),
+                "arguments_sha256": hashlib.sha256(canonical).hexdigest(),
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
         )
@@ -586,79 +604,118 @@ class MultiagentLifecycleEngine:
         name: str,
         mission: str,
         allowed_tools: Any,
+        resource_scope: Any,
         max_tool_calls: int = 2,
+        *,
+        request_id: str | None = None,
     ) -> str:
+        from vibap import GovernedSubagentRequest
+
         allowed = _coerce_tool_list(allowed_tools)
+        scope = _coerce_tool_list(resource_scope)
         args = {
             "name": name,
             "mission": mission,
             "allowed_tools": allowed,
+            "resource_scope": scope,
             "max_tool_calls": max_tool_calls,
         }
         self._record_parent_tool_call("spawn_subagent", args)
-        child_token, child_claims, remaining = self.proxy.delegate_passport(
-            parent_token=self.parent_token,
-            private_key=self.private_key,
-            child_agent_id=str(name),
-            child_allowed_tools=allowed,
-            child_mission=str(mission),
-            child_max_tool_calls=int(max_tool_calls),
-            delegation_request_id=str(name),
+        stable_request_id = request_id or hashlib.sha256(
+            (
+                f"{self.parent_session.jti}\0{name}\0"
+                + json.dumps(args, sort_keys=True, separators=(",", ":"))
+            ).encode("utf-8")
+        ).hexdigest()
+        handle = self.adapter.spawn(
+            GovernedSubagentRequest(
+                request_id=f"demo-spawn:{stable_request_id}",
+                child_agent_id=str(name),
+                mission=str(mission),
+                allowed_tools=allowed,
+                resource_scope=scope,
+                max_tool_calls=int(max_tool_calls),
+                ttl_s=120,
+            )
         )
-        child_session = self.proxy.start_session(child_token)
-        child_jti = str(child_claims["jti"])
-        self.children[child_jti] = {
+        handle_value = str(handle)
+        self.children[handle_value] = {
             "name": str(name),
-            "token": child_token,
-            "claims": dict(child_claims),
-            "session": child_session,
-            "closed": False,
+            "handle": handle_value,
+            "close_result": None,
         }
-        print(f"      {GREEN}spawned{RESET} {name} child_jti={child_jti} remaining_parent_calls={remaining}")
-        return f"spawned {name}; child_jti={child_jti}"
+        print(f"      {GREEN}spawned{RESET} {name} child_handle=<opaque>")
+        return f"spawned {name}; child_handle={handle_value}"
 
-    def _resolve_child(self, child_jti: str) -> dict[str, Any]:
-        text = str(child_jti)
-        if text in self.children:
-            return self.children[text]
-        for jti, child in self.children.items():
-            if child["name"] == text or jti in text or str(child["name"]) in text:
-                return child
-        raise ValueError(f"unknown child_jti or child name: {child_jti}")
+    def _resolve_child(self, child_handle: str) -> dict[str, Any]:
+        child = self.children.get(str(child_handle))
+        if child is None:
+            raise ValueError("unknown child_handle; use the exact opaque handle returned at spawn")
+        return child
 
-    def _evaluate_child(self, child: dict[str, Any], tool_name: str, args: dict[str, Any]) -> str:
-        session = child["session"]
-        decision, reason = self.proxy.evaluate_tool_call(session, tool_name, args)
+    @staticmethod
+    def _operation_id(child_handle: str, task: str, suffix: str) -> str:
+        digest = hashlib.sha256(
+            f"{child_handle}\0{task}\0{suffix}".encode("utf-8")
+        ).hexdigest()
+        return f"demo-run:{digest}"
+
+    def _evaluate_child(
+        self,
+        child: dict[str, Any],
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        operation_id: str,
+    ) -> str:
+        def execute() -> str:
+            if tool_name == "read_file":
+                return execute_read_file(self.workspace, str(args["path"]))
+            if tool_name == "write_report":
+                response = str(args.get("content", ""))
+                execute_write_report(self.workspace, str(args["path"]), response)
+                return response
+            if tool_name == "delete_file":
+                return execute_delete_file(self.workspace, str(args["path"]))
+            return "(permitted synthetic side effect)"
+
+        result = self.adapter.run_tool(
+            child["handle"],
+            operation_id=operation_id,
+            tool_name=tool_name,
+            arguments=args,
+            executor=execute,
+        )
+        decision_name = result.decision.name if result.decision is not None else "REPLAY"
         print(
             f"        child {child['name']} {tool_name} -> "
-            f"{GREEN if decision.name == 'PERMIT' else RED}{decision.name}{RESET}: {reason}"
+            f"{GREEN if decision_name == 'PERMIT' else RED}{decision_name}{RESET}: {result.reason}"
         )
-        if decision.name != "PERMIT":
-            return f"DENIED {tool_name}: {reason}"
-        start = time.perf_counter()
-        if tool_name == "read_file":
-            response = execute_read_file(self.workspace, str(args["path"]))
-        elif tool_name == "write_report":
-            response = str(args.get("content", ""))
-            execute_write_report(self.workspace, str(args["path"]), response)
-        elif tool_name == "delete_file":
-            response = execute_delete_file(self.workspace, str(args["path"]))
-        else:
-            response = "(permitted synthetic side effect)"
-        self.proxy.record_tool_result(
-            session,
-            response=response[:500],
-            duration_ms=(time.perf_counter() - start) * 1000.0,
-        )
-        return response[:500]
+        if result.status == "replay_suppressed":
+            return "REPLAY SUPPRESSED: recover the prior result from the framework checkpoint"
+        if not result.executed:
+            return f"DENIED {tool_name}: {result.reason}"
+        return str(result.value)[:500]
 
-    def run_subagent(self, child_jti: str, task: str) -> str:
-        args = {"child_jti": child_jti, "task": task}
+    def run_subagent(
+        self,
+        child_handle: str,
+        task: str,
+        *,
+        operation_id: str | None = None,
+    ) -> str:
+        args = {"child_handle": child_handle, "task": task}
         self._record_parent_tool_call("run_subagent", args)
-        child = self._resolve_child(str(child_jti))
+        child = self._resolve_child(str(child_handle))
         name = child["name"]
+        base_operation_id = operation_id or self._operation_id(child_handle, task, "run")
         if name == "sales-reader":
-            return self._evaluate_child(child, "read_file", {"path": "sales/q1-revenue.csv"})
+            return self._evaluate_child(
+                child,
+                "read_file",
+                {"path": "sales/q1-revenue.csv"},
+                operation_id=base_operation_id,
+            )
         if name == "report-writer":
             return self._evaluate_child(
                 child,
@@ -667,26 +724,45 @@ class MultiagentLifecycleEngine:
                     "path": "reports/q1-child-summary.md",
                     "content": "Child report: Q1 revenue reviewed and summarized.",
                 },
+                operation_id=base_operation_id,
             )
         if name == "safety-probe":
-            denied = self._evaluate_child(child, "delete_file", {"path": "sales/q1-revenue.csv"})
-            allowed = self._evaluate_child(child, "read_file", {"path": "sales/q1-revenue.csv"})
+            denied = self._evaluate_child(
+                child,
+                "delete_file",
+                {"path": "sales/q1-revenue.csv"},
+                operation_id=self._operation_id(
+                    child_handle,
+                    base_operation_id,
+                    "delete",
+                ),
+            )
+            allowed = self._evaluate_child(
+                child,
+                "read_file",
+                {"path": "sales/q1-revenue.csv"},
+                operation_id=self._operation_id(
+                    child_handle,
+                    base_operation_id,
+                    "read",
+                ),
+            )
             return denied + "\n" + allowed
-        return self._evaluate_child(child, "read_file", {"path": "sales/q1-revenue.csv"})
-
-    def close_subagent(self, child_jti: str) -> str:
-        args = {"child_jti": child_jti}
-        self._record_parent_tool_call("close_subagent", args)
-        child = self._resolve_child(str(child_jti))
-        token, claims = self.proxy.issue_attestation_for_session(
-            child["session"].jti,
-            self.private_key,
+        return self._evaluate_child(
+            child,
+            "read_file",
+            {"path": "sales/q1-revenue.csv"},
+            operation_id=base_operation_id,
         )
-        child["attestation_token"] = token
-        child["attestation_claims"] = claims
-        child["closed"] = True
-        print(f"      {GREEN}closed{RESET} {child['name']} attestation_jti={claims['jti']}")
-        return f"closed {child['name']}; attestation_jti={claims['jti']}"
+
+    def close_subagent(self, child_handle: str) -> str:
+        args = {"child_handle": child_handle}
+        self._record_parent_tool_call("close_subagent", args)
+        child = self._resolve_child(str(child_handle))
+        result = self.adapter.close(child["handle"])
+        child["close_result"] = result
+        print(f"      {GREEN}closed{RESET} {child['name']} attestation_jti={result.attestation_id}")
+        return f"closed {child['name']}; attestation_jti={result.attestation_id}"
 
     def export_bundle(self, parent_token: str, parent_claims: dict[str, Any]) -> Path:
         from cryptography.hazmat.primitives import serialization
@@ -745,20 +821,19 @@ class MultiagentLifecycleEngine:
             for call in self.tool_calls:
                 handle.write(json.dumps(call, sort_keys=True) + "\n")
         for child in self.children.values():
-            session = child["session"]
-            token = child.get("attestation_token") or session.attestation_token
-            if token:
-                claims = child.get("attestation_claims")
-                if not claims:
-                    from vibap.attestation import verify_attestation
-
-                    claims = verify_attestation(token, self.private_key.public_key())
-                (children_dir / f"{session.jti}.attestation.json").write_text(
-                    json.dumps({"token": token, "claims": claims}, indent=2, sort_keys=True),
-                    encoding="utf-8",
-                )
-            (children_dir / f"{session.jti}.session.json").write_text(
-                json.dumps(session.to_dict(), indent=2, sort_keys=True),
+            snapshot = self.adapter.lifecycle_snapshot(child["handle"])
+            child_jti = str(snapshot["child_jti"])
+            token, claims = self.adapter.export_attestation_evidence(child["handle"])
+            (children_dir / f"{child_jti}.attestation.json").write_text(
+                json.dumps({"token": token, "claims": claims}, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            (children_dir / f"{child_jti}.session.json").write_text(
+                json.dumps(
+                    self.adapter.export_session_evidence(child["handle"]),
+                    indent=2,
+                    sort_keys=True,
+                ),
                 encoding="utf-8",
             )
         return bundle
@@ -768,19 +843,31 @@ def make_langchain_multiagent_tools(engine: MultiagentLifecycleEngine):
     from langchain_core.tools import tool
 
     @tool
-    def spawn_subagent(name: str, mission: str, allowed_tools: list[str], max_tool_calls: int = 2) -> str:
-        """Spawn a governed child agent with attenuated allowed_tools and budget."""
-        return engine.spawn_subagent(name, mission, allowed_tools, max_tool_calls)
+    def spawn_subagent(
+        name: str,
+        mission: str,
+        allowed_tools: list[str],
+        resource_scope: list[str],
+        max_tool_calls: int = 2,
+    ) -> str:
+        """Spawn a governed child with attenuated tools, resources, and budget."""
+        return engine.spawn_subagent(
+            name,
+            mission,
+            allowed_tools,
+            resource_scope,
+            max_tool_calls,
+        )
 
     @tool
-    def run_subagent(child_jti: str, task: str) -> str:
-        """Run one already-spawned child agent by child_jti."""
-        return engine.run_subagent(child_jti, task)
+    def run_subagent(child_handle: str, task: str) -> str:
+        """Run one spawned child using its exact opaque child_handle."""
+        return engine.run_subagent(child_handle, task)
 
     @tool
-    def close_subagent(child_jti: str) -> str:
-        """Close one child agent and issue its lifecycle attestation."""
-        return engine.close_subagent(child_jti)
+    def close_subagent(child_handle: str) -> str:
+        """Close one child by exact opaque handle and issue its attestation."""
+        return engine.close_subagent(child_handle)
 
     return [spawn_subagent, run_subagent, close_subagent]
 
@@ -1031,7 +1118,7 @@ def scene_5_impersonation(
         agent_id="impostor",
         mission="Masquerade as a different workload",
         allowed_tools=["read_file"], forbidden_tools=[],
-        resource_scope=[], allowed_side_effect_classes=["none", "read"],
+        resource_scope=["**"], allowed_side_effect_classes=["none", "read"],
         max_tool_calls=1, max_duration_s=60,
         delegation_allowed=False, max_delegation_depth=0,
         holder_spiffe_id="spiffe://ardur-demo.local/workload/other-workload",
@@ -1048,8 +1135,6 @@ def scene_5_impersonation(
         ctx.proxy.start_session_from_biscuit(
             impostor_biscuit, ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
         fail("UNEXPECTED: impostor biscuit accepted")
     except PermissionError as e:
@@ -1063,13 +1148,11 @@ def scene_6_session(ctx: DemoContext):
     banner(6, "Start the governed session (real SPIFFE binding)",
            framework=ctx.framework)
     step("proxy.start_session_from_biscuit(biscuit, issuer_pub, "
-         "peer_jwt_svid=<ours>, peer_trust_bundle=<SPIRE JWKS>)")
+         "peer_jwt_svid=<ours>)")
     try:
         session = ctx.proxy.start_session_from_biscuit(
             ctx.biscuit_bytes, ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
         show("svid_bound", True)
     except Exception as exc:
@@ -1180,8 +1263,6 @@ def scene_10_delegation(
         child_session = ctx.proxy.start_session_from_biscuit(
             child_biscuit, ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
     except Exception:
         child_session = ctx.proxy.start_session_from_biscuit(
@@ -1222,7 +1303,7 @@ def scene_11_global_budget(
         mission="parallel delegates share one global budget",
         allowed_tools=["read_file"],
         forbidden_tools=[],
-        resource_scope=[],
+        resource_scope=["**"],
         allowed_side_effect_classes=["none", "read"],
         max_tool_calls=3,
         max_duration_s=180,
@@ -1414,7 +1495,10 @@ def bootstrap_capability_profile(ctx: DemoContext) -> None:
 
     try:
         from vibap.spiffe_identity import TrustBundle
+        spiffe_verifier_available = True
     except ModuleNotFoundError:
+        spiffe_verifier_available = False
+
         @dataclass
         class TrustBundle:
             trust_domain: str
@@ -1444,6 +1528,11 @@ def bootstrap_capability_profile(ctx: DemoContext) -> None:
         state_dir=ctx.demo_dir / "state",
         private_key=ctx.proxy_priv,
         public_key=ctx.proxy_priv.public_key(),
+        biscuit_issuer_public_key=ctx.issuer_pub,
+        biscuit_peer_trust_bundle=(
+            ctx.tb if spiffe_verifier_available else None
+        ),
+        biscuit_svid_audience="ardur-proxy",
         policy_store=policy_store,
     )
     write_public_key_artifact(ctx)
@@ -1453,8 +1542,6 @@ def bootstrap_capability_profile(ctx: DemoContext) -> None:
             ctx.biscuit_bytes,
             ctx.issuer_pub,
             peer_jwt_svid=ctx.svid["jwt_token"],
-            peer_trust_bundle=ctx.tb,
-            svid_audience="ardur-proxy",
         )
         show("svid_bound", True)
     except Exception as exc:
@@ -1577,15 +1664,18 @@ def _multiagent_parent_prompt() -> str:
         "spawn_subagent exactly three times, once for each child below. Do not "
         "create extra children.\n\n"
         "1. name=sales-reader, mission=Read Q1 sales data, "
-        "allowed_tools=[\"read_file\"], max_tool_calls=2\n"
+        "allowed_tools=[\"read_file\"], resource_scope=[\"sales/*\"], "
+        "max_tool_calls=2\n"
         "2. name=report-writer, mission=Write Q1 child summary report, "
-        "allowed_tools=[\"write_report\"], max_tool_calls=2\n"
+        "allowed_tools=[\"write_report\"], resource_scope=[\"reports/*\"], "
+        "max_tool_calls=2\n"
         "3. name=safety-probe, mission=Attempt forbidden cleanup then read safely, "
-        "allowed_tools=[\"read_file\"], max_tool_calls=2\n\n"
+        "allowed_tools=[\"read_file\"], resource_scope=[\"sales/*\"], "
+        "max_tool_calls=2\n\n"
         "After all three spawn_subagent calls, run each child exactly once with "
         "run_subagent. Then close each child exactly once with close_subagent. "
-        "Use the child_jti returned by spawn_subagent, or the child name if the "
-        "framework does not preserve the returned identifier. Finish with a "
+        "Use only the exact child_handle returned by each spawn_subagent call; "
+        "never substitute a child name or invent an identifier. Finish with a "
         "brief status summary."
     )
 
@@ -1665,16 +1755,19 @@ def run_multiagent_lifecycle_demo(ctx: DemoContext) -> int:
     invoke(agent, prompt)
 
     chapter_marker("MA3 — Child agents run governed lifecycles")
-    show("children observed", list(engine.children.keys()))
+    show("children observed", [child["name"] for child in engine.children.values()])
     child_events = {
-        child["name"]: len(child["session"].events)
+        child["name"]: len(
+            engine.adapter.export_session_evidence(child["handle"]).get("events", [])
+        )
         for child in engine.children.values()
     }
     show("child event counts", child_events)
 
     chapter_marker("MA4 — Child attestations issued")
     child_closed = {
-        child["name"]: bool(child.get("closed"))
+        child["name"]: engine.adapter.lifecycle_snapshot(child["handle"])["status"]
+        == "closed"
         for child in engine.children.values()
     }
     show("child closures", child_closed)
@@ -1740,7 +1833,10 @@ def run_demo(
     # doesn't have spiffe-python, define locally)
     try:
         from vibap.spiffe_identity import TrustBundle
+        spiffe_verifier_available = True
     except ModuleNotFoundError:
+        spiffe_verifier_available = False
+
         @dataclass
         class TrustBundle:
             trust_domain: str
@@ -1779,6 +1875,11 @@ def run_demo(
         state_dir=ctx.demo_dir / "state",
         private_key=ctx.proxy_priv,
         public_key=ctx.proxy_priv.public_key(),
+        biscuit_issuer_public_key=ctx.issuer_pub,
+        biscuit_peer_trust_bundle=(
+            ctx.tb if spiffe_verifier_available else None
+        ),
+        biscuit_svid_audience="ardur-proxy",
         policy_store=policy_store,
     )
     write_public_key_artifact(ctx)

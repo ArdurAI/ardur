@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/runtime-evidence-event-v0.1.schema.json",
+  "title": "Ardur Runtime Evidence Event v0.1",
+  "description": "Private ingest contract for one normalized external runtime observation. Sensitive detail fields are excluded from the public correlation report.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "source",
+    "event_type",
+    "observed_at",
+    "process",
+    "correlation",
+    "details"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.runtime_evidence_event.v0.1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "process_start",
+        "process_exit",
+        "file_write",
+        "file_delete",
+        "network_connect"
+      ]
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 20,
+      "maxLength": 40
+    },
+    "process": {
+      "$ref": "#/$defs/process"
+    },
+    "correlation": {
+      "$ref": "#/$defs/correlation"
+    },
+    "details": {
+      "$ref": "#/$defs/details"
+    },
+    "source_event_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "boundedString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "sensitiveString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "format",
+        "assurance",
+        "coverage"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "normalized",
+            "tetragon",
+            "falco"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "assurance": {
+          "const": "imported_unverified"
+        },
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "degraded",
+            "unknown",
+            "alert_only"
+          ]
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4194304
+        },
+        "ppid": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4194304
+        },
+        "start_time": {
+          "type": "string",
+          "format": "date-time",
+          "minLength": 20,
+          "maxLength": 40
+        },
+        "parent_start_time": {
+          "type": "string",
+          "format": "date-time",
+          "minLength": 20,
+          "maxLength": 40
+        },
+        "exec_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "parent_exec_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "container_id": {
+          "$ref": "#/$defs/boundedString"
+        }
+      }
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "receipt_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "trace_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "session_id": {
+          "$ref": "#/$defs/boundedString"
+        },
+        "actor": {
+          "$ref": "#/$defs/boundedString"
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/sensitiveString"
+        },
+        "path": {
+          "$ref": "#/$defs/sensitiveString"
+        },
+        "destination": {
+          "$ref": "#/$defs/sensitiveString"
+        },
+        "workspace": {
+          "$ref": "#/$defs/sensitiveString"
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    }
+  }
+}

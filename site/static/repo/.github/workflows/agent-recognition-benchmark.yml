@@ -1,0 +1,243 @@
+name: Agent recognition benchmark
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/agent-recognition-benchmark.yml"
+      - "docs/benchmarks/agent-recognition-overhead.md"
+      - "go/cmd/ardur-agent-recognition-benchmark/**"
+      - "go/cmd/ardur-agent-recognition-workload/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/pkg/kernelcapture/**"
+      - "python/tests/test_agent_recognition_benchmark_workflow.py"
+  pull_request:
+    paths:
+      - ".github/workflows/agent-recognition-benchmark.yml"
+      - "docs/benchmarks/agent-recognition-overhead.md"
+      - "go/cmd/ardur-agent-recognition-benchmark/**"
+      - "go/cmd/ardur-agent-recognition-workload/**"
+      - "go/cmd/ardur-kernelcaptured/**"
+      - "go/pkg/kernelcapture/**"
+      - "python/tests/test_agent_recognition_benchmark_workflow.py"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Bounded workload profile"
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-recognition-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Agent recognition overhead (${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      BENCHMARK_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'ci' }}
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      PROMOTION_BOOTSTRAP_REFERENCE_SHA: 7a2167f543671bba4fc20a8d3702f5ae6d6315df
+      BUDGET_FILE: go/pkg/kernelcapture/testdata/agent-recognition-benchmark-budget-v0.4.json
+      EVIDENCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.profile == 'ci' }}
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require reviewed budget for automatic CI
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          test -f "$BUDGET_FILE"
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version: '1.26.6'
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Run race-sensitive benchmark tests
+        working-directory: go
+        run: |
+          go test -race -count=1 \
+            ./pkg/kernelcapture \
+            ./cmd/ardur-kernelcaptured \
+            ./cmd/ardur-agent-recognition-benchmark \
+            ./cmd/ardur-agent-recognition-workload
+
+      - name: Build exact benchmark artifacts
+        working-directory: go
+        run: |
+          go build -trimpath -o "$RUNNER_TEMP/ardur-kernelcaptured" ./cmd/ardur-kernelcaptured
+          go build -trimpath -o "$RUNNER_TEMP/ardur-agent-recognition-benchmark" ./cmd/ardur-agent-recognition-benchmark
+          go build -trimpath -o "$RUNNER_TEMP/ardur-agent-recognition-workload" ./cmd/ardur-agent-recognition-workload
+
+      - name: Prepare isolated kernel filesystems
+        run: |
+          set -euo pipefail
+          if [ "$(stat -f -c %T /sys/fs/bpf)" != "bpf_fs" ]; then
+            sudo mount -t bpf bpf /sys/fs/bpf
+          fi
+          if [ "$(stat -f -c %T /sys/kernel/tracing)" != "tracefs" ]; then
+            sudo mount -t tracefs tracefs /sys/kernel/tracing
+          fi
+
+      - name: Resolve exact reference source
+        id: reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$SOURCE_SHA" ]; then
+            echo "::error::current checkout does not match the requested source SHA"
+            exit 2
+          fi
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              reference_sha="${{ github.event.pull_request.base.sha }}"
+              ;;
+            push)
+              reference_sha="${{ github.event.before }}"
+              ;;
+            workflow_dispatch)
+              git fetch --no-tags origin dev
+              reference_sha="$(git merge-base "$SOURCE_SHA" origin/dev)"
+              if [ "$reference_sha" = "$SOURCE_SHA" ]; then
+                reference_sha="$(git rev-parse "$SOURCE_SHA^")"
+              fi
+              ;;
+            *)
+              echo "::error::unsupported benchmark event"
+              exit 2
+              ;;
+          esac
+          if [[ ! "$reference_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::reference source is not an exact commit SHA"
+            exit 2
+          fi
+          if [ "$PR_BASE_REF" = "main" ] && [ "$PR_HEAD_REF" = "dev" ]; then
+            if git cat-file -e "$reference_sha^{commit}" 2>/dev/null && \
+              ! git cat-file -e "$reference_sha:go/cmd/ardur-kernelcaptured" 2>/dev/null; then
+              reference_sha="$PROMOTION_BOOTSTRAP_REFERENCE_SHA"
+            fi
+          fi
+          if [ "$reference_sha" = "$SOURCE_SHA" ]; then
+            echo "::error::reference source must differ from the candidate source"
+            exit 2
+          fi
+          if ! git cat-file -e "$reference_sha^{commit}" 2>/dev/null; then
+            echo "::error::reference source is not available in the candidate history"
+            exit 2
+          fi
+          if ! git merge-base --is-ancestor "$reference_sha" "$SOURCE_SHA"; then
+            echo "::error::reference source is not an ancestor of the candidate source"
+            exit 2
+          fi
+          if ! git cat-file -e "$reference_sha:go/cmd/ardur-kernelcaptured" 2>/dev/null; then
+            echo "::error::reference source does not contain the benchmark daemon"
+            exit 2
+          fi
+          echo "source_sha=$reference_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact reference source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ steps.reference.outputs.source_sha }}
+          path: reference
+          persist-credentials: false
+
+      - name: Verify exact reference checkout
+        working-directory: reference
+        env:
+          EXPECTED_REFERENCE_SOURCE_SHA: ${{ steps.reference.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$EXPECTED_REFERENCE_SOURCE_SHA" ]; then
+            echo "::error::reference checkout does not match the resolved source SHA"
+            exit 2
+          fi
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "::error::reference checkout is not clean"
+            exit 2
+          fi
+
+      - name: Build exact reference daemon
+        id: reference_build
+        working-directory: reference/go
+        run: |
+          set -euo pipefail
+          reference_build_root="$(mktemp -d "$RUNNER_TEMP/ardur-reference-build.XXXXXX")"
+          chmod 700 "$reference_build_root"
+          GOMODCACHE="$reference_build_root/modcache" GOCACHE="$reference_build_root/buildcache" go mod download
+          GOMODCACHE="$reference_build_root/modcache" GOCACHE="$reference_build_root/buildcache" go mod verify
+          GOMODCACHE="$reference_build_root/modcache" GOCACHE="$reference_build_root/buildcache" \
+            go build -trimpath -o "$reference_build_root/ardur-kernelcaptured-reference" ./cmd/ardur-kernelcaptured
+          chmod 500 "$reference_build_root/ardur-kernelcaptured-reference"
+          echo "daemon_path=$reference_build_root/ardur-kernelcaptured-reference" >> "$GITHUB_OUTPUT"
+
+      - name: Run paired recognition benchmark
+        env:
+          REFERENCE_DAEMON_PATH: ${{ steps.reference_build.outputs.daemon_path }}
+          REFERENCE_SOURCE_SHA: ${{ steps.reference.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          benchmark_bin="$RUNNER_TEMP/ardur-agent-recognition-benchmark"
+          report_dir="$RUNNER_TEMP/ardur-agent-recognition-benchmark-report"
+          if [ "$benchmark_bin" = "$report_dir" ] || [ -e "$report_dir" ]; then
+            echo "::error::benchmark report path is not isolated"
+            exit 2
+          fi
+          args=(
+            "$benchmark_bin"
+            --daemon-bin "$RUNNER_TEMP/ardur-kernelcaptured"
+            --reference-daemon-bin "$REFERENCE_DAEMON_PATH"
+            --workload-bin "$RUNNER_TEMP/ardur-agent-recognition-workload"
+            --source-sha "$SOURCE_SHA"
+            --reference-source-sha "$REFERENCE_SOURCE_SHA"
+            --output-dir "$report_dir"
+            --profile "$BENCHMARK_PROFILE"
+            --runner-image-os "${ImageOS:-unknown}"
+            --runner-image-version "${ImageVersion:-unknown}"
+            --warmup-pairs 1
+            --measured-pairs 20
+            --timeout 25m
+          )
+          if [ "$BENCHMARK_PROFILE" = "ci" ] && [ "$EVIDENCE_ONLY" != "true" ]; then
+            args+=(--budget "$BUDGET_FILE")
+          elif [ "$BENCHMARK_PROFILE" = "ci" ]; then
+            echo "::notice::manual CI dispatch is collecting budget-independent v0.4 evidence"
+          else
+            echo "::notice::manual release profile is a budget-independent experiment and never substitutes for required CI"
+          fi
+          set +e
+          sudo -- "${args[@]}"
+          benchmark_status=$?
+          set -e
+          if [ -d "$report_dir" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "$report_dir"
+          fi
+          exit "$benchmark_status"
+
+      - name: Upload machine-readable report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-recognition-benchmark-${{ env.BENCHMARK_PROFILE }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/ardur-agent-recognition-benchmark-report/
+          if-no-files-found: warn
+          retention-days: 14

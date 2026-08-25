@@ -20,9 +20,14 @@ class _Counter:
         self._lock = threading.Lock()
 
     def inc(self, **label_values: str) -> None:
+        self.add(1, **label_values)
+
+    def add(self, amount: int, **label_values: str) -> None:
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            raise ValueError("counter amount must be a non-negative integer")
         key = tuple(label_values.get(label, "") for label in self.labels)
         with self._lock:
-            self._data[key] += 1
+            self._data[key] += amount
 
     def render(self) -> str:
         lines = [f"# HELP {self.name} {self.help}", f"# TYPE {self.name} counter"]
@@ -60,10 +65,24 @@ class _Gauge:
 
 
 class _Histogram:
-    def __init__(self, name: str, help_text: str, buckets: tuple[float, ...] | None = None):
+    def __init__(
+        self, name: str, help_text: str, buckets: tuple[float, ...] | None = None
+    ):
         self.name = name
         self.help = help_text
-        self.buckets = buckets or (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+        self.buckets = buckets or (
+            0.005,
+            0.01,
+            0.025,
+            0.05,
+            0.1,
+            0.25,
+            0.5,
+            1.0,
+            2.5,
+            5.0,
+            10.0,
+        )
         self._sum = 0.0
         self._count = 0
         self._bucket_counts: dict[float, int] = defaultdict(int)
@@ -92,13 +111,44 @@ class _Histogram:
 
 class ArdurMetrics:
     def __init__(self):
-        self.requests_total = _Counter("ardur_requests_total", "Total HTTP requests", ("method", "path", "status"))
-        self.evaluations_total = _Counter("ardur_evaluations_total", "Tool-call evaluations by decision", ("decision",))
-        self.errors_total = _Counter("ardur_errors_total", "Errors by type", ("error_type",))
-        self.active_sessions = _Gauge("ardur_active_sessions", "Currently active governed sessions")
-        self.kill_switch_active = _Gauge("ardur_kill_switch_active", "1 if kill switch is active")
-        self.request_duration_seconds = _Histogram("ardur_request_duration_seconds", "Request duration in seconds")
-        self.evaluation_duration_seconds = _Histogram("ardur_evaluation_duration_seconds", "Evaluation duration in seconds")
+        self.requests_total = _Counter(
+            "ardur_requests_total", "Total HTTP requests", ("method", "path", "status")
+        )
+        self.evaluations_total = _Counter(
+            "ardur_evaluations_total",
+            "Tool-call evaluations by decision",
+            ("decision",),
+        )
+        self.errors_total = _Counter(
+            "ardur_errors_total", "Errors by type", ("error_type",)
+        )
+        self.risk_budget_operations_total = _Counter(
+            "ardur_risk_budget_operations_total",
+            "Typed risk-budget operations by bounded outcome",
+            ("operation", "outcome", "fact", "reason"),
+        )
+        self.spend_events_total = _Counter(
+            "ardur_spend_events_total",
+            "Spend budget lifecycle events",
+            ("operation", "outcome"),
+        )
+        self.spend_amount_total = _Counter(
+            "ardur_spend_amount_total",
+            "Spend budget amounts by lifecycle operation and unit",
+            ("operation", "unit"),
+        )
+        self.active_sessions = _Gauge(
+            "ardur_active_sessions", "Currently active governed sessions"
+        )
+        self.kill_switch_active = _Gauge(
+            "ardur_kill_switch_active", "1 if kill switch is active"
+        )
+        self.request_duration_seconds = _Histogram(
+            "ardur_request_duration_seconds", "Request duration in seconds"
+        )
+        self.evaluation_duration_seconds = _Histogram(
+            "ardur_evaluation_duration_seconds", "Evaluation duration in seconds"
+        )
         self._startup_time = time.time()
 
     def render(self) -> str:
@@ -106,13 +156,18 @@ class ArdurMetrics:
             self.requests_total.render(),
             self.evaluations_total.render(),
             self.errors_total.render(),
+            self.risk_budget_operations_total.render(),
+            self.spend_events_total.render(),
+            self.spend_amount_total.render(),
             self.active_sessions.render(),
             self.kill_switch_active.render(),
             self.request_duration_seconds.render(),
             self.evaluation_duration_seconds.render(),
         ]
         uptime = time.time() - self._startup_time
-        parts.append(f"# HELP ardur_uptime_seconds Proxy uptime in seconds\n# TYPE ardur_uptime_seconds gauge\nardur_uptime_seconds {uptime:.3f}\n")
+        parts.append(
+            f"# HELP ardur_uptime_seconds Proxy uptime in seconds\n# TYPE ardur_uptime_seconds gauge\nardur_uptime_seconds {uptime:.3f}\n"
+        )
         return "\n".join(parts)
 
 

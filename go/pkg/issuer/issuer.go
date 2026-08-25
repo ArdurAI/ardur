@@ -12,7 +12,7 @@
 //  7. Log issuance to transparency log (pkg/transparency)
 //
 // Each provider is optional. The Issuer supports three compliance levels:
-//   - Level 1 (Core): Layers 1 + 3 + 5 only (identity + intent + trust)
+//   - Level 1 (Core): Layers 3 + 5, with optional caller-provided Layer 1
 //   - Level 2 (Verified): All layers with external verification
 //   - Level 3 (Enforced): All layers with kernel-level enforcement
 package issuer
@@ -20,6 +20,7 @@ package issuer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/credential"
@@ -35,8 +36,8 @@ import (
 type ComplianceLevel string
 
 const (
-	LevelCore     ComplianceLevel = "core"     // L1: self-attested identity + intent + trust
-	LevelVerified ComplianceLevel = "verified" // L2: SPIFFE + Sigstore + Cedar verified
+	LevelCore     ComplianceLevel = "core"     // Core: intent + trust; Layer 1 is optional and caller-provided
+	LevelVerified ComplianceLevel = "verified" // L2: workload SPIFFE ID + Sigstore + Cedar verified; owner attribution is not
 	LevelEnforced ComplianceLevel = "enforced" // L3: Full stack with eBPF + network enforcement
 )
 
@@ -119,11 +120,11 @@ func (iss *Issuer) MaxComplianceLevel() ComplianceLevel {
 // computeActualCompliance determines the compliance level based on
 // what was actually verified during issuance, not just what providers
 // are configured.
-func computeActualCompliance(identityFromSPIRE bool, provenanceVerified bool, policyCompiled bool, profileRetrieved bool, trustScored bool) ComplianceLevel {
-	if identityFromSPIRE && provenanceVerified && policyCompiled && profileRetrieved && trustScored {
+func computeActualCompliance(workloadIdentityFromSPIRE bool, provenanceVerified bool, policyCompiled bool, profileRetrieved bool, trustScored bool) ComplianceLevel {
+	if workloadIdentityFromSPIRE && provenanceVerified && policyCompiled && profileRetrieved && trustScored {
 		return LevelEnforced
 	}
-	if identityFromSPIRE && provenanceVerified && policyCompiled {
+	if workloadIdentityFromSPIRE && provenanceVerified && policyCompiled {
 		return LevelVerified
 	}
 	return LevelCore
@@ -132,10 +133,14 @@ func computeActualCompliance(identityFromSPIRE bool, provenanceVerified bool, po
 // IssueRequest contains all inputs for credential issuance.
 // Not all fields are required — it depends on the compliance level.
 type IssueRequest struct {
-	// Layer 1: Identity (required for L2+; for L1, provide SPIFFEID/OwnerID directly)
+	// Layer 1: Identity (required for L2+; optional for Core only when
+	// AllowUnverifiedIdentity is explicitly enabled)
 	SPIFFEID   string // Direct SPIFFE ID (used if no IdentityProvider)
-	OwnerID    string // Direct owner ID (used if no IdentityProvider)
+	OwnerID    string // Direct self-asserted owner attribution (used if no IdentityProvider)
 	A2ACardRef string
+	// AllowUnverifiedIdentity explicitly permits issuance without SPIFFEID. The
+	// credential then uses AgentID as a non-SPIFFE subject and omits Layer 1.
+	AllowUnverifiedIdentity bool
 
 	// Layer 2: Provenance (optional)
 	ImageRef       string // OCI image reference for verification
@@ -186,11 +191,12 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 		score    *trust.TrustScore
 
 		// Track what was actually verified for compliance level
-		identityFromSPIRE  bool
-		provenanceVerified bool
-		policyCompiled     bool
-		profileRetrieved   bool
-		trustScored        bool
+		workloadIdentityFromSPIRE bool
+		unverifiedIdentity        bool
+		provenanceVerified        bool
+		policyCompiled            bool
+		profileRetrieved          bool
+		trustScored               bool
 	)
 
 	// --- Layer 1: Identity ---
@@ -200,14 +206,28 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 			return nil, fmt.Errorf("layer 1 (identity): %w", err)
 		}
 		agentID = identity.SPIFFEID
-		ownerID = identity.OwnerID
+		ownerID = identity.OwnerID.String()
 		a2aRef = identity.A2ACardRef
-		identityFromSPIRE = true
+		workloadIdentityFromSPIRE = true
 	} else {
-		if req.SPIFFEID == "" || req.OwnerID == "" {
-			return nil, fmt.Errorf("layer 1 (identity): SPIFFEID and OwnerID required when no IdentityProvider")
+		if req.SPIFFEID == "" {
+			if !req.AllowUnverifiedIdentity {
+				return nil, fmt.Errorf("layer 1 (identity): SPIFFEID required unless AllowUnverifiedIdentity is explicitly enabled")
+			}
+			if req.AgentID == "" {
+				return nil, fmt.Errorf("layer 1 (identity): AgentID required when SPIFFEID is omitted")
+			}
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(req.AgentID)), "spiffe://") {
+				return nil, fmt.Errorf("layer 1 (identity): unverified AgentID must not be SPIFFE-formatted")
+			}
+			agentID = req.AgentID
+			unverifiedIdentity = true
+		} else {
+			if req.OwnerID == "" {
+				return nil, fmt.Errorf("layer 1 (identity): OwnerID required when no IdentityProvider")
+			}
+			agentID = req.SPIFFEID
 		}
-		agentID = req.SPIFFEID
 		ownerID = req.OwnerID
 		a2aRef = req.A2ACardRef
 	}
@@ -293,7 +313,6 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 
 	// --- Build Credential ---
 	b := credential.NewBuilder(iss.issuerURI, agentID).
-		WithIdentity(agentID, ownerID, a2aRef).
 		WithIntent(agentChecksum, engineName, policyHash, req.PermittedActions).
 		WithTrust(
 			score.StaticCapability,
@@ -302,6 +321,9 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 			"",
 			score.AuthorizationTier,
 		)
+	if !unverifiedIdentity {
+		b = b.WithIdentity(agentID, ownerID, a2aRef)
+	}
 
 	if req.TTL > 0 {
 		b = b.WithTTL(req.TTL)
@@ -340,7 +362,7 @@ func (iss *Issuer) Issue(ctx context.Context, req IssueRequest) (*IssueResult, e
 	result := &IssueResult{
 		Credential:      cred,
 		Encoded:         encoded,
-		ComplianceLevel: computeActualCompliance(identityFromSPIRE, provenanceVerified, policyCompiled, profileRetrieved, trustScored),
+		ComplianceLevel: computeActualCompliance(workloadIdentityFromSPIRE, provenanceVerified, policyCompiled, profileRetrieved, trustScored),
 	}
 
 	// --- Transparency Log ---

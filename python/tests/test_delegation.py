@@ -5,18 +5,53 @@ explicit so a future refactor can't silently remove them."""
 from __future__ import annotations
 
 import hashlib
-import time
 
 import jwt
 import pytest
 
 from vibap.passport import (
     MissionPassport,
+    _inherited_mic_conformance_claims,
     derive_child_passport,
     generate_keypair,
     issue_passport,
     verify_passport,
 )
+
+
+MIC_MANIFEST_DIGEST = "sha-256:" + ("a" * 64)
+MIC_CLAIMS = frozenset(
+    {"conformance_profile", "receipt_policy", "tool_manifest_digest"}
+)
+
+
+def _issue_delegating_parent(private_key, *, extra_claims=None):
+    return issue_passport(
+        MissionPassport(
+            agent_id="mic-parent",
+            mission="delegate governed work",
+            allowed_tools=["read"],
+            max_tool_calls=5,
+            max_duration_s=120,
+            delegation_allowed=True,
+            max_delegation_depth=1,
+        ),
+        private_key,
+        ttl_s=120,
+        extra_claims=extra_claims,
+    )
+
+
+def _derive_child(parent_token, private_key, public_key):
+    return derive_child_passport(
+        parent_token=parent_token,
+        public_key=public_key,
+        private_key=private_key,
+        child_agent_id="mic-child",
+        child_allowed_tools=["read"],
+        child_mission="perform governed work",
+        child_ttl_s=60,
+    )
 
 
 @pytest.fixture
@@ -50,7 +85,9 @@ class TestScopeNarrowing:
         )
         claims = verify_passport(child, public_key, parent_token=parent_token)
         parent_claims = verify_passport(parent_token, public_key)
-        assert set(claims["allowed_tools"]).issubset(set(parent_claims["allowed_tools"]))
+        assert set(claims["allowed_tools"]).issubset(
+            set(parent_claims["allowed_tools"])
+        )
 
     def test_child_scope_cannot_equal_but_exceed_parent(
         self, parent_token, private_key, public_key
@@ -66,6 +103,193 @@ class TestScopeNarrowing:
                 child_mission="evil",
                 child_ttl_s=60,
             )
+
+
+class TestMICConformanceInheritance:
+    def test_inherited_receipt_policy_is_deep_copied(self):
+        parent_claims = {
+            "conformance_profile": "MIC-Evidence",
+            "receipt_policy": {"level": "counter_signed"},
+            "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+        }
+
+        inherited = _inherited_mic_conformance_claims(parent_claims)
+        inherited["receipt_policy"]["level"] = "transparency_logged"
+
+        assert parent_claims["receipt_policy"] == {"level": "counter_signed"}
+
+    @pytest.mark.parametrize(
+        ("profile", "receipt_level"),
+        [
+            ("Delegation-Core", "minimal"),
+            ("MIC-State", "minimal"),
+            ("MIC-Evidence", "counter_signed"),
+        ],
+    )
+    def test_child_inherits_only_complete_mic_bundle(
+        self,
+        private_key,
+        public_key,
+        profile,
+        receipt_level,
+    ):
+        expected = {
+            "conformance_profile": profile,
+            "receipt_policy": {"level": receipt_level},
+            "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+        }
+        parent = _issue_delegating_parent(
+            private_key,
+            extra_claims={
+                **expected,
+                "issuer_private_marker": {"must": "not propagate"},
+            },
+        )
+
+        child = _derive_child(parent, private_key, public_key)
+        claims = verify_passport(child, public_key, parent_token=parent)
+
+        assert {claim: claims[claim] for claim in MIC_CLAIMS} == expected
+        assert "issuer_private_marker" not in claims
+
+    @pytest.mark.parametrize(
+        "legacy_extras",
+        [
+            None,
+            {"receipt_policy": {"level": "minimal"}},
+            {"tool_manifest_digest": MIC_MANIFEST_DIGEST},
+            {
+                "receipt_policy": {"level": "minimal"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+        ],
+    )
+    def test_legacy_parent_without_profile_remains_legacy(
+        self,
+        private_key,
+        public_key,
+        legacy_extras,
+    ):
+        parent = _issue_delegating_parent(
+            private_key,
+            extra_claims=legacy_extras,
+        )
+
+        child = _derive_child(parent, private_key, public_key)
+        claims = verify_passport(child, public_key, parent_token=parent)
+
+        assert MIC_CLAIMS.isdisjoint(claims)
+
+    @pytest.mark.parametrize(
+        "extra_claims",
+        [
+            {"conformance_profile": "MIC-State"},
+            {
+                "conformance_profile": "MIC-Unknown",
+                "receipt_policy": {"level": "minimal"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+            {
+                "conformance_profile": "MIC-State",
+                "receipt_policy": {"level": "unknown"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+            {
+                "conformance_profile": "MIC-State",
+                "receipt_policy": {"level": "minimal", "extra": True},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+            {
+                "conformance_profile": "MIC-State",
+                "receipt_policy": {"level": "minimal"},
+                "tool_manifest_digest": "sha-256:not-a-digest",
+            },
+            {
+                "conformance_profile": "MIC-Evidence",
+                "receipt_policy": {"level": "minimal"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+        ],
+    )
+    def test_partial_or_malformed_mic_bundle_fails_closed(
+        self,
+        private_key,
+        public_key,
+        extra_claims,
+    ):
+        parent = _issue_delegating_parent(
+            private_key,
+            extra_claims=extra_claims,
+        )
+
+        with pytest.raises(PermissionError, match="MIC conformance claim bundle"):
+            _derive_child(parent, private_key, public_key)
+
+    def test_parent_extras_cannot_overwrite_child_lineage_claims(
+        self, private_key, public_key
+    ):
+        parent = _issue_delegating_parent(
+            private_key,
+            extra_claims={
+                "conformance_profile": "MIC-State",
+                "receipt_policy": {"level": "minimal"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+                "parent_token_hash": "attacker-controlled",
+                "reserved_budget_share": 999,
+            },
+        )
+
+        child = _derive_child(parent, private_key, public_key)
+        claims = verify_passport(child, public_key, parent_token=parent)
+
+        expected_parent_hash = hashlib.sha256(parent.encode("utf-8")).hexdigest()
+        assert claims["parent_token_hash"] == expected_parent_hash
+        assert claims["reserved_budget_share"] == claims["max_tool_calls"]
+
+    def test_parent_aware_verification_rejects_pre_fix_child_without_bundle(
+        self, private_key, public_key
+    ):
+        parent = _issue_delegating_parent(
+            private_key,
+            extra_claims={
+                "conformance_profile": "MIC-Evidence",
+                "receipt_policy": {"level": "counter_signed"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+        )
+        child = _derive_child(parent, private_key, public_key)
+        child_claims = verify_passport(child, public_key, parent_token=parent)
+        for claim in MIC_CLAIMS:
+            child_claims.pop(claim)
+        pre_fix_child = jwt.encode(child_claims, private_key, algorithm="ES256")
+
+        with pytest.raises(
+            PermissionError,
+            match="child MIC conformance claim bundle does not match parent",
+        ):
+            verify_passport(pre_fix_child, public_key, parent_token=parent)
+
+    def test_parent_aware_verification_rejects_weaker_child_profile(
+        self, private_key, public_key
+    ):
+        parent = _issue_delegating_parent(
+            private_key,
+            extra_claims={
+                "conformance_profile": "MIC-Evidence",
+                "receipt_policy": {"level": "counter_signed"},
+                "tool_manifest_digest": MIC_MANIFEST_DIGEST,
+            },
+        )
+        child = _derive_child(parent, private_key, public_key)
+        child_claims = verify_passport(child, public_key, parent_token=parent)
+        child_claims["conformance_profile"] = "MIC-State"
+        weakened_child = jwt.encode(child_claims, private_key, algorithm="ES256")
+
+        with pytest.raises(
+            PermissionError,
+            match="child MIC conformance claim bundle does not match parent",
+        ):
+            verify_passport(weakened_child, public_key, parent_token=parent)
 
 
 class TestMultiLevel:
@@ -135,22 +359,22 @@ class TestMultiLevel:
         # The parent_jti check catches this first (child_b has a different jti
         # than child_a_prime). The chain[0].token_hash check is defense-in-depth
         # for cases where jti values could collide in multi-key deployments.
-        with pytest.raises(PermissionError, match="parent_jti does not match|chain splice"):
+        with pytest.raises(
+            PermissionError, match="parent_jti does not match|chain splice"
+        ):
             verify_passport(grand_c, public_key, parent_token=child_b)
 
         # Legitimate: verify grand_c with correct parent → should pass
         claims = verify_passport(grand_c, public_key, parent_token=child_a_prime)
         assert claims["sub"] == "grand-c"
 
-    def test_grandchild_cannot_re_escalate(
-        self, parent_token, private_key, public_key
-    ):
+    def test_grandchild_cannot_re_escalate(self, parent_token, private_key, public_key):
         child = derive_child_passport(
             parent_token=parent_token,
             public_key=public_key,
             private_key=private_key,
             child_agent_id="child",
-            child_allowed_tools=["read"],        # child is already narrowed
+            child_allowed_tools=["read"],  # child is already narrowed
             child_mission="child",
             child_ttl_s=300,
         )
@@ -358,13 +582,15 @@ class TestResourceScopeNarrowing:
         claims = verify_passport(child_token, public_key, parent_token=parent_token)
         assert claims["resource_scope"] == ["/data/*", "/logs/*"]
 
-    def test_unrestricted_parent_can_delegate_narrowed_child_scope(self, private_key, public_key):
+    def test_unrestricted_parent_can_delegate_narrowed_child_scope(
+        self, private_key, public_key
+    ):
         parent_token = issue_passport(
             MissionPassport(
                 agent_id="p",
                 mission="coord",
                 allowed_tools=["read"],
-                resource_scope=[],
+                resource_scope=["**"],
                 delegation_allowed=True,
                 max_delegation_depth=2,
             ),
@@ -383,7 +609,35 @@ class TestResourceScopeNarrowing:
         claims = verify_passport(child_token, public_key, parent_token=parent_token)
         assert claims["resource_scope"] == ["/tmp/*"]
 
-    def test_restricted_parent_cannot_delegate_empty_child_scope(self, private_key, public_key):
+    def test_absent_parent_scope_cannot_delegate_resource_authority(
+        self, private_key, public_key
+    ):
+        parent_token = issue_passport(
+            MissionPassport(
+                agent_id="p",
+                mission="coord",
+                allowed_tools=["read"],
+                resource_scope=[],
+                delegation_allowed=True,
+                max_delegation_depth=2,
+            ),
+            private_key,
+            ttl_s=600,
+        )
+        with pytest.raises(PermissionError, match="scope escalation \\(resources\\)"):
+            derive_child_passport(
+                parent_token=parent_token,
+                public_key=public_key,
+                private_key=private_key,
+                child_agent_id="c",
+                child_allowed_tools=["read"],
+                child_mission="sub",
+                child_resource_scope=["/tmp/*"],
+            )
+
+    def test_restricted_parent_can_delegate_empty_child_scope(
+        self, private_key, public_key
+    ):
         parent_token = issue_passport(
             MissionPassport(
                 agent_id="p",
@@ -396,16 +650,17 @@ class TestResourceScopeNarrowing:
             private_key,
             ttl_s=600,
         )
-        with pytest.raises(PermissionError, match="cannot widen"):
-            derive_child_passport(
-                parent_token=parent_token,
-                public_key=public_key,
-                private_key=private_key,
-                child_agent_id="c",
-                child_allowed_tools=["read"],
-                child_mission="sub",
-                child_resource_scope=[],
-            )
+        child_token = derive_child_passport(
+            parent_token=parent_token,
+            public_key=public_key,
+            private_key=private_key,
+            child_agent_id="c",
+            child_allowed_tools=["read"],
+            child_mission="sub",
+            child_resource_scope=[],
+        )
+        claims = verify_passport(child_token, public_key, parent_token=parent_token)
+        assert claims["resource_scope"] == []
 
 
 class TestEmptyChildTools:
@@ -474,7 +729,8 @@ class TestDelegationChainAdversarial:
         }
         if extra_claims:
             claims.update(extra_claims)
-        return issue_passport(
+        jti_override = claims.pop("jti", None)
+        token = issue_passport(
             MissionPassport(
                 agent_id="child",
                 mission="forged child",
@@ -488,6 +744,11 @@ class TestDelegationChainAdversarial:
             ttl_s=60,
             extra_claims=claims,
         )
+        if not isinstance(jti_override, str):
+            return token
+        payload = jwt.decode(token, options={"verify_signature": False})
+        payload["jti"] = jti_override
+        return jwt.encode(payload, private_key, algorithm="ES256")
 
     def test_orphan_child_without_chain_rejected_even_without_parent_token(
         self, private_key, public_key
@@ -522,9 +783,7 @@ class TestDelegationChainAdversarial:
         with pytest.raises(PermissionError, match="inconsistent delegation_chain"):
             verify_passport(forged, public_key)
 
-    def test_cycle_rejected_even_without_parent_token(
-        self, private_key, public_key
-    ):
+    def test_cycle_rejected_even_without_parent_token(self, private_key, public_key):
         parent_token = self._parent(private_key)
         parent_claims = verify_passport(parent_token, public_key)
         forged = self._signed_child(
@@ -617,22 +876,22 @@ class TestEscrowRights:
             child_agent_id="c3",
             child_allowed_tools=["read"],
             child_mission="third sibling",
-            child_max_tool_calls=15,                     # asks for 15
-            parent_reserved_for_descendants=20,           # 2 prior sibs * 10
+            child_max_tool_calls=15,  # asks for 15
+            parent_reserved_for_descendants=20,  # 2 prior sibs * 10
         )
         claims = verify_passport(third, public_key, parent_token=root_token)
         # Clamped to escrow_remaining = ceiling(30) - reserved(20) = 10
         assert claims["max_tool_calls"] == 10
         assert claims["reserved_budget_share"] == 10
 
-    def test_ceiling_exhausted_rejects_delegation(
-        self, private_key, public_key
-    ):
+    def test_ceiling_exhausted_rejects_delegation(self, private_key, public_key):
         """If parent_reserved_for_descendants == ceiling, no further
         delegation may occur even if parent_calls_remaining is silent
         about the exhaustion."""
         root_token = self._root(private_key, ceiling=30)
-        with pytest.raises(PermissionError, match="descendant-reservation pool exhausted"):
+        with pytest.raises(
+            PermissionError, match="descendant-reservation pool exhausted"
+        ):
             derive_child_passport(
                 parent_token=root_token,
                 public_key=public_key,
@@ -644,9 +903,7 @@ class TestEscrowRights:
                 parent_reserved_for_descendants=30,  # already at ceiling
             )
 
-    def test_over_allocated_reservation_rejected(
-        self, private_key, public_key
-    ):
+    def test_over_allocated_reservation_rejected(self, private_key, public_key):
         """Defensive: a caller that reports more reserved than the ceiling
         is mathematically impossible — refuse rather than accept and
         compute a negative escrow_remaining."""
@@ -663,9 +920,7 @@ class TestEscrowRights:
                 parent_reserved_for_descendants=31,  # > ceiling
             )
 
-    def test_negative_reservation_rejected(
-        self, private_key, public_key
-    ):
+    def test_negative_reservation_rejected(self, private_key, public_key):
         root_token = self._root(private_key, ceiling=30)
         with pytest.raises(PermissionError, match="must be non-negative"):
             derive_child_passport(
@@ -697,9 +952,7 @@ class TestEscrowRights:
             child_max_tool_calls=10,
             # parent_reserved_for_descendants omitted — defaults to 0
         )
-        claims = verify_passport(
-            child_token, public_key, parent_token=root_token
-        )
+        claims = verify_passport(child_token, public_key, parent_token=root_token)
         assert claims["max_tool_calls"] == 10
         assert claims["reserved_budget_share"] == 10
 
@@ -908,9 +1161,7 @@ class TestColdLineageVerification:
             child_mission="subtask",
             child_ttl_s=120,
         )
-        claims = verify_passport(
-            child_token, public_key, parent_token=parent_token
-        )
+        claims = verify_passport(child_token, public_key, parent_token=parent_token)
         assert claims["sub"] == "child"
         assert claims["parent_jti"]  # chain intact
 

@@ -1,11 +1,15 @@
 package aat
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,7 +23,16 @@ import (
 //   - trustAnchors holds root public keys (raw Ed25519 32-byte keys)
 //   - tool/args/popJWT are the invocation-time presentation inputs
 func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[string]interface{}, popJWT string) (*VerifyResult, error) {
-	now := time.Now()
+	return VerifyChainWithOpts(chain, trustAnchors, tool, args, popJWT, VerifyChainOpts{})
+}
+
+// VerifyChainWithOpts verifies either the legacy DG v0.1/draft-00 profile or
+// the explicitly discriminated DG v0.2/draft-01 profile.
+func VerifyChainWithOpts(chain []*Token, trustAnchors [][]byte, tool string, args map[string]interface{}, popJWT string, opts VerifyChainOpts) (*VerifyResult, error) {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	result := &VerifyResult{
 		Verdict: VerdictDeny,
@@ -41,20 +54,17 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		return result, err
 	}
 
-	// Parse all tokens from compact form
+	// Prepare compact JWS metadata without deserializing application claims.
 	parsed := make([]*Token, len(chain))
 	for i, tok := range chain {
-		if tok.Compact != "" && tok.JWTID == "" {
-			pt, err := parseCompactToken(tok.Compact)
-			if err != nil {
+		if tok.Compact != "" {
+			if err := prepareCompactToken(tok); err != nil {
 				result.FailedStep = "step-2c"
 				result.Cause = err
 				return result, err
 			}
-			parsed[i] = pt
-		} else {
-			parsed[i] = tok
 		}
+		parsed[i] = tok
 	}
 
 	// Step 3: root verification
@@ -78,6 +88,18 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		links = append(links, ChainLink{Index: i - 1, Parent: parent, Child: child})
 	}
 	result.Links = links
+	if root.Profile == DGProfileV02 {
+		if opts.Audience == "" {
+			result.FailedStep = "profile-v0.2"
+			result.Cause = ErrPoPAudienceRequired
+			return result, ErrPoPAudienceRequired
+		}
+		if err := validateReceiptSignerSeparation(parsed, opts.ReceiptSignerJWK); err != nil {
+			result.FailedStep = "profile-v0.2"
+			result.Cause = err
+			return result, err
+		}
+	}
 
 	leaf := parsed[len(parsed)-1]
 	result.Leaf = leaf
@@ -95,6 +117,13 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		result.Cause = err
 		return result, err
 	}
+	if leaf.Profile == DGProfileV02 {
+		if err := validateSatisfiedApprovals(leaf.ApprovalRefs, opts.SatisfiedApprovalRefs); err != nil {
+			result.FailedStep = "profile-v0.2-approvals"
+			result.Cause = err
+			return result, err
+		}
+	}
 
 	// Step 7: PoP verification
 	if popJWT == "" {
@@ -102,7 +131,11 @@ func VerifyChain(chain []*Token, trustAnchors [][]byte, tool string, args map[st
 		result.Cause = fmt.Errorf("PoP JWT is required")
 		return result, fmt.Errorf("PoP JWT is required")
 	}
-	popResult, err := VerifyPoPJWT(leaf, tool, args, popJWT, VerifyPoPOpts{Now: now})
+	popResult, err := VerifyPoPJWT(leaf, tool, args, popJWT, VerifyPoPOpts{
+		Now:              now,
+		ExpectedAudience: opts.Audience,
+		RequireAudience:  leaf.Profile == DGProfileV02,
+	})
 	if err != nil {
 		result.FailedStep = "step-7"
 		result.Cause = err
@@ -120,6 +153,9 @@ func validateStructure(chain []*Token) error {
 		return ErrDenyStep2BChainTooLarge
 	}
 	for i, tok := range chain {
+		if tok == nil {
+			return fmt.Errorf("%w at index %d", ErrDenyStep2CInvalidPayload, i)
+		}
 		if len(tok.Compact) > MAX_TOKEN_SIZE {
 			return fmt.Errorf("%w at index %d", ErrDenyStep2ATokenTooLarge, i)
 		}
@@ -128,9 +164,12 @@ func validateStructure(chain []*Token) error {
 	seen := make(map[string]bool)
 	for _, tok := range chain {
 		jti := tok.JWTID
-		if jti == "" {
-			// Try to extract from compact form
-			jti = extractJTI(tok.Compact)
+		if tok.Compact != "" {
+			untrustedJTI, err := extractUntrustedJTI(tok.Compact)
+			if err != nil {
+				return err
+			}
+			jti = untrustedJTI
 		}
 		if jti == "" {
 			return ErrDenyStep2CMissingJTI
@@ -143,41 +182,115 @@ func validateStructure(chain []*Token) error {
 	return nil
 }
 
-func parseCompactToken(compact string) (*Token, error) {
+func prepareCompactToken(token *Token) error {
+	compact := token.Compact
 	parts := strings.SplitN(compact, ".", 3)
-	if len(parts) < 2 {
-		return nil, ErrDenyStep2CInvalidPayload
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return ErrDenyStep2CInvalidPayload
 	}
-
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, ErrDenyStep2CInvalidPayload
+	*token = Token{
+		Compact:          compact,
+		ProtectedSegment: parts[0],
+		PayloadSegment:   parts[1],
+		SignatureSegment: parts[2],
+		SigningInput:     parts[0] + "." + parts[1],
 	}
-
-	var token Token
-	if err := json.Unmarshal(payloadBytes, &token); err != nil {
-		return nil, ErrDenyStep2CInvalidPayload
-	}
-
-	sigPart := ""
-	if len(parts) >= 3 {
-		sigPart = parts[2]
-	}
-
-	token.Compact = compact
-	token.ProtectedSegment = parts[0]
-	token.PayloadSegment = parts[1]
-	token.SignatureSegment = sigPart
-	token.SigningInput = parts[0] + "." + parts[1]
-	return &token, nil
+	return nil
 }
 
-func extractJTI(compact string) string {
-	tok, err := parseCompactToken(compact)
-	if err != nil || tok == nil {
-		return ""
+func extractUntrustedJTI(compact string) (string, error) {
+	parts := strings.SplitN(compact, ".", 3)
+	if len(parts) != 3 {
+		return "", ErrDenyStep2CInvalidPayload
 	}
-	return tok.JWTID
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", ErrDenyStep2CInvalidPayload
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	opening, err := decoder.Token()
+	if err != nil || opening != json.Delim('{') {
+		return "", ErrDenyStep2CInvalidPayload
+	}
+	var jti string
+	seenJTI := false
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return "", ErrDenyStep2CInvalidPayload
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return "", ErrDenyStep2CInvalidPayload
+		}
+		if key == "jti" {
+			if seenJTI {
+				return "", ErrDenyStep2CInvalidPayload
+			}
+			seenJTI = true
+			value, err := decoder.Token()
+			if err != nil {
+				return "", ErrDenyStep2CInvalidPayload
+			}
+			jti, ok = value.(string)
+			if !ok || jti == "" {
+				return "", ErrDenyStep2CMissingJTI
+			}
+			continue
+		}
+		if err := skipJSONValue(decoder); err != nil {
+			return "", ErrDenyStep2CInvalidPayload
+		}
+	}
+	if closing, err := decoder.Token(); err != nil || closing != json.Delim('}') {
+		return "", ErrDenyStep2CInvalidPayload
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return "", ErrDenyStep2CInvalidPayload
+	}
+	if !seenJTI {
+		return "", ErrDenyStep2CMissingJTI
+	}
+	return jti, nil
+}
+
+func skipJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		for decoder.More() {
+			if _, err := decoder.Token(); err != nil {
+				return err
+			}
+			if err := skipJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil || closing != json.Delim('}') {
+			return fmt.Errorf("unterminated JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := skipJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		closing, err := decoder.Token()
+		if err != nil || closing != json.Delim(']') {
+			return fmt.Errorf("unterminated JSON array")
+		}
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+	}
+	return nil
 }
 
 func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
@@ -212,16 +325,21 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 		return err
 	}
 
-	// 3c: aat_type
-	aatType, _ := claims["aat_type"].(string)
-	if aatType != string(AATTypeDelegation) && aatType != string(AATTypeExecution) {
-		return ErrDenyStep3CInvalidRootType
+	// 3c/profile dispatch: draft-00 uses aat_type; DG v0.2 uses a positive,
+	// exact profile claim and forbids aat_type.
+	profile, aatType, err := detectTokenProfile(claims)
+	if err != nil {
+		if err == ErrDenyStep4DInvalidChildType {
+			return ErrDenyStep3CInvalidRootType
+		}
+		return err
 	}
-	root.TokenType = AATType(aatType)
+	root.Profile = profile
+	root.TokenType = aatType
 
 	// 3d: del_depth == 0
-	delDepth, ok := claims["del_depth"].(float64)
-	if !ok || int(delDepth) != 0 {
+	delDepth, ok := integralClaim(claims, "del_depth")
+	if !ok || delDepth != 0 {
 		return ErrDenyStep3DInvalidRootDepth
 	}
 	root.DelegationDepth = 0
@@ -247,7 +365,7 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 		return ErrDenyStep3GRootIATSkew
 	}
 	root.IssuedAt = int64(iat)
-	if absDiff(int64(iat), now.Unix()) > MAX_IAT_SKEW_S {
+	if int64(iat) > now.Unix()+MAX_IAT_SKEW_S {
 		return ErrDenyStep3GRootIATSkew
 	}
 
@@ -262,11 +380,11 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 	}
 
 	// 3j: del_max_depth validity
-	delMaxDepth, ok := claims["del_max_depth"].(float64)
-	if !ok || int(delMaxDepth) < 0 || int(delMaxDepth) > MAX_DELEGATION_DEPTH {
+	delMaxDepth, ok := integralClaim(claims, "del_max_depth")
+	if !ok || delMaxDepth < 0 || delMaxDepth > MAX_DELEGATION_DEPTH {
 		return ErrDenyStep3JRootMaxDepth
 	}
-	root.DelegationMaxDepth = int(delMaxDepth)
+	root.DelegationMaxDepth = delMaxDepth
 
 	// 3k: jti present
 	jti, _ := claims["jti"].(string)
@@ -277,7 +395,8 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 
 	// 3l: iss URI (basic check)
 	iss, _ := claims["iss"].(string)
-	if iss == "" {
+	parsedIssuer, err := url.Parse(iss)
+	if err != nil || iss == "" || parsedIssuer.Scheme == "" {
 		return ErrDenyStep3LRootIssuer
 	}
 	root.Issuer = iss
@@ -296,16 +415,35 @@ func verifyRoot(root *Token, trustAnchors [][]byte, now time.Time) error {
 		return ErrDenyStep3MRootCNF
 	}
 	var jwk jose.JSONWebKey
-	if err := json.Unmarshal(jwkBytes, &jwk); err != nil || !jwk.Valid() {
+	if err := json.Unmarshal(jwkBytes, &jwk); err != nil || !jwk.Valid() || !jwk.IsPublic() {
 		return ErrDenyStep3MRootCNF
 	}
 	root.Confirmation = &ConfirmationKey{JWK: jwk}
 
 	// 3n: authorization_details
-	if err := validateAuthorization(claims); err != nil {
+	if err := validateAuthorization(claims, true); err != nil {
 		return fmt.Errorf("%w: %v", ErrDenyStep3NRootAuthorization, err)
 	}
-	root.Authorization = extractAuthorization(claims)
+	root.Authorization, err = extractAuthorization(claims)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrDenyStep3NRootAuthorization, err)
+	}
+	if root.Profile == DGProfileV02 {
+		if len(root.Authorization) != 1 {
+			return fmt.Errorf("%w: DG v0.2 root requires one AAT authorization entry", ErrDenyStep3NRootAuthorization)
+		}
+		if err := validateDraft01Authorization(root.Authorization); err != nil {
+			return fmt.Errorf("%w: %v", ErrDenyStep3NRootAuthorization, err)
+		}
+		root.MissionRef = claims["mission_ref"]
+		if err := validateMissionRef(root.MissionRef); err != nil {
+			return err
+		}
+		root.ApprovalRefs, err = approvalRefsFromClaims(claims)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -329,6 +467,15 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("link %d %w", linkIdx, err)
 	}
+	childProfile, childType, err := detectTokenProfile(claims)
+	if err != nil {
+		return fmt.Errorf("link %d %w", linkIdx, err)
+	}
+	if childProfile != parent.Profile {
+		return fmt.Errorf("link %d %w", linkIdx, ErrProfileMismatch)
+	}
+	child.Profile = childProfile
+	child.TokenType = childType
 
 	// 4b1: child jti
 	jti, _ := claims["jti"].(string)
@@ -348,29 +495,51 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	}
 	jwkBytes, _ := json.Marshal(jwkMap)
 	var childJWK jose.JSONWebKey
-	if err := json.Unmarshal(jwkBytes, &childJWK); err != nil || !childJWK.Valid() {
+	if err := json.Unmarshal(jwkBytes, &childJWK); err != nil || !childJWK.Valid() || !childJWK.IsPublic() {
 		return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4B2ChildCNF)
 	}
 	child.Confirmation = &ConfirmationKey{JWK: childJWK}
 
 	// 4b3: child authorization_details
-	if err := validateAuthorization(claims); err != nil {
+	if err := validateAuthorization(claims, false); err != nil {
 		return fmt.Errorf("link %d %w: %v", linkIdx, ErrDenyStep4B3ChildAuthorization, err)
 	}
-	child.Authorization = extractAuthorization(claims)
+	child.Authorization, err = extractAuthorization(claims)
+	if err != nil {
+		return fmt.Errorf("link %d %w: %v", linkIdx, ErrDenyStep4B3ChildAuthorization, err)
+	}
+	if child.Profile == DGProfileV02 {
+		if err := validateDraft01Authorization(child.Authorization); err != nil {
+			return fmt.Errorf("link %d %w: %v", linkIdx, ErrDenyStep4B3ChildAuthorization, err)
+		}
+		child.MissionRef = claims["mission_ref"]
+		if err := validateMissionRef(child.MissionRef); err != nil {
+			return fmt.Errorf("link %d %w", linkIdx, err)
+		}
+		if !missionRefsEqual(parent.MissionRef, child.MissionRef) {
+			return fmt.Errorf("link %d %w", linkIdx, ErrMissionRefChanged)
+		}
+		child.ApprovalRefs, err = approvalRefsFromClaims(claims)
+		if err != nil {
+			return fmt.Errorf("link %d %w", linkIdx, err)
+		}
+		if !approvalRefsPreserved(parent.ApprovalRefs, child.ApprovalRefs) {
+			return fmt.Errorf("link %d %w", linkIdx, ErrApprovalRefDropped)
+		}
+	}
 
 	// 4b4: child depth claims
-	delDepth, ok := claims["del_depth"].(float64)
+	delDepth, ok := integralClaim(claims, "del_depth")
 	if !ok {
 		return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4B4ChildDepthClaims)
 	}
-	child.DelegationDepth = int(delDepth)
+	child.DelegationDepth = delDepth
 
-	delMaxDepth, ok := claims["del_max_depth"].(float64)
+	delMaxDepth, ok := integralClaim(claims, "del_max_depth")
 	if !ok {
 		return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4B4ChildDepthClaims)
 	}
-	child.DelegationMaxDepth = int(delMaxDepth)
+	child.DelegationMaxDepth = delMaxDepth
 
 	// 4b5: required claims (iat, exp, iss)
 	iat, ok := claims["iat"].(float64)
@@ -399,13 +568,6 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	if child.Issuer != expectedIssuer {
 		return fmt.Errorf("link %d %w: child.iss=%q expected=%q", linkIdx, ErrDenyStep4CIssuerMismatch, child.Issuer, expectedIssuer)
 	}
-
-	// 4d: child aat_type
-	childType := AATType(claims["aat_type"].(string))
-	if childType != AATTypeDelegation && childType != AATTypeExecution {
-		return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4DInvalidChildType)
-	}
-	child.TokenType = childType
 
 	// 4e: I2 del_depth = parent.del_depth + 1
 	if child.DelegationDepth != parent.DelegationDepth+1 {
@@ -443,7 +605,7 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 	}
 
 	// 4l: child.iat within MAX_IAT_SKEW
-	if absDiff(child.IssuedAt, now.Unix()) > MAX_IAT_SKEW_S {
+	if child.IssuedAt > now.Unix()+MAX_IAT_SKEW_S {
 		return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4LChildIATSkew)
 	}
 
@@ -457,8 +619,8 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 		return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4NChildDepthWindow)
 	}
 
-	// 4o: single "attenuating_agent_token" entry
-	if err := validateAuthorization(claims); err != nil {
+	// 4o: at most one "attenuating_agent_token" entry; zero is the empty set.
+	if err := validateAuthorization(claims, false); err != nil {
 		return fmt.Errorf("link %d %w: %v", linkIdx, ErrDenyStep4OMultipleAATEntries, err)
 	}
 
@@ -486,11 +648,18 @@ func verifyLink(parent, child *Token, linkIdx int, now time.Time) error {
 		return fmt.Errorf("link %d %w: got=%q expected=%q", linkIdx, ErrDenyStep4RParentHash, child.ParentHash, expectedHash)
 	}
 
-	// 4s: type-transition key separation
-	if parent.TokenType != child.TokenType {
-		parentPub := parent.Confirmation.JWK.Key
-		childPub := child.Confirmation.JWK.Key
-		if keysEqual(parentPub, childPub) {
+	// 4s/profile: draft-00 rotates on type transitions. DG v0.2 has no token
+	// types and therefore requires a fresh holder key at every derivation.
+	if child.Profile == DGProfileV02 {
+		if jwkThumbprintsEqual(parent.Confirmation.JWK, child.Confirmation.JWK) {
+			return fmt.Errorf("link %d %w", linkIdx, ErrDraft01HolderKeyReuse)
+		}
+	} else if parent.TokenType != child.TokenType {
+		childThumbprint, err := child.Confirmation.JWK.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return fmt.Errorf("link %d %w: computing child thumbprint: %v", linkIdx, ErrDenyStep4STypeTransitionKeyReuse, err)
+		}
+		if bytes.Equal(parentThumbprint, childThumbprint) {
 			return fmt.Errorf("link %d %w", linkIdx, ErrDenyStep4STypeTransitionKeyReuse)
 		}
 	}
@@ -504,8 +673,9 @@ func verifyLeafInvocation(leaf *Token, tool string, args map[string]interface{})
 		return ErrDenyStep6ALeafAuthorization
 	}
 
-	// 6c: leaf must be execution type
-	if leaf.TokenType != AATTypeExecution {
+	// 6c: draft-00 needs an execution token. Draft-01 determines invocation
+	// authority from the leaf's position in the verified chain.
+	if leaf.Profile == "" && leaf.TokenType != AATTypeExecution {
 		return ErrDenyStep6CDelegationLeaf
 	}
 
@@ -528,7 +698,8 @@ func verifyLeafInvocation(leaf *Token, tool string, args map[string]interface{})
 		}
 	}
 
-	// Check for unknown args in closed-world mode (if toolConstraints is non-empty)
+	// AAT §3.3 defines an empty map as unrestricted arguments. Once any
+	// constraint is present, the map becomes a closed-world invocation shape.
 	if len(toolConstraints) > 0 {
 		for argName := range args {
 			if _, ok := toolConstraints[argName]; !ok {
@@ -541,19 +712,26 @@ func verifyLeafInvocation(leaf *Token, tool string, args map[string]interface{})
 }
 
 func verifyCapabilityMonotonicity(parent, child *Token) error {
-	parentAuth := parent.Authorization[0]
-	childAuth := child.Authorization[0]
+	parentTools := make(ToolMap)
+	if len(parent.Authorization) == 1 {
+		parentTools = parent.Authorization[0].Tools
+	}
+	childTools := make(ToolMap)
+	if len(child.Authorization) == 1 {
+		childTools = child.Authorization[0].Tools
+	}
 
 	// I4: each child tool must be in parent's tools
-	for childTool, childArgMap := range childAuth.Tools {
-		parentArgMap, ok := parentAuth.Tools[childTool]
+	for childTool, childArgMap := range childTools {
+		parentArgMap, ok := parentTools[childTool]
 		if !ok {
 			return fmt.Errorf("%w: child tool %q not in parent", ErrDenyStep4Q1ToolExpansion, childTool)
 		}
 
-		// 4q2: closed-world shape — if parent has constraints, child must constrain same args
-		if len(parentArgMap) > 0 && len(childArgMap) == 0 {
-			return fmt.Errorf("%w: parent constrains tool %q but child has no constraints", ErrDenyStep4Q2ArgumentShape, childTool)
+		// 4q2: a non-empty parent map fixes the closed-world argument shape.
+		// An empty parent map is unrestricted, so a child may add constraints.
+		if len(parentArgMap) > 0 && len(childArgMap) != len(parentArgMap) {
+			return fmt.Errorf("%w: parent and child argument keys differ for tool %q", ErrDenyStep4Q2ArgumentShape, childTool)
 		}
 		for argName := range parentArgMap {
 			if _, ok := childArgMap[argName]; !ok {
@@ -564,7 +742,7 @@ func verifyCapabilityMonotonicity(parent, child *Token) error {
 		// 4q4: child constraint must subsume parent's for each arg
 		for argName, parentConstraint := range parentArgMap {
 			childConstraint := childArgMap[argName]
-			subsumes, err := SubsumesConstraint(childConstraint, parentConstraint)
+			subsumes, err := SubsumesConstraint(parentConstraint, childConstraint)
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrDenyStep4Q4ConstraintSubsume, err)
 			}
@@ -577,6 +755,22 @@ func verifyCapabilityMonotonicity(parent, child *Token) error {
 	return nil
 }
 
+func draft00TokenType(claims map[string]interface{}) (AATType, error) {
+	raw, present := claims["aat_type"]
+	if !present {
+		return "", ErrUnsupportedDraftRevision
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", ErrDenyStep4DInvalidChildType
+	}
+	tokenType := AATType(value)
+	if tokenType != AATTypeDelegation && tokenType != AATTypeExecution {
+		return "", ErrDenyStep4DInvalidChildType
+	}
+	return tokenType, nil
+}
+
 func parseClaims(compact string) (map[string]interface{}, error) {
 	parts := strings.SplitN(compact, ".", 3)
 	if len(parts) < 2 {
@@ -586,14 +780,18 @@ func parseClaims(compact string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, ErrDenyStep2CInvalidPayload
 	}
-	var claims map[string]interface{}
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+	decoded, err := decodeUniqueJSON(payloadBytes)
+	if err != nil {
+		return nil, ErrDenyStep2CInvalidPayload
+	}
+	claims, ok := decoded.(map[string]interface{})
+	if !ok {
 		return nil, ErrDenyStep2CInvalidPayload
 	}
 	return claims, nil
 }
 
-func validateAuthorization(claims map[string]interface{}) error {
+func validateAuthorization(claims map[string]interface{}, requireNonEmpty bool) error {
 	authDetails, ok := claims["authorization_details"]
 	if !ok {
 		return fmt.Errorf("missing authorization_details")
@@ -602,78 +800,182 @@ func validateAuthorization(claims map[string]interface{}) error {
 	if !ok {
 		return fmt.Errorf("authorization_details must be an array")
 	}
+	if requireNonEmpty && len(authList) == 0 {
+		return fmt.Errorf("authorization_details must be non-empty")
+	}
 	aatCount := 0
 	for _, item := range authList {
 		auth, ok := item.(map[string]interface{})
 		if !ok {
-			continue
+			return fmt.Errorf("authorization_details entries must be objects")
 		}
-		if typ, _ := auth["type"].(string); typ == AuthorizationDetailType {
+		typ, ok := auth["type"].(string)
+		if !ok || typ == "" {
+			return fmt.Errorf("authorization_details entry missing string type")
+		}
+		if typ == AuthorizationDetailType {
 			aatCount++
 		}
 	}
-	if aatCount != 1 {
-		return fmt.Errorf("expected exactly one %s entry, got %d", AuthorizationDetailType, aatCount)
+	if aatCount > 1 {
+		return fmt.Errorf("expected at most one %s entry, got %d", AuthorizationDetailType, aatCount)
 	}
 	return nil
 }
 
-func extractAuthorization(claims map[string]interface{}) []AuthorizationDetail {
+func extractAuthorization(claims map[string]interface{}) ([]AuthorizationDetail, error) {
 	var result []AuthorizationDetail
 	authList, ok := claims["authorization_details"].([]interface{})
 	if !ok {
-		return result
+		return nil, fmt.Errorf("authorization_details must be an array")
 	}
 	for _, item := range authList {
 		authMap, ok := item.(map[string]interface{})
 		if !ok {
+			return nil, fmt.Errorf("authorization_details entries must be objects")
+		}
+		typ, ok := authMap["type"].(string)
+		if !ok || typ != AuthorizationDetailType {
 			continue
 		}
-		detail := AuthorizationDetail{}
-		if typ, ok := authMap["type"].(string); ok {
-			detail.Type = typ
-		}
-		if tools, ok := authMap["tools"].(map[string]interface{}); ok {
-			detail.Tools = parseToolMap(tools)
+		detail := AuthorizationDetail{Type: typ, Tools: make(ToolMap)}
+		if rawTools, present := authMap["tools"]; present {
+			tools, ok := rawTools.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("AAT tools must be an object")
+			}
+			parsedTools, err := parseToolMap(tools)
+			if err != nil {
+				return nil, err
+			}
+			detail.Tools = parsedTools
 		}
 		result = append(result, detail)
 	}
-	return result
+	if len(result) > 1 {
+		return nil, fmt.Errorf("expected at most one %s entry", AuthorizationDetailType)
+	}
+	return result, nil
 }
 
-func parseToolMap(tools map[string]interface{}) ToolMap {
+func parseToolMap(tools map[string]interface{}) (ToolMap, error) {
 	result := make(ToolMap)
 	for toolName, argMapRaw := range tools {
 		argMap, ok := argMapRaw.(map[string]interface{})
 		if !ok {
-			continue
+			return nil, fmt.Errorf("tool %q argument constraints must be an object", toolName)
 		}
 		constraints := make(ArgumentConstraintMap)
 		for argName, constraintRaw := range argMap {
-			constraint := parseConstraint(constraintRaw)
-			if constraint != nil {
-				constraints[argName] = constraint
+			constraint, err := parseConstraint(constraintRaw)
+			if err != nil {
+				return nil, fmt.Errorf("tool %q argument %q: %w", toolName, argName, err)
 			}
+			constraints[argName] = constraint
 		}
 		result[toolName] = constraints
 	}
-	return result
+	return result, nil
 }
 
-func parseConstraint(raw interface{}) *Constraint {
+func parseConstraint(raw interface{}) (*Constraint, error) {
 	constraintMap, ok := raw.(map[string]interface{})
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("constraint must be an object")
 	}
 	jsonBytes, err := json.Marshal(constraintMap)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("marshal constraint: %w", err)
 	}
 	var constraint Constraint
-	if err := json.Unmarshal(jsonBytes, &constraint); err != nil {
-		return nil
+	decoder := json.NewDecoder(strings.NewReader(string(jsonBytes)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&constraint); err != nil {
+		return nil, fmt.Errorf("decode constraint: %w", err)
 	}
-	return &constraint
+	if constraint.ConstraintType == "" {
+		return nil, fmt.Errorf("constraint_type is required")
+	}
+	return &constraint, nil
+}
+
+func integralClaim(claims map[string]interface{}, name string) (int, bool) {
+	value, ok := claims[name].(float64)
+	if !ok || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value {
+		return 0, false
+	}
+	converted := int(value)
+	if float64(converted) != value {
+		return 0, false
+	}
+	return converted, true
+}
+
+func decodeUniqueJSON(raw []byte) (interface{}, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	value, err := decodeUniqueJSONValue(decoder)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("unexpected trailing JSON token")
+		}
+		return nil, err
+	}
+	return value, nil
+}
+
+func decodeUniqueJSONValue(decoder *json.Decoder) (interface{}, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	delimiter, isDelimiter := token.(json.Delim)
+	if !isDelimiter {
+		return token, nil
+	}
+	switch delimiter {
+	case '{':
+		object := make(map[string]interface{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return nil, err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return nil, fmt.Errorf("JSON object key is not a string")
+			}
+			if _, duplicate := object[key]; duplicate {
+				return nil, fmt.Errorf("duplicate JSON member %q", key)
+			}
+			value, err := decodeUniqueJSONValue(decoder)
+			if err != nil {
+				return nil, err
+			}
+			object[key] = value
+		}
+		if closing, err := decoder.Token(); err != nil || closing != json.Delim('}') {
+			return nil, fmt.Errorf("unterminated JSON object")
+		}
+		return object, nil
+	case '[':
+		array := make([]interface{}, 0)
+		for decoder.More() {
+			value, err := decodeUniqueJSONValue(decoder)
+			if err != nil {
+				return nil, err
+			}
+			array = append(array, value)
+		}
+		if closing, err := decoder.Token(); err != nil || closing != json.Delim(']') {
+			return nil, fmt.Errorf("unterminated JSON array")
+		}
+		return array, nil
+	default:
+		return nil, fmt.Errorf("unexpected JSON delimiter %q", delimiter)
+	}
 }
 
 func constraintDepth(c *Constraint) int {
@@ -692,18 +994,4 @@ func constraintDepth(c *Constraint) int {
 		}
 	}
 	return 1 + maxChild
-}
-
-func absDiff(a, b int64) int64 {
-	if a > b {
-		return a - b
-	}
-	return b - a
-}
-
-func keysEqual(a, b interface{}) bool {
-	// Compare public keys by their raw bytes
-	aBytes, _ := json.Marshal(a)
-	bBytes, _ := json.Marshal(b)
-	return string(aBytes) == string(bBytes)
 }

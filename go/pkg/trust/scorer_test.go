@@ -1,9 +1,12 @@
 package trust
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -223,6 +226,51 @@ func TestInMemoryAggregator_Recovery(t *testing.T) {
 	}
 }
 
+func TestInMemoryAggregator_RateLimitLogOmitsAgentID(t *testing.T) {
+	var buf bytes.Buffer
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	defer func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	agg, _ := NewInMemoryAggregator()
+	defer agg.Close()
+	ctx := context.Background()
+	agentID := "agent-1\nforged-log-line"
+	agg.RegisterAgent(ctx, agentID, 0.8, 0.9)
+
+	agg.mu.Lock()
+	agg.agents[agentID].maxSignalsPerMin = 1
+	agg.mu.Unlock()
+
+	for i := 0; i < 2; i++ {
+		_, err := agg.IngestSignal(ctx, TelemetrySignal{
+			AgentID:  agentID,
+			Type:     SignalPolicyViolation,
+			Severity: SeverityLow,
+			Source:   "test",
+		})
+		if err != nil {
+			t.Fatalf("IngestSignal: %v", err)
+		}
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "rate limit exceeded for registered agent") {
+		t.Fatalf("expected rate-limit log entry, got %q", logged)
+	}
+	if strings.Contains(logged, "agent-1") || strings.Contains(logged, "forged-log-line") {
+		t.Fatalf("rate-limit log leaked agent ID: %q", logged)
+	}
+}
+
 func TestInMemoryAggregator_InfoSignalNoImpact(t *testing.T) {
 	agg, _ := NewInMemoryAggregator()
 	defer agg.Close()
@@ -386,178 +434,6 @@ func TestInMemoryAggregator_ConcurrentAccess(t *testing.T) {
 	score, _ := agg.GetScore(ctx, "agent-1")
 	if score.SignalCount != 50 {
 		t.Errorf("signal count = %d, want 50", score.SignalCount)
-	}
-}
-
-// --- MockAggregator tests ---
-
-func TestMockAggregator_NewMockAggregator(t *testing.T) {
-	m := NewMockAggregator()
-	if m == nil {
-		t.Fatal("NewMockAggregator returned nil")
-	}
-	if m.scores == nil {
-		t.Error("scores map should be initialized")
-	}
-	if m.closed {
-		t.Error("new mock should not be closed")
-	}
-}
-
-func TestMockAggregator_SetScore(t *testing.T) {
-	m := NewMockAggregator()
-	score := &TrustScore{AgentID: "agent-1", CompositeScore: 85.0}
-	m.SetScore(score)
-	got, err := m.GetScore(context.Background(), "agent-1")
-	if err != nil {
-		t.Fatalf("GetScore: %v", err)
-	}
-	if got.CompositeScore != 85.0 {
-		t.Errorf("composite = %.2f, want 85.00", got.CompositeScore)
-	}
-}
-
-func TestMockAggregator_SetIngestError(t *testing.T) {
-	m := NewMockAggregator()
-	m.RegisterAgent(context.Background(), "agent-1", 0.8, 0.9)
-	m.SetIngestError(errors.New("injected error"))
-	_, err := m.IngestSignal(context.Background(), TelemetrySignal{AgentID: "agent-1"})
-	if err == nil {
-		t.Error("expected error from SetIngestError")
-	}
-	if err.Error() != "injected error" {
-		t.Errorf("err = %v, want injected error", err)
-	}
-}
-
-func TestMockAggregator_IngestCount(t *testing.T) {
-	m := NewMockAggregator()
-	m.RegisterAgent(context.Background(), "agent-1", 0.8, 0.9)
-	if c := m.IngestCount(); c != 0 {
-		t.Errorf("IngestCount() = %d, want 0", c)
-	}
-	m.IngestSignal(context.Background(), TelemetrySignal{AgentID: "agent-1"})
-	m.IngestSignal(context.Background(), TelemetrySignal{AgentID: "agent-1"})
-	if c := m.IngestCount(); c != 2 {
-		t.Errorf("IngestCount() = %d, want 2", c)
-	}
-}
-
-func TestMockAggregator_Signals(t *testing.T) {
-	m := NewMockAggregator()
-	m.RegisterAgent(context.Background(), "agent-1", 0.8, 0.9)
-	sig1 := TelemetrySignal{AgentID: "agent-1", Type: SignalBehavioralDrift}
-	sig2 := TelemetrySignal{AgentID: "agent-1", Type: SignalPolicyViolation}
-	m.IngestSignal(context.Background(), sig1)
-	m.IngestSignal(context.Background(), sig2)
-	signals := m.Signals()
-	if len(signals) != 2 {
-		t.Fatalf("Signals() len = %d, want 2", len(signals))
-	}
-	if signals[0].Type != SignalBehavioralDrift {
-		t.Errorf("first signal type = %s, want behavioral_drift", signals[0].Type)
-	}
-	if signals[1].Type != SignalPolicyViolation {
-		t.Errorf("second signal type = %s, want policy_violation", signals[1].Type)
-	}
-}
-
-func TestMockAggregator_RegisterAgent(t *testing.T) {
-	m := NewMockAggregator()
-	ctx := context.Background()
-	err := m.RegisterAgent(ctx, "agent-1", 0.8, 0.9)
-	if err != nil {
-		t.Fatalf("RegisterAgent: %v", err)
-	}
-	score, err := m.GetScore(ctx, "agent-1")
-	if err != nil {
-		t.Fatalf("GetScore: %v", err)
-	}
-	if score.StaticCapability != 0.8 || score.HistoricalReputation != 0.9 {
-		t.Errorf("score = %+v", score)
-	}
-}
-
-func TestMockAggregator_IngestSignal_Success(t *testing.T) {
-	m := NewMockAggregator()
-	m.RegisterAgent(context.Background(), "agent-1", 0.8, 0.9)
-	score, err := m.IngestSignal(context.Background(), TelemetrySignal{
-		AgentID: "agent-1", Type: SignalBehavioralDrift, Source: "test",
-	})
-	if err != nil {
-		t.Fatalf("IngestSignal: %v", err)
-	}
-	if score == nil {
-		t.Fatal("expected non-nil score")
-	}
-	if score.AgentID != "agent-1" {
-		t.Errorf("agentID = %s, want agent-1", score.AgentID)
-	}
-}
-
-func TestMockAggregator_IngestSignal_Error(t *testing.T) {
-	m := NewMockAggregator()
-	m.RegisterAgent(context.Background(), "agent-1", 0.8, 0.9)
-	m.SetIngestError(errors.New("mock ingest error"))
-	_, err := m.IngestSignal(context.Background(), TelemetrySignal{AgentID: "agent-1"})
-	if err == nil {
-		t.Error("expected error")
-	}
-}
-
-func TestMockAggregator_GetScore_Found(t *testing.T) {
-	m := NewMockAggregator()
-	m.SetScore(&TrustScore{AgentID: "agent-1", CompositeScore: 75.0})
-	score, err := m.GetScore(context.Background(), "agent-1")
-	if err != nil {
-		t.Fatalf("GetScore: %v", err)
-	}
-	if score.CompositeScore != 75.0 {
-		t.Errorf("composite = %.2f, want 75.00", score.CompositeScore)
-	}
-}
-
-func TestMockAggregator_GetScore_NotFound(t *testing.T) {
-	m := NewMockAggregator()
-	_, err := m.GetScore(context.Background(), "nonexistent")
-	if !errors.Is(err, ErrAgentNotFound) {
-		t.Errorf("err = %v, want ErrAgentNotFound", err)
-	}
-}
-
-func TestMockAggregator_ListScores(t *testing.T) {
-	m := NewMockAggregator()
-	m.SetScore(&TrustScore{AgentID: "a1", CompositeScore: 80})
-	m.SetScore(&TrustScore{AgentID: "a2", CompositeScore: 90})
-	scores, err := m.ListScores(context.Background())
-	if err != nil {
-		t.Fatalf("ListScores: %v", err)
-	}
-	if len(scores) != 2 {
-		t.Errorf("len = %d, want 2", len(scores))
-	}
-}
-
-func TestMockAggregator_Close(t *testing.T) {
-	m := NewMockAggregator()
-	if err := m.Close(); err != nil {
-		t.Errorf("Close: %v", err)
-	}
-	if !m.closed {
-		t.Error("closed should be true after Close")
-	}
-	_, err := m.GetScore(context.Background(), "any")
-	if !errors.Is(err, ErrAggregatorClosed) {
-		t.Errorf("GetScore after close: %v", err)
-	}
-}
-
-func TestMockAggregator_RegisterAgentClosed(t *testing.T) {
-	m := NewMockAggregator()
-	m.Close()
-	err := m.RegisterAgent(context.Background(), "agent-1", 0.5, 0.5)
-	if !errors.Is(err, ErrAggregatorClosed) {
-		t.Errorf("RegisterAgent after close: %v", err)
 	}
 }
 

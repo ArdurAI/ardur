@@ -1,0 +1,508 @@
+# Kernel Capture Daemon Operations
+
+`ardur-kernelcaptured` is the Linux daemon that owns Ardur's local Unix-socket
+control plane and kernel event consumers. This reference describes
+control-plane-only mode, process-lifecycle cgroup filtering, and capture-loss
+evidence.
+
+## Control-plane-only mode
+
+Start the daemon with `--no-ringbuf` only when intentionally testing or
+diagnosing the socket control plane:
+
+```bash
+ardur-kernelcaptured --no-ringbuf
+```
+
+The flag keeps the daemon's health and session-control socket available, but it
+does not start the process exec/exit consumer, the BPF-LSM enforcement
+consumer, or the seccomp handoff server. The daemon therefore provides neither
+kernel capture nor a kernel enforcement tier in this mode. Startup emits:
+
+```text
+eBPF ringbuf consumers disabled (--no-ringbuf); enforcement tiers unavailable
+```
+
+Do not use `--no-ringbuf` as a production fallback for a failing event
+consumer. A healthy socket in this mode proves control-plane liveness only; it
+does not prove that a governed process is observed or constrained below the
+tool-call boundary.
+
+## Control-plane shutdown and handler drain
+
+On SIGINT or SIGTERM, the daemon stops accepting control-socket connections,
+cancels the request context, and closes accepted Unix connections so blocked
+reads and writes return. It tracks every accepted handler and waits up to five
+seconds for those handlers to return. A handler already inside a bounded map or
+evidence operation may finish that operation; a request that has not begun its
+authorized mutation observes cancellation and stops.
+
+BPF policy maps and guard handles remain live until the handler drain is
+proven. If a non-cooperative handler outlives the five-second deadline, the
+daemon logs `control socket handler drain timed out` and deliberately skips
+explicit guard-handle teardown. Process exit then owns cleanup. This avoids
+closing a live map handle underneath the stuck handler while keeping shutdown
+bounded; it is a fail-safe exit path, not evidence that the request completed.
+
+## Seccomp governance endpoint
+
+On a seccomp-tier `ardur run`, the network policy also traps the agent's TCP
+connection to the run's embedded governance proxy. The authenticated,
+session-owning parent includes that proxy's exact literal loopback IP and port
+in `apply_policy`. The daemon validates the tuple and stores it separately from
+the mission's `net_allow`; hostnames, non-loopback addresses, port zero, an
+endpoint without `OP_NET_CONNECT`, and broad `127/8` or `::1` CIDR exceptions
+are not accepted.
+
+For that exact tuple only, the daemon does not resume the tracee's original
+`connect(2)` with `SECCOMP_USER_NOTIF_FLAG_CONTINUE`. Another target thread
+could rewrite a pointer argument after inspection. Instead, the supervisor
+uses `pidfd_open(2)` and `pidfd_getfd(2)` to duplicate the target socket,
+connects the shared socket using the daemon-stored tuple, revalidates the
+notification, and returns synthetic success with no continue flag. Any lookup,
+permission, duplication, connect, or notification-validity failure returns
+`EPERM`. The control connection is transport plumbing and does not emit a
+mission enforcement event; unrelated loopback connections still follow the
+mission policy and remain visible in evidence.
+
+This emulation requires Linux 5.6 or newer and permission for the daemon to
+perform the kernel's `PTRACE_MODE_ATTACH_REALCREDS` check for the target. A
+production daemon normally satisfies that through its privileged service
+identity; restrictive capability, Yama, LSM, or container settings can still
+deny it, in which case the connection fails closed. See the Linux kernel
+[seccomp user-notification documentation](https://docs.kernel.org/userspace-api/seccomp_filter.html),
+[`seccomp_unotify(2)`](https://www.man7.org/linux/man-pages/man2/seccomp_unotify.2.html),
+and [`pidfd_getfd(2)`](https://www.man7.org/linux/man-pages/man2/pidfd_getfd.2.html).
+The shipped systemd unit includes `CAP_SYS_PTRACE` in both its ambient and
+bounding sets and explicitly permits `pidfd_open` and `pidfd_getfd`; custom
+units must preserve those three requirements for the seccomp endpoint path.
+
+Ordinary seccomp mission-policy allows still use `CONTINUE` and retain the
+documented weaker-than-BPF-LSM race boundary. The BPF-LSM tier does not use
+seccomp emulation: its root process receives an exact generation-bound
+loopback IP-and-port exception in BPF, and a `PTRACE_EVENT_EXEC` stop keeps the
+target from running until cgroup registration and policy application finish.
+
+## BPF-LSM stopped-exec bootstrap
+
+Strict BPF-LSM launch stops the new root image at `PTRACE_EVENT_EXEC`, before
+target user space runs. The daemon reads `/proc/<pid>/exe`, cwd, and cmdline,
+resolves symlinks, and records the executable plus at most four regular-file
+arguments. It then arms a one-shot observation keyed by its own TGID and the
+observed inode and opens each file synchronously. The LSM writes the
+kernel-native superblock device plus inode into the target cgroup's allow map
+and returns that device through an acknowledgement record. This avoids trusting
+namespace-translated path, `st_dev`, or mount-ID values from userspace.
+Fixed root-only runtime reads cover `/usr`, distro library roots `/lib` and
+`/lib64`, the loader cache, CA certificates, entropy, and the root's `/proc`
+subtree. The governed request cannot add another category.
+
+The file-open hook additionally requires the current TGID to equal the
+daemon-stamped session root and the allow-map generation to equal the active
+policy generation. A child, another generation, or a replaced file object
+cannot reuse the exception. Observation request setup, trigger open,
+acknowledgement, and cleanup are serialized with policy application; any
+failure aborts launch while the target remains stopped.
+
+The observation map is pinned only so its ABI participates in all-or-nothing
+guard-state reuse. Its requests are transient capabilities, not policy: every
+daemon start clears all stale requests before exposing the policy maps or
+reporting the BPF-LSM guard ready. Applied enforcement and exact-file allow
+entries remain pinned across restart.
+
+These file identities and the fixed runtime-category bitmask are daemon-private
+fields added after wire validation; a governed client cannot submit or widen
+them. They apply only to reads. Pinned-map reuse also validates map type, key
+size, value size, capacity, and flags against the embedded BPF specification,
+so an old complete pin generation cannot be paired with a new userspace ABI.
+Any observation, map update, cgroup migration, policy application, or ptrace
+transition failure kills the still-stopped target instead of releasing an
+ungoverned process.
+
+## BPF-LSM policy publication
+
+The daemon serializes policy-map mutations and writes a complete operation
+policy into the inactive `cgroup_op_policy` slot. The path and network
+allowlist maps are shared rather than slot-keyed, so a policy update first
+computes entries present in the last successful apply but absent from the new
+request. It must delete all of those stale entries before publishing the new
+`cgroup_managed` generation and active slot. A failed delete rejects the update
+without flipping the managed gate; the prior generation remains active and may
+be more restrictive if some stale deletes already succeeded. This is an
+intentional fail-closed availability trade-off.
+
+After successful pre-revocation, the daemon writes the requested shared
+allowlist entries and flips `cgroup_managed` last. Therefore an entry revoked
+by the new generation cannot remain effective after that generation becomes
+active. Shared allowlist additions can become visible before the final gate
+write when the prior generation already uses the same allowlist action; the
+update sequence does not claim a general transaction across independent BPF
+maps. Bootstrap-file, trusted-root, and control-plane exceptions carry an
+explicit generation and are cleaned after the flip because stale generations
+are already rejected in the BPF lookup path.
+
+## Process lifecycle cgroup filter
+
+The production lifecycle consumer pins `filter_control` and `allowed_cgroups`
+with its exec/exit tracepoint links, ringbuf, and producer-drop counter as one
+restart generation. An older generation without either filter-map pin is
+removed before a fresh attach; partial old and new generations are not reused
+together.
+
+At startup the daemon temporarily makes the filter permissive, clears stale
+allowlist entries inherited from any prior daemon lifetime, restores every
+currently admitted session, and then enables filtering. An enabled filter with
+an empty allowlist is the normal idle state: no unrelated host exec/exit events
+enter Ardur's lifecycle ringbuf when no governed session exists.
+
+For each `register_session`, the daemon adds the verified nonzero cgroup before
+the registry can return success and before the launch gate is released. A map
+update failure rejects that registration so the enabled producer cannot omit
+the new session. Session end and TTL expiry retire the userspace route after any
+already-matched event finishes mutable correlation, then remove the cgroup;
+they do not hold the daemon-wide routing lock behind evidence `fsync`. A stable
+per-session append shard preserves JSONL order across a reused session ID while
+the old append completes. Multiple active sessions retain independent entries.
+The BPF allowlist capacity is 4,096, matching the daemon session registry's
+active-session limit.
+
+For non-root socket peers, registration also fails closed unless the daemon can
+resolve the kernel-supplied `SO_PEERCRED` PID in its `/proc` view, verify that
+`root_pid` descends from that peer, and confirm that `root_pid` occupies the
+claimed cgroup. Run the enforcement daemon in a PID namespace that can observe
+its clients (normally the host/ancestor namespace, with a matching procfs
+mount). A topology that cannot map the peer PID is rejected rather than granted
+unverified cgroup-enforcement rights; there is no implicit cross-namespace
+bypass.
+
+For non-root registration, the daemon also reads `root_pid`'s process start time
+from `/proc/<root_pid>/stat` before and after those ownership checks and retains
+the stable value; the already-privileged root path records one such observation.
+This is distinct from the control-socket owner: the launcher registers the
+session, then its PID-preserving child execs into `ardur-exec-shim`. The seccomp
+handoff therefore requires the independently authorized handoff peer's
+`SO_PEERCRED` PID and separately observed `/proc` start time to match that
+registered root identity before the daemon acknowledges or supervises the
+transferred listener. PID plus clock-tick start time hardens numeric PID reuse
+but is not a pidfd task handle. `SCM_RIGHTS` transfers the listener reference;
+it does not by itself establish Ardur session ownership. Immediately after
+reserving the listener, the daemon revalidates both that root identity and an
+immutable daemon-local registration generation, so an ended session cannot be
+silently replaced under the same `session_id` while a handoff is in flight. A
+shared lifecycle barrier also keeps register, end, and expiry transitions from
+interleaving with handoff acknowledgement or notification decisions. Listener
+entries and cleanup carry that generation, so a late supervisor exit from an
+older registration cannot remove a replacement listener. Each accepted
+registration also clears the reusable session ID's prior seccomp policy, and
+policy publication holds the same lifecycle read barrier, preventing an
+in-flight apply from crossing into a replacement generation.
+
+If startup reconciliation itself fails, the daemon leaves filtering disabled
+and continues the prior permissive capture behavior rather than enabling a
+partial allowlist that could hide governed events. It logs the degradation; the
+resource-isolation benefit is unavailable for that daemon lifetime. If the
+control map cannot be switched to that known-permissive state, new session
+registration fails instead of risking an enabled stale allowlist that omits the
+session. When the consumer detaches cleanly, it leaves pinned filtering enabled
+with an empty allowlist so pinned tracepoints do not fill the ringbuf while no
+reader exists.
+
+This is producer-side resource and completeness isolation. The userspace router
+still validates session ownership before writing evidence. It does not claim
+universal process capture, observe provider-hidden actions, or write unrelated
+host events into session evidence.
+
+## Opt-in agent recognition preview
+
+Start the Linux daemon with recognition explicitly enabled:
+
+```bash
+ardur-kernelcaptured --agent-recognition
+```
+
+The embedded registry currently contains four release-bound exact Linux names:
+`claude` (`claude_code`), `codex` (`codex_cli`), `gemini` (`gemini_cli`), and
+`kimi` (`kimi_cli`). The BPF producer checks `comm` and the basename derived
+from the successful exec filename in separate 64-entry hash maps, then emits
+matching exec events alongside the unchanged cgroup-scoped lifecycle feed.
+This catches script-backed launchers without treating generic `node` or
+`python` activity as an agent. Nonmatching host execs and all host-wide exit
+events are dropped before ringbuf reservation. The registry is versioned and
+SHA-256-digested; the digest is integrity metadata for the embedded rules, not
+a signature or software-provenance assertion.
+
+Operator class overrides are applied before the map is populated:
+
+```bash
+ardur-kernelcaptured --agent-recognition \
+  --agent-recognition-allow claude_code,codex_cli \
+  --agent-recognition-deny codex_cli
+```
+
+Deny takes precedence over allow. Unknown class names fail startup, override
+flags require `--agent-recognition`, and recognition cannot be combined with
+`--no-ringbuf`. Every daemon start disables and clears any inherited
+recognition maps before installing the selected names. If optional recognition
+configuration fails, the classifier is disabled while normal cgroup-scoped
+lifecycle capture remains active. Clean detach disables and clears recognition
+so pinned tracepoints do not keep emitting candidates without a consumer.
+
+### Optional executable fingerprint registry
+
+Linux operators may strengthen recognized native executables and script-backed
+launchers with an operator-maintained SHA-256 registry:
+
+```bash
+ardur-kernelcaptured --agent-recognition \
+  --agent-recognition-fingerprint-registry /etc/ardur/agent-fingerprints.json
+```
+
+Schema `ardur.agent_fingerprint_registry.v0.2` adds launcher digests and final
+interpreter profiles. Native-only v0.1 documents remain accepted unchanged,
+but v0.1 rejects launcher fields. This illustrative v0.2 document contains
+placeholders; replace each value with the 64-character lowercase SHA-256 of
+the reviewed object:
+
+```json
+{
+  "schema_version": "ardur.agent_fingerprint_registry.v0.2",
+  "registry_version": "operator.agents.2026-07-14.v2",
+  "rules": [
+    {
+      "rule_id": "native.codex.reviewed-release",
+      "agent_type": "codex_cli",
+      "expected_sha256": ["<replace-with-64-lowercase-hex>"]
+    },
+    {
+      "rule_id": "launcher.codex.reviewed-release",
+      "agent_type": "codex_cli",
+      "expected_launcher_sha256": ["<replace-with-64-lowercase-hex>"],
+      "allowed_interpreter_profiles": ["node"]
+    }
+  ]
+}
+```
+
+For the root systemd daemon, install the completed file as `root:root` mode
+`0600`. The daemon opens it read-only with `O_NOFOLLOW`, validates the opened
+descriptor is a regular file owned by the daemon UID and not writable by group
+or other, enforces a 64 KiB document ceiling, rejects unknown fields and
+inactive agent types, and then canonicalizes the rules. A digest cannot be
+assigned to two different agent types. Any failure aborts startup; local socket
+clients cannot select or replace the registry. Native and launcher digest
+domains are matched separately, and every launcher rule must contain at least
+one exact bounded interpreter basename.
+
+Only already-recognized candidates enter fingerprinting. Queue admission never
+waits: the default queue holds 64 jobs, two workers run concurrently, each job
+has a 500 ms cooperative deadline, and at most 32 MiB of a regular executable
+is hashed. The event PID is first bound to a pidfd. A native worker then opens
+the live executable object through `/proc/<pid>/exe`, checks process lifetime
+before and after acquisition, and labels an unlinked-but-open object with
+`object_state=deleted`.
+
+A script's live executable object is its interpreter, not the original script.
+When launcher rules exist, the daemon therefore tries to attach a separate,
+non-enforcing BPF-LSM program at `bprm_check_security`. The first binary-handler
+pass first clears stale task state, requires the original buffer to begin with
+`#!`, and then records only the original object's device, inode, mount ID, and
+link count in a bounded 4,096-entry task-keyed map shared with the
+successful-exec tracepoint. Later interpreter passes do not overwrite it;
+successful exec and process exit delete it. `binfmt_misc` and any other
+interpreter-backed shape without that explicit marker remain unproven and can
+never fall back to native interpreter hashing. The emitted private worker event
+also carries only the bounded final-interpreter basename. The observer always
+returns the prior LSM result and cannot authorize or deny exec.
+
+`/proc/<pid>/cmdline` is mutable process-presented data and is never identity.
+For launcher jobs, the worker reads at most 16 KiB and 64 non-empty arguments,
+treats non-flag fields only as locator candidates, and opens them relative to
+the observed process root with `openat2(RESOLVE_IN_ROOT|RESOLVE_NO_MAGICLINKS)`.
+Relative fields use the observed process cwd. Before hashing, `statx` device,
+inode, and mount ID must exactly equal the kernel-observed object. A process
+that rewrites cmdline to a trusted, digest-matching file therefore receives
+`locator_mismatch`, not a match. Recursive/flagged shebangs are scanned within
+the same fixed limits; fd-backed, deleted-before-open, namespace-inaccessible,
+early-exit, and unsupported filesystem shapes return explicit low-confidence
+outcomes instead of falling back to hashing the interpreter.
+
+The launcher path requires Linux 5.11 or newer (the lifecycle programs use
+`bpf_get_current_task_btf()`), kernel BTF, `CONFIG_BPF_LSM`, and `bpf` in the
+active LSM list. Version alone is not enough because distributions choose
+kernel configuration and boot LSM order. If load or attach fails, native
+fingerprinting and ordinary lifecycle capture continue; launcher submissions
+return `unsupported_kernel`. Other bounded outcomes include process exit,
+missing kernel identity, unsupported filesystem, missing locator, locator
+mismatch, resolution denial, interpreter denial, argument/size/deadline limit,
+digest mismatch, queue saturation, worker unavailability, and success. An
+observer callback must return before an attempt is counted as successfully
+published, so every attempt occupies one terminal bucket. The lifecycle
+ringbuf consumer never performs file I/O or waits for queue capacity.
+
+A configured match produces `confidence=medium` and
+`identity_assurance=heuristic_executable_content` for native objects or
+`heuristic_kernel_bound_launcher_content` for scripts. A mismatch or
+unavailable resolution leaves the original low-confidence name result
+unchanged. Every result remains `governance_action=observe_only`. Ordinary
+SHA-256 is a content comparison, not signed provenance, package verification,
+fs-verity measurement, attestation, authorization, or policy selection.
+
+Authenticated `health` responses add `agent_fingerprint` with the canonical
+registry version/SHA-256, queue capacity/depth, worker count, timeout, maximum
+file/argument bytes and argument count, launcher-observer availability, and
+monotonic counters for every bounded outcome above, including attempts the
+worker was unavailable for (submitted while closing or closed, or abandoned
+because processing panicked and was contained).
+The registry SHA-256 identifies the canonical configuration; it is not a
+computed executable digest. Logs, results, receipts, health data, and fixtures
+never include the computed executable digest, full host path, argv, environment,
+or file content.
+
+There is deliberately no fingerprint cache in this slice. Re-reading a bounded
+live object costs disk I/O and CPU during candidate bursts, but avoids treating
+mutable inode metadata or a stale cache entry as provenance. Capacity exhausts
+by reporting saturation rather than blocking lifecycle capture. Operators
+should monitor the counters and measure host I/O and CPU impact before changing
+the compiled defaults. The current CLI exposes no tuning flags; code-level hard
+ceilings are 4,096 queued jobs, 32 workers, a one-minute deadline, 1 GiB per
+file, 1 MiB of arguments, and 1,024 arguments. The cooperative deadline is
+checked before and after reads and between 64 KiB chunks. It cannot preempt a
+single filesystem read blocked in the kernel, so keep executable objects on
+healthy local filesystems and treat storage stalls as an operator incident.
+The optional BPF-LSM program observes every exec while launcher rules are
+active, but stores only bounded non-path identity and clears it at success or
+exit; the userspace I/O and hashing cost remains limited to recognized launcher
+candidates.
+
+The successful-exec hook reads at most 255 path bytes, derives and emits only a
+62-byte-or-shorter basename, and ignores truncated or oversized names. It never
+emits the parent path. The daemon classifies only bounded process metadata in
+the lifecycle event and logs a recognized candidate before session routing.
+An unrouted candidate is not appended to a session evidence log. Exact-name
+evidence has `confidence=low`,
+`identity_assurance=heuristic_process_metadata`, and
+`governance_action=observe_only`. No argv, full executable path, binary hash,
+uid, environment, or file content is emitted by name-only recognition. The
+optional fingerprint worker privately computes a bounded SHA-256 under the
+stricter native or launcher contract above. Neither mode issues a passport,
+adopts a process, selects policy, or enforces an action. Any
+process can reuse one of these names, and unlisted launch shapes remain false
+negatives. The [agent-recognition evaluation
+reference](agent-recognition-evaluation.md) documents the versioned sanitized
+corpus, separately reported name-only and synthetic content-fingerprint
+strata, deterministic report, maintained-corpus thresholds, Wilson intervals,
+known renamed-binary false negatives, and zero mismatch-promotion gate. This
+completes the bounded Linux classification evidence contract in #67.
+Attestation, adoption, governance, and macOS/Windows launch sources remain
+separate slices under #68, #69, #70, #71, and #106.
+
+Kernel contract references: Linux [`fs/exec.c`](https://github.com/torvalds/linux/blob/v6.10/fs/exec.c),
+[`fs/binfmt_script.c`](https://github.com/torvalds/linux/blob/v6.10/fs/binfmt_script.c),
+[`sched_process_exec`](https://github.com/torvalds/linux/blob/v6.10/include/trace/events/sched.h),
+[`bpf_get_current_task_btf()` introduction](https://github.com/torvalds/linux/commit/3ca1032ab7ab010eccb107aa515598788f7d93bb),
+[BPF LSM](https://docs.kernel.org/bpf/prog_lsm.html),
+[`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html),
+[`openat2(2)`](https://man7.org/linux/man-pages/man2/openat2.2.html),
+[`statx(2)`](https://man7.org/linux/man-pages/man2/statx.2.html), and
+[`/proc/<pid>/cmdline`](https://man7.org/linux/man-pages/man5/proc_pid_cmdline.5.html).
+The current method is ordinary SHA-256 over the opened object and must not be
+reported as an fs-verity measurement or software-provenance proof.
+
+## Lifecycle capture loss
+
+Lifecycle capture has two observable loss sources. If the eBPF producer cannot
+reserve ringbuf space, it increments a pinned monotonic counter. The daemon
+baselines inherited totals at startup and samples new deltas after delivered
+events and before session registration, status, or end:
+
+```text
+lifecycle ringbuf producer drops observed drop_count=<n> kernel_dropped_total=<n> loss_epoch=<n>
+```
+
+Separately, the userspace consumer decodes a fixed binary record emitted by the
+matching eBPF program. A record that is too short for that ABI, or otherwise
+cannot be decoded, produces:
+
+```text
+malformed ringbuf record loss_epoch=<n>
+```
+
+The daemon drops a malformed record and continues reading. For either source,
+`loss_epoch` is a monotonic daemon-lifetime identifier for a host-wide lifecycle
+capture gap. Missing or malformed records have no trustworthy session owner, so
+every session active when the gap is observed records the same increment. An
+uncorrelated valid event cannot clear the summary, and a session registered
+after the prior counter delta was sampled does not inherit it.
+
+Successful `session_status` and `end_session` responses expose the summary with
+`coverage_status`, total `ringbuf_dropped`, source-specific
+`producer_ringbuf_dropped` / `malformed_records`, sticky
+`producer_counter_evidence_gap`, `daemon_queue_dropped`, and the
+first and last affected loss epochs. The evidence-gap flag becomes true if the
+counter cannot be read, moves backwards, or a previously installed live source
+disappears. Sessions registered while that unavailable state persists inherit
+the flag. In that case the missing count is unknown, even if the numeric
+counters are zero. The run bridge fetches this summary before ending a normal
+governed session and folds it into the signed attestation as
+`kernel_enforcement.lifecycle_capture`. The daemon retains the summary for the
+session lifetime and returns it on every status request; individual lifecycle
+receipts do not misrepresent the host-global gap as event-local capture loss.
+
+A producer drop points to ringbuf pressure. A malformed record instead points
+to a producer/consumer ABI mismatch, truncated sample, or corruption after
+reservation. Neither is the expected symptom of a BPF verifier rejection:
+verifier or attach failures occur during startup and are reported by the loader
+before records can be emitted.
+
+## Process-lifecycle observability gap
+
+The `ardur run` proxy registers each signed receipt identifier with the daemon
+after writing the receipt and before returning the evaluation response that
+releases the action. `register_receipt` accepts only a bounded opaque identifier
+from the Unix-socket peer that owns the active session. PID, cgroup, peer
+identity, and observation time come from daemon-owned state. Registrations are
+deduplicated and capped at 4,096 per session.
+
+Successful `session_status` and `end_session` responses include
+`observability_gap` with:
+
+- registered, corroborated, and unobserved receipt counts;
+- captured, correlated, and uncorrelated process lifecycle effect counts;
+- `observed_effect_gap_ratio = uncorrelated_effects / captured_effects` for a
+  non-empty captured sample;
+- `effect_scope = process_lifecycle` and explicit `process_exec` /
+  `process_exit` event classes; and
+- `receipt_source_assurance = authenticated_session_owner`.
+
+An empty captured sample is `not_measured` and omits the ratio. A non-empty,
+loss-free sample is `measured`. Any lifecycle capture loss or producer-counter
+evidence gap makes it `degraded`; the ratio still describes only the events
+that reached the daemon and must not be promoted to a complete-session rate.
+The metric does not claim daemon-side receipt signature verification, universal
+host capture, or file/network/provider-hidden effect coverage. The run bridge
+folds it into the signed attestation at
+`kernel_enforcement.observability_gap`.
+
+## Operator response
+
+1. Confirm that the daemon binary and eBPF objects came from the same reviewed
+   build or release digest.
+2. Inspect startup logs for load, verifier, attach, or pinned-state reuse
+   failures, and for lifecycle cgroup-filter reconciliation warnings, before
+   the first malformed-record warning.
+3. Treat every producer-drop or malformed-record warning, or any
+   `lifecycle_capture` summary whose
+   `coverage_status` is `degraded` as an evidence gap; do not use affected
+   sessions to claim complete kernel observation for that interval.
+4. Interpret `observability_gap.observed_effect_gap_ratio` only within its
+   `process_lifecycle` event classes. Investigate uncorrelated effects, but do
+   not treat a zero observed-sample ratio as proof of universal coverage.
+5. Restart with a matched daemon and eBPF artifact set. If warnings continue,
+   preserve the daemon logs, kernel version, artifact digests, and the first
+   affected receipt for diagnosis.
+6. Use `--no-ringbuf` only to isolate the socket control plane. Record that
+   capture and enforcement were intentionally unavailable during the test.
+
+The summary is evidence-integrity metadata for a session's active time window,
+not a claim that the malformed record belonged to that session or a promise
+that any missing kernel event can be reconstructed.

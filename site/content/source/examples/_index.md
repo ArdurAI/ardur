@@ -30,3 +30,4 @@ This section lists hosted documentation and mirrored artifacts generated from `e
 - [`langgraph-quickstart/`](/__ardur_internal__/source/examples/langgraph-quickstart/)
 - [`missions/`](/__ardur_internal__/source/examples/missions/)
 - [`openai-agents-sdk/`](/__ardur_internal__/source/examples/openai-agents-sdk/)
+- [`tool-server-preflight/`](/__ardur_internal__/source/examples/tool-server-preflight/)

@@ -1,0 +1,132 @@
+import pytest
+
+from vibap.shareable_redaction import (
+    file_uri_placeholder,
+    local_path_leak_hits,
+    redact_local_path_text,
+    replace_path_roots,
+)
+
+
+def test_replace_path_roots_uses_longest_match_first_for_overlapping_roots() -> None:
+    text = "/tmp/foobar/output.json and /tmp/foo/input.json"
+
+    redacted = replace_path_roots(
+        text,
+        (
+            ("/tmp/foo", "<FOO>"),
+            ("/tmp/foobar", "<FOOBAR>"),
+        ),
+    )
+
+    assert redacted == "<FOOBAR>/output.json and <FOO>/input.json"
+
+
+def test_redacted_placeholder_relative_paths_are_not_reported_as_absolute_leaks() -> None:
+    redacted = redact_local_path_text(
+        "receipt at /private/tmp/ardur-run/project/ARDUR.md",
+        root_pairs=(("/private/tmp/ardur-run/project", "<RWT_PROJECT>"),),
+    )
+
+    assert redacted == "receipt at <RWT_PROJECT>/ARDUR.md"
+    assert local_path_leak_hits(redacted, extra_markers=("/private/tmp/ardur-run",)) == []
+
+
+def test_lowercase_placeholder_relative_paths_are_not_rewritten() -> None:
+    redacted = redact_local_path_text(
+        "receipts appear under <ardur-home>/claude-code-hook/<trace-id>/receipts.jsonl"
+    )
+
+    assert redacted == "receipts appear under <ardur-home>/claude-code-hook/<trace-id>/receipts.jsonl"
+    assert local_path_leak_hits(redacted) == []
+
+
+def test_redaction_placeholders_do_not_preserve_sensitive_suffixes() -> None:
+    redacted = redact_local_path_text("target <PATH:abc123>/secret-project/private.txt")
+
+    assert redacted == "target <PATH:abc123><ABSOLUTE_PATH:local>"
+    assert "secret-project" not in redacted
+    assert "private.txt" not in redacted
+    assert local_path_leak_hits(redacted) == []
+
+
+def test_file_uri_variants_are_redacted_and_detected() -> None:
+    text = "open file://localhost/Users/rahul/project/secret.txt or file:///tmp/ardur/out.json"
+
+    assert "file://localhost/Users/rahul/project/secret.txt" in local_path_leak_hits(text)
+    assert "file:///tmp/ardur/out.json" in local_path_leak_hits(text)
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "open <FILE_URI:/Users> or <FILE_URI:/tmp>"
+    assert local_path_leak_hits(redacted) == []
+
+
+def test_file_uri_placeholder_falls_back_to_local_for_unrecognized_roots() -> None:
+    assert file_uri_placeholder("file:///opt/ardur/secret.txt") == "<FILE_URI:local>"
+
+
+@pytest.mark.parametrize("slash", ["\uff0f", "\u2044", "\u2215", "\u29f8"])
+def test_unicode_solidus_local_paths_are_redacted_and_detected(slash: str) -> None:
+    text = f"receipt at {slash}Users{slash}rahul{slash}project{slash}secret.json"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <ABSOLUTE_PATH:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert "/Users/rahul/project/secret.json" in local_path_leak_hits(text)
+
+
+def test_percent_encoded_local_paths_are_redacted_and_detected() -> None:
+    text = "receipt at %2FUsers%2Frahul%2Fproject%2Fsecret.json"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <ABSOLUTE_PATH:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert "/Users/rahul/project/secret.json" in local_path_leak_hits(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "receipt at %252FUsers%252Frahul%252Fproject%252Fsecret.json",
+        "receipt at %25252FUsers%25252Frahul%25252Fproject%25252Fsecret.json",
+        "receipt at %252525252FUsers%252525252Frahul%252525252Fproject%252525252Fsecret.json",
+        "receipt at %25EF%25BC%258FUsers%25EF%25BC%258Frahul%25EF%25BC%258Fsecret.json",
+    ],
+)
+def test_nested_percent_encoded_local_paths_are_redacted_and_detected(text: str) -> None:
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <ABSOLUTE_PATH:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert any(hit.startswith("/Users/rahul") for hit in local_path_leak_hits(text))
+
+
+def test_nested_percent_encoded_file_uri_paths_are_redacted_and_detected() -> None:
+    text = "receipt at file%253A%252F%252F%252FUsers%252Frahul%252Fproject%252Fsecret.json"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <FILE_URI:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert "file:///Users/rahul/project/secret.json" in local_path_leak_hits(text)
+
+
+def test_unrelated_percent_escapes_are_not_fully_decoded() -> None:
+    text = "status=100%25 and space=%2520 before /tmp/secret.txt"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "status=100%25 and space=%2520 before <ABSOLUTE_PATH:/tmp>"
+
+
+def test_percent_encoded_file_uri_paths_are_redacted_and_detected() -> None:
+    text = "receipt at file%3A%2F%2F%2FUsers%2Frahul%2Fproject%2Fsecret.json"
+
+    redacted = redact_local_path_text(text)
+
+    assert redacted == "receipt at <FILE_URI:/Users>"
+    assert local_path_leak_hits(redacted) == []
+    assert "file:///Users/rahul/project/secret.json" in local_path_leak_hits(text)

@@ -15,26 +15,42 @@ Ardur is pre-release, but the public repo is code-bearing today.
 
 | Surface | Current state | Primary source |
 |---|---|---|
-| Runtime governance | Python and Go runtime imports, mission passport issuance, verification, receipt paths, governance checks, AAT credential-attenuation engine (constraints, derivation, PoP, chain verification) | {{< repo-link "python/README.md" "Python" >}}, {{< repo-link "go/README.md" "Go" >}} |
-| CLI | Protocol and Personal commands including `issue`, `verify`, `attest`, `start`, `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `run`, `profile init`, `protect claude-code`, `claude-code-hook`, and `claude-code-report` | {{< repo-link "docs/reference/cli.md" "CLI reference" >}} |
+| Runtime governance | Configured Python proxy and adapter paths for mission passport issuance, policy decisions, and issuer-signed/hash-linked receipts; Go JWT AAT constraints, derivation, PoP, and chain verification with CWT mapping still pending | {{< repo-link "python/README.md" "Python" >}}, {{< repo-link "go/README.md" "Go" >}} |
+| CLI | Protocol commands including `issue`, full offline `verify`, `evidence correlate`, `telemetry export`, `anchor`, `receiver-attestation-fixture`, `drp-profile-fixture`, `offline-verification-fixture`, `attest`, `start`, and `kill-switch`; Personal commands including `hub`, `setup`, `status`, `doctor`, `doctor-claude-code`, `run`, `desktop-observe`, `personal-native-host`, `personal-native-manifest`, `personal-firewall demo`, `profile init`, `protect claude-code`, and `uninstall`; posture and preflight inspection (`posture scan`, `posture report`, `preflight tool-server`); the wheel also ships `ardur-verify` | {{< repo-link "docs/reference/cli.md" "CLI reference" >}} |
 | Ardur Personal | Local Hub service, browser extension, desktop observe adapter, native messaging host | {{< repo-link "docs/guides/ardur-personal-hub.md" "Personal Hub guide" >}} |
-| Claude Code | Plugin and hooks for `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`; source-checkout MVP quickstart with no-key harness and live-Claude path | {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "MVP quickstart" >}}, {{< repo-link "plugins/claude-code/README.md" "Plugin README" >}} |
+| Claude Code | Plugin and hooks for `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`; source-checkout MVP quickstart with no-key harness, demo packet, evidence-bundle reader, and live-Claude path | {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "MVP quickstart" >}}, {{< repo-link "docs/guides/phase1-demo-packet.md" "Demo packet" >}}, {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Evidence bundle guide" >}}, {{< repo-link "plugins/claude-code/README.md" "Plugin README" >}} |
+| Gemini CLI and Codex app-server | Local-only hook/fixture/report adapters for Gemini CLI and Codex app-server/host-event ingestion (`gemini-cli-hook`, `gemini-cli-fixture`, `gemini-cli-report`, `codex-app-server-event`, `codex-app-server-fixture`, `codex-app-server-report`); same configured-boundary receipt semantics as Claude Code | {{< repo-link "docs/reference/cli.md" "CLI reference" >}} |
 | Runnable examples | Mission JSON, LangChain, LangGraph, AutoGen, browser extension, desktop observe, native host | {{< repo-link "examples/README.md" "Examples index" >}} |
-| Protocol docs | Mission Declaration, Delegation Grant, Execution Receipt, EAT profile, Verifier Contract, conformance profiles, IDM extension, revocation | {{< repo-link "docs/specs/README.md" "Specs index" >}} |
-| Cloud model tests | Real-world governance proof: live LLM tool calls through Ardur proxy with zero denials | {{< repo-link "python/tests/test-results/SUMMARY.md" "Test results" >}} |
+| Protocol docs | Mission Declaration, Delegation Grant, Execution Receipt, EAT profile, Transparency Anchor, Receiver Attestation, Offline Verification Bundle, Verifier Contract, conformance profiles, IDM extension, revocation | {{< repo-link "docs/specs/README.md" "Specs index" >}} |
+| Cloud model tests | Real-world governance harnesses for live LLM tool calls through the Ardur proxy; raw per-model fixtures are not shipped in the redacted public tree. Aggregate report path: `python/tests/comprehensive_test_report.json` | {{< repo-link "python/tests/run_cloud_model_test.py" "Run harness" >}} |
 | CI and public hygiene | Python 3.10 and 3.13, Go, CodeQL, link-check, secret-scan, format validation, Hugo build | {{< repo-link ".github/workflows/tests.yml" "Tests workflow" >}} |
+
+These are configured-boundary claims. They do not imply visibility into calls
+that bypass an adapter, provider-hidden behavior, or side effects below a tool
+request. Receipt verification proves the configured issuer signature and hash
+linkage. Optional transparency and receiver-attestation profiles add separately
+keyed evidence for configured paths, and the packaged offline verifier composes
+them into a redacted timeline. These checks still do not prove universal
+observation, online revocation freshness, or action-set completeness.
 
 ## Bounded Or In Progress
 
 {{< proof-status state="archival" label="Archival media only" source="MEDIA.md" >}}
-The current recordings are asciinema `.cast` files. They are useful proof
-media, but they are not rerunnable public proof until stable verifier commands
-and artifact paths land.
+The current recordings are asciinema `.cast` files. They are useful
+product-direction media, but they are not rerunnable public proof until stable
+verifier commands and artifact paths land. The current rerunnable Phase 1
+evidence path is the no-key JSON bundle, not these archival casts.
 {{< /proof-status >}}
 
 {{< proof-status state="hold" label="Not a packaged production release" source="STATUS.md" >}}
 PyPI/Homebrew/OCI distribution, broader cluster deployment material, and
 rerunnable public proof media are still being hardened.
+{{< /proof-status >}}
+
+{{< proof-status state="hold" label="Linux enforcement is a gated development surface" source="docs/coverage-map.md" >}}
+The repository contains privileged Linux BPF-LSM and seccomp proof harnesses
+with live CI. They are not the cross-platform first-run claim, a production
+kernel agent, or evidence that macOS and Windows have equivalent enforcement.
 {{< /proof-status >}}
 
 Primary status source: {{< repo-link "STATUS.md" >}}.

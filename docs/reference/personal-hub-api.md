@@ -22,7 +22,7 @@ Every endpoint except `GET /health` requires the Hub token written by
 | Where | How |
 |---|---|
 | Header (preferred) | `X-Ardur-Hub-Token: <token>` |
-| Header (alternate) | `Authorization: Bearer <token>` |
+| Header (alternate) | `Authorization: Bearer <hub-token>` |
 | Query (only for `GET /` and `GET /dashboard`) | `?token=<token>` |
 
 The token is compared with constant-time `secrets.compare_digest`. Missing or
@@ -59,14 +59,16 @@ allowed via header *or* `?token=`. Response is `text/html` with strict CSP
 
 ### `GET /v1/status`
 
-Returns Hub state suitable for `ardur status`:
+Returns Hub state suitable for `ardur status`. Examples use `<ardur-home>`
+placeholders; real local API responses include the configured local Ardur home
+path.
 
 ```json
 {
   "ok": true,
   "schema_version": "...",
   "version": "...",
-  "home": "/Users/.../.vibap",
+  "home": "<ardur-home>",
   "verifier_id": "...",
   "hub_url": "http://127.0.0.1:8765",
   "sessions": 0,

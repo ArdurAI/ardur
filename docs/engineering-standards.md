@@ -38,7 +38,8 @@ specific company.
 
 ## Work Process
 
-- Start every Conductor session with `./scripts/conductor-bootstrap.sh`.
+- Start every Conductor session with `./scripts/conductor-bootstrap.sh`, then
+  follow the generated context's graph-availability status.
 - Target `dev` for normal implementation work. `main` is release-only and
   should receive promoted work from `dev` after verification.
 - Before editing, state the task-specific success criteria in plain language.
@@ -91,7 +92,10 @@ specific company.
 - Regression tests are mandatory for bug fixes.
 - Tests must name the behavior they prove, not just the function they call.
 - Avoid live paid-provider tests by default. Make them explicit opt-in with
-  environment variables and cost notes.
+  environment variables and cost notes. If an operator explicitly approves a
+  local live-provider smoke test, load credentials from the environment, never
+  print, log, persist, or commit secret values, and skip/report the test if the
+  credential is absent.
 - Prefer deterministic fixtures over sleeps, random timing, or live network
   dependencies.
 - Add adversarial tests for parsers, auth, policy, revocation, delegation,
@@ -151,7 +155,9 @@ specific company.
 
 - Bootstrap first, then inspect.
 - Do not trust memory when the repo can answer directly.
-- Use `.context/ardur-graph.json` to find likely files, then verify with source.
+- When the generated context reports the graph as available, use
+  `.context/ardur-graph.json` to find likely files, then verify with source. If
+  it is unavailable, inspect live source and workflow files directly.
 - Do not edit generated `.context/` files except by running bootstrap/index
   scripts.
 - Never create secret-bearing fixtures for convenience.

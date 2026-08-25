@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 import uuid
 from typing import Any
@@ -11,12 +10,15 @@ from typing import Any
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from .canonical_json import RFC8785JSONEncoder, canonical_json_bytes
 from .passport import ALGORITHM
 
 
+ATTESTATION_SCHEMA_VERSION = "ardur.behavioral_attestation.v0.2"
+
+
 def compute_log_digest(events: list[dict[str, Any]]) -> str:
-    canonical = json.dumps(events, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical_json_bytes(events)).hexdigest()
 
 
 ATTESTATION_TTL_S = 90 * 24 * 3600  # 90 days; archive separately for long-term retention
@@ -37,6 +39,7 @@ def issue_attestation(
 ) -> str:
     now = int(time.time())
     claims = {
+        "schema_version": ATTESTATION_SCHEMA_VERSION,
         "iss": issuer,
         "sub": agent_id,
         "aud": "vibap-attestation-verifier",
@@ -60,7 +63,12 @@ def issue_attestation(
                 f"extra attestation claims cannot override reserved claims: {collisions}"
             )
         claims.update(extra_claims)
-    return jwt.encode(claims, private_key, algorithm=ALGORITHM)
+    return jwt.encode(
+        claims,
+        private_key,
+        algorithm=ALGORITHM,
+        json_encoder=RFC8785JSONEncoder,
+    )
 
 
 def verify_attestation(
@@ -92,4 +100,9 @@ def verify_attestation(
         },
     )
     assert_iat_in_window(claims.get("iat"), field_name="attestation iat")
+    schema_version = claims.get("schema_version")
+    if schema_version not in {None, ATTESTATION_SCHEMA_VERSION}:
+        raise jwt.InvalidTokenError(
+            f"unsupported attestation schema_version {schema_version!r}"
+        )
     return claims

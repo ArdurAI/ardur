@@ -73,6 +73,20 @@ func TestBuilderMinimal(t *testing.T) {
 	if cred.Claims.Identity == nil {
 		t.Fatal("Identity layer is nil")
 	}
+	identityJSON, err := json.Marshal(cred.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshal identity claims: %v", err)
+	}
+	var identityFields map[string]any
+	if err := json.Unmarshal(identityJSON, &identityFields); err != nil {
+		t.Fatalf("decode identity claims: %v", err)
+	}
+	if got := identityFields["owner_id_assurance"]; got != "self_asserted" {
+		t.Fatalf("owner_id_assurance = %v, want self_asserted", got)
+	}
+	if got := identityFields["spiffe_id_assurance"]; got != "caller_provided" {
+		t.Fatalf("spiffe_id_assurance = %v, want caller_provided", got)
+	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("Intent layer is nil")
 	}
@@ -81,6 +95,40 @@ func TestBuilderMinimal(t *testing.T) {
 	}
 	if cred.Claims.Trust.AuthorizationTier != TierFull {
 		t.Errorf("Trust tier = %q, want %q (score 85)", cred.Claims.Trust.AuthorizationTier, TierFull)
+	}
+}
+
+func TestVerifyRejectsUnsupportedOwnerIDAssurance(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		assurance OwnerIDAssurance
+	}{
+		{name: "missing", assurance: ""},
+		{name: "fabricated verified", assurance: "verified"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			key := testSigningKey(t)
+			cred, err := testBuilder(t).Build(key)
+			if err != nil {
+				t.Fatalf("Build() error: %v", err)
+			}
+			cred.Claims.Identity.OwnerIDAssurance = tt.assurance
+
+			encoded, err := Encode(cred, key)
+			if err != nil {
+				t.Fatalf("Encode() error: %v", err)
+			}
+			result, err := Verify(encoded, key.PublicKey, nil)
+			if err != nil {
+				t.Fatalf("Verify() error: %v", err)
+			}
+			if result.Valid {
+				t.Fatalf("unsupported owner assurance %q was accepted", tt.assurance)
+			}
+			if got := strings.Join(result.Errors, "; "); !strings.Contains(got, "owner_id_assurance") {
+				t.Fatalf("verification errors = %q, want owner_id_assurance failure", got)
+			}
+		})
 	}
 }
 
@@ -171,11 +219,11 @@ func TestBuilderValidationErrors(t *testing.T) {
 			wantErr: "subject is required",
 		},
 		{
-			name: "missing identity",
-			builder: NewBuilder("https://test", "spiffe://test").
+			name: "SPIFFE subject without identity",
+			builder: NewBuilder("https://test", "spiffe://test/agent").
 				WithIntent("checksum", "cedar", "hash", nil).
 				WithTrust(0.5, 0.5, 50, "", ""),
-			wantErr: "identity layer",
+			wantErr: "SPIFFE-formatted subject requires identity",
 		},
 		{
 			name: "missing intent",
@@ -328,6 +376,8 @@ func TestEncodeDecodeRoundtrip(t *testing.T) {
 	}
 	if decoded.Claims.Identity == nil {
 		t.Error("decoded Identity is nil")
+	} else if decoded.Claims.Identity.OwnerIDAssurance != OwnerIDAssuranceSelfAsserted {
+		t.Errorf("decoded owner assurance = %q, want %q", decoded.Claims.Identity.OwnerIDAssurance, OwnerIDAssuranceSelfAsserted)
 	}
 	if decoded.Claims.Intent == nil {
 		t.Error("decoded Intent is nil")
@@ -835,7 +885,7 @@ func TestVerifyRevocationFailsClosedWithoutStatusClient(t *testing.T) {
 func TestVerifyMissingLayers(t *testing.T) {
 	key := testSigningKey(t)
 
-	// Build a credential then nil out required layers
+	// Build a credential, omit optional identity, and nil out required layers.
 	cred, err := testBuilder(t).Build(key)
 	if err != nil {
 		t.Fatalf("Build() error: %v", err)
@@ -860,10 +910,13 @@ func TestVerifyMissingLayers(t *testing.T) {
 	}
 
 	errorSet := strings.Join(result.Errors, "; ")
-	for _, want := range []string{"Layer 1", "Layer 3", "Layer 5"} {
+	for _, want := range []string{"Layer 3", "Layer 5"} {
 		if !strings.Contains(errorSet, want) {
 			t.Errorf("expected error mentioning %q, got: %s", want, errorSet)
 		}
+	}
+	if strings.Contains(errorSet, "Layer 1") {
+		t.Errorf("optional identity must not be reported as missing: %s", errorSet)
 	}
 }
 
@@ -897,6 +950,31 @@ func TestVerifyEmptyIdentityFields(t *testing.T) {
 	}
 	if !strings.Contains(errorSet, "owner_id is empty") {
 		t.Errorf("expected owner_id error, got: %s", errorSet)
+	}
+}
+
+func TestVerifyRejectsSPIFFESubjectWithoutIdentity(t *testing.T) {
+	key := testSigningKey(t)
+	cred, err := testBuilder(t).Build(key)
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+
+	cred.Claims.Identity = nil
+	encoded, err := Encode(cred, key)
+	if err != nil {
+		t.Fatalf("Encode() error: %v", err)
+	}
+
+	result, err := Verify(encoded, key.PublicKey, nil)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+	if result.Valid {
+		t.Fatal("expected invalid SPIFFE-formatted core subject")
+	}
+	if got := strings.Join(result.Errors, "; "); !strings.Contains(got, "core credential subject must not be SPIFFE-formatted") {
+		t.Fatalf("expected core subject error, got: %s", got)
 	}
 }
 

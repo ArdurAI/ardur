@@ -1,7 +1,31 @@
 """Public package API for the Ardur governance proxy."""
 
 from .attestation import compute_log_digest, issue_attestation, verify_attestation
+from .drp import (
+    DRPEmissionError,
+    DRPProfileError,
+    DRPVerificationContext,
+    DRPVerificationError,
+    DRPVerificationResult,
+    DRPVerifiedLogEvidence,
+    DRPVerifiedReceiptChainEvidence,
+    DRPVerifiedRevocationEvidence,
+    emit_drp_receipt,
+    tool_universe_digest,
+    validate_drp_receipt,
+    verify_drp_chain,
+)
 from .mission import MissionCache, MissionDeclaration, load_mission_declaration
+from .governed_subagent import (
+    GovernedSubagentAdapter,
+    GovernedSubagentCloseResult,
+    GovernedSubagentConflictError,
+    GovernedSubagentError,
+    GovernedSubagentHandle,
+    GovernedSubagentRecovery,
+    GovernedSubagentRequest,
+    GovernedToolResult,
+)
 from .passport import (
     ALGORITHM,
     DEFAULT_AUDIENCE,
@@ -15,31 +39,83 @@ from .passport import (
 )
 from .proxy import Decision, GovernanceProxy, GovernanceSession, PolicyEvent
 from .receipt import ExecutionReceipt, build_receipt, sign_receipt, verify_receipt
+from .risk_budget import (
+    FileRiskBudgetLedger,
+    RiskBudgetError,
+    ToolRiskContract,
+    ToolRiskRegistry,
+    attenuate_risk_budget,
+    normalize_risk_budget,
+)
+from .spend_budget import (
+    FileSpendBudgetLedger,
+    SpendBudgetConflictError,
+    SpendBudgetError,
+    SpendCloseResult,
+    SpendQuote,
+    SpendReservationRequest,
+    SpendReservationResult,
+    StaticSpendQuoteStore,
+)
 
 __all__ = [
     "ALGORITHM",
     "DEFAULT_AUDIENCE",
     "DEFAULT_ISSUER",
     "Decision",
+    "DRPEmissionError",
+    "DRPProfileError",
+    "DRPVerificationContext",
+    "DRPVerificationError",
+    "DRPVerificationResult",
+    "DRPVerifiedLogEvidence",
+    "DRPVerifiedReceiptChainEvidence",
+    "DRPVerifiedRevocationEvidence",
     "ExecutionReceipt",
+    "FileRiskBudgetLedger",
+    "FileSpendBudgetLedger",
     "GovernanceProxy",
     "GovernanceSession",
+    "GovernedSubagentAdapter",
+    "GovernedSubagentCloseResult",
+    "GovernedSubagentConflictError",
+    "GovernedSubagentError",
+    "GovernedSubagentHandle",
+    "GovernedSubagentRecovery",
+    "GovernedSubagentRequest",
+    "GovernedToolResult",
     "MissionPassport",
     "MissionCache",
     "MissionDeclaration",
     "PolicyEvent",
+    "RiskBudgetError",
+    "SpendBudgetConflictError",
+    "SpendBudgetError",
+    "SpendCloseResult",
+    "SpendQuote",
+    "SpendReservationRequest",
+    "SpendReservationResult",
+    "StaticSpendQuoteStore",
+    "ToolRiskContract",
+    "ToolRiskRegistry",
+    "attenuate_risk_budget",
     "build_receipt",
     "compute_log_digest",
     "derive_child_passport",
+    "emit_drp_receipt",
     "generate_keypair",
     "issue_attestation",
     "issue_passport",
     "load_mission_declaration",
     "load_mission_file",
+    "normalize_risk_budget",
     "sign_receipt",
+    "tool_universe_digest",
+    "validate_drp_receipt",
     "verify_attestation",
     "verify_receipt",
+    "verify_drp_chain",
     "verify_passport",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

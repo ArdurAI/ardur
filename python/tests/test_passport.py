@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import stat
 import time
 
 import jwt
@@ -13,6 +14,7 @@ import pytest
 from vibap.passport import (
     MissionPassport,
     derive_child_passport,
+    generate_keypair,
     issue_passport,
     verify_passport,
 )
@@ -37,6 +39,14 @@ def _tamper_payload(token: str, mutator) -> str:
 
 
 class TestPassportRoundtrip:
+    def test_generate_keypair_writes_private_key_restrictively(self, tmp_path):
+        generate_keypair(keys_dir=tmp_path)
+
+        private_mode = stat.S_IMODE((tmp_path / "passport_private.pem").stat().st_mode)
+        public_mode = stat.S_IMODE((tmp_path / "passport_public.pem").stat().st_mode)
+        assert private_mode == 0o600
+        assert public_mode & 0o002 == 0
+
     def test_issue_and_verify_roundtrip(self, example_mission, private_key, public_key):
         token = issue_passport(example_mission, private_key, ttl_s=60)
         claims = verify_passport(token, public_key)
@@ -311,6 +321,20 @@ class TestDelegation:
                 parent_token=gen3_token, public_key=public_key, private_key=private_key,
                 child_agent_id="gen4", child_allowed_tools=["read"],
                 child_mission="gen4", child_ttl_s=50,
+            )
+
+
+class TestResourceScopeClaim:
+    def test_unrestricted_sentinel_must_be_the_only_pattern(self):
+        with pytest.raises(
+            ValueError,
+            match="must be the only resource_scope pattern",
+        ):
+            MissionPassport(
+                agent_id="ambiguous-scope",
+                mission="reject ambiguous unrestricted authority",
+                allowed_tools=["read_file"],
+                resource_scope=["**", "/workspace/*"],
             )
 
 
@@ -636,7 +660,6 @@ class TestKbJwtSecondDecodeIatBound:
             issue_passport,
         )
         from vibap.proxy import GovernanceProxy
-        import vibap.proxy as proxy_mod
 
         # Generate a holder keypair.
         holder_priv = ec.generate_private_key(ec.SECP256R1())
@@ -684,7 +707,11 @@ class TestKbJwtSecondDecodeIatBound:
             public_key=public_key,
             keys_dir=session_keys_dir,
         )
-        with pytest.raises(PermissionError, match="KB-JWT iat"):
+        # The KB-JWT iat window failure now surfaces a fixed sanitized code
+        # (kb_jwt_iat_invalid) instead of the raw PyJWT InvalidTokenError
+        # message, which could carry library internals. The full traceback is
+        # preserved via the exception chain (``from exc``).
+        with pytest.raises(PermissionError, match="kb_jwt_iat_invalid"):
             proxy.start_session(
                 passport_token,
                 holder_public_key=holder_pub,

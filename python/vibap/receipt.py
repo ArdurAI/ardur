@@ -11,7 +11,6 @@ signed schema.
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 import base64
 import re
@@ -23,6 +22,12 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from .canonical_json import (
+    RFC8785JSONEncoder,
+    canonical_json_bytes,
+    canonical_json_text,
+)
 
 from .passport import (
     ALGORITHM,
@@ -37,6 +42,9 @@ if TYPE_CHECKING:
 
 
 RECEIPT_JWT_TYPE = "application/ardur.er+jwt"
+RECEIPT_SCHEMA_VERSION = "ardur.execution_receipt.v0.2"
+RECEIPT_CANONICALIZATION = "jcs-rfc8785"
+RECEIPT_KIND_ACTION = "action"
 DEFAULT_RECEIPT_TTL_S = 300
 DEFAULT_EVIDENCE_LEVEL = "self_signed"
 DEFAULT_REPLAY_CACHE_MAX_ENTRIES = 4096
@@ -95,38 +103,69 @@ _OPTIONAL_CLAIMS = {
     "evidence_proof_ref",
     "measurements",
 }
-_ALLOWED_CLAIMS = set(_REQUIRED_CLAIMS) | _OPTIONAL_CLAIMS
+_V02_REQUIRED_CLAIMS = {
+    "schema_version",
+    "canonicalization",
+    "receipt_kind",
+}
+_LEGACY_ALLOWED_CLAIMS = set(_REQUIRED_CLAIMS) | _OPTIONAL_CLAIMS
+_ALLOWED_CLAIMS = _LEGACY_ALLOWED_CLAIMS | _V02_REQUIRED_CLAIMS
 _ACTION_CLASSES = {
-    "search", "read", "write", "query", "delegate", "send", "summarize", "observe",
+    "search",
+    "read",
+    "write",
+    "query",
+    "delegate",
+    "send",
+    "summarize",
+    "observe",
     # Claude Code hook adapter extensions — tool-execution semantics not covered
     # by the original proxy-centric schema:
-    "execute",   # Bash / shell execution
+    "execute",  # Bash / shell execution
     "dispatch",  # Task / subagent dispatch
-    "fetch",     # WebFetch / HTTP read
-    "invoke",    # LS, TodoRead, TodoWrite, other passive invocations
+    "fetch",  # WebFetch / HTTP read
+    "invoke",  # LS, TodoRead, TodoWrite, other passive invocations
 }
 _SIDE_EFFECT_CLASSES = {
-    "none", "internal_write", "external_send", "state_change",
+    "none",
+    "internal_write",
+    "external_send",
+    "state_change",
     # Claude Code hook adapter extensions:
     "filesystem_write",  # Write/Edit to local filesystem
-    "process_launch",    # Bash spawns a subprocess
-    "network_read",      # WebFetch/WebSearch makes an outbound read request
-    "subagent_launch",   # Task spawns a sub-agent
+    "process_launch",  # Bash spawns a subprocess
+    "network_read",  # WebFetch/WebSearch makes an outbound read request
+    "subagent_launch",  # Task spawns a sub-agent
 }
-_VERDICTS = {"compliant", "violation", "insufficient_evidence"}
+_VERDICTS = {"compliant", "violation", "insufficient_evidence", "unknown"}
 _EVIDENCE_LEVELS = {"self_signed", "counter_signed", "transparency_logged"}
 _DIGEST_ALGS = {"sha-256", "sha-384", "sha-512"}
 _DIGEST_CANONICALIZATIONS = {"jcs-rfc8785", "none"}
 _DIGEST_SCOPES = {"result", "normalized_input", "measurement", "custom"}
-_DENIAL_REASONS = {"policy_denied", "budget_exhausted", "insufficient_evidence", "revoked", "chain_invalid"}
-_SENSITIVITY_LEVELS = {"public", "internal", "confidential", "restricted", "regulated", "unknown"}
+_DENIAL_REASONS = {
+    "policy_denied",
+    "budget_exhausted",
+    "insufficient_evidence",
+    "revoked",
+    "chain_invalid",
+    "unknown",
+    "observation_gap",
+}
+_SENSITIVITY_LEVELS = {
+    "public",
+    "internal",
+    "confidential",
+    "restricted",
+    "regulated",
+    "unknown",
+}
 _SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
 _BASE64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _TOKEN_FIELD_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 def _canonical_json(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return canonical_json_text(payload)
 
 
 def _stable_identifier(prefix: str, payload: dict[str, Any]) -> str:
@@ -216,7 +255,9 @@ def _validate_digest_object(value: Any, key: str) -> None:
     ):
         _schema_violation(f"{key}.canonicalization has invalid value")
     scope = value.get("scope")
-    if scope is not None and (not isinstance(scope, str) or scope not in _DIGEST_SCOPES):
+    if scope is not None and (
+        not isinstance(scope, str) or scope not in _DIGEST_SCOPES
+    ):
         _schema_violation(f"{key}.scope has invalid value")
     digest_value = value.get("value")
     if not isinstance(digest_value, str) or not _BASE64URL_RE.fullmatch(digest_value):
@@ -258,21 +299,122 @@ def _validate_budget_delta(value: Any) -> None:
             _schema_violation("budget_delta.operation has invalid value")
         _require_string(value, "resource")
         _require_string(value, "unit")
-        for key in ("amount", "remaining_for_parent", "remaining_after", "used_total", "reserved_total"):
+        for key in (
+            "amount",
+            "remaining_for_parent",
+            "remaining_after",
+            "used_total",
+            "reserved_total",
+        ):
             if key in value and (not isinstance(value[key], int) or value[key] < 0):
                 _schema_violation(f"budget_delta.{key} must be a non-negative integer")
-        if "side_effect_class" in value and value["side_effect_class"] not in _SIDE_EFFECT_CLASSES:
+        if (
+            "side_effect_class" in value
+            and value["side_effect_class"] not in _SIDE_EFFECT_CLASSES
+        ):
             _schema_violation("budget_delta.side_effect_class has invalid value")
         if "delegation_request_id" in value:
             _require_string(value, "delegation_request_id")
         if "idempotent" in value and not isinstance(value["idempotent"], bool):
             _schema_violation("budget_delta.idempotent must be boolean")
         return
+    spend_required = {
+        "operation",
+        "resource",
+        "requested",
+        "reserved",
+        "actual",
+        "refunded",
+        "remaining",
+        "currency",
+        "quote_digest",
+        "reservation_hash",
+        "reason_code",
+    }
+    if spend_required <= set(value):
+        allowed = spend_required | {"idempotent", "reconciled"}
+        if set(value) - allowed:
+            _schema_violation("budget_delta contains unknown spend fields")
+        if value.get("operation") not in {
+            "reserve",
+            "reject",
+            "release",
+            "settle",
+            "quarantine",
+        }:
+            _schema_violation("budget_delta.operation has invalid spend value")
+        if value.get("resource") != "spend":
+            _schema_violation("budget_delta.resource must be 'spend'")
+        for field_name in ("requested", "reserved", "actual", "refunded"):
+            _validate_spend_amounts(value.get(field_name), f"budget_delta.{field_name}")
+        remaining = value.get("remaining")
+        if not isinstance(remaining, dict) or set(remaining) != {
+            "session",
+            "agent",
+            "lineage",
+        }:
+            _schema_violation(
+                "budget_delta.remaining must contain session, agent, and lineage"
+            )
+        for scope in ("session", "agent", "lineage"):
+            _validate_spend_amounts(
+                remaining[scope],
+                f"budget_delta.remaining.{scope}",
+            )
+        currency = value.get("currency")
+        if not isinstance(currency, str) or re.fullmatch(r"[A-Z]{3}", currency) is None:
+            _schema_violation("budget_delta.currency must be an uppercase code")
+        for key in ("quote_digest", "reservation_hash"):
+            digest = value.get(key)
+            if not isinstance(digest, str) or not _SHA256_HEX_RE.fullmatch(digest):
+                _schema_violation(f"budget_delta.{key} must be a SHA-256 hex digest")
+        reason_code = value.get("reason_code")
+        if (
+            not isinstance(reason_code, str)
+            or not reason_code
+            or len(reason_code) > 128
+            or _TOKEN_FIELD_RE.fullmatch(reason_code) is None
+        ):
+            _schema_violation("budget_delta.reason_code has invalid value")
+        for key in ("idempotent", "reconciled"):
+            if key in value and not isinstance(value[key], bool):
+                _schema_violation(f"budget_delta.{key} must be boolean")
+        return
     _schema_violation("budget_delta must match a supported shape")
 
 
+def _validate_spend_amounts(value: Any, field_name: str) -> None:
+    if not isinstance(value, dict) or set(value) != {"tokens", "currency_micros"}:
+        _schema_violation(f"{field_name} must contain tokens and currency_micros")
+    for dimension in ("tokens", "currency_micros"):
+        amount = value[dimension]
+        if (
+            isinstance(amount, bool)
+            or not isinstance(amount, int)
+            or amount < 0
+            or amount > 9_007_199_254_740_991
+        ):
+            _schema_violation(f"{field_name}.{dimension} must be a safe integer")
+
+
 def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:
-    extra = set(claims) - _ALLOWED_CLAIMS
+    schema_version = claims.get("schema_version")
+    if schema_version is None:
+        allowed_claims = _LEGACY_ALLOWED_CLAIMS
+    elif schema_version == RECEIPT_SCHEMA_VERSION:
+        allowed_claims = _ALLOWED_CLAIMS
+        missing_v02 = sorted(_V02_REQUIRED_CLAIMS - set(claims))
+        if missing_v02:
+            _schema_violation(
+                f"{missing_v02[0]} is required for {RECEIPT_SCHEMA_VERSION}"
+            )
+        if claims.get("canonicalization") != RECEIPT_CANONICALIZATION:
+            _schema_violation(f"canonicalization must be {RECEIPT_CANONICALIZATION!r}")
+        if claims.get("receipt_kind") != RECEIPT_KIND_ACTION:
+            _schema_violation(f"receipt_kind must be {RECEIPT_KIND_ACTION!r}")
+    else:
+        _schema_violation(f"unsupported schema_version {schema_version!r}")
+    extra = set(claims) - allowed_claims
     if extra:
         _schema_violation(f"unknown claims: {', '.join(sorted(extra))}")
     for key in (
@@ -291,7 +433,10 @@ def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:
         "jti",
     ):
         _require_string(claims, key)
-    if not _BASE64URL_RE.fullmatch(claims["run_nonce"]) or len(claims["run_nonce"]) < 16:
+    if (
+        not _BASE64URL_RE.fullmatch(claims["run_nonce"])
+        or len(claims["run_nonce"]) < 16
+    ):
         _schema_violation("run_nonce must be base64url and at least 16 characters")
     if claims.get("parent_receipt_id") is not None:
         _require_string(claims, "parent_receipt_id")
@@ -317,12 +462,22 @@ def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:
     for item in policy_decisions:
         if not isinstance(item, dict):
             _schema_violation("policy_decisions items must be objects")
-        if set(item) - {"backend", "decision", "reason", "eval_ms"}:
+        if set(item) - {"backend", "decision", "reason", "rule_id", "eval_ms"}:
             _schema_violation("policy_decisions item contains unknown fields")
         _require_string(item, "backend")
         _require_string(item, "decision")
-        if "reason" in item and item["reason"] is not None and not isinstance(item["reason"], str):
+        if (
+            "reason" in item
+            and item["reason"] is not None
+            and not isinstance(item["reason"], str)
+        ):
             _schema_violation("policy_decisions.reason must be string or null")
+        if "rule_id" in item:
+            rule_id = _require_string(item, "rule_id")
+            if len(rule_id) > 256 or not rule_id.isprintable():
+                _schema_violation(
+                    "policy_decisions.rule_id must be a printable string of at most 256 characters"
+                )
         if "eval_ms" in item and (
             not isinstance(item["eval_ms"], (int, float)) or item["eval_ms"] < 0
         ):
@@ -342,11 +497,15 @@ def _validate_receipt_claim_schema(claims: dict[str, Any]) -> None:
         if claims.get("public_denial_reason") not in _DENIAL_REASONS:
             _schema_violation("public_denial_reason has invalid value")
         internal_code = claims.get("internal_denial_code")
-        if not isinstance(internal_code, str) or not _TOKEN_FIELD_RE.fullmatch(internal_code):
+        if not isinstance(internal_code, str) or not _TOKEN_FIELD_RE.fullmatch(
+            internal_code
+        ):
             _schema_violation("internal_denial_code must be an audit token")
     if "sensitivity" in claims and claims["sensitivity"] not in _SENSITIVITY_LEVELS:
         _schema_violation("sensitivity has invalid value")
-    if "instruction_bearing" in claims and not isinstance(claims["instruction_bearing"], bool):
+    if "instruction_bearing" in claims and not isinstance(
+        claims["instruction_bearing"], bool
+    ):
         _schema_violation("instruction_bearing must be boolean")
     if "budget_delta" in claims:
         _validate_budget_delta(claims["budget_delta"])
@@ -374,6 +533,8 @@ def _verdict_from_decision(decision: Any) -> str:
         return "compliant"
     if name == "INSUFFICIENT_EVIDENCE":
         return "insufficient_evidence"
+    if name == "UNKNOWN":
+        return "unknown"
     if name in {"DENY", "VIOLATION", "INSPECT"}:
         return "violation"
     return "violation"
@@ -391,7 +552,9 @@ def _public_denial_reason(verdict: str, internal_denial_code: str | None) -> str
         return None
     if verdict == "insufficient_evidence":
         return "insufficient_evidence"
-    if internal_denial_code in {"budget_exhausted"}:
+    if verdict == "unknown":
+        return "unknown"
+    if internal_denial_code in {"budget_exhausted", "risk_budget_exhausted"}:
         return "budget_exhausted"
     if internal_denial_code in {"revoked", "mission_revoked"}:
         return "revoked"
@@ -440,6 +603,9 @@ def _run_nonce_from_event(event: PolicyEvent, trace_id: str) -> str:
 class ExecutionReceipt:
     """Signed per-hop receipt payload."""
 
+    schema_version: str
+    canonicalization: str
+    receipt_kind: str
     receipt_id: str
     grant_id: str
     parent_receipt_hash: str | None
@@ -479,6 +645,9 @@ class ExecutionReceipt:
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
+            "schema_version": self.schema_version,
+            "canonicalization": self.canonicalization,
+            "receipt_kind": self.receipt_kind,
             "receipt_id": self.receipt_id,
             "grant_id": self.grant_id,
             "parent_receipt_hash": self.parent_receipt_hash,
@@ -551,15 +720,15 @@ def build_receipt(
     # Default json.dumps escapes non-ASCII (ensure_ascii=True) while
     # _canonical_json does not — flagged in Phase 3 audit HIGH #2.
     arguments_hash = hashlib.sha256(
-        _canonical_json(
-            dict(getattr(event, "arguments", {}) or {})
-        ).encode("utf-8")
+        _canonical_json(dict(getattr(event, "arguments", {}) or {})).encode("utf-8")
     ).hexdigest()
     remaining_budget = dict(budget_remaining or {})
     timestamp = str(getattr(event, "timestamp", ""))
     trace_id = _trace_id_from_event(event)
     run_nonce = _run_nonce_from_event(event, trace_id)
-    invocation_digest = _digest_object("normalized_input", _invocation_digest_payload(event))
+    invocation_digest = _digest_object(
+        "normalized_input", _invocation_digest_payload(event)
+    )
     observed_at = _numeric_date(timestamp)
     now = int(time.time())
     iat = max(now, observed_at or now)
@@ -578,9 +747,14 @@ def build_receipt(
         )
 
     payload_without_ids = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "canonicalization": RECEIPT_CANONICALIZATION,
+        "receipt_kind": RECEIPT_KIND_ACTION,
         "grant_id": str(getattr(event, "passport_jti", "")),
         "parent_receipt_hash": parent_receipt_hash,
-        "parent_receipt_id": parent_receipt_hash[:16] if parent_receipt_hash is not None else None,
+        "parent_receipt_id": parent_receipt_hash[:16]
+        if parent_receipt_hash is not None
+        else None,
         "actor": str(getattr(event, "actor", "")),
         "verifier_id": verifier_id,
         "step_id": step_id,
@@ -590,7 +764,9 @@ def build_receipt(
         "resource_family": str(getattr(event, "resource_family", "") or "general"),
         "side_effect_class": str(getattr(event, "side_effect_class", "") or "none"),
         "verdict": verdict,
-        "evidence_level": str(getattr(event, "evidence_level", "") or DEFAULT_EVIDENCE_LEVEL),
+        "evidence_level": str(
+            getattr(event, "evidence_level", "") or DEFAULT_EVIDENCE_LEVEL
+        ),
         "reason": reason_text,
         "policy_decisions": payload_policy_decisions,
         "arguments_hash": arguments_hash,
@@ -607,6 +783,9 @@ def build_receipt(
     receipt_id = _stable_identifier("receipt", payload_without_ids)
 
     return ExecutionReceipt(
+        schema_version=RECEIPT_SCHEMA_VERSION,
+        canonicalization=RECEIPT_CANONICALIZATION,
+        receipt_kind=RECEIPT_KIND_ACTION,
         receipt_id=receipt_id,
         grant_id=payload_without_ids["grant_id"],
         parent_receipt_hash=parent_receipt_hash,
@@ -646,13 +825,30 @@ def build_receipt(
     )
 
 
-def sign_receipt(receipt: ExecutionReceipt, private_key: ec.EllipticCurvePrivateKey) -> str:
+def sign_receipt(
+    receipt: ExecutionReceipt, private_key: ec.EllipticCurvePrivateKey
+) -> str:
     return jwt.encode(
         receipt.to_dict(),
         private_key,
         algorithm=ALGORITHM,
         headers={"typ": RECEIPT_JWT_TYPE},
+        json_encoder=RFC8785JSONEncoder,
     )
+
+
+def _validate_canonical_payload(jwt_str: str, claims: dict[str, Any]) -> None:
+    if claims.get("schema_version") != RECEIPT_SCHEMA_VERSION:
+        return
+    try:
+        encoded_payload = jwt_str.split(".")[1]
+        padding = "=" * (-len(encoded_payload) % 4)
+        payload_bytes = base64.urlsafe_b64decode(encoded_payload + padding)
+        expected = canonical_json_bytes(claims)
+    except (IndexError, ValueError, TypeError) as exc:
+        _schema_violation(f"canonical payload could not be evaluated: {exc}")
+    if payload_bytes != expected:
+        _schema_violation("JWS payload is not RFC 8785 canonical JSON")
 
 
 def verify_receipt(
@@ -663,10 +859,11 @@ def verify_receipt(
     expected_run_nonce: str | None = None,
     expected_invocation_digest: dict[str, Any] | None = None,
     replay_cache: MutableSet[str] | None = None,
-    trusted_issuer_bindings: dict[str, set[str] | list[str] | tuple[str, ...]] | None = None,
+    trusted_issuer_bindings: dict[str, set[str] | list[str] | tuple[str, ...]]
+    | None = None,
     verify_expiry: bool = True,
-    iat_future_skew_s: int = _IAT_FUTURE_SKEW_S,
-    iat_past_skew_s: int = _IAT_PAST_SKEW_S,
+    iat_future_skew_s: int | None = _IAT_FUTURE_SKEW_S,
+    iat_past_skew_s: int | None = _IAT_PAST_SKEW_S,
     now_fn: "callable[..., float] | None" = None,
 ) -> dict[str, Any]:
     """Verify a single Execution Receipt JWT.
@@ -708,6 +905,7 @@ def verify_receipt(
     missing = [claim for claim in _REQUIRED_CLAIMS if claim not in claims]
     if missing:
         raise jwt.MissingRequiredClaimError(missing[0])
+    _validate_canonical_payload(jwt_str, claims)
     _validate_receipt_claim_schema(claims)
     issuer = claims.get("iss")
     verifier_id = claims.get("verifier_id")
@@ -722,7 +920,9 @@ def verify_receipt(
     verdict = claims.get("verdict")
     if verdict == "compliant":
         if "public_denial_reason" in claims or "internal_denial_code" in claims:
-            raise jwt.InvalidTokenError("compliant receipts must not carry denial reasons")
+            raise jwt.InvalidTokenError(
+                "compliant receipts must not carry denial reasons"
+            )
     else:
         if "public_denial_reason" not in claims:
             raise jwt.MissingRequiredClaimError("public_denial_reason")
@@ -738,8 +938,13 @@ def verify_receipt(
         raise jwt.InvalidTokenError("receipt trace_id does not match replay context")
     if expected_run_nonce is not None and claims.get("run_nonce") != expected_run_nonce:
         raise jwt.InvalidTokenError("receipt run_nonce does not match replay context")
-    if expected_invocation_digest is not None and invocation_digest != expected_invocation_digest:
-        raise jwt.InvalidTokenError("receipt invocation_digest does not match replay context")
+    if (
+        expected_invocation_digest is not None
+        and invocation_digest != expected_invocation_digest
+    ):
+        raise jwt.InvalidTokenError(
+            "receipt invocation_digest does not match replay context"
+        )
     if replay_cache is not None:
         max_entries = getattr(replay_cache, "max_entries", None)
         if not isinstance(max_entries, int) or max_entries <= 0:
@@ -763,6 +968,8 @@ def verify_chain(
     public_key: ec.EllipticCurvePublicKey,
     *,
     verify_expiry: bool = True,
+    iat_future_skew_s: int | None = _IAT_FUTURE_SKEW_S,
+    iat_past_skew_s: int | None = _IAT_PAST_SKEW_S,
 ) -> list[dict[str, Any]]:
     """Verify receipt signatures and the receipt-chain hash."""
     tokens = [_receipt_token(item) for item in receipts]
@@ -770,7 +977,13 @@ def verify_chain(
     for index, token in enumerate(tokens):
         try:
             verified_claims.append(
-                verify_receipt(token, public_key, verify_expiry=verify_expiry)
+                verify_receipt(
+                    token,
+                    public_key,
+                    verify_expiry=verify_expiry,
+                    iat_future_skew_s=iat_future_skew_s,
+                    iat_past_skew_s=iat_past_skew_s,
+                )
             )
         except jwt.PyJWTError as exc:
             raise ReceiptChainError(
@@ -822,11 +1035,13 @@ def _signed_policy_decisions(
 ) -> list[dict[str, Any]]:
     raw_policy_decisions = list(getattr(event, "policy_decisions", []) or [])
     if not raw_policy_decisions:
-        return [{
-            "backend": "native",
-            "decision": "Allow" if _decision_name(decision) == "PERMIT" else "Deny",
-            "reason": reason or None,
-        }]
+        return [
+            {
+                "backend": "native",
+                "decision": "Allow" if _decision_name(decision) == "PERMIT" else "Deny",
+                "reason": reason or None,
+            }
+        ]
     compact: list[dict[str, Any]] = []
     for item in raw_policy_decisions:
         backend = str(item.get("backend", "unknown"))
@@ -848,4 +1063,6 @@ def _receipt_token(receipt: str | dict[str, Any]) -> str:
         return receipt
     if isinstance(receipt, dict) and isinstance(receipt.get("jwt"), str):
         return str(receipt["jwt"])
-    raise TypeError("receipt chain entries must be JWT strings or dicts with a 'jwt' field")
+    raise TypeError(
+        "receipt chain entries must be JWT strings or dicts with a 'jwt' field"
+    )

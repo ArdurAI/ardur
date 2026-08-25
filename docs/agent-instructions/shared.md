@@ -7,9 +7,12 @@ future automation.
 
 1. Run `./scripts/conductor-bootstrap.sh`.
 2. Read `.context/ARDUR_CONTEXT.md`.
-3. Read `.context/ardur-graph.md`.
-4. Use `.context/ardur-graph.json` as the structural map, then verify exact
-   behavior with source files and tests.
+3. Check its **Generated Graph** section.
+4. When the graph status is `available`, read `.context/ardur-graph.md` and use
+   `.context/ardur-graph.json` as the structural map, then verify exact behavior
+   with source files and tests.
+5. When the graph status is `unavailable`, use the listed live source and
+   workflow files directly. Missing graph artifacts are optional in this path.
 
 If bootstrap fails, stop and fix or report the bootstrap problem before making
 task-specific edits.
@@ -47,6 +50,10 @@ When sources conflict, state the conflict and verify from the current tree.
   explicit limitation.
 - Do not add secrets, machine-local private paths, generated credentials, or
   local session state.
+- Live external-API tests are allowed only when they materially verify the task,
+  are explicit/opt-in, and use environment credentials approved for that local
+  run. Keep calls minimal and cost-aware; never print, log, persist, or commit
+  secret values. Public CI must not require private credentials.
 - Update docs when behavior or workflow changes.
 
 ## Validation

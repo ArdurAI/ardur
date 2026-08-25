@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from .passport import MAX_DELEGATION_DEPTH
 
@@ -17,7 +17,15 @@ def _policy_metadata(
     tool_name: str,
     arguments: dict[str, Any],
     target: str,
+    policy_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, str]:
+    if isinstance(policy_metadata, Mapping):
+        action_class = policy_metadata.get("action_class")
+        resource_family = policy_metadata.get("resource_family")
+        side_effect_class = policy_metadata.get("side_effect_class")
+        if all(isinstance(item, str) and item for item in (action_class, resource_family, side_effect_class)):
+            return str(action_class), str(resource_family), str(side_effect_class)
+
     proxy_module = _proxy_module()
     action_class = proxy_module._policy_action_class(tool_name)
     resource_family = proxy_module._policy_resource_family(
@@ -141,12 +149,15 @@ def _check_side_effect_class(
     arguments: dict[str, Any],
     target: str,
     session_state: dict[str, Any],
+    *,
+    policy_metadata: Mapping[str, Any] | None = None,
 ) -> list[str]:
     del session_state
     _action_class, _resource_family, side_effect_class = _policy_metadata(
         tool_name,
         arguments,
         target,
+        policy_metadata,
     )
     allowed_side_effect_classes = list(
         passport_dict.get("allowed_side_effect_classes", []) or []
@@ -167,11 +178,14 @@ def _check_per_class_budget(
     arguments: dict[str, Any],
     target: str,
     session_state: dict[str, Any],
+    *,
+    policy_metadata: Mapping[str, Any] | None = None,
 ) -> list[str]:
     _action_class, _resource_family, side_effect_class = _policy_metadata(
         tool_name,
         arguments,
         target,
+        policy_metadata,
     )
     per_class_caps = dict(passport_dict.get("max_tool_calls_per_class", {}) or {})
     if side_effect_class not in per_class_caps:
@@ -200,6 +214,7 @@ def evaluate_native_denials(
     arguments: dict[str, Any],
     target: str,
     session_state: dict[str, Any],
+    policy_metadata: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """Return the first native denial reason, or [] when native policy allows."""
     checks = (
@@ -209,11 +224,20 @@ def evaluate_native_denials(
         _check_session_budget,
         _check_resource_scope,
         _check_cwd_confinement,
-        _check_side_effect_class,
-        _check_per_class_budget,
     )
     for check in checks:
         reasons = check(passport_dict, tool_name, arguments, target, session_state)
+        if reasons:
+            return reasons
+    for check in (_check_side_effect_class, _check_per_class_budget):
+        reasons = check(
+            passport_dict,
+            tool_name,
+            arguments,
+            target,
+            session_state,
+            policy_metadata=policy_metadata,
+        )
         if reasons:
             return reasons
     return []

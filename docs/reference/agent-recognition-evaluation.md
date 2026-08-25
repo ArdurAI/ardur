@@ -1,0 +1,218 @@
+# Agent Recognition Evaluation
+
+This reference describes the maintained, sanitized corpus gate for Ardur's
+opt-in Linux agent recognizer and heuristic content-fingerprint worker. The
+gate is regression evidence for two deliberately separate signal strata. It is
+**not** population accuracy, independent validation, software provenance,
+identity assurance, or evidence that a named process is the claimed agent.
+
+## Reproduce the report
+
+From the repository root, using the Go version pinned in `go/go.mod`:
+
+```bash
+cd go
+go run ./cmd/ardur-agent-recognition-eval > agent-recognition-report.json
+```
+
+The command emits deterministic JSON to stdout. Exit status `0` means the
+reviewed gate passed, `1` means the inputs were valid but a threshold failed,
+and `2` means the input or execution was invalid. A valid threshold failure
+still emits the complete report so CI evidence is not discarded.
+
+Custom reviewed inputs may be supplied with `--corpus` and `--thresholds`.
+Both parsers are size-bounded, reject unknown fields and trailing JSON values,
+and do not echo input paths when a file cannot be opened.
+
+## Versioned inputs
+
+The embedded corpus uses schema `ardur.agent_recognition_corpus.v0.2`. Every
+sample has:
+
+- a stable sample ID and evaluation set;
+- a ground-truth agent class when the set has one;
+- installation shape, Linux platform, and signal stratum;
+- explicit signal availability and classifier input;
+- a reviewed regression expectation; and
+- sanitized provenance with a source kind, repository-relative public
+  reference, and review date.
+
+Content-fingerprint samples additionally select a bounded synthetic fixture by
+stable ID and declare the expected fingerprint outcome and confidence
+transition. The parser rejects duplicate IDs, unsafe or missing provenance,
+contradictory labels, signal-availability conflicts, unknown content fixtures,
+unsupported set/stratum combinations, and any reviewed mismatch expectation
+that attempts to promote confidence.
+
+Raw third-party installers, binaries, command histories, credentials,
+proprietary payloads, host paths, and real vendor digests are not corpus
+material. Synthetic fixture digests are derived in memory from domain-separated
+fixture IDs. Individual expected or computed digests are never emitted in the
+report.
+
+The current corpus contains 36 samples:
+
+| Signal stratum | Samples | Composition | Purpose |
+| --- | ---: | --- | --- |
+| `name_only` | 28 | 9 supported positives, 8 known-unsupported positives, 8 hard negatives, 2 conflicts, 1 unavailable | Preserve the exact `comm`/successful-exec basename classifier contract and its measured false negatives |
+| `content_fingerprint` | 8 | 4 reviewed matches and 4 cross-class mismatches; 2 native and 6 kernel-bound launcher observations | Exercise the production match/mismatch confidence-composition path without collecting or publishing vendor binaries |
+
+Ground truth and expected output are intentionally separate. A renamed binary
+that is expected to produce `unknown` can pass its regression expectation while
+still counting as a false negative against its ground-truth class. A content
+mismatch can likewise preserve the recognized name candidate while proving
+that the separate content signal did not raise its confidence.
+
+## Sample sources
+
+The name-only corpus records only sanitized command-name and
+installation-shape metadata. Its public-shape review uses the projects' primary
+documentation:
+
+- [Claude Code setup](https://code.claude.com/docs/en/getting-started)
+  documents the `claude` command plus package and native installation routes.
+- [Codex CLI](https://github.com/openai/codex/blob/main/README.md) documents the
+  `codex` command plus installer, package-manager, and release-binary routes.
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/index.md)
+  documents the `gemini` command and package-backed installation.
+- [Kimi Code CLI](https://github.com/MoonshotAI/kimi-cli) documents the `kimi`
+  command and its maintained public CLI repository.
+
+These sources support reviewable launch shapes only. The corpus does not copy
+their installers, infer an upstream binary hash, pin an upstream version, or
+claim that a matching name or synthetic fixture proves the named software
+produced the process.
+
+## Signal strata
+
+### `name_only`
+
+The classifier consumes only Linux `comm` and the bounded basename from a
+successful exec filename. Its precision, recall, confusion matrix, and stable
+false-positive/false-negative IDs remain isolated from content evidence.
+
+### `content_fingerprint`
+
+The evaluator first obtains the same low-confidence exact-name candidate, then
+feeds a synthetic native or kernel-bound launcher fixture through the same
+registry matching and confidence-composition functions used by the daemon.
+Each launcher sample supplies its observed interpreter independently from the
+content fixture, so the evaluator must pass the candidate class's interpreter
+allowlist before it can compare the fixture digest. A match may raise the
+heuristic observation only to `medium`. Interpreter denial or digest mismatch
+must remain `low`. Content transition correctness is reported separately and
+is never blended into name-only precision or recall.
+
+The embedded evaluation registry is a privacy-safe test registry, not an
+operator trust registry or a database of vendor artifacts. It covers all four
+embedded agent classes, native and launcher methods, and cross-class
+masquerades. It does not exercise live filesystem resolution, pidfd behavior,
+or BPF-LSM attachment; those boundaries have dedicated unit, integration, and
+real-Linux benchmark coverage.
+
+## Metrics and confidence intervals
+
+The evaluator accounts for every sample before it returns a report. It emits:
+
+- name-only confusion, per-class and aggregate precision/recall,
+  supported-shape recall, hard-negative accuracy, and stable error IDs;
+- separate unknown, ambiguous, and unavailable counts;
+- content match/mismatch, native/launcher, correct-transition, and
+  mismatch-promotion counts;
+- separate content transition accuracy; and
+- exact corpus, name registry, and synthetic content-registry SHA-256 digests.
+
+Every ratio carries numerator, denominator, value, and a two-sided 95% Wilson
+score interval. A zero-denominator ratio has a null value and no interval; no
+standalone percentage is emitted. Wilson intervals are test-inversion
+intervals recommended over the normal approximation for small binomial
+samples. See the [NIST/SEMATECH proportion confidence-interval
+guidance](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm) and
+Wilson's original 1927 paper (DOI `10.1080/01621459.1927.10502953`).
+
+## Maintained-corpus threshold
+
+The reviewed v0.2 threshold document requires:
+
+- name-only supported-shape recall of at least 0.90;
+- zero false positives in the name-only hard-negative set;
+- more than one supported name-only installation shape for every active class;
+- at least one name-only near miss for every active class;
+- content-fingerprint transition accuracy of 1.0;
+- zero confidence promotions after a content mismatch;
+- at least one content match and mismatch target for every active class;
+- both native and kernel-bound launcher content methods; and
+- no mismatches against reviewed regression expectations.
+
+The embedded v0.2 report currently has:
+
+| Evidence | Result |
+| --- | --- |
+| Name-only aggregate precision | 13/13 |
+| Name-only aggregate recall | 13/17 |
+| Name-only supported-shape recall | 9/9 |
+| Name-only hard-negative accuracy | 8/8 |
+| Content transition accuracy | 8/8 |
+| Content mismatch promotions | 0 |
+
+The four name-only false-negative IDs are `claude.renamed`, `codex.renamed`,
+`gemini.renamed`, and `kimi.renamed`. These small maintained-corpus counts are
+why the report retains Wilson intervals and why none of the values may be
+presented as universal host-software accuracy.
+
+The deterministic evidence identifiers for this revision are:
+
+| Input | Version | SHA-256 |
+| --- | --- | --- |
+| Corpus | `ardur.maintained-agent-recognition.2026-07-17.v2` | `b2dd96d55da0d93a498d0f1a33d2e6fd7bf571da6297cde83a8b60f64b8f1bf4` |
+| Name registry | `ardur.embedded-agent-registry.2026-07-11.v2` | `7a8a2984e9e2dbad8dc993e22391e41330e32c89e88f00ae699280d157bf5d2c` |
+| Synthetic content registry | `ardur.agent-recognition-evaluation-content.2026-07-17.v1` | `92597953f40df15993f84b1446ccb9e96ba580182f7cc36086057971f5000d39` |
+| Threshold | `ardur.maintained-agent-recognition-thresholds.2026-07-17.v2` | Published as versioned reviewed input; the report binds the version |
+
+## Known limitations
+
+- Renaming a supported executable produces a false negative in the name-only
+  stratum; all four renamed samples are retained in aggregate recall.
+- A different executable can reuse an exact registered name. The recognizer
+  will surface a low-confidence candidate, not authenticate software identity.
+- The content stratum validates deterministic match/mismatch transitions
+  against synthetic fixtures. It is not a vendor-binary coverage or provenance
+  study.
+- Launcher interpreter values are independent, sanitized corpus inputs, not
+  observations captured from a live kernel in this evaluator.
+- A configured ordinary SHA-256 match raises heuristic confidence only to
+  `medium`; it does not prove publisher, package, version, signer, or origin.
+- Missing name signals are counted as unavailable rather than silently scored
+  as correct or incorrect.
+- The corpus is maintained by the project and includes synthetic adversarial
+  cases; it is neither independently labeled nor representative sampling of a
+  host-software population.
+
+## CI contract
+
+The Go unit test executes both strata and fails on threshold, expectation,
+coverage-shape, near-miss, content-method, confidence-promotion, or silent-skip
+regressions. Panic-containment tests additionally prove that the same
+single-worker pool completes a second job after resolver or observer panic and
+that an unpublished observer-panic attempt occupies only the
+`worker_unavailable` terminal bucket.
+The Go CI job runs the CLI, prints the machine report, and uploads that report
+as a short-lived workflow artifact.
+
+Changing sample order does not change the canonical corpus digest. Adding,
+removing, or changing a sample does. Registry rule order is likewise
+canonicalized, while adding, removing, or changing a rule or synthetic fixture
+changes the corresponding registry digest.
+
+## Operability, security, and cost
+
+Corpus maintenance requires human review of labels, provenance, and threshold
+changes. A green gate never authorizes, adopts, or enforces a process. It
+preserves the runtime boundary: name evidence is low-confidence and a reviewed
+content match is only medium-confidence heuristic evidence.
+
+The evaluator is local, deterministic, and network-free. Its CI cost is one
+small Go command and a compact JSON artifact; it adds no cloud service,
+cross-region transfer, persistent storage, or per-request API charge. Logging
+the complete report is safe only because corpus inputs are constrained to
+sanitized metadata and fixture IDs rather than raw host evidence.

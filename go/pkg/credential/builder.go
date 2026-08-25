@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -49,7 +50,8 @@ type Builder struct {
 
 // NewBuilder creates a new credential builder.
 // issuer is the VIBAP Authority identifier.
-// subject is the agent's SPIFFE ID.
+// subject is always required. It is a SPIFFE ID when Layer 1 is present, or a
+// non-SPIFFE agent identifier when a Core credential omits optional Layer 1.
 func NewBuilder(issuer, subject string) *Builder {
 	b := &Builder{
 		issuer:   issuer,
@@ -77,7 +79,13 @@ func (b *Builder) WithTTL(ttl time.Duration) *Builder {
 }
 
 // WithIdentity sets Layer 1 (Identity) claims.
-// spiffeID and ownerID are required; a2aCardRef is optional.
+// spiffeID and ownerID are required; a2aCardRef is optional. ownerID is
+// configured attribution and is always emitted with self-asserted assurance.
+//
+// The SPIFFE ID is emitted as caller-provided. This builder has no path that
+// emits SPIFFEIDAssuranceProviderVerified, because no issuance path in this
+// repository authenticates a workload identity yet; binding issuance to SPIRE
+// (S3) is what will earn that label.
 func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
 	if spiffeID == "" {
 		b.err = fmt.Errorf("identity: spiffe_id is required")
@@ -88,9 +96,11 @@ func (b *Builder) WithIdentity(spiffeID, ownerID, a2aCardRef string) *Builder {
 		return b
 	}
 	b.identity = &IdentityClaims{
-		SPIFFEID:   spiffeID,
-		OwnerID:    ownerID,
-		A2ACardRef: a2aCardRef,
+		SPIFFEID:          spiffeID,
+		SPIFFEIDAssurance: SPIFFEIDAssuranceCallerProvided,
+		OwnerID:           ownerID,
+		OwnerIDAssurance:  OwnerIDAssuranceSelfAsserted,
+		A2ACardRef:        a2aCardRef,
 	}
 	return b
 }
@@ -250,8 +260,8 @@ func (b *Builder) Build(key *SigningKey) (*VIBAPCredential, error) {
 	if key == nil {
 		return nil, fmt.Errorf("signing key is required")
 	}
-	if b.identity == nil {
-		return nil, fmt.Errorf("identity layer (Layer 1) is required")
+	if b.identity == nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(b.subject)), "spiffe://") {
+		return nil, fmt.Errorf("SPIFFE-formatted subject requires identity layer")
 	}
 	if b.intent == nil {
 		return nil, fmt.Errorf("intent layer (Layer 3) is required")

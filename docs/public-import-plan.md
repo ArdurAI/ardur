@@ -1,6 +1,11 @@
 # Public Import Plan
 
-This plan converts the private source tree into the public Ardur repo without
+> **Historical record.** This plan guided the migration of the private source
+> tree into the public Ardur repo. The migration completed with the v0.1.0 tag
+> (2026-05-14). The document is preserved as a reference for the naming history,
+> source mapping, and graduation gates that shaped the current repo layout.
+
+This plan converted the private source tree into the public Ardur repo without
 turning Ardur into a monorepo dump.
 
 ## Goals
@@ -86,18 +91,21 @@ ardur/
 
 4. **Examples — partly done.**
    Runnable: LangChain, LangGraph, AutoGen, Ardur Personal browser extension,
-   desktop-observe, native-host, plus the Claude Code plugin pointer. JSON
-   missions remain runnable. Deferred adapter specs: OpenAI Agents SDK,
-   Google ADK.
+   desktop-observe, native-host, offline/no-key OpenAI Agents SDK and Google
+   ADK fixtures, plus the Claude Code plugin pointer. JSON missions remain
+   runnable. Future live-provider wrappers for OpenAI Agents SDK and Google ADK
+   remain opt-in/manual until separate provider-SDK and credential-backed
+   evidence exists.
 
 5. **Go runtime and protocol schemas — done.**
    `go/` is a coherent module covering credential, governance, policy, SPIFFE,
-   AAT (constraint engine, derivation, PoP, chain verification — 49 tests),
+   AAT (draft-00/draft-01 profile dispatch, constraint engine, derivation, PoP,
+   chain verification, and deterministic fixture regression — 76 package tests),
    provenance, issuer, trust, transparency, and CLI surfaces.
 
 6. **Deployment material — partly done.**
    SPIRE/Kubernetes material is present under `deploy/k8s/spire/` with an
-   honest README about privileges and unverified cluster surfaces. Helm
+   clear README about privileges and unverified cluster surfaces. Helm
    templates remain stubs by design (`deploy/helm/ardur/README.md`).
 
 7. **Docs and article spine — partly done.**

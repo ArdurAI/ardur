@@ -4,18 +4,21 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ArdurAI/ardur/go/pkg/credential"
-	"github.com/ArdurAI/ardur/go/pkg/policy"
+	"github.com/ArdurAI/ardur/go/pkg/policy/policytest"
 	"github.com/ArdurAI/ardur/go/pkg/profiling"
-	"github.com/ArdurAI/ardur/go/pkg/provenance"
-	"github.com/ArdurAI/ardur/go/pkg/spiffe"
+	"github.com/ArdurAI/ardur/go/pkg/profiling/profilingtest"
+	"github.com/ArdurAI/ardur/go/pkg/provenance/provenancetest"
+	"github.com/ArdurAI/ardur/go/pkg/spiffe/spiffetest"
 	"github.com/ArdurAI/ardur/go/pkg/transparency"
 	"github.com/ArdurAI/ardur/go/pkg/trust"
+	"github.com/ArdurAI/ardur/go/pkg/trust/trusttest"
 )
 
 func testSigningKey(t *testing.T) *credential.SigningKey {
@@ -40,8 +43,8 @@ func testHolderKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	return pub, priv
 }
 
-func defaultMockIdentity() *spiffe.MockIdentityProvider {
-	return spiffe.NewMockIdentityProvider(spiffe.MockIdentityProviderOptions{
+func defaultMockIdentity() *spiffetest.MockIdentityProvider {
+	return spiffetest.NewMockIdentityProvider(spiffetest.MockIdentityProviderOptions{
 		SPIFFEID:    "spiffe://ardur.dev/agent/test/instance-001",
 		OwnerID:     "spiffe://ardur.dev/user/deployer",
 		TrustDomain: "ardur.dev",
@@ -49,16 +52,16 @@ func defaultMockIdentity() *spiffe.MockIdentityProvider {
 	})
 }
 
-func defaultMockProvenance() *provenance.MockProvenanceVerifier {
-	return provenance.NewMockProvenanceVerifier()
+func defaultMockProvenance() *provenancetest.MockProvenanceVerifier {
+	return provenancetest.NewMockProvenanceVerifier()
 }
 
-func defaultMockPolicy() *policy.MockPolicyEngine {
-	return policy.NewMockPolicyEngine(policy.WithMockEngineName("cedar"))
+func defaultMockPolicy() *policytest.MockPolicyEngine {
+	return policytest.NewMockPolicyEngine(policytest.WithMockEngineName("cedar"))
 }
 
-func defaultMockProfiling() *profiling.MockProfileProvider {
-	m := profiling.NewMockProfileProvider()
+func defaultMockProfiling() *profilingtest.MockProfileProvider {
+	m := profilingtest.NewMockProfileProvider()
 	m.AddProfile(&profiling.ApplicationProfile{
 		Name:      "test-pod",
 		Namespace: "default",
@@ -69,8 +72,8 @@ func defaultMockProfiling() *profiling.MockProfileProvider {
 	return m
 }
 
-func defaultMockTrust() *trust.MockAggregator {
-	m := trust.NewMockAggregator()
+func defaultMockTrust() *trusttest.MockAggregator {
+	m := trusttest.NewMockAggregator()
 	m.SetScore(&trust.TrustScore{
 		AgentID:              "spiffe://ardur.dev/agent/test/instance-001",
 		StaticCapability:     0.8,
@@ -256,6 +259,19 @@ func TestIssue_CoreLevel_MinimalRequest(t *testing.T) {
 	if cred.Claims.Identity == nil {
 		t.Fatal("missing Layer 1 (Identity)")
 	}
+	identityJSON, err := json.Marshal(cred.Claims.Identity)
+	if err != nil {
+		t.Fatalf("marshaling identity claims: %v", err)
+	}
+	// Direct issuance signs a SPIFFE ID it was handed. It must say so in the
+	// credential rather than let the signature imply the workload was
+	// authenticated.
+	if got := cred.Claims.Identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceCallerProvided {
+		t.Fatalf("spiffe_id_assurance = %q, want %q: %s", got, credential.SPIFFEIDAssuranceCallerProvided, identityJSON)
+	}
+	if cred.Claims.Identity.SPIFFEIDProviderVerified() {
+		t.Fatalf("direct identity issuance reported provider-verified workload identity: %s", identityJSON)
+	}
 	if cred.Claims.Intent == nil {
 		t.Fatal("missing Layer 3 (Intent)")
 	}
@@ -284,6 +300,45 @@ func TestIssue_CoreLevel_RequiresIdentity(t *testing.T) {
 	}
 }
 
+func TestIssue_CoreLevel_ExplicitlyAllowsUnverifiedIdentityWithoutSPIFFE(t *testing.T) {
+	key := testSigningKey(t)
+	iss, _ := NewIssuer(key, "https://vibap.example.com")
+
+	req := minimalRequest()
+	req.SPIFFEID = ""
+	req.OwnerID = ""
+	req.AgentID = "default/test-agent"
+	req.AllowUnverifiedIdentity = true
+
+	result, err := iss.Issue(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Issue failed for explicit unverified-identity request: %v", err)
+	}
+	if result.Credential.Claims.Identity != nil {
+		t.Fatalf("core credential must omit identity claims: %+v", result.Credential.Claims.Identity)
+	}
+	if got := result.Credential.Claims.Subject; got != req.AgentID {
+		t.Fatalf("subject = %q, want fallback agent ID %q", got, req.AgentID)
+	}
+	claimsJSON, err := json.Marshal(result.Credential.Claims)
+	if err != nil {
+		t.Fatalf("marshaling credential claims: %v", err)
+	}
+	if strings.Contains(string(claimsJSON), "\"identity\"") {
+		t.Fatalf("core credential must omit identity claim: %s", claimsJSON)
+	}
+
+	verification, err := credential.Verify(result.Encoded, key.PublicKey, &credential.VerifyOptions{
+		SkipStatusCheck: true,
+	})
+	if err != nil {
+		t.Fatalf("verifying issued credential: %v", err)
+	}
+	if !verification.Valid {
+		t.Fatalf("issued unverified credential must remain structurally valid: %v", verification.Errors)
+	}
+}
+
 func TestIssue_CoreLevel_RequiresPolicy(t *testing.T) {
 	key := testSigningKey(t)
 	iss, _ := NewIssuer(key, "https://vibap.example.com")
@@ -297,6 +352,41 @@ func TestIssue_CoreLevel_RequiresPolicy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "policy text") {
 		t.Errorf("error should mention policy: %v", err)
+	}
+}
+
+// TestIssue_IdentityProviderPathIsStillCallerProvided pins the boundary that
+// issue #405 restored the label to express. Configuring an IdentityProvider
+// raises the compliance level, but the issuer does not yet check that the
+// identity it received came from an authenticated Workload API exchange, or
+// that the returned SVID is the workload it is issuing for. Until S3 defines
+// and enforces that predicate, no credential may claim provider-verified
+// identity — including on the provider path. S3 flips this test deliberately.
+func TestIssue_IdentityProviderPathIsStillCallerProvided(t *testing.T) {
+	key := testSigningKey(t)
+	iss, _ := NewIssuer(key, "https://vibap.example.com",
+		WithIdentityProvider(defaultMockIdentity()),
+		WithProvenanceVerifier(defaultMockProvenance()),
+		WithPolicyEngine(defaultMockPolicy()),
+	)
+
+	result, err := iss.Issue(context.Background(), IssueRequest{
+		ImageRef:         "ghcr.io/ardur/agent:latest",
+		PolicyText:       `permit(principal, action == Action::"read", resource);`,
+		PermittedActions: []string{"read:database"},
+	})
+	if err != nil {
+		t.Fatalf("Issue failed: %v", err)
+	}
+	identity := result.Credential.Claims.Identity
+	if identity == nil {
+		t.Fatal("missing Layer 1 (Identity)")
+	}
+	if got := identity.SPIFFEIDAssurance; got != credential.SPIFFEIDAssuranceCallerProvided {
+		t.Fatalf("spiffe_id_assurance = %q, want %q", got, credential.SPIFFEIDAssuranceCallerProvided)
+	}
+	if identity.SPIFFEIDProviderVerified() {
+		t.Fatal("configuring an IdentityProvider claimed provider-verified identity before S3 defined what that requires")
 	}
 }
 
@@ -331,6 +421,9 @@ func TestIssue_VerifiedLevel_WithProviders(t *testing.T) {
 	cred := result.Credential
 	if cred.Claims.Identity.SPIFFEID == "" {
 		t.Error("identity should come from SPIRE mock")
+	}
+	if cred.Claims.Identity.OwnerIDAssurance != credential.OwnerIDAssuranceSelfAsserted {
+		t.Errorf("owner assurance = %q, want %q", cred.Claims.Identity.OwnerIDAssurance, credential.OwnerIDAssuranceSelfAsserted)
 	}
 	if cred.Claims.Provenance == nil {
 		t.Error("provenance should be set when image is verified")
@@ -519,8 +612,8 @@ func TestIssue_ProvenanceVerifierFailure(t *testing.T) {
 
 func TestIssue_PolicyEngineFailure(t *testing.T) {
 	key := testSigningKey(t)
-	mock := policy.NewMockPolicyEngine(
-		policy.WithMockCompileError(fmt.Errorf("invalid Cedar syntax")),
+	mock := policytest.NewMockPolicyEngine(
+		policytest.WithMockCompileError(fmt.Errorf("invalid Cedar syntax")),
 	)
 
 	iss, _ := NewIssuer(key, "https://vibap.example.com",
@@ -538,7 +631,7 @@ func TestIssue_PolicyEngineFailure(t *testing.T) {
 
 func TestIssue_ProfilingProviderFailure(t *testing.T) {
 	key := testSigningKey(t)
-	mock := profiling.NewMockProfileProvider()
+	mock := profilingtest.NewMockProfileProvider()
 	mock.SetGetError(fmt.Errorf("profile not available"))
 
 	iss, _ := NewIssuer(key, "https://vibap.example.com",
@@ -561,7 +654,7 @@ func TestIssue_ProfilingProviderFailure(t *testing.T) {
 
 func TestIssue_TrustAggregatorFailure(t *testing.T) {
 	key := testSigningKey(t)
-	mock := trust.NewMockAggregator()
+	mock := trusttest.NewMockAggregator()
 
 	iss, _ := NewIssuer(key, "https://vibap.example.com",
 		WithTrustAggregator(mock),

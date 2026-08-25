@@ -30,6 +30,8 @@ the tool runs.
 **Proof links:**
 
 - {{< repo-link "plugins/claude-code/README.md" "Claude Code plugin README" >}}
+- {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "Claude Code MVP quickstart" >}}
+- {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Phase 1 evidence-bundle guide" >}}
 - {{< repo-link "docs/reference/cli.md" "CLI reference" >}}
 - {{< repo-link "docs/reference/ardur-md-profile.md" "ARDUR.md profile reference" >}}
 
@@ -74,12 +76,14 @@ provider-side reasoning or every kernel-level side effect.
 
 - {{< repo-link "python/vibap/receipt.py" "Receipt chain implementation" >}}
 - {{< repo-link "python/vibap/claude_code_report.py" "Claude Code report implementation" >}}
+- {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "How to read a redacted evidence bundle" >}}
 - {{< repo-link "docs/coverage-map.md" "Coverage map" >}}
 - {{< repo-link "docs/security-model.md" "Security model" >}}
 
-**Coming soon:** rerunnable public proof media with stable verifier commands
-and artifact paths. The current walkthrough media is useful, but it remains
-archival until that proof path lands.
+**Available now:** a rerunnable no-key JSON evidence bundle for the Claude Code
+MVP path. **Coming soon:** rerunnable public proof media with stable verifier
+commands and artifact paths. The current walkthrough media is useful, but it
+remains archival.
 
 ## Report And Replay A Session
 
@@ -95,12 +99,14 @@ inspect and verify the chain.
 **Proof links:**
 
 - {{< repo-link "docs/reference/cli.md" "ardur claude-code-report" >}}
-- [Claude Code demo]({{< relref "/build/claude-code-demo" >}})
+- {{< repo-link "docs/guides/claude-code-mvp-quickstart.md" "Claude Code quickstart and live demo" >}}
+- {{< repo-link "docs/guides/read-phase1-evidence-bundle.md" "Phase 1 no-key evidence reader" >}}
 - {{< repo-link "python/tests/test_receipt_hardening.py" "Receipt hardening tests" >}}
 - {{< repo-link "python/tests/test_claude_code_hook.py" "Claude Code hook tests" >}}
 
-**Coming soon:** public proof recordings that can be regenerated from the
-public tree, not just replayed as archived media.
+**Available now:** report and replay verification through the source checkout
+and no-key harness. **Coming soon:** public proof recordings that can be
+regenerated from the public tree, not just replayed as archived media.
 
 ## Keep The Hook Path Fast Enough For Interactive Use
 

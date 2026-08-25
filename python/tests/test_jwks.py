@@ -19,7 +19,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.passport import MissionPassport, issue_passport
-from vibap.proxy import GovernanceProxy, _public_key_to_jwk, serve_proxy
+from vibap.proxy import _public_key_to_jwk, serve_proxy
 
 
 def _jwk_to_public_key(jwk: dict) -> ec.EllipticCurvePublicKey:

@@ -19,10 +19,8 @@ Usage:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import signal
 import socket
 import ssl
 import sys
@@ -30,19 +28,25 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vibap.proxy import GovernanceProxy
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-CLOUD_MODEL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+CLOUD_MODEL = (
+    sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+)
 MODEL_SAFE = CLOUD_MODEL.replace(":", "_").replace("/", "_")
 API_KEY = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
 
-WORK_DIR = Path(os.environ.get("ARDUR_TEST_WORKDIR", f"/tmp/ardur-cloud-test-{MODEL_SAFE}"))
+WORK_DIR = Path(
+    os.environ.get("ARDUR_TEST_WORKDIR", f"/tmp/ardur-cloud-test-{MODEL_SAFE}")
+)
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR = Path(__file__).resolve().parent / "test-results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -52,10 +56,12 @@ REPORT_PATH = RESULTS_DIR / f"{MODEL_SAFE}.json"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
 
 def _parse_tool_args(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
@@ -66,6 +72,14 @@ def _parse_tool_args(raw: Any) -> dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return {}
+
+
+def _message_content(message: Any) -> str:
+    """Read content from either an Ollama Message object or a message dict."""
+    if isinstance(message, dict):
+        return str(message.get("content") or "")
+    return str(getattr(message, "content", "") or "")
+
 
 def _post_tls(base: str, path: str, body: dict) -> tuple[int, dict, bytes]:
     ctx = ssl.create_default_context()
@@ -84,12 +98,17 @@ def _post_tls(base: str, path: str, body: dict) -> tuple[int, dict, bytes]:
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8")), b""
 
+
 # ---------------------------------------------------------------------------
 # Proxy lifecycle
 # ---------------------------------------------------------------------------
 
-def _start_proxy(port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_dir: Path) -> tuple[GovernanceProxy, threading.Thread, str]:
+
+def _start_proxy(
+    port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_dir: Path
+) -> tuple[GovernanceProxy, threading.Thread, str]:
     import signal as _signal
+
     _signal.signal = lambda *_a, **_kw: None  # only works in main thread
 
     from vibap.passport import generate_keypair
@@ -140,9 +159,11 @@ def _start_proxy(port: int, tls_cert: str, tls_key: str, keys_dir: Path, work_di
 
     return proxy, thread, base
 
+
 # ---------------------------------------------------------------------------
 # Main test
 # ---------------------------------------------------------------------------
+
 
 def main():
     if not API_KEY:
@@ -157,7 +178,6 @@ def main():
 
     # ---- Setup TLS & proxy ----
     from vibap.tls import generate_self_signed_cert
-    from vibap.passport import generate_keypair
 
     tls_dir = WORK_DIR / "tls"
     key_path_obj, cert_path_obj, _ = generate_self_signed_cert(tls_dir)
@@ -168,7 +188,9 @@ def main():
     keys_dir.mkdir(parents=True, exist_ok=True)
 
     port = _free_port()
-    proxy, proxy_thread, base = _start_proxy(port, cert_path, key_path, keys_dir, WORK_DIR)
+    proxy, proxy_thread, base = _start_proxy(
+        port, cert_path, key_path, keys_dir, WORK_DIR
+    )
 
     print(f"\nProxy healthy at {base}\n")
     report: dict[str, Any] = {
@@ -177,6 +199,7 @@ def main():
         "phases": [],
         "tool_calls_total": 0,
         "files_created": [],
+        "denials": [],
         "errors": [],
     }
 
@@ -189,7 +212,7 @@ def main():
             mission="build a complete Code Repository Manager from scratch",
             allowed_tools=["read_file", "write_file", "list_directory", "search_files"],
             forbidden_tools=["delete_file", "execute_shell"],
-            resource_scope=[],
+            resource_scope=["**"],
             max_tool_calls=250,
             max_duration_s=3600,
         )
@@ -210,8 +233,14 @@ def main():
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "File path relative to workspace"},
-                            "content": {"type": "string", "description": "File content"},
+                            "path": {
+                                "type": "string",
+                                "description": "File path relative to workspace",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "File content",
+                            },
                         },
                         "required": ["path", "content"],
                     },
@@ -225,7 +254,10 @@ def main():
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "File path to read"},
+                            "path": {
+                                "type": "string",
+                                "description": "File path to read",
+                            },
                         },
                         "required": ["path"],
                     },
@@ -253,8 +285,14 @@ def main():
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "Directory to search in"},
-                            "pattern": {"type": "string", "description": "Regex pattern to search for"},
+                            "path": {
+                                "type": "string",
+                                "description": "Directory to search in",
+                            },
+                            "pattern": {
+                                "type": "string",
+                                "description": "Regex pattern to search for",
+                            },
                         },
                         "required": ["path", "pattern"],
                     },
@@ -390,6 +428,7 @@ def main():
 
         # ---- Run the model ----
         import ollama
+
         os.environ.setdefault("OLLAMA_API_KEY", API_KEY)
         client = ollama.Client()
 
@@ -397,18 +436,22 @@ def main():
         tool_calls_total = 0
         phase = 0
         start_time = time.time()
+        model_error: Exception | None = None
 
         print("Starting model interaction...\n")
 
         for turn in range(30):
             elapsed = time.time() - start_time
-            print(f"[Turn {turn + 1}] {elapsed:.0f}s elapsed, {tool_calls_total} tool calls so far...")
+            print(
+                f"[Turn {turn + 1}] {elapsed:.0f}s elapsed, {tool_calls_total} tool calls so far..."
+            )
 
             try:
                 resp = client.chat(model=CLOUD_MODEL, messages=messages, tools=tools)
             except Exception as exc:
                 print(f"  ERROR calling model: {exc}")
                 report["errors"].append({"turn": turn, "error": str(exc)})
+                model_error = exc
                 break
 
             tool_calls = getattr(resp.message, "tool_calls", None) or []
@@ -417,30 +460,54 @@ def main():
                 content = resp.message.content or ""
                 if content:
                     print(f"  Model message: {content[:200]}...")
-                    messages.append({"role": "assistant", "content": content})
+                    messages.append(resp.message)
+                    break
                 else:
                     print("  Model returned no tool calls and no content — ending")
+                    report["errors"].append(
+                        {
+                            "turn": turn,
+                            "error": "model returned no tool calls and no content",
+                        }
+                    )
                     break
-                continue
 
+            tool_results = []
+            turn_failed = False
             for tc in tool_calls:
                 tool_name = tc.function.name
                 tool_args = _parse_tool_args(tc.function.arguments)
 
                 # ---- Evaluate through Ardur proxy ----
-                status, decision, _ = _post_tls(base, "/evaluate", {
-                    "session_id": sid,
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                })
+                status, decision, _ = _post_tls(
+                    base,
+                    "/evaluate",
+                    {
+                        "session_id": sid,
+                        "tool_name": tool_name,
+                        "arguments": tool_args,
+                    },
+                )
 
-                if status != 200 or decision.get("decision") != "PERMIT":
-                    print(f"  DENIED: {tool_name}({list(tool_args.keys())}) → {decision.get('decision', 'UNKNOWN')}")
-                    report["errors"].append({
-                        "tool": tool_name,
-                        "args_keys": list(tool_args.keys()),
-                        "decision": decision,
-                    })
+                decision_value = decision.get("decision")
+                evaluation = {
+                    "tool": tool_name,
+                    "args_keys": list(tool_args.keys()),
+                    "status": status,
+                    "decision": decision,
+                }
+
+                if status != 200 or decision_value not in {"PERMIT", "DENY"}:
+                    print(
+                        f"  ERROR: {tool_name}({list(tool_args.keys())}) → "
+                        f"HTTP {status} / {decision_value or 'UNKNOWN'}"
+                    )
+                    report["errors"].append(evaluation)
+                    turn_failed = True
+                    break
+                elif decision_value == "DENY":
+                    print(f"  DENIED: {tool_name}({list(tool_args.keys())}) → DENY")
+                    report["denials"].append(evaluation)
                     result = {"status": "denied", "reason": str(decision)}
                 else:
                     tool_calls_total += 1
@@ -450,7 +517,11 @@ def main():
                         content = tool_args.get("content", "")
                         files_created.add(path)
                         print(f"  ✓ write_file: {path} ({len(content)} bytes)")
-                        result = {"status": "ok", "path": path, "bytes_written": len(content)}
+                        result = {
+                            "status": "ok",
+                            "path": path,
+                            "bytes_written": len(content),
+                        }
 
                     elif tool_name == "read_file":
                         path = tool_args.get("path", "")
@@ -460,7 +531,11 @@ def main():
                     elif tool_name == "list_directory":
                         path = tool_args.get("path", "")
                         print(f"  ✓ list_directory: {path}")
-                        result = {"status": "ok", "path": path, "entries": sorted(files_created)}
+                        result = {
+                            "status": "ok",
+                            "path": path,
+                            "entries": sorted(files_created),
+                        }
 
                     elif tool_name == "search_files":
                         path = tool_args.get("path", "")
@@ -471,17 +546,21 @@ def main():
                     else:
                         result = {"status": "ok"}
 
-                # ---- Append to conversation ----
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [tc],
-                })
-                messages.append({
-                    "role": "tool",
-                    "name": tool_name,
-                    "content": json.dumps(result),
-                })
+                tool_results.append(
+                    {
+                        "role": "tool",
+                        "tool_name": tool_name,
+                        "content": json.dumps(result),
+                    }
+                )
+
+            if turn_failed:
+                break
+
+            # Mutate the transcript only after every call has been processed:
+            # one original assistant turn, then its complete ordered results.
+            messages.append(resp.message)
+            messages.extend(tool_results)
 
             # Phase tracking
             new_phase = 0
@@ -504,38 +583,48 @@ def main():
             if new_phase > phase:
                 phase = new_phase
                 print(f"\n  >>> PHASE {phase}: {fc} files created <<<\n")
-                report["phases"].append({
-                    "phase": phase,
-                    "files_so_far": fc,
-                    "elapsed_s": elapsed,
-                    "tool_calls": tool_calls_total,
-                })
+                report["phases"].append(
+                    {
+                        "phase": phase,
+                        "files_so_far": fc,
+                        "elapsed_s": elapsed,
+                        "tool_calls": tool_calls_total,
+                    }
+                )
 
             # After files 18+, add a nudge for review
-            if fc >= 18 and not any("review" in str(m.get("content", "")).lower() for m in messages[-5:]):
-                messages.append({
-                    "role": "user",
-                    "content": "Excellent progress! Now do a thorough review pass: "
-                    "read back each file you've written and fix any bugs, "
-                    "add missing error handling, and ensure all modules are "
-                    "properly wired together. Then list the full directory.",
-                })
+            if fc >= 18 and not any(
+                "review" in _message_content(message).lower()
+                for message in messages[-5:]
+            ):
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "Excellent progress! Now do a thorough review pass: "
+                        "read back each file you've written and fix any bugs, "
+                        "add missing error handling, and ensure all modules are "
+                        "properly wired together. Then list the full directory.",
+                    }
+                )
 
         # ---- End session ----
         _post_tls(base, "/session/end", {"session_id": sid})
         total_elapsed = time.time() - start_time
+        run_completed = not report["errors"]
 
         # ---- Write report ----
-        report.update({
-            "completed": True,
-            "total_elapsed_s": total_elapsed,
-            "tool_calls_total": tool_calls_total,
-            "files_created": sorted(files_created),
-        })
+        report.update(
+            {
+                "completed": run_completed,
+                "total_elapsed_s": total_elapsed,
+                "tool_calls_total": tool_calls_total,
+                "files_created": sorted(files_created),
+            }
+        )
 
         REPORT_PATH.write_text(json.dumps(report, indent=2))
         print("\n" + "=" * 72)
-        print("TEST COMPLETE")
+        print("TEST COMPLETE" if run_completed else "TEST FAILED")
         print(f"  Duration:       {total_elapsed:.0f}s")
         print(f"  Tool calls:     {tool_calls_total}")
         print(f"  Files created:  {len(files_created)}")
@@ -549,10 +638,16 @@ def main():
             print(f"\nWARNING: {len(report['errors'])} errors encountered:")
             for e in report["errors"]:
                 print(f"  - {e}")
+            failure = RuntimeError(
+                f"cloud model run failed with {len(report['errors'])} error(s)"
+            )
+            if model_error is not None:
+                raise failure from model_error
+            raise failure
 
     finally:
         # Daemon thread will exit when process exits
-        print("\nProxy daemon thread running — exiting cleanly.")
+        print("\nProxy daemon thread will stop when this process exits.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,101 @@
+[Unit]
+Description=Ardur kernel-capture daemon (eBPF process-lifecycle sensor)
+Documentation=https://ardur.dev/docs/sensor
+After=network.target
+Wants=network.target
+
+[Service]
+# Notify systemd when the daemon is ready and send watchdog keepalives.
+Type=notify
+NotifyAccess=main
+
+# Run as root — required for CAP_BPF and eBPF tracepoint attachment.
+User=root
+Group=root
+
+ExecStart=/usr/local/bin/ardur-kernelcaptured \
+    --socket /run/ardur/kernelcapture/control.sock \
+    --evidence-dir /var/lib/ardur/kernelcapture/evidence \
+    --state-dir /var/lib/ardur/kernelcapture/state
+
+# Restart policy: always restart except on explicit stop.
+Restart=always
+RestartSec=2s
+TimeoutStartSec=30s
+TimeoutStopSec=10s
+
+# Watchdog: daemon must call sd_notify(WATCHDOG=1) at least every 30 s.
+# systemd kills and restarts the daemon if the interval is exceeded.
+WatchdogSec=30s
+
+# Create the run-dir at startup; removed automatically on stop.
+RuntimeDirectory=ardur/kernelcapture
+RuntimeDirectoryMode=0700
+
+# State and log dirs are persistent.
+StateDirectory=ardur/kernelcapture
+StateDirectoryMode=0700
+LogsDirectory=ardur/kernelcapture
+LogsDirectoryMode=0700
+
+# ── Capabilities ──────────────────────────────────────────────────────────
+# CAP_BPF: load and manage eBPF programs and maps.
+# CAP_SYS_ADMIN: attach tracepoints and pin BPF objects on bpffs.
+# CAP_NET_ADMIN: manage network-related BPF hooks (future).
+# CAP_PERFMON: access perf_event_open for eBPF tracepoints (kernel ≥5.8).
+# CAP_SYS_PTRACE: duplicate a seccomp target socket with pidfd_getfd after
+#                 the session-owner and exact control-plane tuple checks.
+AmbientCapabilities=CAP_BPF CAP_SYS_ADMIN CAP_NET_ADMIN CAP_PERFMON CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_BPF CAP_SYS_ADMIN CAP_NET_ADMIN CAP_PERFMON CAP_SYS_PTRACE
+SecureBits=keep-caps
+
+# ── Filesystem hardening ──────────────────────────────────────────────────
+# ProtectSystem=strict makes /usr and /boot read-only from the daemon's view.
+# /etc is also read-only by default under strict, matching the daemon's use
+# (reads config at startup, never writes to /etc at runtime).
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Keep host devices visible for the kernel sensor (for example /dev/null).
+PrivateDevices=false
+
+# ReadWritePaths grants write access only to the daemon-owned paths.
+ReadWritePaths=/var/lib/ardur/kernelcapture /run/ardur/kernelcapture /sys/fs/bpf/ardur
+
+# /proc is needed for process metadata.
+ProtectProc=invisible
+ProcSubset=pid
+
+# ── Memory and execution security ─────────────────────────────────────────
+# MemoryDenyWriteExecute=no is required: the eBPF JIT compiler writes BPF
+# bytecode to kernel memory at load time. Enabling MDWE would block BPF map
+# operations that temporarily need W+X pages during JIT compilation.
+MemoryDenyWriteExecute=no
+
+# Deny kernel module loading.
+ProtectKernelModules=true
+# Prevent altering kernel tunables.
+ProtectKernelTunables=true
+# Prevent access to kernel logs.
+ProtectKernelLogs=true
+# Prevent acccess to clock tuning.
+ProtectClock=true
+
+# Block setuid/setgid bit execution from within the service.
+RestrictSUIDSGID=true
+# No new privileges after start.
+# This must remain false so the service retains AmbientCapabilities.
+NoNewPrivileges=false
+
+# Limit syscalls to those needed by eBPF and the socket control plane.
+SystemCallFilter=@system-service @network-io bpf perf_event_open pidfd_open pidfd_getfd
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+# Lock down namespace creation.
+RestrictNamespaces=true
+# Prevent fork-bombing.
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

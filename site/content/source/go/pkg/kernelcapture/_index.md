@@ -16,3 +16,7 @@ This section lists hosted documentation and mirrored artifacts generated from `g
 ## Hosted Docs
 
 - [`README.md`](/__ardur_internal__/source/go/pkg/kernelcapture/readme/)
+
+## Child Sections
+
+- [`testdata/`](/__ardur_internal__/source/go/pkg/kernelcapture/testdata/)

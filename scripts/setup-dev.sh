@@ -67,6 +67,27 @@ if [ "$SKIP_PYTHON" -eq 0 ]; then
     exit 1
   fi
 
+  # Enforce Ardur's Python minimum before creating the venv. python/pyproject.toml
+  # pins requires-python; resolve it the same way the Go block resolves go/go.mod
+  # so the two toolchain floors stay symmetric. Without this check, a below-minimum
+  # PYTHON_BIN (common on macOS where python3 is the system 3.9) creates a broken
+  # venv and fails deep inside a pyproject.toml build-dependency traceback instead
+  # of a clear, actionable message.
+  if [ -f python/pyproject.toml ]; then
+    required_python_min="$(grep -oE 'requires-python[[:space:]]*=[[:space:]]*"[^"]*' python/pyproject.toml | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+  else
+    required_python_min=""
+  fi
+  if [ -z "$required_python_min" ]; then
+    required_python_min="3.10"
+  fi
+  actual_python="$("$PYTHON_BIN" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+  echo "==> Python interpreter: $PYTHON_BIN ($actual_python); Ardur minimum: $required_python_min"
+  if version_lt "$actual_python" "$required_python_min"; then
+    echo "ERROR: Python $actual_python is below Ardur's minimum ($required_python_min). Install Python ${required_python_min}+ or pass --python PATH." >&2
+    exit 1
+  fi
+
   echo "==> Creating/updating python/.venv with $PYTHON_BIN"
   "$PYTHON_BIN" -m venv python/.venv
   python/.venv/bin/python -m pip install --upgrade pip
@@ -79,8 +100,8 @@ if [ "$SKIP_GO" -eq 0 ]; then
     echo "ERROR: go not found; go/go.mod requires $required_go." >&2
     failures=$((failures + 1))
   else
-    actual_go="$(go version | awk '{print $3}' | sed 's/^go//')"
-    echo "==> Go local version: $actual_go; go/go.mod requires: $required_go"
+    actual_go="$(cd go && go env GOVERSION | sed 's/^go//')"
+    echo "==> Go module toolchain version: $actual_go; go/go.mod requires: $required_go"
     if version_lt "$actual_go" "$required_go"; then
       if [ "$ALLOW_GO_MISMATCH" -eq 1 ]; then
         echo "WARN: local Go $actual_go is below go/go.mod requirement $required_go; continuing because --allow-go-mismatch was set." >&2

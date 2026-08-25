@@ -1,0 +1,88 @@
+# ADR-024: Self-asserted owner identity assurance
+
+**Status:** Accepted
+
+**Date:** 2026-07-12
+
+## Context
+
+The Go identity layer carries two identifiers: the workload `spiffe_id` and an
+`owner_id` naming a deploying human or service account. The SPIRE client obtains
+an X.509-SVID for the workload, but accepts `owner_id` from local configuration,
+checks only that it is SPIFFE-formatted, and copies it into the signed
+credential. The signed value therefore proves what the Ardur issuer recorded;
+it does not prove that the named owner controls, deployed, or approved the
+workload.
+
+The SPIFFE Workload API returns identities the calling workload is entitled to
+use, plus their key material, trust bundles, and optional use hints. It does not
+return an authenticated deployer relation. A SPIRE registration entry binds a
+workload SPIFFE ID to a parent ID and attestation selectors. Those fields prove
+the configured workload-entitlement rule; none is an owner approval or an
+owner-controlled signature.
+
+The current individual WIMSE AI-agent identity draft describes a real
+dual-identity credential as cryptographically bound to both the agent and its
+owner. Its issuance models presume pre-established owner trust anchors so the
+issuer can verify owner-controlled proof. Ardur does not currently configure
+such trust anchors or collect such proof.
+
+Primary references:
+
+- [SPIFFE Workload API](https://spiffe.io/docs/latest/spiffe-specs/spiffe_workload_api/)
+- [SPIRE workload registration](https://spiffe.io/docs/latest/deploying/registering/)
+- [SPIFFE identity and SVID security considerations](https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md)
+- [WIMSE Applicability for AI Agents, draft-02](https://datatracker.ietf.org/doc/draft-ni-wimse-ai-agent-identity/)
+
+## Decision
+
+1. The SPIRE client represents configured owner attribution with the named Go
+   type `UnverifiedOwnerID`. Converting it back to a generic string requires an
+   explicit operation at the credential boundary.
+2. Every newly issued credential signs
+   `owner_id_assurance: "self_asserted"` beside `owner_id`. This applies whether
+   the workload identity came from SPIRE or from direct issuer input.
+3. Verification accepts only the implemented `self_asserted` assurance.
+   Missing values and invented values such as `verified` fail closed. This
+   prevents stripping the marker or asserting a stronger state without a
+   corresponding proof path.
+4. `LevelVerified` continues to mean that the workload SPIFFE identity,
+   provenance, and policy were verified. It does not mean owner attribution was
+   verified. Code and documentation name that boundary explicitly.
+5. No policy, authorization, trust-score, or compliance-level calculation may
+   consume `owner_id` as authenticated identity. It remains signed attribution
+   for display, correlation, and future migration only.
+6. A future verified owner-assurance value requires a versioned design that
+   defines owner-controlled proof, configured owner trust anchors, verification
+   at issuance, rotation/revocation behavior, and downgrade-resistant verifier
+   rules. A SPIRE entry lookup alone is insufficient.
+
+## Consequences
+
+- Credentials can no longer blur a SPIRE-authenticated workload with a
+  configured owner label. The weaker owner assurance is signed and visible to
+  every consumer.
+- Legacy credentials without `owner_id_assurance` fail verification. Ardur
+  credentials are short-lived, and accepting an absent marker would preserve
+  the ambiguity this decision removes.
+- The change adds no SPIRE Server API privilege, deployment dependency, network
+  call, or availability coupling.
+- Callers compiling against `AgentIdentity.OwnerID` must acknowledge its named
+  unverified type before converting it to a general string.
+- This decision does not authenticate a human, organization, deployer, or
+  service account and does not implement the WIMSE draft's dual-identity proof.
+
+## Alternatives considered
+
+- **Verify against SPIRE registration entries.** Rejected because entries
+  describe workload entitlement through parent IDs and selectors; they do not
+  authenticate an arbitrary owner relation. Reading them would also require a
+  privileged SPIRE Server API surface that the workload client does not need.
+- **Infer ownership from SPIFFE path conventions.** Rejected because SPIFFE
+  paths are operator-defined identifiers, not standardized ownership claims.
+- **Keep only a comment beside `owner_id`.** Rejected because comments are not
+  signed into the credential and cannot prevent downstream consumers from
+  assuming stronger assurance.
+- **Add `verified: false` as an optional boolean.** Rejected because omission
+  would be ambiguous and a boolean would not leave a versioned vocabulary for
+  future proof mechanisms.

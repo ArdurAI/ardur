@@ -2,7 +2,7 @@
 title: "Ardur Examples"
 description: "Working examples of Ardur governing AI agents across major frameworks and local"
 source_path: "examples/README.md"
-source_sha256: "d77bab01072e8a72722ce2ee1d2ff6c8dad85410914bf85cb65839444636f218"
+source_sha256: "32830c3eec7b4c032a8264d874ad017c26694028c978b40a8313720acaf7626c"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["integration"]
@@ -18,8 +18,8 @@ This page is generated from the public repository source file. Edit the source f
 {{< /proof-status >}}
 
 Working examples of Ardur governing AI agents across major frameworks and local
-assistant surfaces. Some directories are runnable today; deferred directories
-are marked as adapter specs, not shipped capability.
+assistant surfaces. Runnable directories are labeled by maturity; no-key
+provider fixtures are distinct from future live-provider wrappers.
 
 ## Status
 
@@ -34,23 +34,26 @@ are marked as adapter specs, not shipped capability.
 | [ardur-personal-native-host/](/__ardur_internal__/source/examples/ardur-personal-native-host/readme/) | optional bridge | local `ardur hub` + browser Native Messaging |
 | [_shared/](/__ardur_internal__/source/examples/_shared/) | helpers | Imported by the three framework demos above |
 | [claude-code-hook/](/__ardur_internal__/source/examples/claude-code-hook/readme/) | pointer to runnable plugin | `python/` editable install + Claude Code |
-| [openai-agents-sdk/](/__ardur_internal__/source/examples/openai-agents-sdk/readme/) | deferred adapter spec | `python/` editable install + OpenAI Agents SDK + OpenAI API key |
-| [google-adk/](/__ardur_internal__/source/examples/google-adk/readme/) | deferred adapter spec | `python/` editable install + Google ADK + Google AI API key |
+| [openai-agents-sdk/](/__ardur_internal__/source/examples/openai-agents-sdk/readme/) | runnable no-key fixture | `python/` editable install; no OpenAI key for fixture mode |
+| [google-adk/](/__ardur_internal__/source/examples/google-adk/readme/) | runnable no-key fixture | `python/` editable install; no Google key for fixture mode |
 | [../plugins/claude-code/](/__ardur_internal__/source/plugins/claude-code/readme/) | runnable plugin | `python/` editable install + Claude Code |
 
 The runnable framework directories (`langchain-quickstart/`, `langgraph-quickstart/`, `autogen-quickstart/`) ship a `demo.py` entrypoint and, where applicable, a `Dockerfile` that produces the published `rahulnutakki/ardur-demo:*` images. They share helpers under [`_shared/`](/__ardur_internal__/source/examples/_shared/) — provider selection, SVID fetch, Biscuit issuance, governed-session setup, receipt-chain verification, end-of-session attestation. No model identifiers are hard-coded in any of these files; provider config is sourced from environment variables at runtime (see [CONTRIBUTING.md](/__ardur_internal__/source/contributing/) "No specific LLM model names" rule).
 
-The deferred adapter directories carry READMEs that describe the dependency
-footprint and file layout the next import wave will produce. They are not
-advertised as runnable examples until code and tests land.
+The OpenAI Agents SDK and Google ADK directories now ship no-key/offline
+fixtures that exercise the visible provider tool-dispatch boundary, emit signed
+Ardur receipts, and verify the local receipt chain. Future live-provider
+adapters remain opt-in/manual because they require provider SDKs and runtime
+credentials.
 
 ## Running the mission examples (today, no agent required)
 
 ```bash
-cd ../python
-pip install -e .
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 
-# Issue and verify a passport. ardur issue takes mission claims via flags,
+# 2. Issue and verify a passport. ardur issue takes mission claims via flags,
 # not a JSON file — the example mission files under missions/ are reference
 # documents for the spec layer. To exercise the protocol path:
 ardur issue \
@@ -62,17 +65,27 @@ ardur issue \
 ardur verify --token <token-from-issue-output>
 ```
 
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
+
 That exercises the core protocol surface end-to-end — mission compilation, passport issuance, signature, verification — without an LLM or framework in the loop. It's the fastest way to confirm a local install actually works.
 
-## Why deferred adapters instead of one big drop
+## Why adapters land in focused slices
 
-Each framework has its own tool-call interface, its own session-state model, and its own integration point where Ardur's governance proxy attaches. LangChain tool callbacks look nothing like AutoGen's `FunctionTool` registration; LangGraph's state graph wants the verifier wrapped around node transitions; the coding-agent CLI integration wires in via a hook lifecycle, not a Python import. Lifting these as one monolithic commit would conflate unrelated breakage. Per-framework directories let each adapter land, get reviewed, and run CI on its own.
+Each framework has its own tool-call interface, its own session-state model, and its own integration point where Ardur's governance proxy attaches. LangChain tool callbacks look nothing like AutoGen's `FunctionTool` registration; LangGraph's state graph wants the verifier wrapped around node transitions; the coding-agent CLI integration wires in via a hook lifecycle, not a Python import. Lifting these as one monolithic commit would conflate unrelated breakage. Per-framework directories let each adapter land, get reviewed, and run CI on its own. The OpenAI Agents SDK and Google ADK directories are runnable no-key fixtures today; live-provider wrappers remain separate because they would require provider SDKs, runtime credentials, and separate evidence for what the provider actually exposes.
 
 ## CI for examples
 
 The current CI surface is the repo-wide Python and Go workflow in
 `.github/workflows/tests.yml`, plus CodeQL, link-check, secret-scan, format
-validation, and the Hugo site build. The framework quickstarts are runnable
-from the checked-in example directories, but there is not yet a dedicated
-`examples-smoke.yml` workflow for every adapter. Treat that as future hardening,
-not current gate coverage.
+validation, and the Hugo site build. The repo-wide Python job runs all
+`python/tests/`, including `python/tests/test_examples_smoke.py` for mission
+fixtures and `python/tests/test_provider_adapter_fixtures.py` for these no-key
+adapter runners and shareable reports. The `examples-smoke` job separately runs
+organic governance/demo smoke coverage. There is not a dedicated
+`.github/workflows/examples-smoke.yml` today, and the provider-backed framework
+quickstarts remain opt-in/manual unless a future workflow adds real CI evidence
+for those live-provider demos.

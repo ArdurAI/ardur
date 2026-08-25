@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.dev/spec/tool-server-preflight-report-v0.1.schema.json",
+  "title": "Ardur Tool-Server Preflight Report v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "analysis_mode",
+    "source",
+    "summary",
+    "servers",
+    "findings",
+    "suggested_controls",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.tool_server_preflight_report.v0.1"
+    },
+    "analysis_mode": {
+      "const": "static_non_executing"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size_bytes", "collections"],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "collections": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["manifest", "mcpServers", "servers"]
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "server_count",
+        "tool_count",
+        "finding_count",
+        "severity_counts"
+      ],
+      "properties": {
+        "verdict": {
+          "enum": ["pass", "pass_with_warnings", "review", "deny"]
+        },
+        "server_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "tool_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2048
+        },
+        "finding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severity_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["critical", "high", "medium", "low"],
+          "properties": {
+            "critical": {"type": "integer", "minimum": 0},
+            "high": {"type": "integer", "minimum": 0},
+            "medium": {"type": "integer", "minimum": 0},
+            "low": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "servers": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "collection",
+          "transport",
+          "command",
+          "command_sha256",
+          "argument_count",
+          "tool_count"
+        ],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 256},
+          "collection": {"enum": ["manifest", "mcpServers", "servers"]},
+          "transport": {"type": "string", "minLength": 1, "maxLength": 64},
+          "command": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "command_sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "argument_count": {"type": "integer", "minimum": 0},
+          "tool_count": {"type": "integer", "minimum": 0, "maximum": 2048}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "category",
+          "severity",
+          "server",
+          "evidence",
+          "recommendation"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "pattern": "^TS[0-9]{3}$"
+          },
+          "category": {
+            "enum": [
+              "approval_bypass",
+              "filesystem_scope",
+              "instruction_injection",
+              "network_scope",
+              "secret_exposure",
+              "shell_execution",
+              "side_effect_gate",
+              "supply_chain",
+              "tool_metadata"
+            ]
+          },
+          "severity": {
+            "enum": ["critical", "high", "medium", "low"]
+          },
+          "server": {"type": "string", "minLength": 1, "maxLength": 256},
+          "tool": {"type": "string", "minLength": 1, "maxLength": 256},
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "indicators"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+              "indicators": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "maxLength": 256}
+              },
+              "value_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      }
+    },
+    "suggested_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "deny_by_default",
+        "capability_token",
+        "policy"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "ardur.tool_server_policy_skeleton.v0.1"
+        },
+        "deny_by_default": {"const": true},
+        "capability_token": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allowed_tools",
+            "resource_scope",
+            "network_allowed_domains",
+            "delegation_allowed",
+            "max_tool_calls"
+          ],
+          "properties": {
+            "allowed_tools": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1, "maxLength": 513}
+            },
+            "resource_scope": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "network_allowed_domains": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "delegation_allowed": {"const": false},
+            "max_tool_calls": {"type": "integer", "minimum": 1, "maximum": 100}
+          }
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approval_required_tools",
+            "deny_secret_like_environment_keys",
+            "require_content_pins",
+            "require_runtime_receipts"
+          ],
+          "properties": {
+            "approval_required_tools": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1, "maxLength": 513}
+            },
+            "deny_secret_like_environment_keys": {"const": true},
+            "require_content_pins": {"const": true},
+            "require_runtime_receipts": {"const": true}
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    }
+  }
+}

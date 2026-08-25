@@ -7,9 +7,6 @@ the user's real ~/.vibap directory.
 
 from __future__ import annotations
 
-collect_ignore = ["run_cloud_model_test.py", "run_all_models.py", "run_adversarial_suite.py", "run_advanced_adversarial.py", "test_ardur_overhead_ab.py"]
-
-import os
 import socket
 from pathlib import Path
 from typing import Any, Callable
@@ -19,6 +16,14 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from vibap.passport import MissionPassport, generate_keypair, issue_passport
 from vibap.proxy import GovernanceProxy
+
+collect_ignore = [
+    "run_cloud_model_test.py",
+    "run_all_models.py",
+    "run_adversarial_suite.py",
+    "run_advanced_adversarial.py",
+    "test_ardur_overhead_ab.py",
+]
 
 
 # v0.1 spec required-members helper (FIX-3 from S2 audit, 2026-04-28).
@@ -47,6 +52,7 @@ def v01_default_status_url(mission_id: str) -> str:
     """
     # mission_id is typically an opaque URN; hash to keep URL paths sane.
     import hashlib
+
     digest = hashlib.sha256(mission_id.encode("utf-8")).hexdigest()[:16]
     return f"https://issuer.example/status/v01-default-{digest}.jwt"
 
@@ -59,16 +65,13 @@ def v01_default_status_list_token(private_key, mission_id: str) -> str:
     mission referenced by the helper is reported as not revoked.
     """
     import base64
-    import json
     import time
     import zlib
 
     import jwt
 
     raw = bytes([0])  # 1 byte covers idx=0; bit at idx=0 is 0 → not revoked.
-    encoded = (
-        base64.urlsafe_b64encode(zlib.compress(raw)).rstrip(b"=").decode("ascii")
-    )
+    encoded = base64.urlsafe_b64encode(zlib.compress(raw)).rstrip(b"=").decode("ascii")
     now = int(time.time())
     claims = {
         "iss": "test-status-authority",
@@ -99,13 +102,11 @@ def v01_required_md_extras(
     (``test_approval_governance``) pass it explicitly.
     """
     extras: dict[str, Any] = {
-        "mission_id": mission_id,
         "receipt_policy": {"level": receipt_level},
         "conformance_profile": conformance_profile,
         "tool_manifest_digest": "sha-256:" + ("a" * 64),
         "revocation_ref": (
-            revocation_ref
-            or f"{v01_default_status_url(mission_id)}#idx=0"
+            revocation_ref or f"{v01_default_status_url(mission_id)}#idx=0"
         ),
         "governed_memory_stores": [],
         "probing_rate_limit": probing_rate_limit,
@@ -125,7 +126,9 @@ def session_keys_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def keypair(session_keys_dir: Path) -> tuple[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]:
+def keypair(
+    session_keys_dir: Path,
+) -> tuple[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]:
     return generate_keypair(keys_dir=session_keys_dir)
 
 
@@ -143,8 +146,8 @@ def public_key(keypair) -> ec.EllipticCurvePublicKey:
 def example_mission() -> MissionPassport:
     """A plain, non-delegating mission used for simple pass/fail flows.
 
-    resource_scope is intentionally empty here so tests can use arbitrary
-    arguments without having to match a glob. There's a separate
+    resource_scope is explicitly unrestricted here so tests can use arbitrary
+    arguments without having to match a bounded glob. There's a separate
     ``scoped_mission`` fixture for resource-scope tests.
     """
     return MissionPassport(
@@ -152,7 +155,7 @@ def example_mission() -> MissionPassport:
         mission="run Q1 sales analysis",
         allowed_tools=["read_file", "write_file", "analyze"],
         forbidden_tools=["delete_file", "execute_shell"],
-        resource_scope=[],
+        resource_scope=["**"],
         max_tool_calls=5,
         max_duration_s=60,
         delegation_allowed=False,
@@ -178,12 +181,16 @@ def delegating_mission() -> MissionPassport:
 
 @pytest.fixture
 def issued_passport(example_mission, private_key) -> str:
-    return issue_passport(example_mission, private_key, ttl_s=example_mission.max_duration_s)
+    return issue_passport(
+        example_mission, private_key, ttl_s=example_mission.max_duration_s
+    )
 
 
 @pytest.fixture
 def issued_delegating_passport(delegating_mission, private_key) -> str:
-    return issue_passport(delegating_mission, private_key, ttl_s=delegating_mission.max_duration_s)
+    return issue_passport(
+        delegating_mission, private_key, ttl_s=delegating_mission.max_duration_s
+    )
 
 
 @pytest.fixture
@@ -198,7 +205,9 @@ def proxy(tmp_path: Path, public_key, session_keys_dir: Path) -> GovernanceProxy
 
 
 @pytest.fixture
-def proxy_factory(tmp_path: Path, public_key, session_keys_dir: Path) -> Callable[[], GovernanceProxy]:
+def proxy_factory(
+    tmp_path: Path, public_key, session_keys_dir: Path
+) -> Callable[[], GovernanceProxy]:
     """Create independent proxy instances sharing the session keypair."""
     counter = {"n": 0}
 
@@ -228,3 +237,86 @@ def unused_tcp_port() -> int:
 def _isolate_vibap_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point VIBAP_HOME at tmp_path for every test so nothing leaks into $HOME."""
     monkeypatch.setenv("VIBAP_HOME", str(tmp_path / "vibap-home"))
+
+
+# ---------------------------------------------------------------------------
+# Ollama showcase fail-closed gate (issue #375).
+#
+# pytest only auto-registers collection hooks from ``conftest.py`` (never from
+# a test module), so this is the single place the hook can live. It is gated
+# on ``ARDUR_OLLAMA_FAIL_CLOSED=1``, an env var the credentialed showcase job
+# sets after a workflow-level preflight. In every other run (local dev, PR CI,
+# the blocking test aggregate) the hook is inert.
+#
+# When the flag IS set, the showcase must either run its model-gated tests or
+# fail loudly: a silent skip (stale module-level skipif, broken client import,
+# missing credential that slipped past preflight) is converted to a collection
+# error so the job cannot report green while skipping every gated test.
+# ---------------------------------------------------------------------------
+
+
+def _ardur_ollama_preflight() -> tuple[bool, str]:
+    """Credential-free preflight; returns ``(ok, reason)`` without leaking secrets."""
+    import os
+
+    api_key = os.environ.get("ARDUR_OLLAMA_API_KEY", "")
+    cloud_model = os.environ.get("ARDUR_OLLAMA_CLOUD_MODEL", "")
+    if not api_key:
+        return False, "ARDUR_OLLAMA_API_KEY unset/empty"
+    if not cloud_model:
+        return False, "ARDUR_OLLAMA_CLOUD_MODEL unset/empty"
+    try:
+        import ollama  # noqa: F401
+    except ImportError as exc:
+        return False, f"ollama client import failed: {type(exc).__name__}"
+    return True, ""
+
+
+def _item_has_ardur_ollama_skip(item) -> bool:
+    """Return True if ``item`` carries the showcase's model-gated ``skipif``.
+
+    The showcase's ``ollama_required`` marker stores a precomputed boolean as
+    the first positional arg and carries both env-var names in its reason.
+    We detect by reason text (stable across import-time condition evaluation)
+    rather than marker identity so the hook works regardless of whether the
+    test module was imported with credentials present.
+    """
+    reason_needles = ("ARDUR_OLLAMA_API_KEY", "ARDUR_OLLAMA_CLOUD_MODEL")
+    for marker in item.iter_markers(name="skipif"):
+        if not marker.args:
+            continue
+        condition = marker.args[0]
+        try:
+            would_skip = bool(condition)
+        except Exception:
+            continue
+        if not would_skip:
+            continue
+        reason = marker.kwargs.get("reason", "")
+        if all(needle in reason for needle in reason_needles):
+            return True
+    return False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Fail closed for the Ollama showcase when ``ARDUR_OLLAMA_FAIL_CLOSED=1``."""
+    import os
+
+    if os.environ.get("ARDUR_OLLAMA_FAIL_CLOSED", "") != "1":
+        return
+    ok, reason = _ardur_ollama_preflight()
+    if not ok:
+        # Preflight failed: surface as a collection error rather than letting
+        # every gated test skip silently. The reason is redacted (no key value).
+        raise pytest.UsageError(
+            "ARDUR_OLLAMA_FAIL_CLOSED=1 but Ollama preflight failed: "
+            f"{reason}. Showcase cannot run honestly."
+        )
+    skipped = [item for item in items if _item_has_ardur_ollama_skip(item)]
+    if skipped:
+        names = ", ".join(item.nodeid for item in skipped[:5])
+        raise pytest.UsageError(
+            "ARDUR_OLLAMA_FAIL_CLOSED=1 and preflight passed, but "
+            f"{len(skipped)} ollama_required test(s) are still marked skip: "
+            f"{names}. Stale skip state must not mask a broken showcase."
+        )

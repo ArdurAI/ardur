@@ -1,0 +1,155 @@
+{
+  "schema_version": "ardur.aat_revision_change_ledger.v0.1",
+  "generated_at": "2026-07-11",
+  "sources": {
+    "draft_00": {
+      "name": "draft-niyikiza-oauth-attenuating-agent-tokens-00",
+      "published": "2026-03-16",
+      "sha256": "e822cc94f6b83ba81d6530f98f54617b3a9e5c7a46463bbfbdf67cb181431f1e",
+      "url": "https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-00"
+    },
+    "draft_01": {
+      "name": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+      "published": "2026-06-15",
+      "sha256": "4e5fdd2f42cd3ff4570b711a0be5ff710236618e1f6926ef34030f82c3d04df5",
+      "url": "https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-01"
+    },
+    "standing": "active individual Internet-Draft; not endorsed by the IETF and no formal standing in the IETF standards process"
+  },
+  "decision": {
+    "selected_revision": "draft-niyikiza-oauth-attenuating-agent-tokens-00",
+    "profile": "ardur.mcep.dg.v0.1",
+    "additional_revision": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+    "additional_profile": "ardur.dg.aat-draft-01.v0.2",
+    "disposition": "versioned-parallel-profile",
+    "review_completed": "2026-07-11",
+    "review_deadline": "2026-09-15",
+    "follow_up_issue": "https://github.com/ArdurAI/ardur/issues/246",
+    "review_triggers": [
+      "v0.2.0 release promotion completes",
+      "a new AAT revision is published",
+      "an independent draft-01 implementation fixture becomes available"
+    ],
+    "draft_01_handling": "accept only with the exact Ardur DG v0.2 profile identifier; reject unprofiled, mixed, unknown, and cross-version wire forms",
+    "independent_interoperability": "not-demonstrated"
+  },
+  "required_categories": [
+    "claims",
+    "token_role_semantics",
+    "derivation",
+    "verification",
+    "constraint_behavior",
+    "algorithms",
+    "security_requirements"
+  ],
+  "changes": [
+    {
+      "id": "AAT-REV-001",
+      "category": "token_role_semantics",
+      "draft_00": "Section 3.1 defines delegation and execution token types through required aat_type values; only an execution leaf may invoke a tool.",
+      "draft_01": "Section 3.1 removes separate token types; root, intermediate, and leaf roles are determined only by chain position.",
+      "wire_change": true,
+      "security_impact": "A draft-01 token omits a claim required by draft-00, and a draft-01 verifier must not infer the old structural planning/invocation boundary.",
+      "ardur_disposition": "Keep aat_type mandatory in DG v0.1 and reject its absence as unsupported draft-01 wire semantics."
+    },
+    {
+      "id": "AAT-REV-002",
+      "category": "claims",
+      "draft_00": "Section 3.2 registers aat_type as a required common claim.",
+      "draft_01": "Section 3.2 removes aat_type from the common-claim table; jti, iss, iat, exp, cnf, del_depth, del_max_depth, par_hash, and authorization_details remain.",
+      "wire_change": true,
+      "security_impact": "Unknown top-level claims are ignored, so a generic draft-01 verifier could accept a draft-00 token unless a deployment profile enforces revision separation.",
+      "ardur_disposition": "Use required aat_type presence as the unambiguous v0.1 compatibility discriminator."
+    },
+    {
+      "id": "AAT-REV-003",
+      "category": "claims",
+      "draft_00": "The PoP JWT has jti, iat, aat_id, aat_tool, and hta.",
+      "draft_01": "Section 5.2 adds optional aat_aud; profiles that require audience binding must require and verify it.",
+      "wire_change": true,
+      "security_impact": "Audience-free PoP can be replayed at another enforcement point within its time window when keys and tool identifiers overlap.",
+      "ardur_disposition": "Do not add aat_aud to DG v0.1. Require an explicit v0.2 profile decision before enabling audience-bound draft-01 PoP."
+    },
+    {
+      "id": "AAT-REV-004",
+      "category": "constraint_behavior",
+      "draft_00": "Section 3.4 defines exact, pattern, range, one_of, not_one_of, contains, subset, regex, cel, wildcard, all, any, and not as core constraints.",
+      "draft_01": "Section 3.4 retains exact, range, one_of, not_one_of, contains, subset, wildcard, all, and any; pattern, regex, cel, and not require separately registered extension semantics.",
+      "wire_change": true,
+      "security_impact": "Treating removed constraints as draft-01 core constraints would overstate interoperability and could apply non-portable matching or subsumption rules.",
+      "ardur_disposition": "Keep the draft-00 registry for DG v0.1. A draft-01 migration must version or reject every removed constraint before processing the chain."
+    },
+    {
+      "id": "AAT-REV-005",
+      "category": "derivation",
+      "draft_00": "Section 6 selects child aat_type and requires a fresh holder key when the type changes; same-scope derivation is valid but discouraged.",
+      "draft_01": "Section 6 removes type selection and the type-transition key rule; same-scope derivation may support holder-key handoff or subprocess delegation.",
+      "wire_change": true,
+      "security_impact": "The old structural key boundary cannot be carried forward as if it were a draft-01 invariant.",
+      "ardur_disposition": "Preserve draft-00 type-transition checks in DG v0.1. Define any draft-01 role/key policy as a versioned Ardur profile extension."
+    },
+    {
+      "id": "AAT-REV-006",
+      "category": "derivation",
+      "draft_00": "Section 6 requires temporal attenuation, while Section 4.4 states child iat must not precede parent iat.",
+      "draft_01": "Section 6 makes the child iat >= parent iat requirement explicit in the derivation procedure and keeps expiration bounded by the parent.",
+      "wire_change": false,
+      "security_impact": "This is a clarification that prevents backdated child grants.",
+      "ardur_disposition": "Retain and test the existing monotonic iat/exp checks."
+    },
+    {
+      "id": "AAT-REV-007",
+      "category": "verification",
+      "draft_00": "Section 7 validates aat_type on every token, enforces type-transition key separation, and denies a delegation leaf.",
+      "draft_01": "Section 7 removes type checks and authorizes only the chain-position leaf after full chain and PoP verification.",
+      "wire_change": true,
+      "security_impact": "Mixing algorithms would either reject valid draft-01 chains or silently remove draft-00 invocation-boundary checks.",
+      "ardur_disposition": "Keep the draft-00 algorithm intact and return an explicit unsupported-revision error when aat_type is absent."
+    },
+    {
+      "id": "AAT-REV-008",
+      "category": "verification",
+      "draft_00": "Root and child required-claim checks leave some public-key and single-token-chain requirements implicit or inconsistently worded.",
+      "draft_01": "Section 7 explicitly rejects private JWK parameters, requires exactly one root AAT authorization entry, and closes the single-token-chain validation bypass.",
+      "wire_change": false,
+      "security_impact": "Accepting private key material leaks holder secrets; weak single-token validation can bypass checks normally performed on adjacent links.",
+      "ardur_disposition": "Backport the fail-closed public-key and required-claim checks where they do not change valid DG v0.1 wire semantics."
+    },
+    {
+      "id": "AAT-REV-009",
+      "category": "algorithms",
+      "draft_00": "Ed25519 support is mandatory; every token and PoP algorithm must be allowlisted, key-compatible, and asymmetric.",
+      "draft_01": "The Ed25519 support requirement and per-token asymmetric algorithm allowlist remain; section numbering moves from 8.14 to 8.13.",
+      "wire_change": false,
+      "security_impact": "Algorithm confusion remains a chain-wide risk at every signature boundary.",
+      "ardur_disposition": "Keep the current EdDSA-only Go profile as a strict subset and retain per-token allowlisting."
+    },
+    {
+      "id": "AAT-REV-010",
+      "category": "security_requirements",
+      "draft_00": "Section 8.12 makes type-transition key separation a protocol invariant and Section 8.13 carries CEL-specific privilege-escalation rules.",
+      "draft_01": "Section 8.12 makes role-based key separation deployment guidance, removes CEL-specific core rules, and adds Section 8.10 guidance for profile-defined approval gates.",
+      "wire_change": true,
+      "security_impact": "Planning/invocation separation and approval preservation become profile responsibilities instead of base-protocol guarantees.",
+      "ardur_disposition": "Do not claim draft-01 security semantics until a versioned profile defines role keys, approvals, and removed-constraint handling."
+    },
+    {
+      "id": "AAT-REV-011",
+      "category": "security_requirements",
+      "draft_00": "Section 8.15 states that signed token contents are visible and recommends encrypted transport and sensitive storage.",
+      "draft_01": "The dedicated section is removed, while the tokens remain signed rather than encrypted.",
+      "wire_change": false,
+      "security_impact": "Removing the section does not remove the confidentiality risk.",
+      "ardur_disposition": "Retain the DG v0.1 TLS and sensitive-storage requirement as an Ardur security boundary."
+    },
+    {
+      "id": "AAT-REV-012",
+      "category": "claims",
+      "draft_00": "Appendix D is titled a normative CBOR/CWT profile but defers claim keys, COSE rules, and an interoperable profile to a companion draft.",
+      "draft_01": "Appendix D is explicitly non-normative and states that JWT/JWS is the only fully specified encoding.",
+      "wire_change": true,
+      "security_impact": "Claiming unchanged CWT interoperability would be unsupported by either complete wire assignments or independent fixtures.",
+      "ardur_disposition": "DG v0.1 support is JWT/JWS only; remove the prior statement that the profile applies unchanged to CWT."
+    }
+  ]
+}

@@ -13,6 +13,7 @@ from vibap.claude_code_telemetry import (
 # Sanity: the local tuple must match proxy.py's contract exactly.
 def test_declared_telemetry_fields_match_proxy_contract() -> None:
     from vibap.proxy import DECLARED_TELEMETRY_FIELDS as PROXY_FIELDS
+
     assert DECLARED_TELEMETRY_FIELDS == PROXY_FIELDS
 
 
@@ -47,9 +48,29 @@ def test_all_eleven_declared_fields_are_present_for_read() -> None:
         assert value not in (None, ""), f"empty {field}"
 
 
+def test_telemetry_mapper_defaults_envelope_signature_to_not_verified() -> None:
+    arguments = map_tool_call(
+        tool_name="mcp__custom__op",
+        tool_input={"name": "resource"},
+    )
+
+    assert arguments["envelope_signature_valid"] == "not-verified"
+    assert arguments["observed_manifest_digest"] == "not-observed"
+
+
+def test_telemetry_mapper_preserves_explicit_envelope_verification() -> None:
+    arguments = map_tool_call(
+        tool_name="Read",
+        tool_input={"file_path": "/tmp/x.txt", "envelope_signature_valid": True},
+    )
+
+    assert arguments["envelope_signature_valid"] is True
+
+
 # ---------------------------------------------------------------------------
 # Write
 # ---------------------------------------------------------------------------
+
 
 def test_write_tool_maps_to_filesystem_write_with_side_effect() -> None:
     arguments = map_tool_call(
@@ -70,10 +91,15 @@ def test_write_tool_maps_to_filesystem_write_with_side_effect() -> None:
 # Edit
 # ---------------------------------------------------------------------------
 
+
 def test_edit_tool_maps_to_filesystem_write_with_side_effect() -> None:
     arguments = map_tool_call(
         tool_name="Edit",
-        tool_input={"file_path": "/src/main.py", "old_string": "foo", "new_string": "bar"},
+        tool_input={
+            "file_path": "/src/main.py",
+            "old_string": "foo",
+            "new_string": "bar",
+        },
     )
     assert arguments["action_class"] == "write"
     assert arguments["target"] == "/src/main.py"
@@ -88,6 +114,7 @@ def test_edit_tool_maps_to_filesystem_write_with_side_effect() -> None:
 # ---------------------------------------------------------------------------
 # Glob
 # ---------------------------------------------------------------------------
+
 
 def test_glob_tool_maps_to_filesystem_search_no_side_effect() -> None:
     arguments = map_tool_call(
@@ -116,6 +143,7 @@ def test_glob_tool_uses_cwd_placeholder_when_path_absent() -> None:
 # Grep
 # ---------------------------------------------------------------------------
 
+
 def test_grep_tool_maps_to_filesystem_search_no_side_effect() -> None:
     arguments = map_tool_call(
         tool_name="Grep",
@@ -142,6 +170,7 @@ def test_grep_tool_uses_cwd_placeholder_when_path_absent() -> None:
 # ---------------------------------------------------------------------------
 # Bash
 # ---------------------------------------------------------------------------
+
 
 def test_bash_tool_maps_to_shell_execute_high_sensitivity_instruction_bearing() -> None:
     arguments = map_tool_call(
@@ -172,13 +201,19 @@ def test_bash_tool_keeps_full_command_as_policy_target() -> None:
 # Task
 # ---------------------------------------------------------------------------
 
-def test_task_tool_maps_to_agent_dispatch_medium_sensitivity_instruction_bearing() -> None:
+
+def test_task_tool_maps_to_agent_dispatch_medium_sensitivity_instruction_bearing() -> (
+    None
+):
     arguments = map_tool_call(
         tool_name="Task",
-        tool_input={"subagent_type": "general-purpose", "description": "Summarise the repo"},
+        tool_input={
+            "subagent_type": "general-purpose",
+            "description": "Summarise the repo",
+        },
     )
     assert arguments["action_class"] == "dispatch"
-    assert arguments["target"] == "general-purpose:Summarise the repo"
+    assert arguments["target"] == "general-purpose"
     assert arguments["resource_family"] == "agent"
     assert arguments["content_class"] == "user_instruction"
     assert arguments["side_effect_class"] == "subagent_launch"
@@ -198,7 +233,7 @@ def test_agent_tool_maps_to_agent_dispatch_alias() -> None:
         },
     )
     assert arguments["action_class"] == "dispatch"
-    assert arguments["target"] == "general-purpose:Read README title"
+    assert arguments["target"] == "general-purpose"
     assert arguments["resource_family"] == "agent"
     assert arguments["side_effect_class"] == "subagent_launch"
     assert arguments["instruction_bearing"] is True
@@ -206,19 +241,20 @@ def test_agent_tool_maps_to_agent_dispatch_alias() -> None:
     assert arguments["prompt"] == "Read README.md and report the title"
 
 
-def test_task_tool_truncates_description_to_64_chars() -> None:
+def test_task_tool_does_not_embed_description_in_target() -> None:
     long_desc = "Do this thing " + "y" * 100
     arguments = map_tool_call(
         tool_name="Task",
         tool_input={"subagent_type": "general-purpose", "description": long_desc},
     )
-    expected_target = "general-purpose:" + long_desc[:64]
-    assert arguments["target"] == expected_target
+    assert arguments["target"] == "general-purpose"
+    assert long_desc not in arguments["target"]
 
 
 # ---------------------------------------------------------------------------
 # WebFetch
 # ---------------------------------------------------------------------------
+
 
 def test_webfetch_tool_maps_to_network_fetch_medium_sensitivity() -> None:
     arguments = map_tool_call(
@@ -239,6 +275,7 @@ def test_webfetch_tool_maps_to_network_fetch_medium_sensitivity() -> None:
 # ---------------------------------------------------------------------------
 # WebSearch
 # ---------------------------------------------------------------------------
+
 
 def test_websearch_tool_maps_to_network_search_low_sensitivity() -> None:
     arguments = map_tool_call(
@@ -270,6 +307,7 @@ def test_websearch_tool_truncates_query_to_128_chars() -> None:
 # NotebookEdit
 # ---------------------------------------------------------------------------
 
+
 def test_notebookedit_tool_maps_to_filesystem_write_with_cell_target() -> None:
     arguments = map_tool_call(
         tool_name="NotebookEdit",
@@ -282,7 +320,9 @@ def test_notebookedit_tool_maps_to_filesystem_write_with_cell_target() -> None:
     assert arguments["sensitivity"] == "medium"
     assert arguments["instruction_bearing"] is False
     assert arguments["budget_delta"] == 2
-    assert arguments["notebook_path"] == "/work/analysis.ipynb"  # original input preserved
+    assert (
+        arguments["notebook_path"] == "/work/analysis.ipynb"
+    )  # original input preserved
 
 
 def test_notebookedit_tool_target_has_trailing_hash_when_cell_id_absent() -> None:
@@ -296,6 +336,7 @@ def test_notebookedit_tool_target_has_trailing_hash_when_cell_id_absent() -> Non
 # ---------------------------------------------------------------------------
 # MCP fallback
 # ---------------------------------------------------------------------------
+
 
 def test_unknown_tool_uses_mcp_fallback_and_preserves_input() -> None:
     arguments = map_tool_call(
@@ -339,6 +380,7 @@ def test_mcp_fallback_uses_mcp_placeholder_when_no_uri_or_name() -> None:
 # Cross-mapper completeness gate
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "tool_name,tool_input",
     [
@@ -375,7 +417,9 @@ def test_every_mapper_emits_all_eleven_declared_fields(tool_name, tool_input) ->
         ("NotebookEdit", {"notebook_path": None, "cell_id": None}),
     ],
 )
-def test_none_valued_inputs_yield_unknown_target_not_string_None(tool_name, tool_input) -> None:
+def test_none_valued_inputs_yield_unknown_target_not_string_None(
+    tool_name, tool_input
+) -> None:
     """A caller passing ``None`` for a target-deriving field must produce a
     ``<unknown>``-style target, not the literal string ``"None"`` that
     ``str(None)`` would otherwise emit. Misleading audit receipts are worse

@@ -2,18 +2,8 @@ name: hugo-site
 
 on:
   pull_request:
-    paths:
-      - "site/**"
-      - "**/*.md"
-      - "media/**"
-      - ".github/workflows/hugo-site.yml"
   push:
     branches: [main, dev]
-    paths:
-      - "site/**"
-      - "**/*.md"
-      - "media/**"
-      - ".github/workflows/hugo-site.yml"
   workflow_dispatch:
 
 permissions:
@@ -31,7 +21,7 @@ jobs:
       HUGO_VERSION: 0.161.1
       HUGO_PARAMS_SOURCEREF: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
       - name: Verify source-backed Hugo mirrors
         run: |
@@ -42,6 +32,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 site/scripts/validate_claims.py
+
+      - name: Test llms.txt validation contract
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s site/tests -p 'test_*.py' -v
 
       - name: Install Hugo
         run: |
@@ -63,6 +58,11 @@ jobs:
           set -euo pipefail
           python3 site/scripts/validate_rendered_docs_links.py site/public
 
+      - name: Verify generated llms.txt
+        run: |
+          set -euo pipefail
+          python3 site/scripts/validate_llms_output.py site/public
+
       - name: Verify rendered source provenance
         run: |
           set -euo pipefail
@@ -71,6 +71,9 @@ jobs:
             exit 1
           fi
 
+      # Dev pushes validate and build the site only. The public hosted site is
+      # refreshed from main after reviewed release/main-promotion work, so the
+      # rendered source commit on github.io is the public freshness boundary.
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
@@ -95,3 +98,19 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0
+
+  hugo-site:
+    name: hugo-site
+    if: ${{ always() }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the source-backed site build
+        env:
+          BUILD: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          if [ "$BUILD" != "success" ]; then
+            echo "::error::Hugo site build concluded $BUILD"
+            exit 1
+          fi

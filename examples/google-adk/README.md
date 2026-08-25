@@ -1,60 +1,72 @@
-# Google ADK + Ardur quickstart
+# Google ADK + Ardur no-key fixture
 
-Deferred adapter spec. This directory is not a runnable example in the current
-release candidate; it records the dependency footprint and expected shape for
-the future Google ADK adapter.
+Runnable today without a Google API key or Vertex project. This directory
+contains an offline proof fixture for the Google ADK visible tool dispatch
+boundary. It does not call Google or install ADK; it simulates the callable /
+`BaseTool.run_async` boundary that Ardur can observe, then proves Ardur's local
+policy/receipt path end to end.
 
-## What this example will demonstrate
+## What this fixture demonstrates
 
-An agent built on Google's Agent Development Kit (`google-adk`) making tool calls through Ardur's governance proxy. The agent runs under an Ardur-issued mission credential, calls a small set of tools (read, write, summarize), and Ardur:
+The fixture loads a checked-in Ardur mission template, issues a local mission
+passport, evaluates three provider-visible ADK-style tool calls, emits signed
+Execution Receipts, and verifies the receipt chain locally:
 
-1. Issues a Mission Declaration signed by the local issuer key
-2. Verifies the credential on every tool call against the mission's allowed tools, resource scope, and budget
-3. Emits an Execution Receipt per call (compliant / violation / insufficient_evidence)
-4. Produces a session-end attestation that's offline-verifiable with the issuer's public key
+1. `read_file` is allowed by the mission and native policy.
+2. `write_file` is denied by the mission boundary.
+3. `provider_opaque_tool` returns `insufficient_evidence` because the visible
+   tool schema is not mappable enough for Ardur to make a safe claim.
 
-ADK's `LlmAgent` builds tools from plain Python callables and resolves their schemas via type hints. The proxy attaches at the `BaseTool.run_async` boundary so receipts emit consistently across both function-tools and the `AgentTool` wrapper used for sub-agent invocation.
+The generated report records `receipt_chain_verified: true`, verdict counts,
+receipt IDs, and explicit non-claims.
 
-## Dependencies
+## Run
 
-- `python/` editable install (this repo, `pip install -e ../python`; CLI is `ardur`, module imports are `vibap`)
-- `google-adk ^0.1.0`
-- LLM access: Google AI Studio API key (model id supplied via env var, see ADK docs); Vertex AI works too if `GOOGLE_GENAI_USE_VERTEXAI=true`
-- Optional: Docker for the recorded asciinema flow
-
-ADK shares a transitive dependency tree with `google-cloud-*` libraries, and `protobuf` version skew has bitten this combination in the past. A clean venv is the path of least resistance.
-
-## File layout (when imported)
-
-```
-google-adk/
-├── README.md              # this file
-├── run.sh                 # one-line runner
-├── src/
-│   ├── agent.py           # LlmAgent + tool registration
-│   └── tools.py           # governed demo tools (read, write, summarize)
-├── mission.json           # the Mission Declaration the agent runs under
-└── expected-receipt.json  # what a clean run produces, for diff-testing
-```
-
-## Run (when available)
+From the repository root:
 
 ```bash
-cd google-adk
-export GOOGLE_API_KEY=...
-./run.sh
-# Output:
-#   - mission compiled
-#   - agent started with passport
-#   - tool calls + per-call verdicts
-#   - session attestation printed at exit
+OUT="$(mktemp -d "${TMPDIR:-/tmp}/ardur-google-adk-fixture.XXXXXX")"
+examples/google-adk/run.sh --out-dir "$OUT"
+python3 -m json.tool "$OUT/report.json" >/dev/null
+printf 'report: %s\n' "$OUT/report.json"
 ```
 
-## Out of scope for this example
+The command writes:
 
-- Vertex AI deployment — local AI Studio API only. Vertex requires service-account auth and a real GCP project, which is too much setup for a quickstart.
-- Sub-agent / `AgentTool` chains — single-agent flow only.
-- Real-cluster SPIRE deployment — the example uses local file-based identity.
-- Multi-tenant key isolation — single issuer key.
+```text
+$OUT/report.json                    # redacted/shareable fixture report
+$OUT/receipts.jsonl                 # signed local Execution Receipt chain
+$OUT/passport.claims.redacted.json  # redacted local mission-passport claims
+$OUT/keys/                          # local fixture signing keys
+```
 
-For the protocol-only flow without an LLM, see `examples/missions/`.
+`run.sh` accepts `--mission PATH` if you want to point at another compatible
+mission template. The default is
+`examples/missions/provider-adapter-no-key-mission.json`. The runner honors
+`PYTHON` when set; otherwise it prefers `python/.venv/bin/python`, then
+`python3.13`/`python3.12`/`python3.11`/`python3.10`, and fails clearly if the
+selected interpreter is below Ardur's Python 3.10 minimum or lacks Ardur's
+package dependencies. Run `./scripts/setup-dev.sh` or set `PYTHON` to a prepared
+environment such as `python/.venv/bin/python`.
+
+## Optional future live-provider path
+
+A future live adapter can wrap real Google ADK `LlmAgent` / callable tool /
+`BaseTool.run_async` surfaces and feed the same visible tool-dispatch records
+into Ardur before execution. That path would require ADK plus a Google AI Studio
+or Vertex credential supplied by the operator at runtime. This no-key fixture is
+deliberately the first CI-safe slice: it proves Ardur's mission/passport, native
+policy, signed receipt, and chain-verification behavior without credentials.
+
+## Non-claims
+
+This fixture does not claim:
+
+- live provider API enforcement;
+- provider-hidden reasoning visibility;
+- server-side tool-call capture inside Google;
+- kernel, subprocess, or network side-effect capture;
+- sub-agent / `AgentTool` chain coverage;
+- production adapter hardening.
+
+For protocol-only mission examples, see `examples/missions/`.

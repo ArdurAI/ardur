@@ -65,7 +65,6 @@ the primitive that downstream integrators can wrap.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import time
@@ -274,7 +273,7 @@ class ToolPublicKeyResolver(Protocol):
     """
 
     def resolve(self, key_id: str) -> ec.EllipticCurvePublicKey | None:
-        ...
+        raise NotImplementedError
 
 
 @dataclass

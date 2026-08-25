@@ -22,26 +22,38 @@ langchain-quickstart/
 
 ## Dependencies
 
-- Python 3.13+
-- `python/` editable install (this repo, `pip install -e ../../python[dev]`; the CLI is `ardur`, module imports are `vibap`)
-- `langchain ^0.3.0` plus `langchain-core ^0.3.0`, `langchain-ollama`, `langchain-openai`, `langchain-anthropic`, `langgraph`
+- Python 3.13 (`biscuit-python==0.4.0` does not support Python 3.14)
+- `python/` editable install with the framework extra
+  (via `./scripts/setup-dev.sh --skip-go` then `pip install -e '.[langgraph]'`;
+  the CLI is `ardur`, module imports are `vibap`)
+- `langchain >=1.3.13,<2` and `langgraph >=1.2.9,<2`; provider adapters
+  (`langchain-ollama`, `langchain-openai`, or `langchain-anthropic`) remain
+  application-selected
 - LLM access: any provider that LangChain supports — local Ollama, an OpenAI-compatible gateway, an Anthropic API key, etc.
 - Optional: Docker for the recorded asciinema flow (`rahulnutakki/ardur-demo:lang`)
 
 ## Running locally
 
 ```bash
-# 1. Install the runtime
-cd ../../python && pip install -e '.[dev]'
+# 1. Install the runtime (from the repo root)
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
+pip install -e '.[langgraph]'
 
 # 2. Pick a provider + model id
 export ARDUR_PROVIDER=ollama
 export OLLAMA_MODEL='<your local model tag>'
 
 # 3. Run the demo from this directory
-cd ../examples/langchain-quickstart
+cd examples/langchain-quickstart
 PYTHONPATH=../_shared python demo.py
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e 'python/.[dev,langgraph]'`; macOS system Python 3.9 and
+its bundled pip are too old for the PEP 660 editable install.
 
 `ARDUR_PROVIDER` selects the backend (`ollama` / `openai` / `anthropic`). The matching `*_MODEL` env var is required and tells the demo which model id to drive — no model identifiers are hard-coded in `demo_scenes.py` per the project rule (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). For an OpenAI-compatible gateway, set `OPENAI_BASE_URL` alongside `OPENAI_API_KEY`.
 

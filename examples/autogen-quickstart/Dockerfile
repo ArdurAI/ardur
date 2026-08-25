@@ -14,25 +14,33 @@
 # uses the official `spire-agent` CLI instead (production sidecar-fetch
 # pattern). Same real Workload API, different real client.
 
-# FIX-9 (2026-04-28): production builds MUST digest-pin both base images.
-# Resolve current digests with:
-#   skopeo inspect docker://ghcr.io/spiffe/spire-agent:1.14.2 \
-#     --format '{{.Digest}}'
-#   skopeo inspect docker://docker.io/library/python:3.13-slim \
-#     --format '{{.Digest}}'
-# Then update the FROM lines to use "@sha256:<digest>" form. The
-# published demo images keep tag-pinned references for contributor
-# reproducibility; CI/release builds must swap to digest pinning so a
-# malicious tag re-push at the upstream registry can't poison the
-# governance demo.
+# Keep tags for readable dependency updates while immutable multi-arch index
+# digests prevent a registry tag re-push from changing published demo builds.
 
 # Stage 1: pull the real spire-agent binary from the official image.
-FROM ghcr.io/spiffe/spire-agent:1.14.2 AS spire
+FROM ghcr.io/spiffe/spire-agent:1.15.2@sha256:1d042e4040466686e0ee46f74981ff2167c86adfadca19b3835946f4d6047536 AS spire
 
-FROM python:3.13-slim
+# biscuit-python 0.4.0 embeds PyO3 0.24.1, whose supported ceiling is 3.13.
+FROM python:3.13.14-slim-trixie@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+ARG UTIL_LINUX_VERSION=2.41.5-0+deb13u1
+ARG BSDUTILS_VERSION=1:2.41.5-0+deb13u1
+ARG LOGIN_VERSION=1:4.16.0-2+really2.41.5-0+deb13u1
+
+# Remove this targeted upgrade once the base includes the CVE-2026-53615 fix.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        bsdutils=${BSDUTILS_VERSION} \
+        libblkid1=${UTIL_LINUX_VERSION} \
+        liblastlog2-2=${UTIL_LINUX_VERSION} \
+        libmount1=${UTIL_LINUX_VERSION} \
+        libsmartcols1=${UTIL_LINUX_VERSION} \
+        libuuid1=${UTIL_LINUX_VERSION} \
+        login=${LOGIN_VERSION} \
+        mount=${UTIL_LINUX_VERSION} \
+        util-linux=${UTIL_LINUX_VERSION} \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g 1000 ardur \

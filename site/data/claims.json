@@ -1,9 +1,32 @@
 {
   "claims": [
     {
+      "id": "configured-tool-boundary",
+      "title": "Ardur governs calls observed at a configured tool boundary",
+      "body": "When a supported adapter or proxy routes a tool request through Ardur, the runtime evaluates the request before that integration dispatches it and emits an issuer-signed, hash-linked receipt. This is a configured-boundary claim: it does not establish universal capture, third-party witnessing, provider-hidden behavior, or side effects below the tool call.",
+      "evidence_level": "code-and-doc",
+      "maturity": "public-now",
+      "claim_type": "runtime-boundary",
+      "surface": ["docs", "python", "scripts"],
+      "framework": ["framework-agnostic", "claude-code"],
+      "source_paths": [
+        "README.md",
+        "STATUS.md",
+        "docs/coverage-map.md",
+        "docs/known-limitations.md",
+        "docs/guides/claude-code-mvp-quickstart.md",
+        "scripts/run-claude-deny-demo.py",
+        "python/vibap/claude_code_hook.py",
+        "python/vibap/proxy.py",
+        "python/vibap/receipt.py",
+        "python/tests/test_claude_deny_demo.py",
+        "python/tests/test_claude_code_hook.py"
+      ]
+    },
+    {
       "id": "mission-boundary",
       "title": "Mission boundaries are the product center",
-      "body": "Ardur binds agent sessions to declared missions and makes runtime decisions over tools, resources, budgets, and delegation. The public claim is the conservative runtime-governance boundary, not a universal sandbox.",
+      "body": "Ardur binds agent sessions to declared missions and makes runtime decisions over tools, resources, flat runtime budgets, and delegation reservations. Mission-declared lineage_budgets are a v0.1 protocol goal, not a current runtime claim: non-empty lineage_budgets fail closed at compile/issue time until compiler/verifier support lands.",
       "evidence_level": "code-and-doc",
       "maturity": "public-now",
       "claim_type": "runtime-boundary",
@@ -13,14 +36,19 @@
         "README.md",
         "docs/security-model.md",
         "python/vibap/proxy.py",
-        "go/pkg/aat/derive.go",
-        "go/pkg/aat/chain_verify.go"
+        "python/vibap/lineage_budget.py",
+        "python/vibap/mission_compile.py",
+        "python/vibap/passport.py",
+        "python/tests/test_lineage_budget.py",
+        "python/tests/test_mission_compile.py",
+        "python/tests/test_http.py",
+        "go/pkg/policy/engine.go"
       ]
     },
     {
       "id": "delegation-narrowing",
       "title": "Delegation narrows instead of widening authority",
-      "body": "Child sessions are intended to receive strictly narrower authority than their parents. The public evidence includes the ADR, Python tests, and Go chain-audit tests rather than broad marketing language.",
+      "body": "Child sessions are intended to receive strictly narrower authority than their parents. The public evidence includes the ADR, Python tests, Go chain-audit tests, and the file-backed delegation reservation ledger; mission-declared lineage_budgets remain deferred and fail closed rather than implying unsupported enforcement.",
       "evidence_level": "code-and-doc",
       "maturity": "public-now",
       "claim_type": "delegation",
@@ -29,6 +57,9 @@
       "source_paths": [
         "docs/decisions/ADR-017-biscuit-attenuation-narrowing-semantics.md",
         "python/tests/test_delegation.py",
+        "python/tests/test_lineage_budget.py",
+        "python/tests/test_mission_compile.py",
+        "python/tests/test_http.py",
         "go/pkg/aat/verify_chain_test.go"
       ]
     },
@@ -45,6 +76,93 @@
         "docs/security-model.md",
         "docs/known-limitations.md",
         "python/tests/test_denial_vocabulary.py"
+      ]
+    },
+    {
+      "id": "phase1-no-key-bundle",
+      "title": "The Phase 1 no-key bundle is the current rerunnable Claude Code MVP proof",
+      "body": "The fresh-user harness writes a redacted bundle that exercises source checkout setup, ARDUR.md profile creation, Claude Code protection, simulated allow/deny hook receipts, report verification, redaction checks, and explicit claim mapping. It supports a no-key local tool-boundary claim, not a live-Claude, package-release, eBPF, or universal-CLI claim.",
+      "evidence_level": "code-and-doc",
+      "maturity": "public-now",
+      "claim_type": "evidence-semantics",
+      "surface": ["docs", "python", "scripts"],
+      "framework": ["claude-code", "framework-agnostic"],
+      "source_paths": [
+        "docs/guides/claude-code-mvp-quickstart.md",
+        "docs/guides/read-phase1-evidence-bundle.md",
+        "docs/guides/phase1-demo-packet.md",
+        "scripts/run-rwt-phase1-fresh-user.py",
+        "python/tests/test_real_world_harness_contract.py",
+        "plugins/claude-code/README.md"
+      ]
+    },
+    {
+      "id": "gemini-cli-local-proof",
+      "title": "Gemini CLI support is a local-only hook fixture, not a live-provider enforcement claim",
+      "body": "The Gemini CLI adapter writes a local settings/context fixture, records visible pre-tool-call hook payloads as signed Ardur receipts, preserves allow/deny/unknown evidence semantics, and emits redacted shareable reports. This supports a local tool-boundary proof path only: it does not claim provider-hidden reasoning visibility, server-side tool-call capture, sandbox isolation, or live Gemini enforcement.",
+      "evidence_level": "code-and-doc",
+      "maturity": "in-progress",
+      "claim_type": "evidence-semantics",
+      "surface": ["docs", "python"],
+      "framework": ["gemini-cli", "framework-agnostic"],
+      "source_paths": [
+        "docs/reference/cli.md",
+        "python/vibap/gemini_cli_hook.py",
+        "python/vibap/cli.py",
+        "python/tests/test_gemini_cli_hook.py"
+      ]
+    },
+    {
+      "id": "phase2-daemon-kernel-boundary",
+      "title": "Phase 2 daemon/kernel capture is a bounded development proof",
+      "body": "The current dev branch includes a gated Linux eBPF process-lifecycle proof harness that loads and attaches exec/exit tracepoint programs in a privileged Linux test environment, plus bounded Linux Slice 2 daemon installer/systemd/link-pinning development surfaces: `ardur-sensor` preflight/install/status/uninstall commands, fd-anchored root custody path/config creation, a systemd unit with `sd_notify`/watchdog/capability/path boundaries, and BPF tracepoint-link/ringbuf-map pinning for restart survival. The daemon enforcement path (`ardur-kernelcaptured`) includes BPF policy application with cgroup-scoped enforcement, seccomp-notify governance for syscall interception with sockaddr-based network policy, an agent-fingerprint registry for launcher-identity binding, lifecycle exec filtering, and a guard degradation path that records observability gaps when enforcement drops from BPF to seccomp or none. The same boundary includes no-mutation daemon custody/preflight seams with O_NOFOLLOW path-opening and restrictive umask on sensitive files, peer-authorization and protocol/peer handshake contracts, SO_PEERCRED retrieval with daemon-observed process-start identity binding and PID-reuse mismatch rejection, accepted-connection protocol, dry-run accept-loop invariant seams, a bounded local Unix-domain socket server proof seam for authorized protocol requests, a capped in-memory daemon session registry for register/status/end requests with safe active-session lookup and process-start-bound ownership checks, a daemon evidence-log append-plan family for filesystem-anchored status evidence, no-mutation handoff-plan builder ergonomics, daemon-internal status snapshots for internal daemon status/handoff code, a no-mutation daemon session handoff plan for hashed state/runtime paths plus cgroup allowlist preconditions, a no-privilege/no-execution launch-wrapper session-proof seam for deterministic argv/cwd digest evidence, an agent-recognition benchmark/evaluation harness with corpus and threshold data, tamper-audit and observability-gap evidence types, and a macOS Endpoint Security client stub. This supports a local experimental boundary claim only: no production daemon readiness, no release package or cross-platform installer, no production live enforcement or persistent session-state manager, no client-visible protocol expansion from daemon-internal status snapshots, no daemon-created/assigned cgroups, no filesystem writes/cgroup writes/BPF map mutation from the handoff plan, no universal CLI capture, no file/network/privilege side-effect capture, no macOS/Windows kernel capture, and no unprivileged/no-install eBPF support.",
+      "evidence_level": "code-and-doc",
+      "maturity": "in-progress",
+      "claim_type": "runtime-boundary",
+      "surface": ["go", "docs"],
+      "framework": ["framework-agnostic", "foundation"],
+      "source_paths": [
+        "reports/PHASE2_DAEMON_KERNEL_BOUNDARY_CLAIM_LEDGER_2026-05-11.md",
+        "reports/LINEAGE_BUDGET_DELEGATION_PLAN_REVIEW_2026-05-13.md",
+        "go/pkg/kernelcapture/README.md",
+        "go/pkg/kernelcapture/linux_ebpf_smoke_linux.go",
+        "go/cmd/ardur-sensor/main.go",
+        "go/pkg/kernelcapture/daemon_installer_linux.go",
+        "go/pkg/kernelcapture/daemon_installer_linux_test.go",
+        "go/pkg/kernelcapture/linux_ebpf_daemon_linux.go",
+        "packaging/systemd/ardur-kernelcaptured.service",
+        "go/pkg/kernelcapture/daemon_custody.go",
+        "go/pkg/kernelcapture/daemon_preflight.go",
+        "go/pkg/kernelcapture/daemon_protocol.go",
+        "go/pkg/kernelcapture/daemon_peer_authorization.go",
+        "go/pkg/kernelcapture/daemon_peer_credentials_linux.go",
+        "go/pkg/kernelcapture/daemon_socket_peer_contract.go",
+        "go/pkg/kernelcapture/daemon_socket_server.go",
+        "go/pkg/kernelcapture/daemon_socket_server_test.go",
+        "go/pkg/kernelcapture/daemon_session_registry.go",
+        "go/pkg/kernelcapture/daemon_session_registry_test.go",
+        "go/pkg/kernelcapture/daemon_session_status_snapshot.go",
+        "go/pkg/kernelcapture/daemon_session_status_snapshot_test.go",
+        "go/pkg/kernelcapture/daemon_session_handoff_plan.go",
+        "go/pkg/kernelcapture/daemon_session_handoff_plan_test.go",
+        "go/pkg/kernelcapture/daemon_accept_loop_plan.go",
+        "go/pkg/kernelcapture/launch_wrapper_session.go",
+        "go/pkg/kernelcapture/launch_wrapper_session_test.go",
+        "go/cmd/ardur-kernelcaptured/main.go",
+        "go/cmd/ardur-kernelcaptured/daemon_enforce.go",
+        "go/cmd/ardur-kernelcaptured/daemon_guard_linux.go",
+        "go/pkg/kernelcapture/bpf_policy_apply.go",
+        "go/pkg/kernelcapture/bpf_policy_apply_linux.go",
+        "go/pkg/kernelcapture/seccomp_notify_linux.go",
+        "go/pkg/kernelcapture/seccomp_policy.go",
+        "go/pkg/kernelcapture/seccomp_sockaddr.go",
+        "go/pkg/kernelcapture/agent_fingerprint.go",
+        "go/pkg/kernelcapture/agent_recognition.go",
+        "go/pkg/kernelcapture/enforce_receipt_chain.go",
+        "go/pkg/kernelcapture/daemon_session_status_evidence_log_append_plan.go",
+        "go/pkg/kernelcapture/observability_gap.go",
+        "go/pkg/kernelcapture/tamper_audit.go",
+        "go/pkg/kernelcapture/es_client_darwin.go"
       ]
     },
     {

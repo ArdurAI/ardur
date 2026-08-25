@@ -4,8 +4,8 @@ This file is the public reporting policy for Ardur.
 
 ## Supported versions
 
-Until Ardur has tagged releases, only the latest default branch is treated
-as supported for security fixes.
+The latest tagged release (v0.1.0+) and the default branch are supported
+for security fixes.
 
 ## Reporting a vulnerability
 

@@ -133,9 +133,10 @@
       "enum": [
         "compliant",
         "violation",
-        "insufficient_evidence"
+        "insufficient_evidence",
+        "unknown"
       ],
-      "description": "Tri-state verifier result."
+      "description": "Verifier result. 'unknown' (v0.2 extension) records a structural observation gap distinct from 'insufficient_evidence' (transient operational failure)."
     },
     "evidence_level": {
       "type": "string",
@@ -589,7 +590,8 @@
           "verdict": {
             "enum": [
               "violation",
-              "insufficient_evidence"
+              "insufficient_evidence",
+              "unknown"
             ]
           }
         },

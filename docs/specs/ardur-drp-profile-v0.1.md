@@ -1,0 +1,252 @@
+# Ardur DRP Profile v0.1
+
+## 1. Status and claim boundary
+
+This document defines the runtime profile implemented by
+`python/vibap/drp.py`. Its JSON Schema is
+[`ardur-drp-profile-v0.1.schema.json`](./ardur-drp-profile-v0.1.schema.json).
+
+The profile is pinned to
+[`draft-nelson-agent-delegation-receipts-10`](https://datatracker.ietf.org/doc/html/draft-nelson-agent-delegation-receipts-10).
+That document is an active individual Internet-Draft with no formal IETF
+standing. Ardur v0.1 therefore claims:
+
+- a deterministic draft-10-pinned Authorization Object profile;
+- Ardur emitter/verifier round-trip behavior; and
+- a documented comparison with one exact reference-SDK snapshot.
+
+It does not claim an IETF standard, IETF conformance, independent
+interoperability, or a complete RFC 3161 verifier. The
+[implementation and interoperability note](./ardur-drp-implementation-interop-v0.1.md)
+publishes portable Ardur self-test fixtures and records independent
+interoperability as `not-demonstrated`.
+
+## 2. Lifecycle and the external log proof
+
+The Authorization Object is constructed, identified, and signed before it is
+submitted to the delegation log. The resulting inclusion and TSA evidence is
+therefore external evidence:
+
+1. construct the unsigned body;
+2. derive `receiptId` from the RFC 8785 pre-ID body;
+3. sign the RFC 8785 body containing `receiptId`;
+4. submit the immutable receipt to the required log/TSA backend;
+5. verify the resulting proof against external log/TSA trust; and
+6. pass the verified facts into the Ardur verifier.
+
+The earlier mapping example placed a nested log `receiptId` and proof output
+inside the pre-ID body. That created a circular fixed-point requirement:
+the nested value had to equal the hash of a body containing itself. It also
+attempted to embed proof data that cannot exist until after signing.
+
+The corrected signed critical extension is a policy:
+
+```json
+{
+  "delegationLogAnchor": {
+    "backend": "rfc3161-log",
+    "required": true,
+    "subject": "receipt-id"
+  }
+}
+```
+
+Actual proof bytes, integration time, and proof reference remain outside the
+receipt. They bind the final `receiptId`. Missing, stale, mismatched,
+post-action, or untrusted evidence returns DENY.
+
+`DRPVerifiedLogEvidence` is the output boundary of a separately trusted
+log/TSA verifier. Constructing that object from receipt claims without
+validating raw evidence violates this profile. Existing Ardur action-receipt
+transparency anchors do not automatically satisfy this requirement.
+
+## 3. Emitter
+
+`emit_drp_receipt` accepts the complete unsigned Authorization Object plus a
+P-256 signer key. It:
+
+1. normalizes every string and object name to Unicode NFC;
+2. rejects names that collide after normalization;
+3. derives the exact public JWK from the signer key;
+4. rejects caller-supplied derived fields;
+5. computes `receiptId = "rec_" + lowercase_hex(SHA-256(JCS(pre_id_body)))`;
+6. computes `canonicalPayload` from the JCS signed body containing
+   `receiptId`;
+7. signs those exact bytes using ES256 and unpadded base64url raw `R || S`;
+8. for a child, signs the parent binding string with the parent orchestrator
+   key; and
+9. validates the final closed-world schema.
+
+A root omits `parentReceiptId` and `orchestratorSignature`. A child requires
+both. The emitter does not accept an embedded key as a trust decision.
+
+## 4. Verification context
+
+`DRPVerificationContext` is mandatory and contains six external inputs:
+
+| Input | Binding and failure behavior |
+|---|---|
+| `signer_keys` | Maps the signed Ardur issuer identity to an externally trusted P-256 key. The embedded JWK must match. |
+| `operator_instructions` | Maps each receipt ID to the instructions presented at decision time. Text and `sha256:` digest must match. |
+| `tool_universes` | Maps `toolSchemaHash` to a finite, concrete operation/resource universe. The verifier recomputes the digest. |
+| `log_evidence` | Maps each receipt ID to preverified pre-action log/TSA facts satisfying the signed policy. |
+| `revocation_evidence` | Maps each signed revocation reference to authenticated, fresh active/revoked/unknown status. |
+| `receipt_chain_evidence` | Maps a receipt ID with `receiptChainAnchor.state = "present"` to independently verified trace/head facts. Missing or mismatched evidence denies. |
+
+These inputs cannot be sourced from the receipt alone. Missing context is
+`INSUFFICIENT_EVIDENCE` and projects to DENY.
+
+The finite tool universe document is:
+
+```json
+{
+  "schemaVersion": "ardur.drp.tool_universe.v0.1",
+  "actions": [
+    {"operation": "read", "resource": "tool://calendar/team"}
+  ]
+}
+```
+
+`toolSchemaHash` is `sha256:` followed by the lowercase SHA-256 hex digest of
+that document's RFC 8785 bytes. Entries are concrete and sorted; wildcard
+entries are forbidden in the universe.
+
+## 5. Verification algorithm
+
+`verify_drp_chain` accepts receipts in root-to-leaf order, one concrete
+requested action with operation, resource, arguments, side-effect class, and
+absolute current working directory, the context, and the decision time. The
+caller must derive this classification from the actual invocation boundary,
+not model-supplied labels. It fails closed in this order:
+
+1. reject empty, oversized, overlong, malformed UTF-8, duplicate-name, or
+   schema-invalid JSON;
+2. require NFC strings and object names;
+3. require the exact ten critical Ardur paths and reject unknown critical
+   paths;
+4. recompute the pre-ID body and `receiptId`;
+5. recompute the RFC 8785 signed body and require byte-identical
+   `canonicalPayload`;
+6. compare the embedded P-256 JWK with external issuer trust;
+7. verify every receipt signature;
+8. compare the current operator instructions and digest;
+9. recompute the finite tool universe and effective allow/deny sets;
+10. require independently verified pre-action log/TSA facts;
+11. enforce expiry and online revocation policy;
+12. require fresh revocation status for every ancestor;
+13. require matching preverified action-chain facts for every signed
+    `present` receipt-chain anchor;
+14. verify every parent ID and orchestrator binding;
+15. verify every attenuation edge;
+16. require the concrete requested action in the leaf's effective scope;
+17. enforce the leaf resource, side-effect-class, and cwd bounds; and
+18. evaluate every leaf argument constraint against the concrete arguments,
+    with closed-world argument names whenever a constraint map is present.
+
+Only a fully verified action returns `PERMIT`. There is no signature-only
+PERMIT mode.
+
+## 6. Transitive attenuation
+
+For every parent/child edge, the verifier requires:
+
+- `child.issuer == parent.subject`;
+- child depth equals parent depth plus one;
+- child depth is less than parent `maxDepth`;
+- child `maxDepth` is no greater than the parent's;
+- the child time window is contained by the parent;
+- one authenticated finite tool universe across the chain;
+- the child's effective allowed-action set is a strict proper subset;
+- every parent denial remains denied;
+- child resource and side-effect bounds are subsets;
+- child `cwd` is equal to or below the parent path;
+- argument constraints are equal or provably narrower;
+- total, per-class, and reserved budgets do not increase;
+- mission and policy bindings remain equal;
+- `parentTokenHash` binds the parent capability-token digest; and
+- revocation cascade semantics do not change.
+
+`redelegation.mode = "none"` is terminal. `mode = "bounded"` permits only the
+checks above. Denied re-delegation is an outcome, not a third grant mode.
+
+Draft-10 requires a strict action-set subset. A child that narrows only time,
+arguments, resources, or budget while keeping the same effective action set is
+not exportable and returns `SCOPE_NOT_STRICT_SUBSET`.
+
+Base DRP operation/resource wildcards are accepted only as a full `"*"` value
+and are expanded against the authenticated finite universe. Ardur resource
+bounds accept exact values or one trailing `*`, also resolved against that
+universe.
+
+Profile timestamps use uppercase `T` and `Z`, include seconds, and allow at
+most six fractional digits. Alternative ISO 8601 spellings are rejected so
+Python parser permissiveness cannot change a signed authorization boundary.
+
+The Python v0.1 verifier evaluates exact, pattern, range, one-of, not-one-of,
+contains, subset, wildcard, all, any, and not constraints. Regex and CEL
+constraints return `UNSUPPORTED_CRITICAL_EXTENSION` rather than using a
+different or potentially unsafe evaluator.
+
+## 7. Bounded denial reasons
+
+Representative public reasons include:
+
+- `SCHEMA_INVALID`, `MALFORMED_JSON`, `DUPLICATE_JSON_NAME`,
+  `NON_CANONICAL_JSON`;
+- `RECEIPT_ID_MISMATCH`, `INVALID_SIGNATURE`, `UNTRUSTED_SIGNER`;
+- `INSTRUCTION_HASH_MISMATCH`, `TOOL_UNIVERSE_MISMATCH`;
+- `INSUFFICIENT_EVIDENCE`, `INVALID_LOG_TIME`, `RECEIPT_CHAIN_MISMATCH`;
+- `REVOCATION_CHECK_REQUIRED`, `REVOKED`, `EXPIRED`;
+- `MISSING_ANCESTOR`, `REDELEGATION_DENIED`;
+- `SCOPE_NOT_STRICT_SUBSET`, `PARENT_SCOPE_VIOLATION`;
+- `RESOURCE_BOUND_WIDENING`, `ARGUMENT_CONSTRAINT_WIDENING`,
+  `RESOURCE_BOUND_VIOLATION`, `ARGUMENT_CONSTRAINT_VIOLATION`,
+  `BUDGET_WIDENING`; and
+- `INVALID_ACTION`, `ACTION_TOO_LARGE`, `ACTION_NOT_IN_SCOPE`.
+
+Exception text is bounded diagnostic detail. Consumers should make policy
+decisions from the stable reason code.
+
+## 8. Reference SDK comparison
+
+The exact reviewed AuthProof source is
+[`Commonguy25/authproof-sdk@ae1c56d`](https://github.com/Commonguy25/authproof-sdk/tree/ae1c56da7f55965c229d1b0a638d5390b4882123).
+It is the draft author's reference implementation, not an independent
+implementation.
+
+| Surface | Ardur profile v0.1 | AuthProof `ae1c56d` snapshot | Result |
+|---|---|---|---|
+| Signature algorithm | P-256 / ES256 | P-256 ECDSA | compatible primitive |
+| Main signature encoding | unpadded base64url raw `R || S` | 128-character hex | incompatible wire |
+| Signed JSON | NFC plus RFC 8785 | insertion-order `JSON.stringify(body)` | incompatible wire |
+| Receipt ID | `rec_` plus hash of pre-ID JCS body | external hash over receipt including signature | incompatible wire |
+| Time window | `notBefore` / `notAfter` | `start` / `end` | incompatible wire |
+| Signer key field | `publicKey` | `signerPublicKey` | incompatible wire |
+| Canonical payload | required and byte-compared | absent | incompatible wire |
+| Child binding string | same parent/child binding form | same binding form | compatible concept |
+| Reference vectors | draft-author SDK vectors | generated from older SDK behavior | comparison input, not independent conformance |
+
+Ardur rejects that older wire shape with `SCHEMA_INVALID`. It does not add a
+legacy acceptance path or call that rejection interoperability.
+
+## 9. Fixtures and proof limits
+
+The issue #179 fixture set uses synthetic P-256 keys and an organic
+root/child/grandchild chain. Private keys are never persisted. The external
+context fixture contains public trust material and explicitly labeled
+preverified facts for exercising this verifier contract. Those facts are not
+raw RFC 3161 proofs and do not establish independent conformance.
+
+Issue #180 must replace or supplement the context boundary with independently
+verified cross-tool and raw-evidence fixtures before any public conformance
+claim.
+
+## 10. References
+
+- [DRP draft-10](https://datatracker.ietf.org/doc/html/draft-nelson-agent-delegation-receipts-10)
+- [Ardur DRP Mapping Profile v0.1](./ardur-drp-mapping-v0.1.md)
+- [Ardur Delegation Grant Profile v0.1](./delegation-grant-profile-v0.1.md)
+- [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)
+- [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515.html)
+- [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517.html)
+- [RFC 3161](https://www.rfc-editor.org/rfc/rfc3161.html)

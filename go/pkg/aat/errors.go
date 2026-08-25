@@ -26,10 +26,29 @@ var (
 	ErrInvariantI6NotImplemented = fmt.Errorf("%w: I6 proof of possession", ErrNotImplemented)
 
 	// Constraint registry errors.
-	ErrUnknownConstraintType   = errors.New("aat: unknown constraint type")
-	ErrDuplicateConstraintType = errors.New("aat: duplicate constraint type registration")
-	ErrNilConstraintHandler    = errors.New("aat: nil constraint handler")
-	ErrNilConstraint           = errors.New("aat: nil constraint")
+	ErrUnknownConstraintType    = errors.New("aat: unknown constraint type")
+	ErrDuplicateConstraintType  = errors.New("aat: duplicate constraint type registration")
+	ErrNilConstraintHandler     = errors.New("aat: nil constraint handler")
+	ErrNilConstraint            = errors.New("aat: nil constraint")
+	ErrUnsupportedDraftRevision = fmt.Errorf(
+		"aat: unprofiled %s wire is unsupported; use the explicit %s profile or the %s wire contract",
+		Draft01Revision,
+		DGProfileV02,
+		SupportedDraftRevision,
+	)
+	ErrUnknownDGProfile      = errors.New("aat: unknown or missing Ardur DG profile")
+	ErrMixedDraftWire        = errors.New("aat: mixed draft-00 and draft-01 wire claims")
+	ErrProfileMismatch       = errors.New("aat: delegation chain changes DG profile")
+	ErrDraft01Constraint     = errors.New("aat: constraint is not in the draft-01 core vocabulary")
+	ErrDraft01HolderKeyReuse = errors.New("aat: DG v0.2 requires a fresh holder key at every derivation")
+	ErrReceiptSignerKeyReuse = errors.New("aat: AAT holder key must differ from the DRP receipt signer key")
+	ErrApprovalRefInvalid    = errors.New("aat: invalid DG approval requirement reference")
+	ErrApprovalRefDropped    = errors.New("aat: derived token drops a DG approval requirement")
+	ErrApprovalUnsatisfied   = errors.New("aat: required DG approval was not independently satisfied")
+	ErrMissionRefInvalid     = errors.New("aat: DG v0.2 mission_ref is missing or invalid")
+	ErrMissionRefChanged     = errors.New("aat: derived token changes DG mission_ref")
+	ErrPoPAudienceRequired   = errors.New("aat: DG v0.2 PoP audience is required")
+	ErrPoPAudienceMismatch   = errors.New("aat: PoP audience does not match the enforcement point")
 
 	// Chain verification DENY points (AAT §7).
 	ErrDenyStep1EmptyChain = errors.New("aat: deny step 1 empty chain")
@@ -92,6 +111,8 @@ var (
 	ErrDenyStep6CDelegationLeaf          = errors.New("aat: deny step 6c delegation token cannot authorize direct invocation")
 
 	ErrDenyStep7APoPSignature = errors.New("aat: deny step 7a pop signature verification failed")
+	ErrDenyStep7AMissingJTI   = errors.New("aat: deny step 7a pop jti is required")
+	ErrDenyStep7ANonCanonical = errors.New("aat: deny step 7a pop payload is not RFC 8785 canonical JSON")
 	ErrDenyStep7BAATID        = errors.New("aat: deny step 7b pop aat_id does not match leaf jti")
 	ErrDenyStep7CPoPTool      = errors.New("aat: deny step 7c pop aat_tool does not match requested tool")
 	ErrDenyStep7DHTAMismatch  = errors.New("aat: deny step 7d pop hta does not match canonicalized args")

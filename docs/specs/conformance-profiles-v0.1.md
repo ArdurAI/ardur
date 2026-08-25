@@ -75,8 +75,8 @@ capability attenuation, cascading revocation, and basic receipt emission.
    (A.6 §4).
 7. The verifier MUST emit a linked Execution Receipt (A.3) for every
    evaluated step. Receipt `parent_receipt_id` MUST chain correctly.
-8. The verifier MUST use the tri-state verdict codomain: `compliant`,
-   `violation`, `insufficient_evidence` (A.4 §4).
+8. The verifier MUST use the verdict codomain: `compliant`,
+   `violation`, `insufficient_evidence`, `unknown` (A.4 §4).
 
 ### 3.2. MIC-State
 
@@ -209,16 +209,15 @@ and maps them to the minimum profile at which each rule applies:
 
 ## 7. Conformance Test Vector Index
 
-> **Public-import note (2026-04-25):** The original v0.1 spec was authored
-> when both this document and its companion fixtures lived under
-> `docs/spec/` in the private research repo. Public migration relocates
-> the document to `docs/specs/`. The conformance fixture directory has
-> not yet been imported; the references below describe the private
-> layout and will be updated to public paths under `docs/specs/conformance/`
-> once the fixtures land.
+> **Public-import note (updated 2026-07-10):** The historical MCEP vectors
+> indexed below have not yet been imported from the private `docs/spec/`
+> layout. A separate public DRP implementation self-test bundle now lives at
+> `docs/specs/conformance/drp-v0.1/`; it does not satisfy or relabel the
+> historical Delegation-Core, MIC-State, MIC-Evidence, or IDM vector index.
 
-Test vectors are stored in `docs/spec/conformance/` (private layout) using
-the JSONL format described in `docs/spec/conformance/README.md`.
+The historical test vectors were stored in `docs/spec/conformance/` (private
+layout) using the JSONL format described in the private
+`docs/spec/conformance/README.md`.
 
 Each test vector specifies:
 

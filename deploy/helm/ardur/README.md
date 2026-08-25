@@ -99,7 +99,7 @@ production-ready" future effort. That lane would:
 2. Produce a real `values.production.yaml` example
 3. Run on a kind cluster end-to-end (MissionDeclaration CR →
    Reconcile verdict)
-4. Add an ADR (next available number after ADR-021, e.g. `docs/decisions/ADR-022-ardur-helm-chart.md`)
+4. Add an ADR (next available number after ADR-024, e.g. `docs/decisions/ADR-025-ardur-helm-chart.md`)
    documenting chart design decisions — ADR-016 is already taken
    (delegation lineage hash index)
 5. Publish to a Helm repo (possibly GitHub Pages under

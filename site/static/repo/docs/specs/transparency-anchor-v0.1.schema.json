@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ardur.ai/specs/transparency-anchor-v0.1.schema.json",
+  "title": "Ardur Transparency Anchor v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "anchor_id",
+    "status",
+    "subject",
+    "receipt_jwt",
+    "backend",
+    "queued_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ardur.transparency_anchor.v0.1"
+    },
+    "anchor_id": {
+      "type": "string",
+      "pattern": "^anchor:[a-f0-9]{64}$"
+    },
+    "status": {
+      "enum": ["pending", "anchored"]
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "receipt_jwt": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+      "maxLength": 2097152
+    },
+    "backend": {
+      "$ref": "#/$defs/backend"
+    },
+    "queued_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "anchored_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidence"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "pending"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": ["anchored_at"]
+            },
+            {
+              "required": ["evidence"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "anchored"
+          }
+        }
+      },
+      "then": {
+        "required": ["anchored_at", "evidence"],
+        "properties": {
+          "backend": {
+            "properties": {
+              "kind": {
+                "enum": ["c2sp-local-v1", "rekor-v1"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_type", "digest"],
+      "properties": {
+        "media_type": {
+          "const": "application/ardur.er+jwt"
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "value"],
+          "properties": {
+            "algorithm": {
+              "const": "sha256"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["unconfigured", "c2sp-local-v1", "rekor-v1"]
+        },
+        "log_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "entry_uuid": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "body",
+        "integrated_time",
+        "log_id",
+        "log_index",
+        "verification"
+      ],
+      "properties": {
+        "body": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "maxLength": 2097152
+        },
+        "integrated_time": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "log_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "log_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inclusion_proof": {
+              "$ref": "#/$defs/inclusionProofSnake"
+            },
+            "inclusionProof": {
+              "$ref": "#/$defs/inclusionProofCamel"
+            },
+            "signed_entry_timestamp": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "maxLength": 2097152
+            },
+            "signedEntryTimestamp": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "maxLength": 2097152
+            }
+          },
+          "oneOf": [
+            {
+              "required": ["inclusion_proof"]
+            },
+            {
+              "required": ["inclusionProof", "signedEntryTimestamp"]
+            },
+            {
+              "required": ["inclusionProof", "signed_entry_timestamp"]
+            }
+          ]
+        }
+      }
+    },
+    "inclusionProofSnake": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint", "hashes", "log_index", "root_hash", "tree_size"],
+      "properties": {
+        "checkpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 131072
+        },
+        "hashes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        },
+        "log_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "root_hash": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "tree_size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "inclusionProofCamel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint", "hashes", "logIndex", "rootHash", "treeSize"],
+      "properties": {
+        "checkpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 131072
+        },
+        "hashes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        },
+        "logIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rootHash": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "treeSize": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

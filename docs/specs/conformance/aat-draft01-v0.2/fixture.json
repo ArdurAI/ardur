@@ -1,0 +1,69 @@
+{
+  "schema_version": "ardur.aat_draft01_fixture.v0.2",
+  "claim_boundary": "Ardur-generated deterministic self-test; not independent interoperability evidence",
+  "draft_revision": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+  "draft_text_sha256": "4e5fdd2f42cd3ff4570b711a0be5ff710236618e1f6926ef34030f82c3d04df5",
+  "dg_profile": "ardur.dg.aat-draft-01.v0.2",
+  "independent_fixture_available": false,
+  "reference_implementation_note": "The draft-author Tenuo repository exposes a different CBOR warrant fixture, not a draft-01 JWT interoperability fixture.",
+  "verification_time": "2030-01-01T00:00:00Z",
+  "audience": "https://enforcer.example",
+  "tool": "https://tools.example/read_file",
+  "arguments": {
+    "path": "/data/a.txt"
+  },
+  "approval_refs": [
+    "approval:human-owner",
+    "approval:security"
+  ],
+  "public_keys": {
+    "drp_receipt_signer": {
+      "use": "sig",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "alg": "EdDSA",
+      "x": "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI"
+    },
+    "leaf_holder": {
+      "use": "sig",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "alg": "EdDSA",
+      "x": "11l5O7wTooGagnx2rbb7qKSa7gB_SfLQmS2ZuCWtLEg"
+    },
+    "planner_holder": {
+      "use": "sig",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "alg": "EdDSA",
+      "x": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+    },
+    "root_trust_anchor": {
+      "use": "sig",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "alg": "EdDSA",
+      "x": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+    },
+    "worker_holder": {
+      "use": "sig",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "alg": "EdDSA",
+      "x": "F8t5-ytBIPKx7GXkGY1uCLKOgT_rAeSkAIObheGAgM4"
+    }
+  },
+  "chain": [
+    "eyJhbGciOiJFZERTQSJ9.eyJhcmR1cl9hcHByb3ZhbF9yZWZzIjpbImFwcHJvdmFsOmh1bWFuLW93bmVyIl0sImFyZHVyX2RnX3Byb2ZpbGUiOiJhcmR1ci5kZy5hYXQtZHJhZnQtMDEudjAuMiIsImF1dGhvcml6YXRpb25fZGV0YWlscyI6W3sidHlwZSI6ImF0dGVudWF0aW5nX2FnZW50X3Rva2VuIiwidG9vbHMiOnsiaHR0cHM6Ly90b29scy5leGFtcGxlL3JlYWRfZmlsZSI6eyJwYXRoIjp7ImNvbnN0cmFpbnRfdHlwZSI6IndpbGRjYXJkIn19fX1dLCJjbmYiOnsiandrIjp7InVzZSI6InNpZyIsImt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJhbGciOiJFZERTQSIsIngiOiJvSnFsOUhwbldZQXYtVlg0M0MwcUZLWEpuU08tbF9oa0VuXzVPRFJWcFBBIn19LCJkZWxfZGVwdGgiOjAsImRlbF9tYXhfZGVwdGgiOjIsImV4cCI6MTg5MzQ1OTYwMCwiaWF0IjoxODkzNDU2MDAwLCJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwianRpIjoiMDE5YTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMTAxIiwibWlzc2lvbl9yZWYiOnsibWlzc2lvbl9kaWdlc3QiOiJzaGEtMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJtaXNzaW9uX2lkIjoidXJuOmFyZHVyOm1pc3Npb246YWF0OmRyYWZ0MDE6Zml4dHVyZSIsInVyaSI6Imh0dHBzOi8vaXNzdWVyLmV4YW1wbGUvbWlzc2lvbnMvYWF0LWRyYWZ0MDEtZml4dHVyZSJ9fQ.7EaS4whDZczgIE98mqWniZnLiESZw8vVYuIqRqBAxblyrssIzwK1WoJXrJrhmsmiDEvzcvrRbXv1sE0HNlU1Ag",
+    "eyJhbGciOiJFZERTQSJ9.eyJhcmR1cl9hcHByb3ZhbF9yZWZzIjpbImFwcHJvdmFsOmh1bWFuLW93bmVyIiwiYXBwcm92YWw6c2VjdXJpdHkiXSwiYXJkdXJfZGdfcHJvZmlsZSI6ImFyZHVyLmRnLmFhdC1kcmFmdC0wMS52MC4yIiwiYXV0aG9yaXphdGlvbl9kZXRhaWxzIjpbeyJ0eXBlIjoiYXR0ZW51YXRpbmdfYWdlbnRfdG9rZW4iLCJ0b29scyI6eyJodHRwczovL3Rvb2xzLmV4YW1wbGUvcmVhZF9maWxlIjp7InBhdGgiOnsiY29uc3RyYWludF90eXBlIjoib25lX29mIiwidmFsdWVzIjpbIi9kYXRhL2EudHh0IiwiL2RhdGEvYi50eHQiXX19fX1dLCJjbmYiOnsiandrIjp7InVzZSI6InNpZyIsImt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJhbGciOiJFZERTQSIsIngiOiJGOHQ1LXl0QklQS3g3R1hrR1kxdUNMS09nVF9yQWVTa0FJT2JoZUdBZ000In19LCJkZWxfZGVwdGgiOjEsImRlbF9tYXhfZGVwdGgiOjIsImV4cCI6MTg5MzQ1ODcwMCwiaWF0IjoxODkzNDU2MDAwLCJpc3MiOiJ1cm46aWV0ZjpwYXJhbXM6b2F1dGg6andrLXRodW1icHJpbnQ6c2hhLTI1NjpmM3pOdE5uWWZnbUVLc1F5eUh0bXJ1T2ZKRnpCaTFseWJfRF8ySjlDRFBvIiwianRpIjoiMDE5YTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMTAyIiwibWlzc2lvbl9yZWYiOnsibWlzc2lvbl9kaWdlc3QiOiJzaGEtMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJtaXNzaW9uX2lkIjoidXJuOmFyZHVyOm1pc3Npb246YWF0OmRyYWZ0MDE6Zml4dHVyZSIsInVyaSI6Imh0dHBzOi8vaXNzdWVyLmV4YW1wbGUvbWlzc2lvbnMvYWF0LWRyYWZ0MDEtZml4dHVyZSJ9LCJwYXJfaGFzaCI6IkQwc3RYejhqTG5naEVLV3piWndONEpGUWdtZUhEVkJ1bXpmVW5xQW0zaW8ifQ.aqlW2aDts5wAmPpagaN_bRiXgd2L3L40Ce0U4smLJnSW1YVEEVoNXwJAf3nQqLa2CvxJPKX5T8Kpt7EEwTJGCA",
+    "eyJhbGciOiJFZERTQSJ9.eyJhcmR1cl9hcHByb3ZhbF9yZWZzIjpbImFwcHJvdmFsOmh1bWFuLW93bmVyIiwiYXBwcm92YWw6c2VjdXJpdHkiXSwiYXJkdXJfZGdfcHJvZmlsZSI6ImFyZHVyLmRnLmFhdC1kcmFmdC0wMS52MC4yIiwiYXV0aG9yaXphdGlvbl9kZXRhaWxzIjpbeyJ0eXBlIjoiYXR0ZW51YXRpbmdfYWdlbnRfdG9rZW4iLCJ0b29scyI6eyJodHRwczovL3Rvb2xzLmV4YW1wbGUvcmVhZF9maWxlIjp7InBhdGgiOnsiY29uc3RyYWludF90eXBlIjoiZXhhY3QiLCJ2YWx1ZSI6Ii9kYXRhL2EudHh0In19fX1dLCJjbmYiOnsiandrIjp7InVzZSI6InNpZyIsImt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJhbGciOiJFZERTQSIsIngiOiIxMWw1Tzd3VG9vR2FnbngycmJiN3FLU2E3Z0JfU2ZMUW1TMlp1Q1d0TEVnIn19LCJkZWxfZGVwdGgiOjIsImRlbF9tYXhfZGVwdGgiOjIsImV4cCI6MTg5MzQ1NzgwMCwiaWF0IjoxODkzNDU2MDAwLCJpc3MiOiJ1cm46aWV0ZjpwYXJhbXM6b2F1dGg6andrLXRodW1icHJpbnQ6c2hhLTI1NjpiN2RLRDItRGxNQXBrR2xqei1SSndEZE5jeXh3eUZCcFNtaHoyY1JCbmF3IiwianRpIjoiMDE5YTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMTAzIiwibWlzc2lvbl9yZWYiOnsibWlzc2lvbl9kaWdlc3QiOiJzaGEtMjU2OjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEiLCJtaXNzaW9uX2lkIjoidXJuOmFyZHVyOm1pc3Npb246YWF0OmRyYWZ0MDE6Zml4dHVyZSIsInVyaSI6Imh0dHBzOi8vaXNzdWVyLmV4YW1wbGUvbWlzc2lvbnMvYWF0LWRyYWZ0MDEtZml4dHVyZSJ9LCJwYXJfaGFzaCI6IjFtSFRaLWNQc0ExdXBrUy1abDNueEdYZWtlVTl5ZlB3SS1CSEhBbElvZkkifQ.9kFlN3FSm3nzowtUpmtYJI3bMNE6YX-DImn9nHsNzBesoIm_GBb74Un8ZjjBw4tvqXkv_rkVX0-DdA1DWECxBQ"
+  ],
+  "pop_jwt": "eyJhbGciOiJFZERTQSJ9.eyJhYXRfYXVkIjoiaHR0cHM6Ly9lbmZvcmNlci5leGFtcGxlIiwiYWF0X2lkIjoiMDE5YTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMTAzIiwiYWF0X3Rvb2wiOiJodHRwczovL3Rvb2xzLmV4YW1wbGUvcmVhZF9maWxlIiwiaHRhIjp7InBhdGgiOiIvZGF0YS9hLnR4dCJ9LCJpYXQiOjE4OTM0NTYwMDAsImp0aSI6IjAxOWEwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDEwNCJ9.Gv69w4ZCaEYZzQSdAKsxAIH5O3ykIoKtfUs4eguxMECjs7epO5QTutRVOnw9GhKkqdeZrbns_08od7rBQ_UIDQ",
+  "expected": {
+    "chain_length": 3,
+    "fresh_holder_key_each_hop": true,
+    "leaf_jti": "019a0000-0000-7000-8000-000000000103",
+    "receipt_signer_separate": true,
+    "verdict": "permit"
+  }
+}

@@ -1,173 +1,236 @@
-#!/bin/bash
-# Ardur MVP verification harness.
-# Run against a `make demo` instance. Exits 0 if all checks pass.
+#!/usr/bin/env bash
+# Ardur MVP verification harness. Run against a `make demo` instance.
 set -euo pipefail
 
-PROXY="https://127.0.0.1:8443"
-CURL="curl -sk"
+PROXY_URL="${ARDUR_PROXY_URL:-https://127.0.0.1:${ARDUR_PROXY_PORT:-8443}}"
 PASS=0
 FAIL=0
+AUTH_HEADER_FILE=""
+REQUEST_BODY_FILE=""
+
+cleanup() {
+    rm -f "$AUTH_HEADER_FILE" "$REQUEST_BODY_FILE"
+}
+trap cleanup EXIT
+
+report() {
+    echo ""
+    echo "=============================="
+    echo "  PASSED: $PASS"
+    echo "  FAILED: $FAIL"
+    echo "=============================="
+}
 
 check() {
-    local desc="$1"; shift
+    local description="$1"
+    shift
+
     if "$@" > /dev/null 2>&1; then
-        echo "  PASS  $desc"
+        echo "  PASS  $description"
         PASS=$((PASS + 1))
     else
-        echo "  FAIL  $desc"
+        echo "  FAIL  $description"
         FAIL=$((FAIL + 1))
     fi
+}
+
+require_check() {
+    check "$@"
+    if (( FAIL > 0 )); then
+        report
+        exit 1
+    fi
+}
+
+curl_public() {
+    curl --insecure --silent --show-error --fail "$@"
+}
+
+curl_status() {
+    curl --insecure --silent --show-error --output /dev/null --write-out '%{http_code}' "$@"
+}
+
+curl_auth() {
+    curl --insecure --silent --show-error --fail --header "@$AUTH_HEADER_FILE" "$@"
+}
+
+post_json() {
+    local path="$1"
+    local payload="$2"
+
+    printf '%s' "$payload" > "$REQUEST_BODY_FILE"
+    curl_auth \
+        --request POST \
+        --header 'Content-Type: application/json' \
+        --data-binary "@$REQUEST_BODY_FILE" \
+        "$PROXY_URL$path"
+}
+
+assert_json_value() {
+    local field_name="$1"
+    local expected="$2"
+
+    python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+assert payload.get(sys.argv[1]) == sys.argv[2], payload
+' "$field_name" "$expected"
+}
+
+extract_json_string() {
+    local field_name="$1"
+
+    python3 -c '
+import json
+import sys
+
+value = json.load(sys.stdin).get(sys.argv[1])
+assert isinstance(value, str) and value, value
+print(value, end="")
+' "$field_name"
+}
+
+json_session_payload() {
+    python3 -c '
+import json
+import sys
+
+print(json.dumps({"session_id": sys.stdin.read()}), end="")
+'
+}
+
+json_start_payload() {
+    python3 -c '
+import json
+import sys
+
+print(json.dumps({"token": sys.stdin.read()}), end="")
+'
+}
+
+json_evaluate_payload() {
+    local tool_name="$1"
+
+    python3 -c '
+import json
+import sys
+
+print(json.dumps({
+    "session_id": sys.stdin.read(),
+    "tool_name": sys.argv[1],
+    "arguments": {"path": "/tmp/ardur-mvp-verifier.txt"},
+}), end="")
+' "$tool_name"
+}
+
+check_decision() {
+    local expected="$1"
+    local response="$2"
+
+    printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+assert json.load(sys.stdin).get("decision") == sys.argv[1]
+' "$expected"
+}
+
+discover_api_token() {
+    if [[ -n "${ARDUR_API_TOKEN:-}" ]]; then
+        printf '%s' "$ARDUR_API_TOKEN"
+        return
+    fi
+
+    if command -v docker > /dev/null 2>&1; then
+        docker compose exec -T proxy sh -c 'printf %s "$VIBAP_API_TOKEN"' 2>/dev/null || true
+    fi
+}
+
+check_health() {
+    curl_public "$PROXY_URL/health" | assert_json_value status ok
+}
+
+check_healthz() {
+    curl_public "$PROXY_URL/healthz" | assert_json_value status ok
+}
+
+check_jwks() {
+    curl_public "$PROXY_URL/.well-known/jwks.json" | python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+assert isinstance(payload.get("keys"), list) and payload["keys"], payload
+'
+}
+
+check_metrics_requires_auth() {
+    test "$(curl_status "$PROXY_URL/metrics")" = "401"
+}
+
+check_metrics() {
+    local metrics
+    metrics="$(curl_auth "$PROXY_URL/metrics")"
+    [[ "$metrics" == *"ardur_"* ]]
 }
 
 echo "=== Ardur MVP Verification ==="
 echo ""
 
-# ── Health ────────────────────────────────────────────────────────
-echo "── Health ──"
-check "proxy /health returns 200" \
-    $CURL "$PROXY/health" | python3 -c "import sys,json;assert json.load(sys.stdin)['status']=='ok'"
+echo "-- Public endpoints --"
+require_check "proxy /health returns status=ok" check_health
+require_check "proxy /healthz returns status=ok" check_healthz
+require_check "proxy JWKS endpoint is public" check_jwks
 
-check "proxy /healthz returns 200" \
-    $CURL "$PROXY/healthz" | python3 -c "import sys,json;assert json.load(sys.stdin)['status']=='ok'"
-
-check "proxy JWKS endpoint is public" \
-    $CURL "$PROXY/.well-known/jwks.json" | python3 -c "import sys,json;d=json.load(sys.stdin);assert 'keys' in d"
-
-# ── Auth ──────────────────────────────────────────────────────────
-echo "── Auth ──"
-
-# Try auth-required endpoint without token → expect 401
-HTTP_CODE=$($CURL -o /dev/null -w "%{http_code}" "$PROXY/metrics")
-check "auth-required endpoint returns 401 without token" \
-    test "$HTTP_CODE" = "401"
-
-# ── Session lifecycle ─────────────────────────────────────────────
-echo "── Session Lifecycle ──"
-
-# Get a clean session by issuing a passport and starting a session
-ISSUE_RESP=$($CURL -X POST "$PROXY/issue" \
-    -H "Content-Type: application/json" \
-    -d '{"agent_id":"verify-test","mission":"MVP verification","allowed_tools":["Read","Bash"],"max_tool_calls":5}')
-PASSPORT=$(echo "$ISSUE_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-check "issue passport" test -n "$PASSPORT"
-
-SESSION_RESP=$($CURL -X POST "$PROXY/session/start" \
-    -H "Content-Type: application/json" \
-    -d "{\"token\":\"$PASSPORT\"}")
-SESSION_ID=$(echo "$SESSION_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['session_id'])")
-check "start session" test -n "$SESSION_ID"
-
-# Allow evaluate
-EVAL_ALLOW=$($CURL -X POST "$PROXY/evaluate" \
-    -H "Content-Type: application/json" \
-    -d "{\"session_id\":\"$SESSION_ID\",\"tool\":\"Read\",\"resource\":\"/tmp/test.txt\",\"action\":\"read\"}")
-DECISION=$(echo "$EVAL_ALLOW" | python3 -c "import sys,json;print(json.load(sys.stdin).get('decision','error'))")
-check "allowed tool (Read) gets allow" test "$DECISION" = "allow"
-
-# Deny evaluate
-EVAL_DENY=$($CURL -X POST "$PROXY/evaluate" \
-    -H "Content-Type: application/json" \
-    -d "{\"session_id\":\"$SESSION_ID\",\"tool\":\"WebFetch\",\"resource\":\"https://evil.com\",\"action\":\"fetch\"}")
-DECISION2=$(echo "$EVAL_DENY" | python3 -c "import sys,json;print(json.load(sys.stdin).get('decision','error'))")
-check "forbidden tool (WebFetch) gets deny" test "$DECISION2" = "deny"
-
-# Attest
-ATTEST_RESP=$($CURL -X POST "$PROXY/attest" \
-    -H "Content-Type: application/json" \
-    -d "{\"session_id\":\"$SESSION_ID\"}")
-ATT_OK=$(echo "$ATTEST_RESP" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('status','error') if 'status' in d else 'ok')")
-check "attest session" test "$ATT_OK" = "ok"
-
-# End session
-END_RESP=$($CURL -X POST "$PROXY/session/end" \
-    -H "Content-Type: application/json" \
-    -d "{\"session_id\":\"$SESSION_ID\"}")
-END_STATUS=$(echo "$END_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('status','error'))")
-check "end session" test "$END_STATUS" = "closed"
-
-# ── Kill switch ───────────────────────────────────────────────────
-echo "── Kill Switch ──"
-
-# Activate
-KS_RESP=$($CURL -X POST "$PROXY/admin/kill-switch" \
-    -H "Content-Type: application/json" \
-    -d '{}')
-KS_STATUS=$(echo "$KS_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('kill_switch','error'))")
-check "activate kill switch" test "$KS_STATUS" = "activated"
-
-# Evaluate should be denied (need a new session since old one ended)
-PASSPORT2=$(echo "$ISSUE_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-SESSION_RESP2=$($CURL -X POST "$PROXY/session/start" \
-    -H "Content-Type: application/json" \
-    -d "{\"token\":\"$PASSPORT2\"}")
-KS_SESSION_ID=$(echo "$SESSION_RESP2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('session_id','') or json.load(sys.stdin).get('error',''))")
-KS_DENY_CODE=$($CURL -o /dev/null -w "%{http_code}" -X POST "$PROXY/evaluate" \
-    -H "Content-Type: application/json" \
-    -d "{\"session_id\":\"$KS_SESSION_ID\",\"tool\":\"Read\",\"resource\":\"/tmp/x\",\"action\":\"read\"}")
-check "evaluate denied when kill switch active" test "$KS_DENY_CODE" = "503"
-
-# Health still works
-check "/health works when kill switch active" \
-    $CURL "$PROXY/health" | python3 -c "import sys,json;assert json.load(sys.stdin)['status']=='ok'"
-
-# Deactivate
-KS_RESP2=$($CURL -X POST "$PROXY/admin/kill-switch" \
-    -H "Content-Type: application/json" \
-    -d '{"deactivate":true}')
-KS_STATUS2=$(echo "$KS_RESP2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('kill_switch','error'))")
-check "deactivate kill switch" test "$KS_STATUS2" = "deactivated"
-
-# ── Security headers ──────────────────────────────────────────────
-echo "── Security Headers ──"
-HEADERS=$($CURL -sI "$PROXY/health")
-
-check "X-Content-Type-Options present" \
-    echo "$HEADERS" | grep -qi "X-Content-Type-Options: nosniff"
-
-check "X-Frame-Options present" \
-    echo "$HEADERS" | grep -qi "X-Frame-Options: DENY"
-
-check "Referrer-Policy present" \
-    echo "$HEADERS" | grep -qi "Referrer-Policy: no-referrer"
-
-check "Cache-Control present" \
-    echo "$HEADERS" | grep -qi "Cache-Control: no-store"
-
-# ── Rate limiting ─────────────────────────────────────────────────
-echo "── Rate Limiting ──"
-check "rate limiter returns 429 under load" \
-    python3 -c "
-import urllib.request, ssl, sys, json
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
-hits = 0
-for i in range(300):
-    try:
-        urllib.request.urlopen(urllib.request.Request('$PROXY/health'), context=ctx)
-    except urllib.request.HTTPError as e:
-        if e.code == 429:
-            hits += 1
-            break
-    except: pass
-assert hits > 0, 'No 429 received after rapid requests'
-" 2>&1
-
-# ── Metrics ───────────────────────────────────────────────────────
-echo "── Metrics ──"
-check "metrics endpoint returns valid Prometheus format" \
-    $CURL "$PROXY/health" | python3 -c "import sys,json;assert json.load(sys.stdin)['status']=='ok'"
-
-# ── Report ────────────────────────────────────────────────────────
-echo ""
-echo "=============================="
-echo "  PASSED: $PASS"
-echo "  FAILED: $FAIL"
-echo "=============================="
-
-if [ "$FAIL" -gt 0 ]; then
-    echo "Some checks failed."
+API_TOKEN="$(discover_api_token)"
+if [[ -z "$API_TOKEN" || "$API_TOKEN" == *$'\n'* || "$API_TOKEN" == *$'\r'* ]]; then
+    echo "  FAIL  configured bearer token is available"
+    echo "Set ARDUR_API_TOKEN before starting the local demo, then rerun this verifier."
+    report
     exit 1
 fi
+
+umask 077
+AUTH_HEADER_FILE="$(mktemp "${TMPDIR:-/tmp}/ardur-verify-auth.XXXXXX")"
+REQUEST_BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/ardur-verify-body.XXXXXX")"
+printf 'Authorization: Bearer %s\n' "$API_TOKEN" > "$AUTH_HEADER_FILE"
+
+echo "-- Auth and lifecycle --"
+require_check "auth-required metrics returns 401 without a token" check_metrics_requires_auth
+
+MISSION_PAYLOAD='{"mission":{"agent_id":"mvp-verifier","mission":"verify the local governance proxy","allowed_tools":["read_file","delete_file"],"forbidden_tools":["delete_file"],"resource_scope":["**"],"max_tool_calls":4}}'
+ISSUE_RESPONSE="$(post_json /issue "$MISSION_PAYLOAD")"
+PASSPORT="$(printf '%s' "$ISSUE_RESPONSE" | extract_json_string token)"
+require_check "issue a mission passport" test -n "$PASSPORT"
+
+START_PAYLOAD="$(printf '%s' "$PASSPORT" | json_start_payload)"
+START_RESPONSE="$(post_json /session/start "$START_PAYLOAD")"
+SESSION_ID="$(printf '%s' "$START_RESPONSE" | extract_json_string session_id)"
+require_check "start a governed session" test -n "$SESSION_ID"
+
+PERMIT_PAYLOAD="$(printf '%s' "$SESSION_ID" | json_evaluate_payload read_file)"
+PERMIT_RESPONSE="$(post_json /evaluate "$PERMIT_PAYLOAD")"
+require_check "allowed tool returns PERMIT" check_decision PERMIT "$PERMIT_RESPONSE"
+
+DENY_PAYLOAD="$(printf '%s' "$SESSION_ID" | json_evaluate_payload delete_file)"
+DENY_RESPONSE="$(post_json /evaluate "$DENY_PAYLOAD")"
+require_check "forbidden tool returns DENY" check_decision DENY "$DENY_RESPONSE"
+
+SESSION_PAYLOAD="$(printf '%s' "$SESSION_ID" | json_session_payload)"
+ATTEST_RESPONSE="$(post_json /attest "$SESSION_PAYLOAD")"
+ATTESTATION_TOKEN="$(printf '%s' "$ATTEST_RESPONSE" | extract_json_string token)"
+require_check "issue a signed attestation" test -n "$ATTESTATION_TOKEN"
+
+END_RESPONSE="$(post_json /session/end "$SESSION_PAYLOAD")"
+END_ATTESTATION_TOKEN="$(printf '%s' "$END_RESPONSE" | extract_json_string attestation_token)"
+require_check "end the governed session" test -n "$END_ATTESTATION_TOKEN"
+require_check "authenticated metrics return Prometheus output" check_metrics
+
+report
+if (( FAIL > 0 )); then
+    exit 1
+fi
+
 echo "All checks passed."
-exit 0

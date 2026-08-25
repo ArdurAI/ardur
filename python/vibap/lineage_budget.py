@@ -358,8 +358,6 @@ class FileLineageBudgetLedger(LineageBudgetLedger):
             tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
             os.replace(tmp, path)
         except Exception:
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink()
-            except OSError:
-                pass
             raise

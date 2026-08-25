@@ -37,7 +37,9 @@ DECLARED_TELEMETRY_FIELDS: tuple[str, ...] = (
 )
 
 
-_VISIBILITY_FULL = "full"  # proxy._missing_declared_telemetry requires this exact string.
+_VISIBILITY_FULL = (
+    "full"  # proxy._missing_declared_telemetry requires this exact string.
+)
 _PROVENANCE = "claude_code_tool_input"
 _UNKNOWN_TARGET = "<unknown>"
 
@@ -143,15 +145,12 @@ def _agent_dispatch_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
         or _safe_str(tool_input.get("type"))
         or "<unknown>"
     )
-    description = (
-        _safe_str(tool_input.get("description"))
-        or _safe_str(tool_input.get("prompt"))
-        or _safe_str(tool_input.get("task"))
-        or _safe_str(tool_input.get("request"))
-    )[:64]
     return {
         "action_class": "dispatch",
-        "target": f"{subagent_type}:{description}",
+        # Prompts and descriptions may contain credentials or private task
+        # content. Classify by the provider's agent type only; receipts retain
+        # an arguments hash but never copy the instruction text into telemetry.
+        "target": subagent_type,
         "resource_family": "agent",
         "content_class": "user_instruction",
         "content_provenance": _PROVENANCE,
@@ -214,9 +213,7 @@ def _notebook_edit_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
 
 def _mcp_fallback_mapping(tool_input: Mapping[str, Any]) -> dict[str, Any]:
     target = (
-        _safe_str(tool_input.get("uri"))
-        or _safe_str(tool_input.get("name"))
-        or "<mcp>"
+        _safe_str(tool_input.get("uri")) or _safe_str(tool_input.get("name")) or "<mcp>"
     )
     return {
         "action_class": "invoke",
@@ -261,6 +258,6 @@ def map_tool_call(*, tool_name: str, tool_input: Mapping[str, Any]) -> dict[str,
     arguments: dict[str, Any] = dict(tool_input)
     arguments.update(mapper(tool_input))
     arguments["tool_name"] = tool_name
-    arguments.setdefault("envelope_signature_valid", True)
+    arguments.setdefault("envelope_signature_valid", "not-verified")
     arguments.setdefault("observed_manifest_digest", "not-observed")
     return arguments

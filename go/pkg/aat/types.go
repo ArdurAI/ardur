@@ -1,30 +1,27 @@
-// Package aat defines the skeleton types for the Attenuating Authorization
-// Tokens (AAT) profile adopted by VIBAP.
-//
-// SECURITY-RELEVANT NOTICE — DO NOT USE THIS PACKAGE AS A VERIFIER (FIX-10
-// from S2 hostile audit, 2026-04-28). The AAT chain verifier in this
-// package is a fail-closed stub: VerifyChain returns VerdictDeny on every
-// call, regardless of inputs. Production callers MUST NOT depend on this
-// package's VerifyChain to enforce AAT §7. Until the TODO list in
-// chain_verify.go is closed, AAT enforcement happens in the Python
-// reference proxy (python/vibap/aat_adapter.py), not here. Importing this
-// package gives you the data types and the fail-closed stub, nothing more.
+// Package aat implements the JWT path of the Attenuating Authorization Tokens
+// (AAT) profile adopted by Ardur. It includes issuance, attenuation,
+// proof-of-possession, constraint, and chain-verification logic.
 //
 // Spec reference:
 //   - draft-niyikiza-oauth-attenuating-agent-tokens-00
-//   - Section 3: Token Types and Structure
+//   - draft-niyikiza-oauth-attenuating-agent-tokens-01
 //
-// This package intentionally lands only the type system, function signatures,
-// and verification/derivation scaffolding required by PLAN.md §B.5. The
-// verifier, derivation logic, and PoP handling are left as explicit follow-up
-// work.
+// The companion CWT integer claim-key mapping remains pending; see ClaimKeys.
 package aat
 
-import jose "github.com/go-jose/go-jose/v4"
+import (
+	"time"
+
+	jose "github.com/go-jose/go-jose/v4"
+)
 
 const (
-	AuthorizationDetailType = "attenuating_agent_token"
-	SigningAlgorithmEdDSA   = "EdDSA"
+	AuthorizationDetailType  = "attenuating_agent_token"
+	SigningAlgorithmEdDSA    = "EdDSA"
+	SupportedDraftRevision   = "draft-niyikiza-oauth-attenuating-agent-tokens-00"
+	Draft01Revision          = "draft-niyikiza-oauth-attenuating-agent-tokens-01"
+	UnsupportedDraftRevision = Draft01Revision
+	DGProfileV02             = "ardur.dg.aat-draft-01.v0.2"
 
 	// TODO(B.5/Appendix-D.3): assign integer claim keys in the companion CWT
 	// profile document once Appendix D.3 is translated into repo-local
@@ -91,6 +88,11 @@ type Token struct {
 	ParentHash         string                `json:"par_hash,omitempty"`
 	Authorization      []AuthorizationDetail `json:"authorization_details,omitempty"`
 
+	// DG v0.2 profile claims. They are absent from the draft-00 profile.
+	Profile      string   `json:"ardur_dg_profile,omitempty"`
+	MissionRef   any      `json:"mission_ref,omitempty"`
+	ApprovalRefs []string `json:"ardur_approval_refs,omitempty"`
+
 	// Unknown top-level claims are intentionally preserved for future extension
 	// handling. Per AAT §3.4, unrecognized top-level claims do not by themselves
 	// invalidate a token.
@@ -129,7 +131,8 @@ type ToolMap map[string]ArgumentConstraintMap
 
 // ArgumentConstraintMap maps an argument name to its governing constraint.
 //
-// Closed-world semantics apply when the map is non-empty (AAT §3.3).
+// An empty map authorizes the tool without argument restrictions. Closed-world
+// semantics apply when the map is non-empty (AAT §3.3).
 type ArgumentConstraintMap map[string]*Constraint
 
 // Constraint is the wire-format union for all core AAT argument constraints
@@ -174,7 +177,17 @@ type PoPJWT struct {
 	IssuedAt     int64          `json:"iat"`
 	AATID        string         `json:"aat_id"`
 	AATTool      string         `json:"aat_tool"`
+	AATAudience  string         `json:"aat_aud,omitempty"`
 	HTA          map[string]any `json:"hta"`
+}
+
+// VerifyChainOpts carries Ardur DG profile inputs that are intentionally not
+// inferred from attacker-controlled token claims.
+type VerifyChainOpts struct {
+	Now                   time.Time
+	Audience              string
+	ReceiptSignerJWK      jose.JSONWebKey
+	SatisfiedApprovalRefs map[string]struct{}
 }
 
 // ChainLink captures one adjacent parent/child relationship in a chain.

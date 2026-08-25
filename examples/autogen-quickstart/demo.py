@@ -113,17 +113,29 @@ def _make_autogen_governed_tools(proxy, session_ref, workspace):
 
 
 def _make_autogen_multiagent_tools(engine):
-    def spawn_subagent(name: str, mission: str, allowed_tools: list[str], max_tool_calls: int = 2) -> str:
-        """Spawn a governed child agent with attenuated allowed_tools and budget."""
-        return engine.spawn_subagent(name, mission, allowed_tools, max_tool_calls)
+    def spawn_subagent(
+        name: str,
+        mission: str,
+        allowed_tools: list[str],
+        resource_scope: list[str],
+        max_tool_calls: int = 2,
+    ) -> str:
+        """Spawn a governed child with attenuated tools, resources, and budget."""
+        return engine.spawn_subagent(
+            name,
+            mission,
+            allowed_tools,
+            resource_scope,
+            max_tool_calls,
+        )
 
-    def run_subagent(child_jti: str, task: str) -> str:
-        """Run one already-spawned child agent by child_jti."""
-        return engine.run_subagent(child_jti, task)
+    def run_subagent(child_handle: str, task: str) -> str:
+        """Run one spawned child using its exact opaque child_handle."""
+        return engine.run_subagent(child_handle, task)
 
-    def close_subagent(child_jti: str) -> str:
-        """Close one child agent and issue its lifecycle attestation."""
-        return engine.close_subagent(child_jti)
+    def close_subagent(child_handle: str) -> str:
+        """Close one child by exact opaque handle and issue its attestation."""
+        return engine.close_subagent(child_handle)
 
     return [
         FunctionTool(spawn_subagent, description="Spawn a governed child agent."),

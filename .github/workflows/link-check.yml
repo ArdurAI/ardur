@@ -2,9 +2,6 @@ name: link-check
 
 on:
   pull_request:
-    paths:
-      - "**/*.md"
-      - ".github/workflows/link-check.yml"
   schedule:
     - cron: "0 14 * * 1"  # Mondays 14:00 UTC
   workflow_dispatch:
@@ -16,23 +13,27 @@ jobs:
   lychee:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
       - name: Restore lychee cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: .lycheecache
           key: cache-lychee-${{ github.sha }}
           restore-keys: cache-lychee-
 
       - name: Run lychee
-        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411  # v2.8.0
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8  # v2.9.0
         with:
           # Excludes:
           # - github.com/.../security/advisories/new: requires being
           #   signed in to GitHub; unauthenticated lychee gets a redirect
           #   that GitHub then 404s. Cannot be unblocked without
           #   authenticating the lychee runner.
+          # - developers.redhat.com, medium.com, answers.uillinois.edu,
+          #   theregister.com: these sites block automated requests with
+          #   403 Forbidden. The URLs are legitimate research citations,
+          #   so the domains are excluded rather than removing references.
           # (Discussions exclude removed 2026-04-28: Discussions are now
           # enabled on the repo so the discussions tab and category URLs
           # return 200 to unauthenticated callers.)
@@ -40,8 +41,30 @@ jobs:
             --cache
             --max-cache-age 7d
             --no-progress
+            --max-retries 3
+            --retry-wait-time 5
             --accept 200,206,429
             --exclude 'github\.com/.*/security/advisories/new(/.*)?$'
+            --exclude 'developers\.redhat\.com'
+            --exclude 'medium\.com'
+            --exclude 'answers\.uillinois\.edu'
+            --exclude 'theregister\.com'
             --exclude-path '^site/content/'
             './**/*.md'
           fail: true
+
+  link-check:
+    name: link-check
+    if: ${{ always() }}
+    needs: lychee
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require link validation
+        env:
+          LYCHEE: ${{ needs.lychee.result }}
+        run: |
+          set -euo pipefail
+          if [ "$LYCHEE" != "success" ]; then
+            echo "::error::Link validation concluded $LYCHEE"
+            exit 1
+          fi

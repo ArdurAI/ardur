@@ -62,48 +62,26 @@ auto-close on the next CodeQL scan against `main` post-merge.
 - **File:** `python/vibap/proxy.py:5031` (banner-print site)
 - **Rule message:** *"This expression logs sensitive data (password)
   as clear text."*
-- **Disposition:** Won't fix
-- **Justification (verbatim, 280-char limit):** *"Operator-bootstrap
-  UX. Banner uses `_display_token()` abbreviation by default; full
-  token printed only when `VIBAP_PRINT_FULL_TOKEN=1`. CodeQL cannot
-  track the abbreviation predicate. 11-round S2 audit (101 findings)
-  reviewed this surface."*
-- **Extended reasoning:** When the proxy starts with auth required,
-  it prints the API token to the operator's terminal so the
-  operator can copy it into client configuration
-  (`Authorization: Bearer <token>` headers, `VIBAP_API_TOKEN` env
-  var for hooks). The default print path uses `_display_token()`,
-  which abbreviates to a prefix-suffix pattern unless the operator
-  explicitly opts into full-token print via the
-  `VIBAP_PRINT_FULL_TOKEN=1` environment variable. CodeQL's
-  data-flow analysis treats any string-formatted token in a print
-  call as cleartext logging without tracking the abbreviation
-  predicate. The token *must* be displayable at startup for the
-  operator to function; replacing the banner with no-op would
-  break operator setup. The S2 audit cycle reviewed this surface
-  in rounds 1–11 and did not flag it as a real concern.
+- **Disposition:** Superseded by code fix on `dev` (2026-06-04)
+- **Justification:** The startup banner no longer prints the bearer token or
+  supports `VIBAP_PRINT_FULL_TOKEN`. It prints only a context-bound token
+  fingerprint and instructs operators to provide the actual token via
+  `VIBAP_API_TOKEN` or `--api-token`.
+- **Extended reasoning:** This section records the original 2026-04-29 triage.
+  The 2026-06-04 security hardening removed the full-token display path rather
+  than continuing to rely on a false-positive dismissal.
 
 ### #2 — `py/clear-text-logging-sensitive-data` (HIGH)
 
 - **File:** `python/vibap/proxy.py:5040` (stderr structured line)
 - **Rule message:** *"This expression logs sensitive data (password)
   as clear text."*
-- **Disposition:** False positive
-- **Justification (verbatim, 280-char limit):** *"Stderr line emits
-  ONLY `_redact_token(api_token)` — an 8-prefix/4-suffix
-  fingerprint, never the cleartext bearer. CodeQL taint cannot
-  propagate through the redaction string-truncation. The actual
-  bytes are 'token_fp=PREFIX…SUFFIX'."*
-- **Extended reasoning:** The stderr line at `proxy.py:5040` is the
-  audit fingerprint emission, *not* the operator-display banner.
-  The format string is
-  `f"[vibap] auth=on source={token_source} token_fp={_redact_token(api_token)}"`,
-  and `_redact_token()` returns an 8-char prefix + ellipsis +
-  4-char suffix — not the full token bytes. CodeQL's taint
-  analysis sees `api_token` flow into the format expression and
-  reports it as cleartext, but the redaction function's
-  string-truncation is opaque to taint propagation. The actual
-  emitted line never carries the cleartext bearer.
+- **Disposition:** Superseded by code fix on `dev` (2026-06-04)
+- **Justification:** The stderr line now emits only `token=redacted`, not a
+  digest, fingerprint, prefix/suffix slice, or cleartext token.
+- **Extended reasoning:** This section records the original 2026-04-29 triage.
+  The 2026-06-04 hardening removed direct token dataflow from both the startup
+  banner and stderr audit line.
 
 ### #3 — `py/overly-permissive-file` (HIGH)
 
@@ -288,19 +266,18 @@ Triaged and dismissed on the same day.
 - **Rule message:** *"Sensitive data (password) is used in a hashing
   algorithm (SHA256) that is insecure for password hashing, since
   it is not a computationally expensive hash function."*
-- **Disposition:** False positive
-- **Justification (verbatim, 280-char limit):** *"SHA-256 normalizes
-  32-byte bearer length pre `hmac.compare_digest`, defeating
-  `_tscmp` length-oracle. Token is machine-generated high-entropy
-  bearer, not user password. KDF use would break constant-time
-  invariant. R7/R8 audit reviewed (`proxy.py:4571-4580` comment)."*
+- **Disposition:** Superseded by code fix on `dev` (2026-06-04)
+- **Justification:** Bearer-auth normalization now uses fixed-length compare
+  material before `hmac.compare_digest`; the bare SHA-256 token-hashing site
+  was removed.
 - **Extended reasoning:**
-  CodeQL's `py/weak-sensitive-data-hashing` rule fires on the
-  surface shape — `hashlib.sha256(...)` near a variable named like
-  a "password" — without semantic context for what the hash is
-  *for*. The actual security predicate at this site is the
-  defense the Round-7 / Round-8 audit added against a
-  length-oracle attack on `hmac.compare_digest`:
+  This section records the original 2026-04-29 triage. The underlying security
+  predicate remains fixed-length comparison before `hmac.compare_digest`, but
+  the 2026-06-04 hardening moved from bare SHA-256 to
+  `_api_token_compare_material()` to avoid both the CodeQL password-hashing
+  shape and direct token dataflow.
+
+  Original context for the length-oracle defense:
 
   - CPython's `_tscmp` (the C function backing
     `hmac.compare_digest`) iterates `min(len_a, len_b)` and

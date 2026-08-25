@@ -85,19 +85,22 @@ type AgentPassportSpec struct {
 
 // IdentitySpec configures Layer 1 identity binding.
 type IdentitySpec struct {
-	// SPIFFEID is the expected SPIFFE ID for the agent workload.
-	// If empty, the operator fetches it from the SPIRE agent.
+	// SPIFFEID is caller-provided workload identity input. The operator does not
+	// authenticate it. If empty, the issued credential omits spiffe_id and the
+	// resource status reports that workload identity is unverified.
 	// +optional
 	SPIFFEID string `json:"spiffeID,omitempty"`
 
-	// OwnerID is the SPIFFE ID of the deploying human or service account.
+	// OwnerID is SPIFFE-formatted deployer attribution. It is self-asserted;
+	// the operator does not authenticate this ownership relation.
 	OwnerID string `json:"ownerID"`
 
 	// A2ACardRef is a URL to the agent's A2A Agent Card.
 	// +optional
 	A2ACardRef string `json:"a2aCardRef,omitempty"`
 
-	// UseSpire enables automatic SPIFFE ID fetching from the SPIRE agent.
+	// UseSpire is reserved for future SPIRE-backed identity resolution. The
+	// operator does not currently read this field or fetch identity from SPIRE.
 	// +optional
 	UseSpire bool `json:"useSpire,omitempty"`
 }
@@ -377,12 +380,13 @@ type AgentPassportStatus struct {
 
 // Condition types for AgentPassport.
 const (
-	ConditionReady            = "Ready"
-	ConditionCredentialIssued = "CredentialIssued" // #nosec G101 -- Status condition name, not a secret
-	ConditionPolicyCompiled   = "PolicyCompiled"
-	ConditionBaselineReady    = "BaselineReady"
-	ConditionTrustScored      = "TrustScored"
-	ConditionGovernanceReady  = "GovernanceReady"
+	ConditionReady              = "Ready"
+	ConditionCredentialIssued   = "CredentialIssued" // #nosec G101 -- Status condition name, not a secret
+	ConditionPolicyCompiled     = "PolicyCompiled"
+	ConditionBaselineReady      = "BaselineReady"
+	ConditionTrustScored        = "TrustScored"
+	ConditionGovernanceReady    = "GovernanceReady"
+	ConditionIdentityUnverified = "IdentityUnverified"
 )
 
 // Condition reasons.
@@ -397,6 +401,7 @@ const (
 	ReasonGovernanceEnabled  = "GovernanceEnabled"
 	ReasonGovernanceDisabled = "GovernanceDisabled"
 	ReasonGovernanceInvalid  = "GovernanceInvalid"
+	ReasonMissingSPIFFEID    = "MissingSPIFFEID"
 )
 
 var allowedGovernanceSideEffects = map[string]struct{}{

@@ -10,12 +10,13 @@ evidence_levels: ["code-and-doc", "doc-and-manifest"]
 ---
 
 The public repo is code-bearing today. LangChain, LangGraph, and AutoGen
-quickstarts run end-to-end; the Ardur Personal Hub service and Claude Code
-plugin ship with signed receipts and a Markdown profile path; dedicated Python
-(3.10 + 3.13) and Go CI gate every push. A tagged packaged release with a
-regenerated Homebrew formula, runnable OpenAI Agents SDK and Google ADK
-adapters, Codex and Claude Desktop integrations, and broader deployment
-material remain in the next hardening wave.
+quickstarts run end-to-end; the OpenAI Agents SDK and Google ADK directories
+ship runnable no-key fixtures for visible tool-dispatch governance; the Ardur
+Personal Hub service and Claude Code plugin ship with signed receipts and a
+Markdown profile path; dedicated Python (3.10 + 3.13) and Go CI gate every
+push. A tagged packaged release with a regenerated Homebrew formula, future
+live-provider wrapper evidence, Codex and Claude Desktop integrations, and
+broader deployment material remain in the next hardening wave.
 
 Use [Use And Troubleshooting]({{< relref "use-and-troubleshooting.md" >}}) as
 the hosted documentation map for README material, quickstarts, deployment

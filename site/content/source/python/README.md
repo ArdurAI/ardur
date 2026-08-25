@@ -2,7 +2,7 @@
 title: "Ardur — Python Reference Implementation"
 description: "The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and rec"
 source_path: "python/README.md"
-source_sha256: "3737f09ff018eb69074fd6850ff2c7c9466a8691f06ca6eb3666b6c1a3f830a9"
+source_sha256: "5b8df320b3d2e3c86b1e318b07d64225496a2c93b0e6697ddea2d44751c614b8"
 weight: 100
 maturity: ["public-now"]
 claim_types: ["runtime-boundary"]
@@ -19,15 +19,29 @@ This page is generated from the public repository source file. Edit the source f
 
 The public Python runtime for Ardur lives here: a runtime governance and evidence layer for AI agents that issues signed mission passports, enforces them at execution time, and records receipts you can verify after the fact.
 
-A note on names: the eventual PyPI package is `ardur`, but the internal Python module is still `vibap`. That's a technical-lineage thing — VIBAP is the original research-era name for the protocol, not a product codename, and renaming the import path would have churned every test and example for no real benefit. Treat `vibap` as an implementation detail; everything user-facing speaks `ardur`.
+A note on names: the distribution and CLI are `ardur`, but the internal Python
+module is still `vibap`. That import name preserves protocol lineage without
+churning every integration. Treat `vibap` as an implementation detail;
+everything user-facing speaks `ardur`.
+
+## Install
+
+Public-index availability is tracked in the repository's root `STATUS.md`.
+After it is marked public, install a release on Python 3.10 or newer with:
+
+```bash
+python -m pip install ardur
+```
+
+From a source checkout, install the same package metadata with:
+
+```bash
+python -m pip install -e python/
+```
 
 ## Quickstart (no API keys required)
 
 ```bash
-# from the ardur repo root
-cd python
-pip install -e .
-
 # Issue a passport for a mission
 ardur issue \
   --agent-id alice \
@@ -39,14 +53,121 @@ ardur issue \
 ardur verify --token <token-from-issue-output>
 ```
 
-That walks through key generation, mission compilation, ES256-signed passport issuance, and verification — all local, no LLM calls.
+That walks through key generation, mission compilation, ES256-signed passport
+issuance, and verification - all local, no LLM calls.
+
+Run the conservative personal action-firewall proof with one command:
+
+```bash
+ardur personal-firewall demo
+```
+
+The provider-free demo preserves the agent's normal permission prompt for a
+safe workspace read, denies outside-workspace writes, secret-like arguments,
+and external network access, then verifies the signed receipt chain. Its
+session cap is measured in governed tool calls; monetary cost remains unknown
+unless an adapter supplies trusted signed cost telemetry. Absolute local scope
+paths are canonicalized before a permit, which rejects symlink escapes; the
+pre-dispatch hook still cannot prove hard-link identity or prevent post-check
+path replacement before the tool opens the path.
+
+Every durable receipt sink also queues an idempotent local transparency-anchor
+sidecar. Network submission is a separate `ardur anchor` operation, and
+`ardur verify --anchor-bundle ...` verifies completed proofs offline with an
+independently supplied log public key. See
+[`docs/specs/transparency-anchor-v0.1.md`](/__ardur_internal__/source/docs/specs/transparency-anchor-v0.1/).
+
+The package also ships a no-service offline verifier and synthetic full-evidence
+fixture:
+
+```bash
+ardur offline-verification-fixture --output ./offline-fixture
+ardur-verify ./offline-fixture/offline-verification-v0.1.json \
+  --receipt-public-key ./offline-fixture/offline-verification-v0.1-receipt-public.pem \
+  --transparency-log-key ./offline-fixture/offline-verification-v0.1-log-public.pem \
+  --receiver-public-key ./offline-fixture/offline-verification-v0.1-receiver-public.pem \
+  --html-report ./offline-fixture/verified.html
+```
+
+The evidence bundle never supplies its own trusted keys. The three public PEMs
+are explicit verifier inputs whose fingerprints must be checked out of band.
+See
+[`docs/specs/offline-verification-bundle-v0.1.md`](/__ardur_internal__/source/docs/specs/offline-verification-bundle-v0.1/).
+
+Correlate a verified receipt journal with an explicit local sensor format:
+
+```bash
+ardur evidence correlate \
+  ../docs/specs/conformance/runtime-evidence-v0.1/receipts.jsonl \
+  ../docs/specs/conformance/runtime-evidence-v0.1/tetragon.jsonl \
+  --source-format tetragon \
+  --receipt-public-key \
+    ../docs/specs/conformance/runtime-evidence-v0.1/receipt-public.pem
+```
+
+This is a no-network offline inspection path. Imported Tetragon/Falco or
+normalized JSON is `imported_unverified`; match confidence does not authenticate
+the sensor or prove complete coverage. Reports exclude raw commands, paths,
+destinations, source identifiers, credentials, and local paths. See the
+[`Runtime Evidence Correlation Profile`](/__ardur_internal__/source/docs/specs/runtime-evidence-correlation-v0.1/).
+
+Export a verified receipt chain as redacted JSONL or standards-shaped
+OTLP/HTTP JSON traces and logs:
+
+```bash
+ardur telemetry export receipts.jsonl \
+  --receipt-public-key receipt-public.pem \
+  --format jsonl \
+  --output governance-events.jsonl
+```
+
+Add `--otlp-endpoint https://collector.example` to post one trace request and
+one log request. Remote collectors require HTTPS; plain HTTP is limited to
+loopback. The exporter verifies signatures and chain linkage before projection
+and excludes raw prompts, tool arguments, targets, paths, and policy-reason
+prose. Collector credentials can be supplied through the standard
+`OTEL_EXPORTER_OTLP*_HEADERS` environment variables.
+
+Actor and verifier IDs are signature-covered receipt claims. The exporter does
+not validate a SPIFFE SVID or bind the receipt signing key to workload identity;
+JSONL and OTLP output disclose that boundary explicitly.
+
+Run the Linux governance-overhead smoke contract from a source checkout:
+
+```bash
+python ../scripts/run-linux-governance-benchmark.py \
+  --mode smoke \
+  --source-ref "$(git rev-parse HEAD)" \
+  --output-dir /tmp/ardur-linux-benchmark
+```
+
+Smoke mode validates execution and report shape; it is not performance
+evidence. The manual Linux stress profile and optional paired-sensor contract
+are documented in the
+[`Linux Governance Overhead Harness`](/__ardur_internal__/source/docs/benchmarks/linux-governance-overhead/).
+
+Generate and self-verify the synthetic DRP draft-10 profile fixture:
+
+```bash
+ardur drp-profile-fixture --output ./drp-fixture
+```
+
+The output directory may be empty or contain only a prior copy of the six
+declared fixture artifacts; unexpected entries are rejected before writing.
+
+The fixture emits a real root/child/grandchild P-256 chain and persists only
+public trust keys, receipts, a finite tool universe, explicitly preverified
+context facts, and a verification report. Its concrete action includes the
+resource, arguments, side-effect class, and cwd enforced by the profile. It is
+implementation evidence, not raw RFC 3161 proof, independent interoperability,
+IETF conformance, or current revocation evidence. See
+[`docs/specs/ardur-drp-profile-v0.1.md`](/__ardur_internal__/source/docs/specs/ardur-drp-profile-v0.1/).
 
 ## Ardur Personal Hub
 
 The regular-user path uses the same package dependencies and CLI:
 
 ```bash
-pip install -e .
 ardur profile init --template read-only --path ARDUR.md
 ardur protect claude-code --profile ARDUR.md
 ardur doctor-claude-code
@@ -83,17 +204,62 @@ python/
 │   ├── claude_code_hook.py      # Claude Code PreToolUse/PostToolUse adapter
 │   ├── claude_code_telemetry.py # Claude Code tool → declared-telemetry mapper
 │   ├── cli.py                   # ardur CLI entrypoint
+│   ├── linux_benchmark.py       # Linux governance overhead report harness
 │   ├── mission.py               # Mission Declaration parsing + cache
 │   ├── passport.py              # Passport issuance + verify
 │   ├── personal_hub.py          # Local Ardur Personal Hub service + adapter API
 │   ├── policy_backend.py        # PolicyBackend protocol
 │   ├── proxy.py                 # Governance proxy + session lifecycle
 │   ├── receipt.py               # Execution Receipt issuance + verify
+│   ├── risk_budget.py           # Typed impact contracts + atomic risk ledger
+│   ├── runtime_evidence.py      # Offline normalized/Tetragon/Falco correlation
 │   └── ...
-└── tests/                  # Curated test set (~23 files)
+└── tests/                  # Curated runtime, adapter, security, and release tests
 ```
 
-A couple of pinned dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format we use for delegated capabilities) and `spiffe>=0.2,<0.3` (workload identity). These pins are deliberate — both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+A couple of runtime dependencies worth flagging: `biscuit-python==0.4.0` (the Biscuit token format used for delegated capabilities) and `spiffe>=0.2,<0.4` (workload identity). They are ordinary project dependencies, not dev-only extras, because shipped modules import them and the proxy/Hub can use them at runtime. The constraints are deliberate: both libraries have had breaking minor releases, so we hold them until we explicitly retest.
+
+## Typed dangerous-action budgets
+
+Library callers can register authenticated `ToolRiskContract` definitions
+before constructing `GovernanceProxy`. An optional signed `risk_budget`
+Mission Passport claim then enforces typed per-action caps and atomic
+session/agent/lineage ceilings before dispatch. Each governed call requires a
+unique `risk_request_id`; after `PERMIT`, the executor must call
+`record_risk_outcome(..., outcome="committed")` once execution may have
+started, or use `outcome="released"` only when it never started. Unresolved or
+quarantined reservations block session finalization. See the full
+[risk-budget reference](/__ardur_internal__/source/docs/reference/risk-budgets/) for schemas,
+failure behavior, privacy, and cost boundaries.
+
+Library deployments that enable Biscuit JWT-SVID holder binding configure a
+server-owned Biscuit issuer key, `TrustBundle`, and expected audience on
+`GovernanceProxy`; clients present only `peer_jwt_svid`. Once configured, the
+SVID is mandatory and per-call inputs cannot replace the issuer, JWKS, trust
+domain, or audience. Without server trust configuration, Biscuit sessions
+remain explicitly `svid_bound=false`. JWT-SVID is still a bearer credential
+with a bounded replay window.
+
+The shipped `ardur start` and `ardur hub` commands fetch and retain their own
+X.509-SVID before serving when `--spiffe-endpoint-socket` or
+`SPIFFE_ENDPOINT_SOCKET` is configured. The shipped Compose path uses
+`unix:///run/spire/sockets/agent.sock`; a configured but unreachable or
+unusable socket fails startup. The fetched private key remains in memory and is
+not written by this path. `ardur start` also exposes operator-owned bundle,
+Biscuit issuer-public-key, trust-domain, and audience settings for the inbound
+verification described above. See the
+[S0–S2 workload-identity reference](/__ardur_internal__/source/docs/reference/spiffe-workload-identity/).
+
+Neither startup acquisition nor peer verification resolves identity from
+SPIRE during credential issuance. Python credential `spiffe_id` values remain
+caller-provided and self-asserted at this stage.
+
+Library adapters for metered tools can also configure operator-owned quote
+snapshots and signed session/agent/lineage spend ceilings. The proxy reserves
+integer token and currency-micro upper bounds before returning `PERMIT`, then
+settles trusted usage or conservatively quarantines missing evidence. See the
+[pre-action spend budget reference](/__ardur_internal__/source/docs/reference/spend-budgets/); no
+provider prices are hard-coded or fetched on the authorization hot path.
 
 ## Protocol identifier rename
 
@@ -103,13 +269,13 @@ Full reasoning is in [`docs/specs/README.md`](/__ardur_internal__/source/docs/sp
 
 ## What's not here yet
 
-A few things are honest gaps right now rather than oversights:
+A few things are documented gaps right now rather than oversights:
 
 - **Live LLM tests** — the semantic-judge and behavioral-fingerprint test lanes need real API keys, so the default test run uses local test doubles. To opt in, set `ARDUR_SEMANTIC_JUDGE=anthropic` and `ANTHROPIC_API_KEY`.
 - **Corpus-heavy benchmark tests** — AgentDojo, InjectAgent, R-Judge, STAC, and the telemetry-ablation harness stay in the private research tree. The cleaner subset that backs the public claims is what's curated here.
 - **Docker images** (`rahulnutakki/ardur-demo:lang`, `:autogen`) and re-recorded asciinema casts — these need a maintainer with Docker Hub credentials and an `asciinema record` session, neither of which an automated process can do.
 
-One more honest caveat: the package imports cleanly and the AST parses, but I haven't run the full pytest suite end-to-end since the rename landed. If something import-time looks off, that's the most likely culprit — file an issue.
+One more caveat: the package imports cleanly and the AST parses. If something import-time looks off, file an issue.
 
 ## License
 

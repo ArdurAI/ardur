@@ -1,0 +1,864 @@
+{
+  "profile_id": "ardur.drp-mapping.v0.1",
+  "status": "mapping-only",
+  "drp": {
+    "document": "draft-nelson-agent-delegation-receipts-10",
+    "url": "https://datatracker.ietf.org/doc/draft-nelson-agent-delegation-receipts/10/",
+    "authorization_object_schema_version": "1.0",
+    "formal_ietf_standing": false,
+    "note": "Individual Internet-Draft; not endorsed by the IETF and not a standard."
+  },
+  "aat_source": {
+    "implementation_document": "draft-niyikiza-oauth-attenuating-agent-tokens-00",
+    "additional_profile_document": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+    "additional_profile": "ardur.dg.aat-draft-01.v0.2",
+    "live_document_observed": "draft-niyikiza-oauth-attenuating-agent-tokens-01",
+    "live_url": "https://datatracker.ietf.org/doc/draft-niyikiza-oauth-attenuating-agent-tokens/",
+    "formal_ietf_standing": false,
+    "migration_issue": "https://github.com/ArdurAI/ardur/issues/246",
+    "note": "The draft-00 wire remains supported. Draft-01 is dispatched only by the explicit Ardur DG v0.2 profile; mixed or unprofiled wire forms fail closed."
+  },
+  "source_surfaces": {
+    "delegation_grant": {
+      "contract": "go/pkg/aat/types.go and docs/specs/delegation-grant-profile-v0.1.md",
+      "scope": "Formal AAT Delegation Grant wire claims, nested authorization details, constraints, and Ardur profile extensions."
+    },
+    "legacy_python_passport": {
+      "contract": "python/vibap/passport.py",
+      "scope": "JWT mission-passport claims emitted by issue_passport plus derive_child_passport lineage and MIC conformance extensions, including explicit inventory of runtime-only claims that the current DRP profile must reject."
+    },
+    "execution_receipt_v0.2": {
+      "contract": "docs/specs/execution-receipt-v0.2.schema.json",
+      "scope": "Every top-level signed action-receipt property."
+    }
+  },
+  "classifications": [
+    "mapped",
+    "extension",
+    "out_of_scope"
+  ],
+  "profile_shape": {
+    "drp_required_fields": [
+      "receiptId",
+      "schemaVersion",
+      "scope",
+      "boundaries",
+      "timeWindow",
+      "operatorInstructionsHash",
+      "canonicalPayload",
+      "publicKey",
+      "signature"
+    ],
+    "drp_optional_fields_used": [
+      "operatorInstructions",
+      "parentReceiptId",
+      "orchestratorSignature",
+      "metadata",
+      "revocationRequired",
+      "toolSchemaHash"
+    ],
+    "ardur_extension_path": "metadata.x-ardur",
+    "implementation_schema": "docs/specs/ardur-drp-profile-v0.1.schema.json",
+    "delegation_log_evidence_lifecycle": "The signed critical extension carries a required backend and subject=receipt-id. Independently verified external inclusion/TSA evidence binds the final receiptId after signing; proof output is not embedded in the pre-ID body.",
+    "receipt_chain_evidence_lifecycle": "A present receiptChainAnchor is a signed commitment. Independently verified external action-chain evidence must match its trace ID, head receipt ID, and head receipt JWT digest before PERMIT.",
+    "ardur_required_fields": [
+      "profile",
+      "critical",
+      "issuer",
+      "subject",
+      "audience",
+      "delegationGrantId",
+      "missionRef",
+      "policy",
+      "capabilityTokenRef",
+      "resourceBounds",
+      "argumentConstraints",
+      "budget",
+      "redelegation",
+      "revocation",
+      "delegationLogAnchor",
+      "receiptChainAnchor"
+    ],
+    "signing_algorithm": "ES256",
+    "canonicalization": "RFC 8785 after NFC normalization",
+    "decision_projection": {
+      "compliant": "PERMIT",
+      "violation": "DENY",
+      "insufficient_evidence": "DENY with metadata.x-ardur.verdict=insufficient_evidence",
+      "unknown": "DENY with metadata.x-ardur.verdict=unknown"
+    }
+  },
+  "security_requirements": {
+    "draft_status_acknowledged": "Implementations and public claims MUST identify draft-10 as an individual Internet-Draft with no formal IETF standing.",
+    "external_trust_anchor_required": "A verifier MUST bind the receipt signing key to externally configured trust; an embedded publicKey alone is not identity evidence.",
+    "canonical_signing_input": "The profile MUST use the deterministic pre-ID and signed-body procedure defined in the companion mapping document.",
+    "full_transitive_chain_verification": "An Ardur verifier MUST fully verify every ancestor receipt and every adjacent attenuation edge, not only the immediate parent.",
+    "parent_denials_preserved": "Every parent denial MUST be carried forward; a child MAY add denials but MUST NOT remove or narrow a denial.",
+    "child_time_window_contained": "A child notBefore MUST be no earlier than its parent and child notAfter MUST be no later.",
+    "widening_rejected": "Tools, resources, argument constraints, budgets, time, and delegation depth MUST never widen.",
+    "unknown_critical_extension_rejected": "A verifier that does not understand every path listed in metadata.x-ardur.critical MUST DENY and MUST NOT downgrade to base DRP authorization.",
+    "unprojected_risk_budget_rejected": "A source credential carrying risk_budget MUST NOT be emitted or verified by this profile because typed contract and multi-scope ledger semantics are not implemented; dropping the claim is forbidden.",
+    "unprojected_mic_policy_bundle_rejected": "A source credential carrying conformance_profile or receipt_policy MUST NOT be emitted by this profile; the entire MIC bundle MUST be rejected and tool_manifest_digest MUST NOT be partially projected.",
+    "tri_state_extension": "Ardur insufficient_evidence MUST project to DRP DENY while remaining distinguishable in the signed extension.",
+    "no_redelegation": "redelegation.mode=none MUST prohibit creation of any sub-receipt.",
+    "bounded_redelegation": "redelegation.mode=bounded MUST require depth below maxDepth and child maxDepth no greater than the parent.",
+    "denied_redelegation": "A child under mode=none, at or beyond maxDepth, or with wider authority MUST return DENY with an Ardur re-delegation reason.",
+    "revocation_freshness": "Offline verification MUST DENY when revocationRequired is true; otherwise it MUST report the revocation observation boundary.",
+    "strict_action_subset": "A draft-10 sub-receipt MUST have a strict proper subset of parent allowedActions; a chain that narrows only arguments, budget, or time is not exportable as a draft-10 sub-receipt.",
+    "finite_scope_universe_required": "Wildcard expansion and strict-subset checks MUST use an authenticated finite tool/resource universe bound by toolSchemaHash; otherwise the verifier MUST DENY as insufficient evidence.",
+    "delegation_log_anchor_required": "A delegation receipt MUST sign the required log backend and receipt-id proof subject, then present independently verified external pre-action append-only-log and authoritative TSA evidence binding the final receiptId; proof output MUST NOT be embedded in the pre-ID body, and an Ardur action-receipt transparency sidecar is not automatically equivalent.",
+    "tsa_evidence_required": "A projected action-log timestamp MUST be backed by the draft-required authoritative log/TSA evidence or be reported as insufficient evidence.",
+    "p256_profile_selected": "The draft-10 interoperability mode MUST use P-256 for root and orchestrator signatures; AAT holder keys remain separate capability-token keys."
+  },
+  "related_artifacts": [
+    {
+      "artifact": "Transparency Anchor v0.1",
+      "relationship": "Implements an independently verifiable action-receipt inclusion sidecar. It is not copied into the DRP Authorization Object and satisfies the DRP delegation-log requirement only when its backend independently provides pre-action inclusion and authoritative RFC 3161 evidence."
+    },
+    {
+      "artifact": "Receiver Attestation v0.1",
+      "relationship": "Adds receiver-side evidence outside DRP draft-10 and remains an Ardur extension."
+    },
+    {
+      "artifact": "Offline Verification Bundle v0.1",
+      "relationship": "Packages receipts and sidecars for skeptical offline verification; it is not a DRP wire field."
+    }
+  ],
+  "entries": [
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "jti",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.delegationGrantId",
+      "rationale": "AAT identifier is preserved; DRP receiptId is independently content-derived."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "iss",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.issuer",
+      "rationale": "Issuer identity has no DRP Authorization Object field and must be bound to external trust configuration."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "iat",
+      "classification": "mapped",
+      "drp_path": "timeWindow.notBefore",
+      "rationale": "Convert NumericDate to an RFC 3339 UTC timestamp; use the later of iat and any governing not-before bound."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "exp",
+      "classification": "mapped",
+      "drp_path": "timeWindow.notAfter",
+      "rationale": "Convert NumericDate to an RFC 3339 UTC timestamp."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "cnf",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.holderConfirmation",
+      "rationale": "AAT holder confirmation is not the DRP receipt-signing key."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "cnf.jwk",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.holderConfirmation.jwk",
+      "rationale": "Preserve the holder JWK separately; never copy it into DRP publicKey unless it is independently the configured receipt signer."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "aat_type",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.tokenType",
+      "rationale": "DG v0.1 uses the draft-00 token-type discriminator. DG v0.2 omits it and uses chain-position semantics; DRP has no equivalent field."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "ardur_dg_profile",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.profile",
+      "rationale": "Positive Ardur profile discrimination prevents draft-01 tokens from being silently interpreted under DG v0.2."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "ardur_approval_refs",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.approvalRequirements",
+      "rationale": "Signed approval requirement references are append-only across AAT derivation and remain critical external-verification inputs."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "del_depth",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.redelegation.depth",
+      "rationale": "DRP describes depth behavior but does not serialize a depth field."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "del_max_depth",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.redelegation.maxDepth",
+      "rationale": "DRP describes maxDepth behavior but does not serialize it in the Authorization Object."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "par_hash",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.parentTokenHash",
+      "rationale": "AAT par_hash binds the parent JWS signing input; DRP parentReceiptId instead identifies the profiled parent receipt and must be resolved separately."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details",
+      "classification": "mapped",
+      "drp_path": "scope",
+      "rationale": "Project each supported tool authorization into DRP allow/deny scope while retaining lossless constraints in the critical extension."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].type",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.authorizationDetailType",
+      "rationale": "The AAT authorization-detail type is a profile discriminator, not a DRP field."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools",
+      "classification": "mapped",
+      "drp_path": "scope.allowedActions",
+      "rationale": "Tool names become operation/resource descriptors under the profile projection."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.constraint_type",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.constraintType",
+      "rationale": "DRP scope has no argument-constraint algebra; this extension is security-critical."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.value",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.value",
+      "rationale": "Preserves exact and pattern constraint data."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.min",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.min",
+      "rationale": "Preserves range lower bound."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.max",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.max",
+      "rationale": "Preserves range upper bound."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.min_inclusive",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.minInclusive",
+      "rationale": "Preserves range lower-bound inclusivity."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.max_inclusive",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.maxInclusive",
+      "rationale": "Preserves range upper-bound inclusivity."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.values",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.values",
+      "rationale": "Preserves enumerated constraint values."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.excluded",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.excluded",
+      "rationale": "Preserves exclusion constraint values."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.required",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.required",
+      "rationale": "Preserves containment requirements."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.allowed",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.allowed",
+      "rationale": "Preserves subset allowlists."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.pattern",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.pattern",
+      "rationale": "Preserves regular-expression constraint data."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.expression",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.expression",
+      "rationale": "Preserves CEL expressions; unsupported evaluators must deny."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.constraints",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.constraints",
+      "rationale": "Preserves all/any child constraints."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.constraint",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.constraint",
+      "rationale": "Preserves a not constraint child."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "mission_ref",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.missionRef",
+      "rationale": "DRP has an instruction commitment but no governing Mission Declaration reference."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "mission_ref.uri",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.missionRef.uri",
+      "rationale": "Preserves the Mission Declaration reference URI."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "mission_ref.mission_digest",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.missionRef.missionDigest",
+      "rationale": "Preserves the Mission Declaration digest."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "reserved_budget_share",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.reservedShare",
+      "rationale": "DRP scope has no conserved lineage-budget field."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.bucket",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.bucket",
+      "rationale": "Optional lineage_budget_share bucket; unsupported evaluators must deny."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.max_share",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.maxShare",
+      "rationale": "Optional lineage_budget_share ceiling."
+    },
+    {
+      "source_surface": "delegation_grant",
+      "source_path": "authorization_details[].tools.*.*.unit",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.argumentConstraints.*.*.unit",
+      "rationale": "Optional lineage_budget_share accounting unit."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "iss",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.issuer",
+      "rationale": "Legacy passport issuer has no base DRP identity field."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "sub",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.subject",
+      "rationale": "Legacy passport subject has no base DRP identity field."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "aud",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.audience",
+      "rationale": "DRP does not serialize a verifier audience."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "iat",
+      "classification": "mapped",
+      "drp_path": "timeWindow.notBefore",
+      "rationale": "Convert NumericDate to RFC 3339 and combine with nbf."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "nbf",
+      "classification": "mapped",
+      "drp_path": "timeWindow.notBefore",
+      "rationale": "Use the later of iat and nbf."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "exp",
+      "classification": "mapped",
+      "drp_path": "timeWindow.notAfter",
+      "rationale": "Convert NumericDate to RFC 3339."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "jti",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.delegationGrantId",
+      "rationale": "Preserve the passport identifier; DRP receiptId remains content-derived."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "mission_id",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.missionRef.id",
+      "rationale": "Stable mission identifier."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "mission",
+      "classification": "mapped",
+      "drp_path": "operatorInstructions",
+      "rationale": "The mission text is the operator task text; operatorInstructionsHash is recomputed from its exact bytes."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "allowed_tools",
+      "classification": "mapped",
+      "drp_path": "scope.allowedActions",
+      "rationale": "Project tools into operation/resource descriptors."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "forbidden_tools",
+      "classification": "mapped",
+      "drp_path": "scope.deniedActions",
+      "rationale": "Project explicit tool denials and carry them to descendants."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "resource_scope",
+      "classification": "mapped",
+      "drp_path": "scope.allowedActions[].resource",
+      "rationale": "Project each normalized resource bound into the corresponding action descriptor."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "max_tool_calls",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.maxToolCalls",
+      "rationale": "DRP has no action-count budget."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "spend_budget",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.spendBudget",
+      "rationale": "Token and monetary authority is security-critical. This mapping ledger reserves the extension path; the current DRP v0.1 emitter/profile does not project it and must fail closed rather than omit or downgrade the claim."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "max_duration_s",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.maxDurationSeconds",
+      "rationale": "Retain the duration budget in addition to the absolute time window."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "delegation_allowed",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.redelegation.mode",
+      "rationale": "false maps to none; true requires a bounded maxDepth."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "max_delegation_depth",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.redelegation.maxDepth",
+      "rationale": "Serialized maximum depth for fail-closed re-delegation."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "parent_jti",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.parentTokenId",
+      "rationale": "A lookup resolves the corresponding parent DRP receiptId; the JWT ID is preserved for audit."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "cwd",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.resourceBounds.cwd",
+      "rationale": "Working-directory containment has no DRP scope primitive."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "allowed_side_effect_classes",
+      "classification": "mapped",
+      "drp_path": "scope.allowedActions[].operation",
+      "rationale": "Project recognized effect classes into operation descriptors and retain the exact list in resourceBounds."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "max_tool_calls_per_class",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.maxToolCallsPerClass",
+      "rationale": "Per-effect budgets are security-critical."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "additional_policies",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.policy.additional",
+      "rationale": "Policy engine references and digests remain critical extensions."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "risk_budget",
+      "classification": "out_of_scope",
+      "drp_path": null,
+      "rationale": "The Python runtime enforces typed contract digests and atomic session, agent, and lineage risk accounting, but the current DRP emitter/verifier does not. Input carrying this claim must fail closed rather than drop authority-narrowing semantics."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "cnf",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.holderConfirmation",
+      "rationale": "Passport PoP key is not the DRP receipt signer."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "parent_token_hash",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.parentTokenHash",
+      "rationale": "Preserves the parent JWT hash alongside parentReceiptId."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "delegation_chain",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.delegationChain",
+      "rationale": "Legacy embedded lineage is retained for audit; the verifier still retrieves and verifies every DRP ancestor."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "reserved_budget_share",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.budget.reservedShare",
+      "rationale": "Signed child budget reservation."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "conformance_profile",
+      "classification": "out_of_scope",
+      "drp_path": null,
+      "rationale": "The current DRP profile cannot preserve the MIC enforcement and evidence tier. Any source carrying this policy claim must fail closed; the MIC bundle must never be partially projected."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "receipt_policy",
+      "classification": "out_of_scope",
+      "drp_path": null,
+      "rationale": "The current DRP profile cannot preserve the MIC receipt-evidence requirement. Any source carrying this policy claim must fail closed; the MIC bundle must never be partially projected."
+    },
+    {
+      "source_surface": "legacy_python_passport",
+      "source_path": "tool_manifest_digest",
+      "classification": "extension",
+      "drp_path": "metadata.x-ardur.capabilityTokenRef.toolManifestDigest",
+      "rationale": "Normalize the legacy sha-256:<64-lowercase-hex> tag to the DRP extension's sha256:<64-lowercase-hex> tag while preserving the exact trusted tool-manifest digest."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "schema_version",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.schemaVersion",
+      "rationale": "DRP draft-10 does not define an action-log JSON schema."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "canonicalization",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.canonicalization",
+      "rationale": "Ardur records RFC 8785 canonicalization explicitly."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "receipt_kind",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.receiptKind",
+      "rationale": "Ardur distinguishes action receipts from other evidence artifacts."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "receipt_id",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.entryId",
+      "rationale": "DRP requires action log entries but does not name an entry identifier field."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "grant_id",
+      "classification": "mapped",
+      "drp_path": "actionLog.receiptHash",
+      "rationale": "Resolve the governing grant to the profiled DRP receiptId/hash."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "parent_receipt_id",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.previousEntryId",
+      "rationale": "DRP requires the previous entry hash, not Ardur's compatibility ID prefix."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "parent_receipt_hash",
+      "classification": "mapped",
+      "drp_path": "actionLog.previousEntryHash",
+      "rationale": "Both bind the immediately preceding signed action-log entry."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "actor",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.actor",
+      "rationale": "DRP requires an agent signature but does not define an actor-identity field."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "verifier_id",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.verifierId",
+      "rationale": "Verifier identity is additional audit context."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "trace_id",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.traceId",
+      "rationale": "Run correlation is an Ardur extension."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "run_nonce",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.runNonce",
+      "rationale": "Replay correlation nonce is an Ardur extension."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "step_id",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.stepId",
+      "rationale": "Step correlation is an Ardur extension."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "invocation_digest",
+      "classification": "mapped",
+      "drp_path": "actionLog.payloadHash",
+      "rationale": "Use the normalized invocation digest as the primary DRP action payload hash."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "tool",
+      "classification": "mapped",
+      "drp_path": "actionLog.actionType",
+      "rationale": "Tool identifier contributes to the DRP action type."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "action_class",
+      "classification": "mapped",
+      "drp_path": "actionLog.actionType",
+      "rationale": "Normalized action family."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "target",
+      "classification": "mapped",
+      "drp_path": "actionLog.destination",
+      "rationale": "Normalized action destination."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "resource_family",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.resourceFamily",
+      "rationale": "Coarse policy resource category."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "side_effect_class",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.sideEffectClass",
+      "rationale": "Ardur side-effect taxonomy."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "verdict",
+      "classification": "mapped",
+      "drp_path": "actionLog.decision",
+      "rationale": "Map compliant to PERMIT and violation, insufficient_evidence, or unknown to DENY; retain verdict detail in the extension."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "evidence_level",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.evidenceLevel",
+      "rationale": "DRP has no assurance-tier field."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "reason",
+      "classification": "mapped",
+      "drp_path": "actionLog.denialReason",
+      "rationale": "DRP requires a reason for denied calls; retain the bounded audit reason."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "policy_decisions",
+      "classification": "mapped",
+      "drp_path": "actionLog.callContext.policyDecisions",
+      "rationale": "DRP requires full denied-call context; Ardur preserves per-engine decisions for all verdicts."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "arguments_hash",
+      "classification": "mapped",
+      "drp_path": "actionLog.payloadHash.arguments",
+      "rationale": "Additional digest of normalized arguments."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "budget_remaining",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.budgetRemaining",
+      "rationale": "Signed post-decision budget state."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "timestamp",
+      "classification": "mapped",
+      "drp_path": "actionLog.timestamp",
+      "rationale": "A DRP projection is valid only when backed by the required authoritative TSA/log evidence; otherwise mark insufficient evidence."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "iss",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.issuer",
+      "rationale": "JWS issuer is additional action-log identity context."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "iat",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.issuedAt",
+      "rationale": "JWT NumericDate is not a substitute for the authoritative DRP timestamp."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "exp",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.expiresAt",
+      "rationale": "Receipt-token expiry is separate from delegation timeWindow."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "jti",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.jwtId",
+      "rationale": "JWT replay identifier."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "content_class",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.contentClass",
+      "rationale": "Ardur content classification."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "content_provenance",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.contentProvenance",
+      "rationale": "Ardur content provenance."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "sensitivity",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.sensitivity",
+      "rationale": "Ardur sensitivity tier."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "instruction_bearing",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.instructionBearing",
+      "rationale": "Ardur records whether observed content carried instructions."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "budget_delta",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.budgetDelta",
+      "rationale": "Signed per-hop budget change."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "result_hash",
+      "classification": "mapped",
+      "drp_path": "actionLog.payloadHash.result",
+      "rationale": "Digest of result material when present."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "public_denial_reason",
+      "classification": "mapped",
+      "drp_path": "actionLog.denialReason",
+      "rationale": "Stable public denial category."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "internal_denial_code",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.internalDenialCode",
+      "rationale": "Private bounded diagnostic code; public projections redact it."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "evidence_proof_ref",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.evidenceProofRef",
+      "rationale": "Reference to evidence proving a higher assurance tier."
+    },
+    {
+      "source_surface": "execution_receipt_v0.2",
+      "source_path": "measurements",
+      "classification": "extension",
+      "drp_path": "actionLog.metadata.x-ardur.measurements",
+      "rationale": "Signed runtime measurements."
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -28,6 +29,9 @@ func main() {
 	var (
 		metricsAddr          string
 		healthProbeAddr      string
+		telemetryAddr        string
+		telemetryWorkloadAPI string
+		telemetrySources     telemetrySourceBindings
 		enableLeaderElection bool
 		signingKeyPath       string
 		issuerURI            string
@@ -36,6 +40,12 @@ func main() {
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics endpoint bind address.")
 	flag.StringVar(&healthProbeAddr, "health-probe-bind-address", ":8081", "Health probe bind address.")
+	flag.StringVar(&telemetryAddr, "telemetry-bind-address", ":8082", "Telemetry signal ingestion address. POST /telemetry/signal")
+	flag.StringVar(&telemetryWorkloadAPI, "telemetry-spiffe-workload-api", os.Getenv("SPIFFE_ENDPOINT_SOCKET"),
+		"SPIFFE Workload API address for telemetry mTLS. Defaults to SPIFFE_ENDPOINT_SOCKET.")
+	flag.Var(&telemetrySources, "telemetry-spiffe-source",
+		"Authorized telemetry source binding in source=spiffe://trust-domain/path form. Repeat per source. "+
+			"When omitted, telemetry ingestion is disabled.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for HA.")
 	flag.StringVar(&signingKeyPath, "signing-key", "", "Path to Ed25519 signing key (JWK). Required in production.")
 	flag.StringVar(&issuerURI, "issuer-uri", "https://vibap.ardur.dev", "Credential issuer URI.")
@@ -90,8 +100,39 @@ func main() {
 		os.Exit(1)
 	}
 
+	operatorCtx := ctrl.SetupSignalHandler()
+	if len(telemetrySources) == 0 {
+		setupLog.Info("telemetry ingestion disabled: no --telemetry-spiffe-source bindings configured")
+	} else {
+		ingestor := newTelemetryIngestor(
+			reconciler.trustAgg,
+			func(ctx context.Context, namespace, tier string) error {
+				return reconciler.applyNetworkPolicyForTier(ctx, namespace, tier)
+			},
+			telemetrySources.authorize,
+		)
+		telemetryServer, err := newTelemetryServer(
+			operatorCtx,
+			telemetryAddr,
+			telemetryWorkloadAPI,
+			telemetrySources,
+			ingestor,
+		)
+		if err != nil {
+			setupLog.Error(err, "unable to configure SPIFFE-authenticated telemetry server")
+			os.Exit(1)
+		}
+		if err := mgr.Add(telemetryServer); err != nil {
+			_ = telemetryServer.Close()
+			setupLog.Error(err, "unable to add telemetry server to manager")
+			os.Exit(1)
+		}
+		setupLog.Info("configured SPIFFE-authenticated telemetry ingestor",
+			"addr", telemetryAddr, "sources", telemetrySources.String())
+	}
+
 	setupLog.Info("starting VIBAP operator")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(operatorCtx); err != nil {
 		setupLog.Error(err, "manager exited with error")
 		os.Exit(1)
 	}

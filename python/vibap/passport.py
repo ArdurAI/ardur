@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -18,11 +19,32 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from .spend_budget import normalize_spend_budget
+
 ALGORITHM = "ES256"
 DEFAULT_ISSUER = "vibap-governance-proxy"
 DEFAULT_AUDIENCE = "vibap-proxy"
 DELEGATION_CHAIN_CLAIM = "delegation_chain"
 MAX_DELEGATION_DEPTH = 16
+UNRESTRICTED_RESOURCE_SCOPE_PATTERN = "**"
+_DELEGATED_MIC_CLAIMS = (
+    "conformance_profile",
+    "receipt_policy",
+    "tool_manifest_digest",
+)
+_SUPPORTED_CONFORMANCE_PROFILES = frozenset(
+    {"Delegation-Core", "MIC-State", "MIC-Evidence"}
+)
+_SUPPORTED_RECEIPT_LEVELS = frozenset(
+    {"minimal", "counter_signed", "transparency_logged"}
+)
+
+
+def resource_scope_is_explicitly_unrestricted(scope: list[str]) -> bool:
+    """Return whether ``scope`` is the sole explicit unrestricted sentinel."""
+
+    return scope == [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]
+
 
 # Bounded-iat skew window applied to every JWT we verify (passport, AAT,
 # Mission Declaration, status list, and receipt).
@@ -35,11 +57,11 @@ MAX_DELEGATION_DEPTH = 16
 # legitimate clock drift across nodes. This helper provides a single
 # explicit bound; each verifier disables PyJWT's verify_iat and calls
 # this instead so the security choice is visible at every JWT decode.
-DEFAULT_IAT_FUTURE_SKEW_S = 300       # 5 min — clock-drift tolerance
+DEFAULT_IAT_FUTURE_SKEW_S = 300  # 5 min — clock-drift tolerance
 DEFAULT_IAT_PAST_SKEW_S = 30 * 86400  # 30 days — long-lived caches OK,
-                                       # archival replay handled by jti
-                                       # replay caches at the verifier
-                                       # boundary, not iat alone.
+# archival replay handled by jti
+# replay caches at the verifier
+# boundary, not iat alone.
 
 
 def assert_iat_in_window(
@@ -85,8 +107,39 @@ def assert_iat_in_window(
         )
 
 
+def _try_chmod_0700_warn(target: Path) -> None:
+    """Best-effort chmod 0o700 with a stderr warning on failure.
+
+    Some filesystems (read-only bind mounts, certain container overlays,
+    NFS with no_root_squash off) reject chmod even when mkdir succeeds.
+    Don't fail home discovery on that — the home dir still exists and is
+    usable. But DO emit a stderr warning so operators see the security
+    trade-off: the dir may be world-readable under the caller's umask,
+    exposing private-key material that later lands inside.
+    Set VIBAP_HOME explicitly to a chmod-capable fs to silence.
+    """
+    try:
+        os.chmod(target, stat.S_IRWXU)
+    except OSError as exc:
+        import sys
+
+        print(
+            f"warning: could not chmod 0o700 on VIBAP home {target}: "
+            f"{exc}. Private-key material may be world-readable. "
+            f"Set VIBAP_HOME to a chmod-capable filesystem.",
+            file=sys.stderr,
+        )
+
+
 def _default_home_dir() -> Path:
-    explicit = os.environ.get("VIBAP_HOME")
+    """Pure path resolver — no filesystem mutation.
+
+    Returns ``$VIBAP_HOME`` (if set and non-empty) or the first viable
+    candidate from ``$CWD/.vibap`` / ``$HOME/.vibap``.  Does NOT create
+    directories or chmod anything; call :func:`_ensure_default_home_dir`
+    to materialise the home with 0o700 on first actual use.
+    """
+    explicit = os.environ.get("VIBAP_HOME", "").strip()
     if explicit:
         return Path(explicit).expanduser()
 
@@ -96,35 +149,71 @@ def _default_home_dir() -> Path:
     ]
     for candidate in candidates:
         target = candidate.expanduser()
+        # Pure resolver: return the first candidate whose parent exists
+        # (so we know the filesystem is reachable) without creating anything.
         try:
-            target.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+            if target.parent.is_dir():
+                return target
         except OSError:
             continue
-        # 2026-04-21 review comment #8 + PR-#13 external-review-G/augment: some
-        # filesystems (read-only bind mounts, certain container
-        # overlays, NFS with no_root_squash off) reject chmod even
-        # when mkdir succeeds. Don't fail home discovery on that —
-        # the home dir still exists and is usable. But DO emit a
-        # stderr warning so operators see the security trade-off:
-        # the dir may be world-readable under the caller's umask,
-        # exposing private-key material that later lands inside.
-        # Set VIBAP_HOME explicitly to a chmod-capable fs to silence.
-        try:
-            os.chmod(target, stat.S_IRWXU)
-        except OSError as exc:
-            import sys
-            print(
-                f"warning: could not chmod 0o700 on VIBAP home {target}: "
-                f"{exc}. Private-key material may be world-readable. "
-                f"Set VIBAP_HOME to a chmod-capable filesystem.",
-                file=sys.stderr,
-            )
-        return target
     raise OSError("unable to determine a writable VIBAP home directory")
 
 
+def _ensure_default_home_dir() -> Path:
+    """Materialise DEFAULT_HOME with 0o700 on first actual use.
+
+    Idempotent: if the directory already exists, ``mkdir(exist_ok=True)``
+    is a no-op and the mode of an *existing* directory is NOT changed
+    (preserving the legacy contract for explicit ``$VIBAP_HOME`` dirs).
+    Only a newly-created directory gets ``0o700``.
+    """
+    target = _default_home_dir()
+    already_existed = target.exists()
+    try:
+        target.mkdir(mode=stat.S_IRWXU, parents=True, exist_ok=True)
+    except OSError:
+        # If we can't even create the directory, the caller will get a
+        # follow-up error from whatever write path triggered this.
+        return target
+    if not already_existed:
+        _try_chmod_0700_warn(target)
+    return target
+
+
+def _is_under_default_home(path: Path) -> bool:
+    """Return True if *path* is equal to or lies under DEFAULT_HOME.
+
+    Uses unresolved string comparison — sufficient because DEFAULT_HOME
+    is always a concrete path (``$VIBAP_HOME``, ``$CWD/.vibap``, or
+    ``$HOME/.vibap``) with no symlink component in practice.
+    """
+    home_str = str(DEFAULT_HOME)
+    path_str = str(path)
+    if path_str == home_str:
+        return True
+    return path_str.startswith(home_str + os.sep)
+
+
 DEFAULT_HOME = _default_home_dir()
-DEFAULT_KEYS_DIR = Path(os.environ.get("VIBAP_KEYS_DIR", DEFAULT_HOME / "keys")).expanduser()
+DEFAULT_KEYS_DIR = Path(
+    os.environ.get("VIBAP_KEYS_DIR", DEFAULT_HOME / "keys")
+).expanduser()
+
+
+class KeyDirectoryError(ValueError):
+    """Fail-closed error for invalid Mission Passport key directory inputs."""
+
+    def __init__(
+        self,
+        detail: str = (
+            "The selected Mission Passport key path already exists as a file or other non-directory."
+        ),
+        *,
+        condition: str = "keys_dir_not_directory",
+    ) -> None:
+        super().__init__(detail)
+        self.condition = condition
+        self.detail = detail
 
 
 def _normalize_cwd(value: str | None) -> str | None:
@@ -152,7 +241,9 @@ def _normalize_cwd(value: str | None) -> str | None:
     if not stripped:
         return None
     if not stripped.startswith("/"):
-        raise ValueError(f"cwd must be an absolute path (start with '/'), got {value!r}")
+        raise ValueError(
+            f"cwd must be an absolute path (start with '/'), got {value!r}"
+        )
     # Phase-3.1a C-3 (external-review-X F3 + SF-P3-04): reject any ``..`` segment
     # BEFORE calling posixpath.normpath. normpath silently collapses
     # ``/workspace/../etc`` → ``/etc``, which would let a passport claim
@@ -231,71 +322,133 @@ class MissionPassport:
     # DENY-wins across native + additional; formally verified in
     # verification/composition_smt.py (properties P1-P4).
     additional_policies: list[dict[str, Any]] = field(default_factory=list)
+    # Optional pre-action monetary/token authority. The mission form omits a
+    # lineage_id; issue_passport binds it to the fresh root JTI. Derived
+    # children inherit the signed policy and lineage identifier unchanged.
+    spend_budget: dict[str, Any] | None = None
+    # Optional typed dangerous-action policy. When present, trusted proxy-side
+    # tool contracts derive risk facts before execution and reserve the signed
+    # session/agent/lineage ceilings atomically. Absence preserves the legacy
+    # behavior for missions that have not opted into impact governance.
+    risk_budget: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Validate/normalize cwd at construction time so an invalid passport
         # can never be issued. Empty string → None; relative → ValueError.
         self.cwd = _normalize_cwd(self.cwd)
+        if self.spend_budget is not None:
+            self.spend_budget = normalize_spend_budget(self.spend_budget)
+        if (
+            UNRESTRICTED_RESOURCE_SCOPE_PATTERN in self.resource_scope
+            and not resource_scope_is_explicitly_unrestricted(self.resource_scope)
+        ):
+            raise ValueError(
+                "unrestricted '**' must be the only resource_scope pattern"
+            )
 
     # Phase-3.1b M-3 (external-review-G F6): canonical set of keys this constructor
     # understands. Anything outside this set is a typo (e.g. `resourc_scope`
     # missing the `e`) that previously was silently dropped, causing the
-    # mistyped field to default (often to an empty list = unrestricted).
-    # Raise instead so operators see the typo at load time. The set
+    # mistyped field to default. Empty scope now denies resource authority,
+    # but silently discarding a declared policy field is still unsafe and
+    # misleading. Raise instead so operators see the typo at load time. The set
     # includes every dataclass field + mission-file metadata keys that
     # `_ttl_from_payload` understands (`ttl_s`, `issued_at`, `expires_at`)
     # and the legacy `budget` dict shape that exposes nested
     # max_tool_calls / max_duration_s.
-    _KNOWN_FIELDS: ClassVar[frozenset[str]] = frozenset({
-        # MissionPassport dataclass fields
-        "agent_id", "mission",
-        "allowed_tools", "forbidden_tools", "resource_scope",
-        "max_tool_calls", "max_duration_s",
-        "delegation_allowed", "max_delegation_depth",
-        "parent_jti", "cwd",
-        "allowed_side_effect_classes",  # side-effect-class enforcement
-        "max_tool_calls_per_class",  # cumulative per-class budget
-        "holder_key_thumbprint",  # K2 PoP
-        "holder_spiffe_id",
-        "additional_policies",  # pluggable policy backends
-        "mission_id",  # H1: stable mission identifier for PolicyStore lookup
-        # Mission-file metadata handled by load_mission_file / issue_passport
-        "budget", "ttl_s", "issued_at", "expires_at",
-    })
+    _KNOWN_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            # MissionPassport dataclass fields
+            "agent_id",
+            "mission",
+            "allowed_tools",
+            "forbidden_tools",
+            "resource_scope",
+            "max_tool_calls",
+            "max_duration_s",
+            "delegation_allowed",
+            "max_delegation_depth",
+            "parent_jti",
+            "cwd",
+            "allowed_side_effect_classes",  # side-effect-class enforcement
+            "max_tool_calls_per_class",  # cumulative per-class budget
+            "holder_key_thumbprint",  # K2 PoP
+            "holder_spiffe_id",
+            "additional_policies",  # pluggable policy backends
+            "spend_budget",  # pre-action token and monetary authority
+            "risk_budget",  # typed dangerous-action blast-radius caps
+            "mission_id",  # H1: stable mission identifier for PolicyStore lookup
+            # Mission-file metadata handled by load_mission_file / issue_passport
+            "budget",
+            "ttl_s",
+            "issued_at",
+            "expires_at",
+        }
+    )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MissionPassport":
         # Phase-3.1b M-3 (external-review-G F6): reject unknown fields so a typo
         # like `resourc_scope` (missing `e`) surfaces at construction
-        # time instead of silently producing an unrestricted passport.
+        # time instead of silently replacing the intended resource policy with
+        # the empty deny-all default.
         # The canonical key set is `_KNOWN_FIELDS`; anything else is a
         # typo or an unversioned schema extension — either way we fail
         # closed and let the caller decide.
         unknown = set(data.keys()) - cls._KNOWN_FIELDS
         if unknown:
+            unknown_fields = sorted(unknown)
+            known_fields = sorted(cls._KNOWN_FIELDS)
+            if "lineage_budgets" in unknown:
+                raise ValueError(
+                    "lineage_budgets is Phase 1 deferred and is not enforced "
+                    "by MissionPassport issuance yet; remove lineage_budgets "
+                    "from this mission until compiler/runtime support lands. "
+                    f"Unknown fields in mission: {unknown_fields} "
+                    f"(known: {known_fields})"
+                )
             raise ValueError(
-                f"unknown fields in mission: {sorted(unknown)} "
-                f"(known: {sorted(cls._KNOWN_FIELDS)})"
+                f"unknown fields in mission: {unknown_fields} (known: {known_fields})"
             )
         budget = data.get("budget") or {}
+        if "spend_budget" in data and not isinstance(data["spend_budget"], dict):
+            raise ValueError("spend_budget must be a JSON object when present")
+        if "risk_budget" in data and not isinstance(data["risk_budget"], dict):
+            raise ValueError("risk_budget must be a JSON object when present")
         return cls(
             agent_id=data["agent_id"],
             mission=data["mission"],
             allowed_tools=list(data.get("allowed_tools", [])),
             forbidden_tools=list(data.get("forbidden_tools", [])),
             resource_scope=list(data.get("resource_scope", [])),
-            max_tool_calls=int(data.get("max_tool_calls", budget.get("max_tool_calls", 50))),
-            max_duration_s=int(data.get("max_duration_s", budget.get("max_duration_s", 600))),
+            max_tool_calls=int(
+                data.get("max_tool_calls", budget.get("max_tool_calls", 50))
+            ),
+            max_duration_s=int(
+                data.get("max_duration_s", budget.get("max_duration_s", 600))
+            ),
             delegation_allowed=bool(data.get("delegation_allowed", False)),
             max_delegation_depth=int(data.get("max_delegation_depth", 0)),
             parent_jti=data.get("parent_jti"),
             cwd=data.get("cwd"),
-            allowed_side_effect_classes=list(data.get("allowed_side_effect_classes", [])),
+            allowed_side_effect_classes=list(
+                data.get("allowed_side_effect_classes", [])
+            ),
             max_tool_calls_per_class=dict(data.get("max_tool_calls_per_class", {})),
             holder_key_thumbprint=data.get("holder_key_thumbprint"),
             holder_spiffe_id=data.get("holder_spiffe_id"),
             additional_policies=list(data.get("additional_policies", [])),
             mission_id=data.get("mission_id"),
+            spend_budget=(
+                dict(data["spend_budget"])
+                if isinstance(data.get("spend_budget"), dict)
+                else None
+            ),
+            risk_budget=(
+                dict(data["risk_budget"])
+                if isinstance(data.get("risk_budget"), dict)
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -304,21 +457,61 @@ class MissionPassport:
         data = asdict(self)
         if data.get("cwd") is None:
             data.pop("cwd", None)
+        if data.get("spend_budget") is None:
+            data.pop("spend_budget", None)
+        if data.get("risk_budget") is None:
+            data.pop("risk_budget", None)
         return data
 
 
 def resolve_keys_dir(keys_dir: str | Path | None = None) -> Path:
     target = Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
-    target.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not target.is_dir():
+        raise KeyDirectoryError()
+    # If the target is under DEFAULT_HOME, materialise the home with 0o700
+    # first so the leaf mkdir(parents=True) doesn't create it with the
+    # process umask.
+    if _is_under_default_home(target):
+        _ensure_default_home_dir()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except (FileExistsError, NotADirectoryError) as exc:
+        raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise KeyDirectoryError(
+            f"Cannot create key directory: {exc.strerror or type(exc).__name__}",
+            condition="keys_dir_unreachable",
+        ) from exc
+    if not target.is_dir():
+        raise KeyDirectoryError()
     return target
 
 
-def _write_bytes(path: Path, data: bytes, mode: int) -> None:
-    path.write_bytes(data)
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(path, mode)
-    except OSError:
-        pass
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(data)
+    finally:
+        if fd != -1:
+            os.close(fd)
+    actual_mode = path.stat().st_mode & 0o777
+    if actual_mode != 0o600:
+        import sys
+
+        print(
+            f"WARNING: {path} permissions are {actual_mode:o}, expected 600; "
+            f"private key may be readable by other users on this filesystem",
+            file=sys.stderr,
+        )
+
+
+def _write_public_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
 
 def generate_keypair(
@@ -330,29 +523,29 @@ def generate_keypair(
     pub_path = target_dir / "passport_public.pem"
 
     if priv_path.exists() and pub_path.exists() and not force:
-        priv_key = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+        priv_key = serialization.load_pem_private_key(
+            priv_path.read_bytes(), password=None
+        )
         pub_key = serialization.load_pem_public_key(pub_path.read_bytes())
         return priv_key, pub_key
 
     priv_key = ec.generate_private_key(ec.SECP256R1())
     pub_key = priv_key.public_key()
 
-    _write_bytes(
+    _write_private_bytes(
         priv_path,
         priv_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         ),
-        0o600,
     )
-    _write_bytes(
+    _write_public_bytes(
         pub_path,
         pub_key.public_bytes(
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo,
         ),
-        0o644,
     )
     return priv_key, pub_key
 
@@ -365,12 +558,78 @@ def load_private_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePriv
     return serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
 
 
+def load_existing_private_key(
+    keys_dir: str | Path | None = None,
+) -> ec.EllipticCurvePrivateKey:
+    """Load ``passport_private.pem`` without creating directories or key material."""
+    target_dir = (
+        Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    )
+    try:
+        if target_dir.exists() and not target_dir.is_dir():
+            raise KeyDirectoryError()
+    except OSError as exc:
+        raise KeyDirectoryError() from exc
+    private_path = target_dir / "passport_private.pem"
+    try:
+        if private_path.is_symlink():
+            raise ValueError("passport_private.pem must not be a symlink")
+        if os.name == "posix" and private_path.stat().st_mode & 0o077:
+            raise PermissionError("passport_private.pem must use mode 0600 or stricter")
+        private_bytes = private_path.read_bytes()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "passport_private.pem is missing from the Mission Passport key directory"
+        ) from exc
+    except PermissionError:
+        raise
+    except NotADirectoryError as exc:
+        raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise ValueError(
+            "passport_private.pem is not a readable EC private key"
+        ) from exc
+    private_key = serialization.load_pem_private_key(private_bytes, password=None)
+    if not isinstance(private_key, ec.EllipticCurvePrivateKey):
+        raise ValueError("passport_private.pem must contain an EC private key")
+    return private_key
+
+
 def load_public_key(keys_dir: str | Path | None = None) -> ec.EllipticCurvePublicKey:
     target_dir = resolve_keys_dir(keys_dir)
     pub_path = target_dir / "passport_public.pem"
     if not pub_path.exists():
         return generate_keypair(keys_dir=target_dir)[1]
     return serialization.load_pem_public_key(pub_path.read_bytes())
+
+
+def load_existing_public_key(
+    keys_dir: str | Path | None = None,
+) -> ec.EllipticCurvePublicKey:
+    """Load ``passport_public.pem`` without creating key directories or key material."""
+    target_dir = (
+        Path(keys_dir).expanduser() if keys_dir is not None else DEFAULT_KEYS_DIR
+    )
+    try:
+        if target_dir.exists() and not target_dir.is_dir():
+            raise KeyDirectoryError()
+    except OSError as exc:
+        raise KeyDirectoryError() from exc
+    pub_path = target_dir / "passport_public.pem"
+    try:
+        public_bytes = pub_path.read_bytes()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "passport_public.pem is missing from the Mission Passport key directory"
+        ) from exc
+    except NotADirectoryError as exc:
+        raise KeyDirectoryError() from exc
+    except OSError as exc:
+        raise ValueError("passport_public.pem is not a readable EC public key") from exc
+    public_key = serialization.load_pem_public_key(public_bytes)
+    if not isinstance(public_key, ec.EllipticCurvePublicKey):
+        raise ValueError("passport_public.pem must contain an EC public key")
+    return public_key
 
 
 def derive_mission_id(agent_id: str, mission_text: str) -> str:
@@ -399,13 +658,30 @@ def issue_passport(
     audience: str = DEFAULT_AUDIENCE,
     ttl_s: int | None = None,
     extra_claims: dict[str, Any] | None = None,
+    *,
+    jti_override: str | None = None,
 ) -> str:
     now = int(time.time())
     ttl = int(ttl_s if ttl_s is not None else mission.max_duration_s)
     if ttl <= 0:
         raise ValueError("ttl_s must be positive")
 
-    jti = str(uuid.uuid4())
+    if jti_override is not None and (
+        not isinstance(jti_override, str)
+        or not jti_override
+        or len(jti_override.encode("utf-8")) > 1024
+    ):
+        raise ValueError(
+            "jti_override must be a non-empty string of at most 1024 bytes"
+        )
+    if jti_override is not None:
+        try:
+            parsed_jti = uuid.UUID(jti_override)
+        except ValueError as exc:
+            raise ValueError("jti_override must use canonical UUID format") from exc
+        if str(parsed_jti).lower() != jti_override.lower():
+            raise ValueError("jti_override must use canonical UUID format")
+    jti = jti_override or str(uuid.uuid4())
     # H1 (2026-04-19): ``mission_id`` is DISTINCT from ``jti``.
     # Previously this field was set to ``jti`` which re-randomized every
     # issuance — the PolicyStore's key would rotate with every re-issued
@@ -447,6 +723,32 @@ def issue_passport(
         claims["max_tool_calls_per_class"] = mission.max_tool_calls_per_class
     if mission.additional_policies:
         claims["additional_policies"] = mission.additional_policies
+    if mission.spend_budget is not None:
+        inherited_lineage_id = mission.spend_budget.get("lineage_id")
+        if mission.parent_jti is None and inherited_lineage_id is not None:
+            raise ValueError(
+                "root spend_budget must omit lineage_id; issuance binds it to the fresh jti"
+            )
+        if mission.parent_jti is not None and inherited_lineage_id is None:
+            raise ValueError("child spend_budget must inherit the parent lineage_id")
+        claims["spend_budget"] = normalize_spend_budget(
+            mission.spend_budget,
+            lineage_id=(
+                str(inherited_lineage_id) if inherited_lineage_id is not None else jti
+            ),
+            require_lineage_id=True,
+        )
+    if mission.risk_budget is not None:
+        from .risk_budget import normalize_risk_budget
+
+        risk_budget = dict(mission.risk_budget)
+        if risk_budget.get("lineage_id") is None:
+            risk_budget = normalize_risk_budget(risk_budget, lineage_id=jti)
+        else:
+            risk_budget = normalize_risk_budget(risk_budget)
+        if not set(risk_budget["tools"]).issubset(mission.allowed_tools):
+            raise ValueError("risk_budget tools must be a subset of allowed_tools")
+        claims["risk_budget"] = risk_budget
     # K2 (I6): Proof of Possession via cnf claim. When the mission declares
     # a holder_key_thumbprint, the passport is bound to that key. Presenters
     # must prove possession by signing a KB-JWT with the matching private key.
@@ -455,6 +757,13 @@ def issue_passport(
     if mission.holder_key_thumbprint:
         claims["cnf"] = {"jkt": mission.holder_key_thumbprint}
     if extra_claims:
+        protected_claims = set(claims)
+        collisions = set(extra_claims).intersection(protected_claims)
+        if collisions:
+            raise ValueError(
+                "extra_claims cannot override protected passport claims: "
+                f"{sorted(collisions)}"
+            )
         claims.update(extra_claims)
 
     return jwt.encode(claims, private_key, algorithm=ALGORITHM)
@@ -473,9 +782,11 @@ def compute_jwk_thumbprint(public_key: ec.EllipticCurvePublicKey) -> str:
     x = base64.urlsafe_b64encode(nums.x.to_bytes(32, "big")).rstrip(b"=").decode()
     y = base64.urlsafe_b64encode(nums.y.to_bytes(32, "big")).rstrip(b"=").decode()
     canonical = f'{{"crv":"P-256","kty":"EC","x":"{x}","y":"{y}"}}'
-    return base64.urlsafe_b64encode(
-        hashlib.sha256(canonical.encode("ascii")).digest()
-    ).rstrip(b"=").decode()
+    return (
+        base64.urlsafe_b64encode(hashlib.sha256(canonical.encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode()
+    )
 
 
 def create_kb_jwt(
@@ -648,6 +959,84 @@ def _token_sha256(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _inherited_mic_conformance_claims(
+    parent_claims: Mapping[str, Any],
+    *,
+    credential_label: str = "parent",
+) -> dict[str, Any]:
+    """Return the validated, closed MIC claim bundle for a child passport.
+
+    Conformance profiles and receipt levels are ordered, non-weakening policy
+    claims.  ``derive_child_passport`` has no child override surface, so exact
+    inheritance is the only safe behavior.  Copying a reviewed allowlist also
+    prevents issuer-controlled extras from colliding with child lineage or
+    budget claims.
+    """
+
+    # Older passports may carry receipt or digest metadata without declaring a
+    # conformance profile.  They remain legacy credentials: do not activate
+    # MIC validation or copy any part of a bundle until a profile is explicit.
+    if "conformance_profile" not in parent_claims:
+        return {}
+
+    present = {claim for claim in _DELEGATED_MIC_CLAIMS if claim in parent_claims}
+    expected = set(_DELEGATED_MIC_CLAIMS)
+    if present != expected:
+        missing = sorted(expected - present)
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle is incomplete; "
+            f"missing {missing}"
+        )
+
+    profile = parent_claims["conformance_profile"]
+    if not isinstance(profile, str) or profile not in _SUPPORTED_CONFORMANCE_PROFILES:
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has an unsupported "
+            "conformance_profile"
+        )
+
+    receipt_policy = parent_claims["receipt_policy"]
+    if not isinstance(receipt_policy, dict) or set(receipt_policy) != {"level"}:
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has a malformed "
+            "receipt_policy"
+        )
+    receipt_level = receipt_policy.get("level")
+    if (
+        not isinstance(receipt_level, str)
+        or receipt_level not in _SUPPORTED_RECEIPT_LEVELS
+    ):
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has an unsupported "
+            "receipt level"
+        )
+    if profile == "MIC-Evidence" and receipt_level == "minimal":
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle weakens MIC-Evidence "
+            "with a minimal receipt level"
+        )
+
+    manifest_digest = parent_claims["tool_manifest_digest"]
+    digest_prefix = "sha-256:"
+    digest_hex = (
+        manifest_digest[len(digest_prefix) :]
+        if isinstance(manifest_digest, str)
+        and manifest_digest.startswith(digest_prefix)
+        else ""
+    )
+    if len(digest_hex) != 64 or any(
+        character not in "0123456789abcdef" for character in digest_hex
+    ):
+        raise PermissionError(
+            f"{credential_label} MIC conformance claim bundle has a malformed "
+            "tool_manifest_digest"
+        )
+
+    return {
+        claim: copy.deepcopy(parent_claims[claim]) for claim in _DELEGATED_MIC_CLAIMS
+    }
+
+
 def _require_nonempty_str(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise PermissionError(f"delegated passport has malformed {field}")
@@ -688,7 +1077,9 @@ def delegation_chain_entries(claims: dict[str, Any]) -> list[dict[str, str]]:
             field=f"{DELEGATION_CHAIN_CLAIM}[{index}].jti",
         )
         if link_jti != expected_jti:
-            raise PermissionError("delegated passport has inconsistent delegation_chain")
+            raise PermissionError(
+                "delegated passport has inconsistent delegation_chain"
+            )
         if link_jti in seen:
             raise PermissionError(f"passport lineage cycle detected at '{link_jti}'")
         seen.add(link_jti)
@@ -794,6 +1185,9 @@ def verify_passport(
                     raise PermissionError(
                         "delegation chain ancestor parent hash is not trusted"
                     )
+            # The cold lineage indexes anchor hashes and parent edges, but do
+            # not persist ancestor policy claims.  MIC bundle equality can
+            # only be enforced below when the signed parent token is present.
             return claims
         parent_claims = _decode_passport(parent_token, public_key, audience=audience)
         if str(parent_claims["jti"]) != str(parent_jti):
@@ -808,6 +1202,17 @@ def verify_passport(
             raise PermissionError(
                 "delegation chain does not match supplied parent lineage"
             )
+
+        parent_mic_claims = _inherited_mic_conformance_claims(parent_claims)
+        if parent_mic_claims:
+            child_mic_claims = _inherited_mic_conformance_claims(
+                claims,
+                credential_label="child",
+            )
+            if child_mic_claims != parent_mic_claims:
+                raise PermissionError(
+                    "child MIC conformance claim bundle does not match parent"
+                )
 
     return claims
 
@@ -825,6 +1230,7 @@ def derive_child_passport(
     parent_reserved_for_descendants: int = 0,
     child_resource_scope: list[str] | None = None,
     child_cwd: str | None = None,
+    child_risk_budget: Mapping[str, Any] | None = None,
 ) -> str:
     """Derive a child passport with strictly narrowed scope.
 
@@ -839,11 +1245,12 @@ def derive_child_passport(
                         parent_budget_ceiling). The proxy passes
                         ``parent_reserved_for_descendants`` from live reserved budget;
                         the signed claim ``reserved_budget_share`` audits the tree.
-      - resource_scope: if child_resource_scope provided, it must be a subset of
-                        parent's (no new patterns); if the parent is unrestricted
-                        (`[]`), any explicit child scope is a valid narrowing.
-                        A restricted parent MAY NOT be widened back to `[]`.
-                        If not provided, inherit parent's verbatim.
+      - resource_scope: an empty scope grants no resource authority; ``["**"]``
+                        is the explicit unrestricted sentinel. An unrestricted
+                        parent may delegate any valid narrower scope. A bounded
+                        or empty parent may delegate ``[]`` (deny all), while a
+                        bounded child otherwise remains an exact pattern subset.
+                        If not provided, inherit parent's scope verbatim.
       - cwd: if ``child_cwd`` is ``None``, child inherits parent's ``cwd``
              verbatim. If the parent has no ``cwd``, the child MAY NOT
              introduce one (cwd can only be inherited or narrowed, never
@@ -852,6 +1259,11 @@ def derive_child_passport(
              — ``/workspace/a`` narrows ``/workspace``; ``/workspaceabc``
              does not). Anything else raises ``PermissionError`` with a
              ``cwd escalation`` reason.
+      - risk_budget: a governed parent policy is inherited or explicitly
+                     attenuated; an ungoverned parent cannot introduce one.
+      - MIC conformance: an explicit, complete profile / receipt-policy /
+                         manifest-digest bundle is validated and inherited
+                         exactly; partial or malformed bundles fail closed.
     """
     # Signature-and-claims decode only. The full chain-anchor verification
     # (``verify_passport`` with ``parent_token=grandparent_token``) is the
@@ -880,7 +1292,9 @@ def derive_child_passport(
     max_ttl = parent_exp - int(time.time())
     if max_ttl <= 0:
         raise PermissionError("parent passport expired")
-    requested_ttl = min(child_ttl_s, max_ttl) if child_ttl_s is not None else min(300, max_ttl)
+    requested_ttl = (
+        min(child_ttl_s, max_ttl) if child_ttl_s is not None else min(300, max_ttl)
+    )
     if requested_ttl <= 0:
         raise PermissionError("insufficient TTL for child passport")
 
@@ -911,24 +1325,32 @@ def derive_child_passport(
         candidates.append(int(child_max_tool_calls))
     child_budget = min(candidates)
 
-    # Resource scope narrowing: child must request a subset of parent's patterns,
-    # or inherit verbatim. We compare by string equality — pattern-level set
-    # subset would require a glob-language intersector we don't have today.
+    # Resource scope narrowing. Empty means no resource authority; ["**"] is
+    # the sole explicit unrestricted sentinel. Bounded pattern comparison stays
+    # exact because a safe glob-language intersector is outside this boundary.
     parent_scope = list(parent.get("resource_scope", []))
     if child_resource_scope is not None:
         child_scope_set = set(child_resource_scope)
-        if not parent_scope:
-            final_scope = sorted(child_scope_set)
+        requested_scope = sorted(child_scope_set)
+        if (
+            UNRESTRICTED_RESOURCE_SCOPE_PATTERN in requested_scope
+            and not resource_scope_is_explicitly_unrestricted(requested_scope)
+        ):
+            raise PermissionError(
+                "unrestricted '**' must be the only child_resource_scope pattern"
+            )
+        if not requested_scope:
+            final_scope = []
+        elif resource_scope_is_explicitly_unrestricted(parent_scope):
+            final_scope = requested_scope
         else:
-            if not child_scope_set:
-                raise PermissionError(
-                    "child_resource_scope cannot widen a restricted parent scope to unrestricted"
-                )
             parent_scope_set = set(parent_scope)
             new_patterns = child_scope_set - parent_scope_set
             if new_patterns:
-                raise PermissionError(f"scope escalation (resources): {sorted(new_patterns)}")
-            final_scope = sorted(child_scope_set)
+                raise PermissionError(
+                    f"scope escalation (resources): {sorted(new_patterns)}"
+                )
+            final_scope = requested_scope
     else:
         final_scope = parent_scope
 
@@ -967,11 +1389,40 @@ def derive_child_passport(
                     f"cwd escalation: {final_cwd!r} is not a subpath of parent's {parent_cwd!r}"
                 )
 
+    parent_risk_budget = parent.get("risk_budget")
+    if parent_risk_budget is None:
+        if child_risk_budget is not None:
+            raise PermissionError("cannot introduce risk_budget: parent has none")
+        final_risk_budget = None
+    else:
+        from .risk_budget import attenuate_risk_budget, project_risk_budget
+
+        if not isinstance(parent_risk_budget, dict):
+            raise PermissionError("parent risk_budget is invalid")
+        projected_parent = project_risk_budget(parent_risk_budget, child_tools)
+        if projected_parent is None:
+            if child_risk_budget is not None:
+                raise PermissionError(
+                    "cannot retain risk_budget after removing all governed tools"
+                )
+            final_risk_budget = None
+        else:
+            final_risk_budget = attenuate_risk_budget(
+                projected_parent,
+                child_risk_budget,
+            )
+            if set(final_risk_budget["tools"]) != set(projected_parent["tools"]):
+                raise PermissionError(
+                    "risk_budget tool removal must match child allowed_tools"
+                )
+
     child = MissionPassport(
         agent_id=child_agent_id,
         mission=child_mission,
         allowed_tools=sorted(child_tools),
-        forbidden_tools=sorted(set(parent.get("forbidden_tools", [])) | (parent_tools - child_tools)),
+        forbidden_tools=sorted(
+            set(parent.get("forbidden_tools", [])) | (parent_tools - child_tools)
+        ),
         resource_scope=final_scope,
         max_tool_calls=child_budget,
         max_duration_s=int(requested_ttl),
@@ -979,6 +1430,15 @@ def derive_child_passport(
         max_delegation_depth=child_depth,
         parent_jti=parent["jti"],
         cwd=final_cwd,
+        spend_budget=(
+            normalize_spend_budget(
+                parent["spend_budget"],
+                require_lineage_id=True,
+            )
+            if parent.get("spend_budget") is not None
+            else None
+        ),
+        risk_budget=final_risk_budget,
     )
     child_chain: list[dict[str, str]] = [{"jti": str(parent["jti"])}]
     # Embed parent's own token hash in the chain link. This is ONE of two
@@ -1006,6 +1466,7 @@ def derive_child_passport(
         private_key,
         ttl_s=requested_ttl,
         extra_claims={
+            **_inherited_mic_conformance_claims(parent),
             "parent_token_hash": _token_sha256(parent_token),
             DELEGATION_CHAIN_CLAIM: child_chain,
             "reserved_budget_share": int(child_budget),
@@ -1020,12 +1481,16 @@ def _ttl_from_payload(data: dict[str, Any]) -> int | None:
         reference = int(data.get("issued_at", time.time()))
         ttl = int(data["expires_at"]) - reference
         if ttl <= 0:
-            raise ValueError("mission file expires_at must be greater than issued_at/current time")
+            raise ValueError(
+                "mission file expires_at must be greater than issued_at/current time"
+            )
         return ttl
     return None
 
 
-def load_mission_file(path: str | Path) -> tuple[MissionPassport, int | None, dict[str, Any]]:
+def load_mission_file(
+    path: str | Path,
+) -> tuple[MissionPassport, int | None, dict[str, Any]]:
     mission_path = Path(path).expanduser()
     payload = json.loads(mission_path.read_text(encoding="utf-8"))
     mission = MissionPassport.from_dict(payload)

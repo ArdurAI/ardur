@@ -22,12 +22,13 @@ var ErrDaemonCustodyConfig = errors.New("kernelcapture: invalid daemon custody c
 // repository, mission, and agent-session configuration must not select these
 // privileged paths.
 type DaemonCustodyConfig struct {
-	ConfigPath     string
-	StateDir       string
-	RunDir         string
-	SocketPath     string
-	BPFFSDir       string
-	RingbufMapPath string
+	ConfigPath              string
+	StateDir                string
+	RunDir                  string
+	SocketPath              string
+	BPFFSDir                string
+	RingbufMapPath          string
+	LifecycleDroppedMapPath string
 
 	OwnerUID int
 	OwnerGID int
@@ -54,15 +55,16 @@ type DaemonCustodyConfig struct {
 // DaemonCustodyPlan is a validated dry-run plan for the future daemon custody
 // boundary. The steps are descriptive; none are executed by this package.
 type DaemonCustodyPlan struct {
-	Mode           string
-	ConfigPath     string
-	StateDir       string
-	RunDir         string
-	SocketPath     string
-	BPFFSDir       string
-	RingbufMapPath string
-	OwnerUID       int
-	OwnerGID       int
+	Mode                    string
+	ConfigPath              string
+	StateDir                string
+	RunDir                  string
+	SocketPath              string
+	BPFFSDir                string
+	RingbufMapPath          string
+	LifecycleDroppedMapPath string
+	OwnerUID                int
+	OwnerGID                int
 
 	ProducerName    string
 	ProducerVersion string
@@ -107,21 +109,22 @@ func (e *DaemonCustodyConfigError) Unwrap() error {
 // into any privileged setup in a future reviewed slice.
 func DefaultDaemonCustodyConfig() DaemonCustodyConfig {
 	return DaemonCustodyConfig{
-		ConfigPath:      "/etc/ardur/kernelcapture-daemon.toml",
-		StateDir:        "/var/lib/ardur/kernelcapture",
-		RunDir:          "/run/ardur/kernelcapture",
-		SocketPath:      "/run/ardur/kernelcapture/control.sock",
-		BPFFSDir:        "/sys/fs/bpf/ardur",
-		RingbufMapPath:  "/sys/fs/bpf/ardur/process_lifecycle_events",
-		OwnerUID:        0,
-		OwnerGID:        0,
-		ConfigMode:      0o600,
-		StateDirMode:    0o700,
-		RunDirMode:      0o700,
-		BPFFSDirMode:    0o700,
-		SocketMode:      0o660,
-		ProducerName:    "ardur-process-lifecycle-ebpf",
-		ProducerVersion: "phase2-process-lifecycle-v0",
+		ConfigPath:              "/etc/ardur/kernelcapture-daemon.toml",
+		StateDir:                "/var/lib/ardur/kernelcapture",
+		RunDir:                  "/run/ardur/kernelcapture",
+		SocketPath:              "/run/ardur/kernelcapture/control.sock",
+		BPFFSDir:                "/sys/fs/bpf/ardur",
+		RingbufMapPath:          "/sys/fs/bpf/ardur/process_lifecycle_events",
+		LifecycleDroppedMapPath: "/sys/fs/bpf/ardur/process_lifecycle_events_dropped",
+		OwnerUID:                0,
+		OwnerGID:                0,
+		ConfigMode:              0o600,
+		StateDirMode:            0o700,
+		RunDirMode:              0o700,
+		BPFFSDirMode:            0o700,
+		SocketMode:              0o660,
+		ProducerName:            "ardur-process-lifecycle-ebpf",
+		ProducerVersion:         "phase2-process-lifecycle-v0",
 	}
 }
 
@@ -133,17 +136,18 @@ func BuildDaemonCustodyPlan(cfg DaemonCustodyConfig) (DaemonCustodyPlan, error) 
 		return DaemonCustodyPlan{}, err
 	}
 	return DaemonCustodyPlan{
-		Mode:            DaemonCustodyModeLocalOnlyScaffold,
-		ConfigPath:      cfg.ConfigPath,
-		StateDir:        cfg.StateDir,
-		RunDir:          cfg.RunDir,
-		SocketPath:      cfg.SocketPath,
-		BPFFSDir:        cfg.BPFFSDir,
-		RingbufMapPath:  cfg.RingbufMapPath,
-		OwnerUID:        cfg.OwnerUID,
-		OwnerGID:        cfg.OwnerGID,
-		ProducerName:    cfg.ProducerName,
-		ProducerVersion: cfg.ProducerVersion,
+		Mode:                    DaemonCustodyModeLocalOnlyScaffold,
+		ConfigPath:              cfg.ConfigPath,
+		StateDir:                cfg.StateDir,
+		RunDir:                  cfg.RunDir,
+		SocketPath:              cfg.SocketPath,
+		BPFFSDir:                cfg.BPFFSDir,
+		RingbufMapPath:          cfg.RingbufMapPath,
+		LifecycleDroppedMapPath: cfg.LifecycleDroppedMapPath,
+		OwnerUID:                cfg.OwnerUID,
+		OwnerGID:                cfg.OwnerGID,
+		ProducerName:            cfg.ProducerName,
+		ProducerVersion:         cfg.ProducerVersion,
 		Steps: []DaemonCustodyStep{
 			{
 				Name:       "validate_root_owned_config",
@@ -179,6 +183,13 @@ func BuildDaemonCustodyPlan(cfg DaemonCustodyConfig) (DaemonCustodyPlan, error) 
 				Mode:       cfg.BPFFSDirMode,
 				Privileged: true,
 				Rationale:  "consumer ringbuf path must be chosen by daemon custody, not repo-controlled config",
+			},
+			{
+				Name:       "pin_process_lifecycle_drop_counter",
+				Path:       cfg.LifecycleDroppedMapPath,
+				Mode:       cfg.BPFFSDirMode,
+				Privileged: true,
+				Rationale:  "producer loss evidence must persist under the same daemon-owned bpffs custody boundary",
 			},
 			{
 				Name:       "bind_local_control_socket",
@@ -218,6 +229,11 @@ func normalizeDaemonCustodyConfig(cfg DaemonCustodyConfig) DaemonCustodyConfig {
 	cfg.SocketPath = cleanPath(cfg.SocketPath)
 	cfg.BPFFSDir = cleanPath(cfg.BPFFSDir)
 	cfg.RingbufMapPath = cleanPath(cfg.RingbufMapPath)
+	if strings.TrimSpace(cfg.LifecycleDroppedMapPath) == "" && cfg.BPFFSDir != "" {
+		cfg.LifecycleDroppedMapPath = filepath.Join(cfg.BPFFSDir, "process_lifecycle_events_dropped")
+	} else {
+		cfg.LifecycleDroppedMapPath = cleanPath(cfg.LifecycleDroppedMapPath)
+	}
 	cfg.RepositoryRoot = cleanPath(cfg.RepositoryRoot)
 	return cfg
 }
@@ -243,6 +259,7 @@ func validateDaemonCustodyConfig(cfg DaemonCustodyConfig) error {
 		{field: "socket_path", path: cfg.SocketPath},
 		{field: "bpffs_dir", path: cfg.BPFFSDir},
 		{field: "ringbuf_map_path", path: cfg.RingbufMapPath},
+		{field: "lifecycle_dropped_map_path", path: cfg.LifecycleDroppedMapPath},
 	} {
 		if item.path == "" {
 			return custodyConfigError(item.field, "path is required")
@@ -250,28 +267,31 @@ func validateDaemonCustodyConfig(cfg DaemonCustodyConfig) error {
 		if !filepath.IsAbs(item.path) {
 			return custodyConfigError(item.field, "path must be absolute")
 		}
-		if pathWithin(item.path, cfg.RepositoryRoot) {
+		if lexicalPathWithin(item.path, cfg.RepositoryRoot) {
 			return custodyConfigError(item.field, "privileged custody path is repository-controlled")
 		}
 	}
 
-	if !pathWithin(cfg.ConfigPath, "/etc/ardur") {
+	if !lexicalPathWithin(cfg.ConfigPath, "/etc/ardur") {
 		return custodyConfigError("config_path", "daemon-owned config must live under /etc/ardur")
 	}
-	if !pathWithin(cfg.StateDir, "/var/lib/ardur") {
+	if !lexicalPathWithin(cfg.StateDir, "/var/lib/ardur") {
 		return custodyConfigError("state_dir", "daemon state must live under /var/lib/ardur")
 	}
-	if !pathWithin(cfg.RunDir, "/run/ardur") && !pathWithin(cfg.RunDir, "/var/run/ardur") {
+	if !lexicalPathWithin(cfg.RunDir, "/run/ardur") && !lexicalPathWithin(cfg.RunDir, "/var/run/ardur") {
 		return custodyConfigError("run_dir", "runtime directory must live under /run/ardur or /var/run/ardur")
 	}
-	if !pathWithin(cfg.SocketPath, cfg.RunDir) {
+	if !lexicalPathWithin(cfg.SocketPath, cfg.RunDir) {
 		return custodyConfigError("socket_path", "socket must live under the daemon runtime directory")
 	}
-	if !pathWithin(cfg.BPFFSDir, "/sys/fs/bpf") {
+	if !lexicalPathWithin(cfg.BPFFSDir, "/sys/fs/bpf") {
 		return custodyConfigError("bpffs_dir", "bpffs directory must live under /sys/fs/bpf")
 	}
-	if !pathWithin(cfg.RingbufMapPath, cfg.BPFFSDir) {
+	if !lexicalPathWithin(cfg.RingbufMapPath, cfg.BPFFSDir) {
 		return custodyConfigError("ringbuf_map_path", "ringbuf map path must live under the daemon bpffs directory")
+	}
+	if !lexicalPathWithin(cfg.LifecycleDroppedMapPath, cfg.BPFFSDir) {
+		return custodyConfigError("lifecycle_dropped_map_path", "lifecycle drop counter path must live under the daemon bpffs directory")
 	}
 
 	if err := validateExactMode("config_mode", cfg.ConfigMode, 0o600); err != nil {
@@ -316,7 +336,10 @@ func cleanPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func pathWithin(child string, parent string) bool {
+// lexicalPathWithin performs lexical-only path containment without checking
+// symlinks or filesystem state. DO NOT USE for production path enforcement —
+// perform symlink-aware realpath resolution first.
+func lexicalPathWithin(child string, parent string) bool {
 	// This is lexical-only containment for a dry-run/no-IO scaffold. Any future
 	// privileged filesystem write must add symlink-aware realpath, ownership, and
 	// mode checks before trusting these paths on disk.

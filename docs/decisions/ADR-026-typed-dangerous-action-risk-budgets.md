@@ -1,0 +1,103 @@
+# ADR-026: Typed dangerous-action risk budgets
+
+**Status:** Accepted
+
+**Date:** 2026-07-14
+
+## Context
+
+Tool allowlists and total call counts limit which operations an agent may
+invoke and how often, but not the impact of one permitted invocation. One
+allowed deletion could address one object or one million; one allowed send
+could remain private or disclose regulated data publicly. Prompt-based risk
+labels and MCP annotations are caller/server assertions, not a trustworthy
+pre-action enforcement input.
+
+Impact caps must also survive concurrent agents and delegated sessions. A
+read-check-write counter per process lets siblings simultaneously observe the
+same remaining authority. Charging only after execution allows irreversible
+actions to oversubscribe before the runtime records them. Automatically
+returning a timed-out charge can race an executor that is still running.
+
+Primary inputs to the decision were RFC 8785, JSON Schema 2020-12, the current
+MCP tools specification, OAuth Attenuating Agent Tokens draft-01, Agent
+Delegation Receipt Protocol draft-10, and Python's `flock`/`os.replace`
+contracts. See
+the [risk-budget reference](../reference/risk-budgets.md#protocol-boundary-and-primary-sources).
+
+## Decision
+
+1. Mission Passports may carry an optional versioned `risk_budget` claim.
+   Absence preserves existing runtime behavior.
+2. Each governed tool is bound to a trusted `ToolRiskContract` digest over the
+   authenticated tool name, JSON Schema, and a closed declarative extractor
+   program. The registry freezes at proxy startup.
+3. Contracts derive mandatory typed facts locally. Numeric facts are additive;
+   categorical facts use closed ordered vocabularies. Missing, unknown,
+   malformed, negative, non-integral, oversized, or schema-invalid input fails
+   closed.
+4. Signed policy contains per-action fact caps plus numeric session, agent, and
+   lineage ceilings. Delegation preserves lineage and contract/fact identity
+   while allowing only tool subsets and lower/equal caps. The first governed
+   call freezes a normalized session snapshot; reservations retain the exact
+   accounting ceilings used at authorization. Tools removed during delegation
+   also remove numeric ceilings that no retained tool references.
+5. `evaluate_tool_call` atomically reserves all numeric facts across all three
+   scopes before ordinary policy can return `PERMIT`. A unique request ID is
+   mandatory for governed actions; active or terminal replay cannot re-permit.
+6. The executor explicitly records `committed` once execution may have started
+   or `released` only when it did not start. Session finalization refuses active
+   or quarantined reservations and resolved lifecycle events whose receipts are
+   not yet durable. Exceptions never imply release, and quarantined reservations
+   may only reconcile as committed.
+7. Stale active reservations quarantine while retaining authority. Explicit
+   reconciliation is preferred. After expiry and a bounded quarantine window,
+   pruning conservatively archives uncertainty as spent. Terminal compaction
+   preserves request/fingerprint tombstones for a bounded replay window and
+   never refunds committed authority.
+8. Action and lifecycle receipts contain only a canonical fact digest, bounded
+   remaining counters, and stable denial classes. Raw facts, request IDs,
+   targets, paths, URLs, and secrets are excluded. Ledger lifecycle state and
+   persisted session receipt material form a retry-safe outbox; compaction does
+   not discard a terminal record before receipt delivery.
+9. The existing DRP profile does not project `risk_budget`. Emitters must fail
+   closed instead of silently dropping the extension.
+
+## Consequences
+
+- Configured dangerous tools can enforce per-action and cumulative impact caps
+  before dispatch, including across processes and delegated agents.
+- The proxy adds JSON Schema validation and an fsync-backed reservation plus
+  outcome transaction for each governed action. All lineages serialize on one
+  global ledger lock so agent ceilings remain atomic across lineage boundaries;
+  this favors safety over high-throughput authorization.
+- An executor crash conservatively consumes/quarantines authority until an
+  operator or recovery controller explicitly reconciles it, or bounded
+  post-expiry maintenance archives the uncertainty as spent.
+- Contract authors become part of the trusted computing base: a schema or
+  extractor that understates impact cannot be repaired by the ledger.
+- The feature does not discover hidden side effects, validate the truth of
+  tool arguments, classify semantic intent, or govern calls that bypass the
+  configured adapter.
+- The runtime adds no network dependency or cloud-service cost, but durable
+  receipt/ledger/tombstone storage and high-throughput lineage contention are
+  operating costs. Receipt-sink failure intentionally retains outbox records
+  and can exhaust the bounded ledger rather than lose audit evidence.
+
+## Alternatives considered
+
+- **Trust a caller-provided risk object.** Rejected because the actor seeking
+  authorization could choose its own impact label.
+- **Use MCP annotations directly.** Rejected because the MCP specification
+  treats annotations as untrusted unless the server is trusted; annotations
+  also do not provide cumulative atomic accounting.
+- **Charge after tool completion.** Rejected because concurrent irreversible
+  actions could all pass before any charge was recorded.
+- **Return stale reservations automatically.** Rejected because timeout does
+  not prove the executor stopped.
+- **Use the existing delegation-call ledger.** Rejected because its single
+  call-count dimension cannot atomically conserve multiple typed facts across
+  session, agent, and lineage scopes.
+- **Store raw facts and identifiers for easier debugging.** Rejected because
+  targets, destinations, and secret classifications are sensitive audit data;
+  digests and bounded counters are sufficient for enforcement evidence.

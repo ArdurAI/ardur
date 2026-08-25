@@ -1,0 +1,44 @@
+{
+  "schema_version": "ardur.execution_receipt.v0.2",
+  "canonicalization": "jcs-rfc8785",
+  "receipt_kind": "action",
+  "receipt_id": "receipt:fixture-v02-action",
+  "grant_id": "grant:fixture-v02",
+  "parent_receipt_id": null,
+  "parent_receipt_hash": null,
+  "actor": "spiffe://example.test/agent/fixture",
+  "verifier_id": "spiffe://example.test/verifier/fixture",
+  "trace_id": "trace:fixture-v02",
+  "run_nonce": "fixture-run-nonce-0001",
+  "step_id": "step:fixture-v02-001",
+  "invocation_digest": {
+    "alg": "sha-256",
+    "canonicalization": "jcs-rfc8785",
+    "scope": "normalized_input",
+    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  "tool": "Bash",
+  "action_class": "execute",
+  "target": "printf hello",
+  "resource_family": "process",
+  "side_effect_class": "process_launch",
+  "verdict": "compliant",
+  "evidence_level": "self_signed",
+  "reason": "fixture action is within scope",
+  "policy_decisions": [
+    {
+      "backend": "native",
+      "decision": "Allow",
+      "reason": "within scope"
+    }
+  ],
+  "arguments_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "budget_remaining": {
+    "tool_call": 4
+  },
+  "timestamp": "2026-07-10T00:00:00Z",
+  "iss": "spiffe://example.test/verifier/fixture",
+  "iat": 1783641600,
+  "exp": 1783641900,
+  "jti": "receipt:fixture-v02-action"
+}

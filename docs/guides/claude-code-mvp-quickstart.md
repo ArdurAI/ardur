@@ -28,17 +28,49 @@ Use it in two modes:
 From a fresh checkout of this branch:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur --help
 ```
 
 Keep the virtualenv active for the rest of the walkthrough so Claude Code hooks
-can find the same installed `ardur` package.
+can find the same installed `ardur` package. For a manual install instead, use
+Python 3.10 or newer, run `python -m pip install --upgrade pip`, then
+`python -m pip install -e python/`. macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
 
-## 2. Run the no-key evidence harness
+## 2. Optional: see the local governance loop first
+
+For a provider-free `PERMIT`/`DENY`/signed-attestation demonstration before the
+broader hook evidence path, run:
+
+```bash
+python scripts/run-no-key-mvp-demo.py
+```
+
+The driver is loopback-only and temporary: it deliberately disables TLS and
+bearer auth for its child process, verifies the attestation signature locally,
+then removes its keys and state. See the
+[no-key MVP guide](no-key-mvp-demo.md) for the complete boundary.
+
+For the shortest Claude Code-specific proof, run the deliberate deny demo:
+
+```bash
+python3 scripts/run-claude-deny-demo.py
+```
+
+It creates a temporary read-only profile and Mission Passport, submits a
+provider-free `PreToolUse` Bash request whose command would delete a canary and
+write an exfiltration marker, and requires Ardur to return a human-readable
+Claude Code deny before the harness can dispatch anything. It then verifies the
+canary digest, absent marker, and signed/hash-linked violation receipt before
+removing all temporary material. The run is capped at 60 seconds.
+
+The unchanged canary and absent marker are post-deny file-state checks. They do
+not prove independent process, kernel, network, or provider observation. Use
+the later evidence-correlation work for those stronger claims.
+
+## 3. Run the no-key evidence harness
 
 This does not call a live LLM provider. It uses temporary HOME, project, Ardur
 home, and evidence directories, then writes a redacted shareable bundle.
@@ -51,18 +83,28 @@ python3 scripts/run-rwt-phase1-fresh-user.py \
 python3 -m json.tool /tmp/ardur-rwt-phase1/bundle.redacted.json | less
 ```
 
+The `--short=12` origin pin is the recommended copy/paste form. The harness also
+accepts a current commit identifier or matching `origin/dev` prefix of at least
+7 characters, but stale or mismatched pins still block.
+
 Expected result for a clean source checkout:
 
 - bundle `status` is `PASS`
 - `RWT-1` is `PASS` for install/profile/protect/doctor
 - `RWT-2` is `PASS` for actual hook CLI fixture allow/deny receipts
-- `RWT-3` is `PASS`, `SKIP_GATED`, or `SKIP_UNSUPPORTED` depending on whether
-  a logged-in `claude` binary is available; a skip is the honest no-key result,
-  not a hidden failure
+- `RWT-3` is `SKIP_GATED` or `SKIP_UNSUPPORTED` in no-key/autonomous mode;
+  it can be `BLOCKED` when local Claude preflight fails. A skip is the explicit
+  no-key result, not a live-Claude pass or a hidden failure
 - `secret_scan_hits` is `0`
 - `raw_secret_values_copied` is `false`
 
-## 3. Run a live Claude Code session
+For field-by-field interpretation, including which public claims a no-key
+bundle can support, read
+[`docs/guides/read-phase1-evidence-bundle.md`](read-phase1-evidence-bundle.md).
+For a compact reviewer/demo handoff after the run, use
+[`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md).
+
+## 4. Run a live Claude Code session
 
 Only run this if `claude` is already installed and logged in. The demo creates a
 temporary project and a local `.vibap` home under that project.
@@ -97,7 +139,7 @@ chain links, and summarize compliant, violation, and unknown outcomes. If the
 model attempts `Bash`, `Edit`, or `Write`, the read-only profile should return a
 Claude Code deny decision and still preserve the signed violation receipt.
 
-## 4. Read the result correctly
+## 5. Read the result correctly
 
 Ardur evidence is strongest at the local tool boundary. Treat the report as a
 verified statement about what Claude Code exposed to local hooks and what Ardur
@@ -108,6 +150,8 @@ coverage, or package-manager release readiness.
 Related references:
 
 - [`plugins/claude-code/README.md`](../../plugins/claude-code/README.md)
+- [`docs/guides/phase1-demo-packet.md`](phase1-demo-packet.md)
+- [`docs/guides/read-phase1-evidence-bundle.md`](read-phase1-evidence-bundle.md)
 - [`docs/reference/cli.md`](../reference/cli.md)
 - [`docs/reference/ardur-md-profile.md`](../reference/ardur-md-profile.md)
 - [`docs/coverage-map.md`](../coverage-map.md)

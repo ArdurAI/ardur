@@ -2,7 +2,7 @@
 
 Ardur Personal is the local product shape for regular users. It protects local
 AI-agent actions where Ardur owns the tool boundary, and it labels everything
-else honestly as observed or unknown.
+else as observed or unknown.
 
 The first release-candidate path is Claude Code.
 
@@ -12,9 +12,28 @@ Install Ardur with its Python dependencies:
 
 ```bash
 cd <ardur-repo>
-pip install -e python/
+./scripts/setup-dev.sh --skip-go
+source python/.venv/bin/activate
 ardur --version
 ```
+
+`setup-dev.sh` defaults to `python3.13` and creates `python/.venv`. For a manual
+install instead, use Python 3.10 or newer (`python/pyproject.toml` enforces this),
+run `python -m pip install --upgrade pip` first, then
+`python -m pip install -e python/`; macOS system Python 3.9 and its bundled pip
+are too old for the PEP 660 editable install.
+
+See the personal safety boundary locally before configuring a provider:
+
+```bash
+ardur personal-firewall demo
+```
+
+The command uses temporary local fixtures only. It shows an `ASK` result for a
+safe workspace read without bypassing Claude Code's normal permission flow,
+then denies an outside-workspace write, a secret-like argument, and external
+network access. It verifies four signed, hash-linked receipts and removes all
+temporary state.
 
 Create a simple guardrail file:
 
@@ -68,16 +87,29 @@ complete release artifact.
 
 ## Options Users Can Choose
 
+- `personal-firewall`: allows reads and edits inside the protected folder,
+  denies shell and external network tools, blocks common secret-like argument
+  markers, and caps the signed session at 40 governed tool calls. Absolute local
+  paths are canonicalized before the scope decision, so an in-folder symlink
+  that resolves outside is denied.
 - `read-only`: review code without editing files or running commands.
 - `safe-coding`: edit files inside the protected folder, but block shell
   commands.
 - `ARDUR.md`: plain Markdown profile for the same settings, suitable for
   non-technical users.
 - Advanced CLI flags: `ardur protect claude-code --scope . --mode read-only`
-  and `ardur protect claude-code --scope . --mode safe-coding`.
+  and `ardur protect claude-code --scope . --mode personal-firewall`.
 
 The Markdown profile compiles into the same Mission Passport and receipt path
 as advanced CLI setup. No policy capability is removed.
+
+The personal session cap is an action budget, not a provider-billing estimate.
+A dollar-denominated cap requires trusted signed cost telemetry from the
+provider adapter. Secret markers are conservative patterns, not universal data
+loss prevention, and allowed actions still pass through the agent's native
+permission flow. The scope receipt is pre-dispatch path evidence: it cannot
+distinguish a hard-link alias or prevent a path component from being replaced
+between the check and Claude Code's later filesystem operation.
 
 For source installs, `pip install -e python/` installs Ardur's required Python
 dependencies from `python/pyproject.toml`. The development Homebrew formula is

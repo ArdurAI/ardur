@@ -18,7 +18,6 @@ import posixpath
 import re
 import secrets
 import signal
-
 import sys
 import threading
 import time
@@ -30,21 +29,94 @@ from dataclasses import dataclass, field
 from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from .log_rotation import RotatingJSONLLog
+from .risk_budget import (
+    FileRiskBudgetLedger,
+    RiskBudgetError,
+    RiskOutcomeResult,
+    RiskBudgetReplayError,
+    RiskFactError,
+    ToolRiskRegistry,
+    attenuate_risk_budget,
+    normalize_risk_budget,
+    validate_action_risk,
+)
+from .spend_budget import (
+    FileSpendBudgetLedger,
+    SpendBudgetError,
+    SpendBudgetLedger,
+    SpendCloseResult,
+    SpendReservationRequest,
+    SpendReservationResult,
+    StaticSpendQuoteStore,
+    normalize_spend_budget,
+)
+from .aat_adapter import (
+    AAT_CREDENTIAL_FORMAT,
+    AAT_DEFAULT_AUDIENCE,
+    decode_aat_claims,
+    material_from_aat_grant,
+)
+from .approvals import ApprovalRateTracker
+from .attestation import issue_attestation, verify_attestation
+from .canonical_json import canonical_json_bytes
+from .denial import DenialReason
+from .lineage_budget import (
+    FileLineageBudgetLedger,
+    LineageBudgetConflictError,
+    LineageBudgetLedger,
+)
+from .memory import (
+    MEMORY_STORE_READ_TOOL,
+    MEMORY_STORE_WRITE_TOOL,
+    GovernedMemoryStore,
+    MemoryIntegrityError,
+)
 from .metrics import metrics as ardur_metrics
+from .mission import (
+    MissionBindingError,
+    MissionCache,
+    MissionStatusUnavailableError,
+    fetch_mission_declaration,
+    mission_is_revoked,
+    parse_mission_ref,
+)
+from .passport import (
+    DEFAULT_HOME,
+    MAX_DELEGATION_DEPTH,
+    MissionPassport,
+    UNRESTRICTED_RESOURCE_SCOPE_PATTERN,
+    _ensure_default_home_dir,
+    delegation_chain_entries,
+    derive_child_passport,
+    generate_keypair,
+    issue_passport,
+    load_private_key,
+    resolve_keys_dir,
+    verify_passport,
+)
+from .policy_backend import (
+    PolicyDecision,
+    compose_decisions,
+    get_backend,
+    timed_evaluate,
+)
 from .rate_limiter import RateLimiter
 from .tls import create_ssl_context, resolve_tls_paths
 
 # Session IDs are UUIDs — reject anything else to prevent path traversal
-_SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+_SESSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 MAX_REQUEST_BODY = 1024 * 1024  # 1 MiB
+_API_TOKEN_COMPARE_MAX_BYTES = 4096
+
 
 # Per-session in-process coordination for shared state_dir access. ``flock``
 # closes the cross-process hole, but same-process proxies can still share a
@@ -58,51 +130,11 @@ class _SessionCoordinationLock:
         self.lock = threading.RLock()
 
 
-_SESSION_COORDINATION_LOCKS: weakref.WeakValueDictionary[str, _SessionCoordinationLock] = (
-    weakref.WeakValueDictionary()
-)
+_SESSION_COORDINATION_LOCKS: weakref.WeakValueDictionary[
+    str, _SessionCoordinationLock
+] = weakref.WeakValueDictionary()
 _SESSION_COORDINATION_LOCKS_GUARD = threading.Lock()
 
-from .aat_adapter import (  # noqa: E402
-    AAT_CREDENTIAL_FORMAT,
-    decode_aat_claims,
-    material_from_aat_grant,
-)
-from .approvals import ApprovalRateTracker
-from .attestation import issue_attestation, verify_attestation
-from .backends.native import NativeBackend
-from .denial import DenialReason
-from .lineage_budget import (
-    FileLineageBudgetLedger,
-    LineageBudgetConflictError,
-    LineageBudgetLedger,
-)
-from .mission import (
-    MissionBindingError,
-    MissionCache,
-    MissionStatusUnavailableError,
-    fetch_mission_declaration,
-    mission_is_revoked,
-    parse_mission_ref,
-)
-from .memory import (
-    MEMORY_STORE_READ_TOOL,
-    MEMORY_STORE_WRITE_TOOL,
-    GovernedMemoryStore,
-    MemoryIntegrityError,
-)
-from .passport import (
-    DEFAULT_HOME,
-    MAX_DELEGATION_DEPTH,
-    MissionPassport,
-    delegation_chain_entries,
-    derive_child_passport,
-    generate_keypair,
-    issue_passport,
-    load_private_key,
-    resolve_keys_dir,
-    verify_passport,
-)
 # NOTE: ``from .receipt import build_receipt, sign_receipt`` was a top-level
 # import here, but proxy ↔ receipt forms a cycle (receipt.py uses ``PolicyEvent``
 # from this module under ``TYPE_CHECKING``). Although the cycle is safe at
@@ -113,14 +145,41 @@ from .passport import (
 # called in exactly one method (``_build_receipt_log_entry``), so a deferred
 # local import there breaks the topological cycle without changing semantics.
 # See ``_build_receipt_log_entry`` for the deferred import.
-from .policy_backend import PolicyDecision, compose_decisions, get_backend, register_backend, timed_evaluate
 
-DEFAULT_STATE_DIR = Path(os.environ.get("VIBAP_STATE_DIR", DEFAULT_HOME / "state")).expanduser()
+# Session IDs are UUIDs — reject anything else to prevent path traversal
+_SESSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+MAX_REQUEST_BODY = 1024 * 1024  # 1 MiB
+_API_TOKEN_COMPARE_MAX_BYTES = 4096
+
+
+# Per-session in-process coordination for shared state_dir access. ``flock``
+# closes the cross-process hole, but same-process proxies can still share a
+# PID, so we need a process-local lock keyed by the absolute lockfile path.
+class _SessionCoordinationLock:
+    """Weakref-able wrapper for a per-session reentrant process lock."""
+
+    __slots__ = ("lock", "__weakref__")
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+
+
+_SESSION_COORDINATION_LOCKS: weakref.WeakValueDictionary[
+    str, _SessionCoordinationLock
+] = weakref.WeakValueDictionary()
+_SESSION_COORDINATION_LOCKS_GUARD = threading.Lock()
+
+DEFAULT_STATE_DIR = Path(
+    os.environ.get("VIBAP_STATE_DIR", DEFAULT_HOME / "state")
+).expanduser()
 DEFAULT_LOG_PATH = DEFAULT_HOME / "governance_log.jsonl"
 DEFAULT_RECEIPTS_LOG_PATH = DEFAULT_HOME / "receipts_log.jsonl"
 
 logger = logging.getLogger(__name__)
-API_VERSION = "0.1.0"
+API_VERSION = "0.2.0"
 REPLAY_CACHE_MAX_ENTRIES = 4096
 REPLAY_CACHE_WARN_ENTRIES = max(1, int(REPLAY_CACHE_MAX_ENTRIES * 0.9))
 LINEAGE_PARENT_CACHE_MAX_ENTRIES = 4096
@@ -128,6 +187,18 @@ _PASSPORT_STATE_SCHEMA_VERSION = 1
 _SESSION_RECEIPT_INTEGRITY_VERSION = 1
 LIFECYCLE_ATTESTATION_SCHEMA = "ardur.lifecycle.attestation.v1"
 LineageEdge = tuple[str | None, str | None]
+
+
+def _warn_explicit_unrestricted_resource_scope(claims: Mapping[str, Any]) -> None:
+    if claims.get("resource_scope") != [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]:
+        return
+    logger.warning(
+        "session credential explicitly grants unrestricted resource_scope via "
+        "the sole '**' pattern (jti=%s, agent_id=%s)",
+        claims.get("jti", "unknown"),
+        claims.get("sub", "unknown"),
+    )
+
 
 # B.2 fail-closed precondition (PLAN E.8). Declared telemetry fields MUST be
 # present and non-empty in the tool-call arguments dict or the verifier returns
@@ -246,16 +317,22 @@ _WINDOWS_UNC_RE = re.compile(r"^\\\\[^\\]+\\")
 # We intentionally exclude U+2571 BOX DRAWINGS LIGHT DIAGONAL (decorative
 # line-drawing, very rare in real paths) and backslash variants — ASCII
 # ``\`` has its own dedicated handling (Windows shape + bare-backslash).
-_SLASH_LIKE_CODEPOINTS = frozenset({"/", "\uFF0F", "\u2044", "\u29F8", "\u2215"})
+_SLASH_LIKE_CODEPOINTS = frozenset({"/", "\uff0f", "\u2044", "\u29f8", "\u2215"})
 
-# Phase-3.2 C-5: Unicode dot-like codepoints that render visually as "." but
-# escape the literal ".." segment checks and posixpath.normpath's traversal
-# collapsing. Folding them to ASCII "." is surgical \u2014 same rationale as
-# _SLASH_LIKE_CODEPOINTS. NFC preserves these codepoints as-is.
-_DOT_LIKE_CODEPOINTS = frozenset({
-    "\u2024",  # ONE DOT LEADER (\u2024)  \u2014 visually indistinguishable from "."
-    "\uFF0E",  # FULLWIDTH FULL STOP (\uFF0E) \u2014 wide "."
-})
+# Dot-confusable codepoints: NFKC maps all three to ASCII ``.`` (U+002E).
+# NFC does NOT fold them, so the step-2 NFC pass alone is insufficient. A
+# tool that applies NFKC normalisation before path resolution would turn
+# ``[U+2024][U+2024]/etc/passwd`` into ``../../etc/passwd``, escaping any
+# ``/tmp/safe/*`` scope constraint the proxy PERMITs.
+#
+# Verified empirically (full set of NFKC \u2192 U+002E codepoints):
+#   unicodedata.normalize("NFKC", "\u2024")  == "."   # ONE DOT LEADER
+#   unicodedata.normalize("NFKC", "\uFE52")  == "."   # SMALL FULL STOP
+#   unicodedata.normalize("NFKC", "\uFF0E")  == "."   # FULLWIDTH FULL STOP
+#
+# We fold explicitly (same pattern as ``_SLASH_LIKE_CODEPOINTS``) so the
+# step-3 pre-normalisation ``..`` check fires before a PERMIT is issued.
+_DOT_LIKE_CODEPOINTS = frozenset({"\u2024", "\ufe52", "\uff0e"})
 
 
 def _contains_slash_like(s: str) -> bool:
@@ -316,29 +393,68 @@ _RESOURCE_SCAN_MAX_DEPTH = 16
 #
 # Hints are resolved per-check (not cached at import time) so tests and
 # operators can flip env vars without reimporting the module.
-_DEFAULT_PATH_HINTS = frozenset({
-    "path", "file", "filepath", "filename", "url", "uri",
-    "src", "source", "dst", "dest", "destination",
-    "location", "object_key", "cwd", "directory", "dir",
-    "target", "resource",
-    "command", "script", "cmd", "file_path",
-    # Phase-3.1b M-1 (external-review-G F1): `pattern` was previously a PATH hint,
-    # but grep / ripgrep / find / SQL LIKE wrappers all use `pattern`
-    # for a REGEX / GLOB / LIKE expression, not a filesystem path.
-    # Treating it as a path produced false-DENYs on in-memory-only
-    # operations (e.g. `{"pattern": "foo/bar", "path": "ok.txt"}`
-    # denied on `pattern`). Dropped from PATH_HINTS. A caller who
-    # really does want `pattern` scoped can re-add it via the
-    # `VIBAP_SCOPE_PATH_HINTS` env var — the defaults now optimize
-    # for the common case.
-})
-_DEFAULT_PROSE_HINTS = frozenset({
-    "content", "body", "text", "message", "note", "summary",
-    "description", "old_string", "new_string", "prompt",
-    "markdown", "response", "stdout", "stderr", "log",
-    "comment", "memo", "answer", "output", "instruction",
-    "query", "sql", "html",
-})
+_DEFAULT_PATH_HINTS = frozenset(
+    {
+        "path",
+        "file",
+        "filepath",
+        "filename",
+        "url",
+        "uri",
+        "src",
+        "source",
+        "dst",
+        "dest",
+        "destination",
+        "location",
+        "object_key",
+        "cwd",
+        "directory",
+        "dir",
+        "target",
+        "resource",
+        "command",
+        "script",
+        "cmd",
+        "file_path",
+        # Phase-3.1b M-1 (external-review-G F1): `pattern` was previously a PATH hint,
+        # but grep / ripgrep / find / SQL LIKE wrappers all use `pattern`
+        # for a REGEX / GLOB / LIKE expression, not a filesystem path.
+        # Treating it as a path produced false-DENYs on in-memory-only
+        # operations (e.g. `{"pattern": "foo/bar", "path": "ok.txt"}`
+        # denied on `pattern`). Dropped from PATH_HINTS. A caller who
+        # really does want `pattern` scoped can re-add it via the
+        # `VIBAP_SCOPE_PATH_HINTS` env var — the defaults now optimize
+        # for the common case.
+    }
+)
+_DEFAULT_PROSE_HINTS = frozenset(
+    {
+        "content",
+        "body",
+        "text",
+        "message",
+        "note",
+        "summary",
+        "description",
+        "old_string",
+        "new_string",
+        "prompt",
+        "markdown",
+        "response",
+        "stdout",
+        "stderr",
+        "log",
+        "comment",
+        "memo",
+        "answer",
+        "output",
+        "instruction",
+        "query",
+        "sql",
+        "html",
+    }
+)
 
 # Cap on raw token input. An attacker who can stuff an MB-sized blob into
 # one arg shouldn't be able to make us do MB-sized splits per call. Values
@@ -346,21 +462,27 @@ _DEFAULT_PROSE_HINTS = frozenset({
 # trip the fail-closed exhaustion path in ``_check_resource_scope``.
 _RESOURCE_TOKEN_MAX_LEN = 4096
 
+# Bound iterative percent-decoding so encoded traversal markers cannot stay
+# hidden behind one more layer while still preventing unbounded decode work.
+_RESOURCE_PERCENT_DECODE_MAX_ITERATIONS = 8
+
 # Minimal prose-only allowlist of grammatical slash compounds that must not
 # be reclassified as resource references by the embedded-path rule below.
 # ``_is_path_shaped_token`` remains the primary grammar guard; this set only
 # fences the extra pure-alpha path recovery added for round-3 C1.
-_GRAMMATICAL_PROSE_SLASH_TOKENS = frozenset({
-    "and/or",
-    "either/or",
-    "he/she",
-    "her/him",
-    "her/his",
-    "him/her",
-    "his/her",
-    "s/he",
-    "she/he",
-})
+_GRAMMATICAL_PROSE_SLASH_TOKENS = frozenset(
+    {
+        "and/or",
+        "either/or",
+        "he/she",
+        "her/him",
+        "her/his",
+        "him/her",
+        "his/her",
+        "s/he",
+        "she/he",
+    }
+)
 
 
 def _sanitize_value(value: str) -> tuple[str, str | None]:
@@ -400,13 +522,19 @@ def _sanitize_value(value: str) -> tuple[str, str | None]:
     # 0. Percent-decode loop (path traversal catalog finding #1, #2, #5).
     #    Without this, %2E%2E/%2F bypasses the step-3 '..' check because
     #    the literal '%2E%2E' does not contain '..'. Iterative decode handles
-    #    double-encoding (%252E → %2E → .). Max 3 iterations to prevent DoS.
+    #    nested encodings (%252E → %2E → .). The loop is bounded and fails
+    #    closed if a value keeps changing after the cap.
     import urllib.parse
-    for _ in range(3):
+
+    raw_input = value
+    for _ in range(_RESOURCE_PERCENT_DECODE_MAX_ITERATIONS):
         decoded = urllib.parse.unquote(value)
         if decoded == value:
             break
         value = decoded
+    else:
+        if urllib.parse.unquote(value) != value:
+            return raw_input, "percent-encoding nesting exceeds maximum"
 
     # 1. Null-byte rejection (also catches %00 after percent-decode above).
     if "\x00" in value:
@@ -429,12 +557,36 @@ def _sanitize_value(value: str) -> tuple[str, str | None]:
         if _sol in value:
             value = value.replace(_sol, "/")
 
-    # 2b. Phase-3.2 C-5: fold Unicode dot-like variants to ASCII "." so the
-    #     literal ".." checks in steps 3 and 7 catch traversal segments
-    #     written with confusable dots (e.g. ONE DOT LEADER U+2024).
+    # 2b. Fold dot-confusable codepoints to ASCII '.'. NFKC maps U+2024 ONE
+    #     DOT LEADER, U+FE52 SMALL FULL STOP, and U+FF0E FULLWIDTH FULL STOP
+    #     to '.' — empirically verified as the complete set. NFC (step 2) does
+    #     not fold them. A tool that performs NFKC normalisation before opening
+    #     a path would turn a PERMIT'd ``[U+2024][U+2024]/etc/passwd`` into
+    #     ``../../etc/passwd`` and escape scope. Fold here, before the '..'
+    #     segment check (step 3), so the invariant holds regardless of what the
+    #     tool layer does.
     for _dot in _DOT_LIKE_CODEPOINTS:
         if _dot in value:
             value = value.replace(_dot, ".")
+
+    # 2c. Definitive confusable backstop. The per-character folds in 2a/2b
+    #     canonicalize the *matched* value without NFKC's collateral damage to
+    #     legitimate fullwidth filenames — but on their own they are a fragile
+    #     allowlist. The real invariant is stronger: NO codepoint that a
+    #     downstream tool's NFKC pass could turn into a ``..`` traversal segment
+    #     may be PERMITted. Some confusables do this in a SINGLE codepoint that
+    #     the 2b per-char '.' fold cannot express:
+    #        unicodedata.normalize("NFKC", "‥") == ".."  # TWO DOT LEADER
+    #        unicodedata.normalize("NFKC", "︰") == ".."  # VERT. TWO DOT LEADER
+    #     Rather than chase an ever-growing list, check the NFKC form itself for
+    #     a ``..`` path segment and fail closed. This is a DENY-only check: it
+    #     never widens scope, and legitimate paths (fullwidth letters, URLs,
+    #     drive letters) never contain a ``..`` segment in their NFKC form.
+    _nfkc_form = unicodedata.normalize("NFKC", value)
+    if _nfkc_form != value:
+        for _seg in re.split(r"[\\/]", _nfkc_form):
+            if _seg == "..":
+                return value, "contains '..' segment (NFKC-confusable)"
 
     # 3. Pre-normalization '..' segment check (B7 — lateral escape).
     #    Split on both '/' and '\\' so a Windows-shaped traversal is caught
@@ -486,6 +638,7 @@ def _resolve_hint_sets() -> tuple[frozenset[str], frozenset[str]]:
     Resolved on every call (not cached) so tests can flip env vars without
     reimporting the module. The cost is a tiny set union per check.
     """
+
     def _parse(raw: str | None) -> set[str]:
         if not raw:
             return set()
@@ -634,7 +787,9 @@ def _is_short_pure_alpha_slash_compound(s: str) -> bool:
     segments = _SLASH_LIKE_SPLIT_RE.split(s)
     if len(segments) != 2:
         return False
-    return all(segment and segment.isalpha() and len(segment) <= 4 for segment in segments)
+    return all(
+        segment and segment.isalpha() and len(segment) <= 4 for segment in segments
+    )
 
 
 def _extract_path_tokens(
@@ -860,7 +1015,11 @@ def _iter_resource_values(
                     exhausted["v"] = True
                 return
             yield from _iter_resource_values(
-                val, key=str(k), depth=depth + 1, budget=budget, exhausted=exhausted,
+                val,
+                key=str(k),
+                depth=depth + 1,
+                budget=budget,
+                exhausted=exhausted,
             )
         return
     if isinstance(arguments, (list, tuple)):
@@ -869,10 +1028,17 @@ def _iter_resource_values(
                 if exhausted is not None:
                     exhausted["v"] = True
                 return
-            # Key context doesn't carry through list/tuple boundaries —
-            # a list member is unkeyed from the scope-matcher's viewpoint.
+            # Preserve parent key context through list/tuple boundaries.
+            # Path-hint keys such as ``directory`` can legitimately carry a
+            # list of resources; dropping the key lets bare values like
+            # ``{"directory": ["hr"]}`` evade ``resource_scope`` because
+            # they do not have path syntax on their own.
             yield from _iter_resource_values(
-                item, key=None, depth=depth + 1, budget=budget, exhausted=exhausted,
+                item,
+                key=key,
+                depth=depth + 1,
+                budget=budget,
+                exhausted=exhausted,
             )
         return
     # Non-string scalars (int/float/bool/None) are never resources.
@@ -886,10 +1052,11 @@ def _check_resource_scope(
     """Verify every resource-like value in `arguments` matches at least one glob in
     `resource_scope`. Returns (ok, reason).
 
-    If `resource_scope` is empty, returns (True, "") for backwards compatibility
-    with passports that don't declare scope. Matching is case-sensitive
-    (fnmatchcase) because real-world paths/URLs are case-sensitive on Linux, S3,
-    GCS, etc.
+    An empty ``resource_scope`` grants no resource authority: resource-bearing
+    arguments are denied while arguments with no resource candidates may pass.
+    The sole ``"**"`` pattern is the explicit unrestricted form. Matching is
+    case-sensitive (fnmatchcase) because real-world paths/URLs are case-sensitive
+    on Linux, S3, GCS, etc.
 
     The optional ``cwd`` is a passport-declared anchor used to resolve
     *relative* candidate values. When a candidate token does not match any
@@ -918,12 +1085,22 @@ def _check_resource_scope(
        any relative pattern → strip leading ``/``). Coerced forms still go
        through escape-check via re-sanitization so coercion can never mask
        traversal.
+    4. **Local filesystem canonicalization** — after a lexical match, absolute
+       POSIX candidates matched by a simple absolute scope root (an exact path
+       or ``ROOT/*``) are resolved with ``realpath`` and compared with the
+       resolved root. This rejects existing and dangling symlink-parent escapes
+       while leaving URL, Windows-path, and intentionally generic glob
+       semantics unchanged.
+
+    Canonical pathname comparison is a pre-dispatch check, not an inode-bound
+    filesystem operation. It cannot distinguish hard-link aliases or prevent a
+    path component from being swapped after this check and before the tool
+    opens it. Callers must disclose that residual boundary rather than treating
+    a PERMIT as kernel-enforced containment.
     """
-    if not resource_scope:
-        # No scope declared — legacy "unrestricted" semantics. PERMIT.
-        return True, ""
+    scope_missing = not resource_scope
     patterns = [p for p in resource_scope if isinstance(p, str) and p]
-    if not patterns:
+    if not patterns and not scope_missing:
         # Phase-3.1b M-2 (external-review-G F4): scope WAS declared but every entry
         # was invalid (None / non-string / empty string). Pre-3.1b this
         # silently devolved to "unrestricted" — the same PERMIT path as
@@ -938,6 +1115,10 @@ def _check_resource_scope(
             "(all entries were None / non-string / empty) — "
             "fix the passport's resource_scope field"
         )
+    if UNRESTRICTED_RESOURCE_SCOPE_PATTERN in patterns and (
+        patterns != [UNRESTRICTED_RESOURCE_SCOPE_PATTERN] or len(resource_scope) != 1
+    ):
+        return False, "unrestricted '**' must be the only resource_scope pattern"
 
     # NFC-normalize scope patterns once per call. Memoized here rather than
     # at module import time so operators can ship passports authored on
@@ -966,6 +1147,80 @@ def _check_resource_scope(
 
     def _matches_any(candidate: str) -> bool:
         return any(fnmatch.fnmatchcase(candidate, pat) for pat in nfc_patterns)
+
+    def _simple_local_scope_pattern(pattern: str) -> tuple[str, bool] | None:
+        """Return ``(root, includes_descendants)`` for canonicalizable patterns.
+
+        Scope values also support URLs, Windows paths, relative strings, and
+        arbitrary globs. ``realpath`` is meaningful only for absolute local
+        POSIX roots, so canonical enforcement is deliberately limited to the
+        exact-root and ``ROOT/*`` shapes emitted by the personal-firewall and
+        governed-run setup paths.
+        """
+
+        if not pattern.startswith("/") or _URL_SCHEME_RE.match(pattern):
+            return None
+        includes_descendants = pattern == "/*" or pattern.endswith("/*")
+        root = pattern[:-2] if includes_descendants else pattern
+        root = root or "/"
+        if any(char in root for char in "*?["):
+            return None
+        return root, includes_descendants
+
+    def _canonical_local_path(path: str) -> str:
+        """Resolve links while allowing only genuinely missing path suffixes.
+
+        ``realpath`` without ``strict`` can also suppress permission, loop, and
+        non-directory errors, potentially returning a path that still contains
+        links. Strict resolution fails closed on those conditions. A missing
+        output is expected for write tools, so only ``FileNotFoundError`` gets
+        the non-strict fallback that resolves every existing prefix.
+        """
+
+        try:
+            return os.path.realpath(path, strict=True)
+        except FileNotFoundError:
+            return os.path.realpath(path)
+
+    local_scope_patterns = [
+        (pattern, parsed)
+        for pattern in nfc_patterns
+        if (parsed := _simple_local_scope_pattern(pattern)) is not None
+    ]
+    resolved_scope_roots: dict[str, str] = {}
+
+    def _resolved_local_match(candidate: str) -> tuple[bool, str | None]:
+        """Re-check a lexical local-path match against canonical scope roots."""
+
+        if not candidate.startswith("/") or _URL_SCHEME_RE.match(candidate):
+            return True, None
+        matched_local_patterns = [
+            (pattern, parsed)
+            for pattern, parsed in local_scope_patterns
+            if fnmatch.fnmatchcase(candidate, pattern)
+        ]
+        if not matched_local_patterns:
+            return True, None
+        try:
+            resolved_candidate = _canonical_local_path(candidate)
+        except (OSError, ValueError) as exc:
+            return False, f"canonical path resolution failed: {exc}"
+
+        for _pattern, (root, includes_descendants) in matched_local_patterns:
+            resolved_root = resolved_scope_roots.get(root)
+            if resolved_root is None:
+                try:
+                    resolved_root = _canonical_local_path(root)
+                except (OSError, ValueError) as exc:
+                    return False, f"scope root resolution failed: {exc}"
+                resolved_scope_roots[root] = resolved_root
+            if resolved_candidate == resolved_root:
+                return True, None
+            if includes_descendants and resolved_candidate.startswith(
+                resolved_root.rstrip("/") + "/"
+            ):
+                return True, None
+        return False, "resolves outside resource_scope after canonical path checking"
 
     def _preview(s: str) -> str:
         return s if len(s) <= 120 else s[:117] + "..."
@@ -1000,14 +1255,14 @@ def _check_resource_scope(
         # denying. The tokenizer is the single point that decides what
         # counts as a resource reference.
         for token in tokens:
+            if scope_missing:
+                return False, (
+                    "resource_scope is missing or empty; declare at least one "
+                    "pattern or use ['**'] to explicitly allow all resources"
+                )
             normalized, error_reason = _sanitize_value(token)
             if error_reason is not None:
-                return False, (
-                    f"resource '{_preview(token)}' rejected: {error_reason}"
-                )
-
-            if _matches_any(normalized):
-                continue
+                return False, (f"resource '{_preview(token)}' rejected: {error_reason}")
 
             token_is_absolute = (
                 normalized.startswith("/")
@@ -1015,14 +1270,20 @@ def _check_resource_scope(
                 or bool(_WINDOWS_DRIVE_RE.match(normalized))
             )
 
-            matched = False
+            matched_candidate: str | None = (
+                normalized if _matches_any(normalized) else None
+            )
 
             # cwd resolution (C8): if a cwd is declared and the candidate is
             # relative, resolve against cwd and re-sanitize. We run the join
             # through _sanitize_value so a '..' in the candidate cannot
             # silently escape cwd (posixpath.join('/workspace', '../etc')
             # would normalize to '/etc' without the check).
-            if cwd_anchor is not None and not token_is_absolute:
+            if (
+                matched_candidate is None
+                and cwd_anchor is not None
+                and not token_is_absolute
+            ):
                 joined_raw = posixpath.join(cwd_anchor, normalized)
                 joined, join_err = _sanitize_value(joined_raw)
                 if join_err is None:
@@ -1030,9 +1291,11 @@ def _check_resource_scope(
                     # posixpath.normpath on a join that contains '..' would
                     # already be flagged by the sanitizer, but we defend in
                     # depth against any future helper change.
-                    if joined == cwd_anchor or joined.startswith(cwd_anchor.rstrip("/") + "/"):
+                    if joined == cwd_anchor or joined.startswith(
+                        cwd_anchor.rstrip("/") + "/"
+                    ):
                         if _matches_any(joined):
-                            matched = True
+                            matched_candidate = joined
 
             # Fallback: two-way absolute/relative coercion (partial CC-2 fix).
             # Claude Code and similar clients sometimes send './in_scope/file'
@@ -1041,22 +1304,33 @@ def _check_resource_scope(
             # original value (already denied above) cannot sneak through,
             # and more importantly the sanitizer's invariants hold on the
             # shape we're actually matching.
-            if not matched and not token_is_absolute and any_absolute:
+            if matched_candidate is None and not token_is_absolute and any_absolute:
                 coerced_raw = "/" + normalized
                 coerced, coerce_err = _sanitize_value(coerced_raw)
                 if coerce_err is None and _matches_any(coerced):
-                    matched = True
+                    matched_candidate = coerced
 
-            if not matched and token_is_absolute and any_relative and normalized.startswith("/"):
+            if (
+                matched_candidate is None
+                and token_is_absolute
+                and any_relative
+                and normalized.startswith("/")
+            ):
                 coerced_raw = normalized.lstrip("/")
                 if coerced_raw:
                     coerced, coerce_err = _sanitize_value(coerced_raw)
                     if coerce_err is None and _matches_any(coerced):
-                        matched = True
+                        matched_candidate = coerced
 
-            if not matched:
+            if matched_candidate is None:
                 return False, (
                     f"resource '{_preview(token)}' is outside resource_scope {patterns}"
+                )
+
+            resolved_ok, resolved_reason = _resolved_local_match(matched_candidate)
+            if not resolved_ok:
+                return False, (
+                    f"resource '{_preview(token)}' rejected: {resolved_reason}"
                 )
 
     if exhausted["v"]:
@@ -1069,7 +1343,7 @@ def _check_resource_scope(
 
 
 class Decision(str, Enum):
-    """Tri-state governance decision for tool-call evaluation (B.2).
+    """Five-state governance decision for tool-call evaluation (B.2).
 
     The verifier MUST return exactly one of these for every evaluation.
     Callers MUST treat only PERMIT as allowing execution; all other
@@ -1103,12 +1377,27 @@ class Decision(str, Enum):
         Callers MUST treat this as DENY (fail-closed). The distinction
         exists so audit trails can separate "known bad" (DENY) from
         "uncertain" (INSUFFICIENT_EVIDENCE) for post-hoc analysis.
+
+    UNKNOWN
+        The verifier observed the call but the evidence is structurally
+        outside the capture boundary. Unlike INSUFFICIENT_EVIDENCE (the
+        verifier tried but could not evaluate), UNKNOWN means the
+        information needed to make a decision was never visible at all:
+        - Visibility is not "full" (the adapter cannot see the complete
+          tool-call envelope)
+        - The tool-call descriptor is incomplete in a way that prevents
+          evaluation rather than failing a declared policy check
+        Callers MUST treat UNKNOWN as DENY (fail-closed). The distinction
+        from INSUFFICIENT_EVIDENCE is that UNKNOWN records a genuine
+        observation gap — the honest "I cannot know what happened" —
+        rather than a transient operational failure that might be retried.
     """
 
     PERMIT = "PERMIT"
     DENY = "DENY"
     VIOLATION = "VIOLATION"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    UNKNOWN = "UNKNOWN"
 
 
 def _coerce_denial_reason(value: Any) -> DenialReason | None:
@@ -1153,6 +1442,8 @@ def _legacy_denial_reason(decision: Decision, reason: str) -> DenialReason | Non
         return DenialReason.BUDGET_EXHAUSTED
     if decision == Decision.INSUFFICIENT_EVIDENCE:
         return DenialReason.TELEMETRY_MISSING
+    if decision == Decision.UNKNOWN:
+        return DenialReason.OBSERVATION_GAP
     return DenialReason.POLICY_DENIED
 
 
@@ -1172,7 +1463,9 @@ def _receipt_step_id(
         sort_keys=True,
         separators=(",", ":"),
     )
-    digest = hmac.new(b"vibap-receipt-step", material.encode("utf-8"), "sha256").hexdigest()[:32]
+    digest = hmac.new(
+        b"vibap-receipt-step", material.encode("utf-8"), "sha256"
+    ).hexdigest()[:32]
     return f"step:{digest}"
 
 
@@ -1207,19 +1500,29 @@ def _policy_action_class(tool_name: str) -> str:
     lowered = tool_name.lower()
     if "delegat" in lowered:
         return "delegate"
-    if any(token in lowered for token in ("send", "email", "mail", "post", "notify", "message", "share")):
+    if any(
+        token in lowered
+        for token in ("send", "email", "mail", "post", "notify", "message", "share")
+    ):
         return "send"
     if any(token in lowered for token in ("search", "find", "lookup", "grep")):
         return "search"
     if any(token in lowered for token in ("query", "sql", "select", "calc", "compute")):
         return "query"
-    if any(token in lowered for token in ("write", "create", "append", "save", "upload")):
+    if any(
+        token in lowered for token in ("write", "create", "append", "save", "upload")
+    ):
         return "write"
     if any(token in lowered for token in ("summar", "analy", "report")):
         return "summarize"
-    if any(token in lowered for token in ("read", "get", "fetch", "view", "list", "download", "open")):
+    if any(
+        token in lowered
+        for token in ("read", "get", "fetch", "view", "list", "download", "open")
+    ):
         return "read"
-    if any(token in lowered for token in ("update", "edit", "modify", "delete", "remove")):
+    if any(
+        token in lowered for token in ("update", "edit", "modify", "delete", "remove")
+    ):
         return "write"
     return "observe"
 
@@ -1232,9 +1535,14 @@ def _policy_resource_family(
 ) -> str:
     lowered_tool = tool_name.lower()
     lowered_target = target.lower()
-    if _is_memory_store_tool(tool_name) or any(key in arguments for key in ("store_id", "record_id")):
+    if _is_memory_store_tool(tool_name) or any(
+        key in arguments for key in ("store_id", "record_id")
+    ):
         return "memory_store"
-    if any(key in arguments for key in ("path", "file_path", "filename", "directory", "cwd")):
+    if any(
+        key in arguments
+        for key in ("path", "file_path", "filename", "directory", "cwd")
+    ):
         return "filesystem"
     if any(key in arguments for key in ("url", "uri")):
         return "network_resource"
@@ -1246,7 +1554,10 @@ def _policy_resource_family(
         return "computation"
     if any(token in lowered_tool for token in ("memory", "store")):
         return "memory_store"
-    if any(token in lowered_target for token in ("/", ".txt", ".md", ".json", ".csv", ".pdf")):
+    if any(
+        token in lowered_target
+        for token in ("/", ".txt", ".md", ".json", ".csv", ".pdf")
+    ):
         return "filesystem"
     return "general"
 
@@ -1308,6 +1619,10 @@ class PolicyEvent:
     duration_ms: float = 0.0
     budget_delta: dict[str, Any] | None = None
     evidence_proof_ref: dict[str, Any] | None = None
+    measurements: dict[str, Any] | None = None
+    risk_budget_remaining: dict[str, int] = field(default_factory=dict)
+    risk_lifecycle_id: str | None = None
+    risk_receipt_entry: dict[str, Any] | None = None
     # Ordered list of per-backend decisions (native + additional_policies).
     # Empty for missions without additional_policies. Each dict carries
     # {"backend", "label", "decision", "reasons", "eval_ms"}.
@@ -1327,14 +1642,22 @@ class PolicyEvent:
             "side_effect_class": self.side_effect_class,
             "decision": self.decision.value,
             "reason": self.reason,
-            "denial_reason": self.denial_reason.value if self.denial_reason is not None else None,
+            "denial_reason": self.denial_reason.value
+            if self.denial_reason is not None
+            else None,
             "passport_jti": self.passport_jti,
             "trace_id": self.trace_id,
             "run_nonce": self.run_nonce,
             "response": self.response,
             "duration_ms": self.duration_ms,
-            "budget_delta": dict(self.budget_delta) if self.budget_delta is not None else None,
+            "budget_delta": dict(self.budget_delta)
+            if self.budget_delta is not None
+            else None,
             "evidence_proof_ref": copy.deepcopy(self.evidence_proof_ref),
+            "measurements": copy.deepcopy(self.measurements),
+            "risk_budget_remaining": dict(self.risk_budget_remaining),
+            "risk_lifecycle_id": self.risk_lifecycle_id,
+            "risk_receipt_entry": copy.deepcopy(self.risk_receipt_entry),
             "policy_decisions": list(self.policy_decisions),
         }
 
@@ -1379,8 +1702,19 @@ class PolicyEvent:
             run_nonce=data.get("run_nonce"),
             response=data.get("response"),
             duration_ms=float(data.get("duration_ms", 0.0)),
-            budget_delta=dict(data["budget_delta"]) if isinstance(data.get("budget_delta"), dict) else None,
+            budget_delta=dict(data["budget_delta"])
+            if isinstance(data.get("budget_delta"), dict)
+            else None,
             evidence_proof_ref=copy.deepcopy(data.get("evidence_proof_ref")),
+            measurements=copy.deepcopy(data.get("measurements")),
+            risk_budget_remaining={
+                str(key): int(value)
+                for key, value in dict(
+                    data.get("risk_budget_remaining", {}) or {}
+                ).items()
+            },
+            risk_lifecycle_id=data.get("risk_lifecycle_id"),
+            risk_receipt_entry=copy.deepcopy(data.get("risk_receipt_entry")),
             policy_decisions=list(data.get("policy_decisions", []) or []),
         )
 
@@ -1394,11 +1728,25 @@ class PassportStateUnavailableError(RuntimeError):
 
 
 class _MissionPolicyResolutionError(RuntimeError):
-    def __init__(self, decision: Decision, reason: str, denial_reason: DenialReason) -> None:
+    def __init__(
+        self, decision: Decision, reason: str, denial_reason: DenialReason
+    ) -> None:
         super().__init__(reason)
         self.decision = decision
         self.reason = reason
         self.denial_reason = denial_reason
+
+
+@dataclass(frozen=True, slots=True)
+class _RiskPreflight:
+    governed: bool
+    accepted: bool
+    reserved: bool = False
+    request_id: str | None = None
+    reason: str | None = None
+    denial_reason: DenialReason | None = None
+    measurements: dict[str, Any] | None = None
+    remaining: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -1419,8 +1767,11 @@ class GovernanceSession:
     last_memory_record_id: str | None = None
     last_receipt_id: str | None = None
     last_receipt_full_hash: str | None = None
+    risk_policy_snapshot: dict[str, Any] | None = None
     run_nonce: str = field(default_factory=lambda: secrets.token_urlsafe(24))
-    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock, repr=False, compare=False
+    )
 
     @property
     def elapsed_s(self) -> float:
@@ -1441,11 +1792,15 @@ class GovernanceSession:
     ) -> tuple[Decision, str, PolicyEvent]:
         """Atomically check a tool call and record the event under the session lock."""
         with self._lock:
-            active_policy = policy_claims if policy_claims is not None else self.passport_claims
+            active_policy = (
+                policy_claims if policy_claims is not None else self.passport_claims
+            )
             actor = str(self.passport_claims.get("sub", "unknown"))
             target = _policy_event_target(tool_name, arguments)
             action_class = _policy_action_class(tool_name)
-            resource_family = _policy_resource_family(tool_name, arguments, target, action_class)
+            resource_family = _policy_resource_family(
+                tool_name, arguments, target, action_class
+            )
             sec = _policy_side_effect_class(tool_name, action_class, resource_family)
             shared_context = {
                 "passport": dict(active_policy),
@@ -1454,7 +1809,9 @@ class GovernanceSession:
                     "tool_call_count_by_class": dict(self.tool_call_count_by_class),
                     "side_effect_counts": dict(self.tool_call_count_by_class),
                     "delegated_budget_reserved": self.delegated_budget_reserved,
-                    "delegation_depth": len(active_policy.get("delegation_chain", []) or []),
+                    "delegation_depth": len(
+                        active_policy.get("delegation_chain", []) or []
+                    ),
                     "elapsed_s": self.elapsed_s,
                     "cwd": active_policy.get("cwd"),
                 },
@@ -1490,7 +1847,9 @@ class GovernanceSession:
                 )
             decisions.append(native_decision)
             if additional:
-                policy_decisions_dicts.append(GovernanceProxy._event_policy_decision_dict(native_decision))
+                policy_decisions_dicts.append(
+                    GovernanceProxy._event_policy_decision_dict(native_decision)
+                )
 
             # Always evaluate every registered backend — no short-circuit on
             # Deny. §1 claims "all three evaluate on every call" and the audit
@@ -1531,7 +1890,9 @@ class GovernanceSession:
                             eval_ms=policy_decision.eval_ms,
                         )
                 decisions.append(policy_decision)
-                policy_decisions_dicts.append(GovernanceProxy._event_policy_decision_dict(policy_decision))
+                policy_decisions_dicts.append(
+                    GovernanceProxy._event_policy_decision_dict(policy_decision)
+                )
 
             final_decision, first_denier = compose_decisions(decisions)
             denial_reason: DenialReason | None = None
@@ -1544,11 +1905,14 @@ class GovernanceSession:
                 denial_reason = DenialReason.POLICY_DENIED
             elif first_denier.backend == "native":
                 decision = Decision.DENY
-                reason = "; ".join(first_denier.reasons) if first_denier.reasons else "native policy denied"
+                reason = (
+                    "; ".join(first_denier.reasons)
+                    if first_denier.reasons
+                    else "native policy denied"
+                )
                 denial_reason = _legacy_denial_reason(decision, reason)
-            elif (
-                first_denier.reasons
-                and first_denier.reasons[0].startswith("unknown policy backend:")
+            elif first_denier.reasons and first_denier.reasons[0].startswith(
+                "unknown policy backend:"
             ):
                 decision = Decision.DENY
                 reason = first_denier.reasons[0]
@@ -1609,13 +1973,17 @@ class GovernanceSession:
                 "side_effect_class": event.side_effect_class,
                 "decision": event.decision.value,
                 "reason": event.reason,
-                "denial_reason": event.denial_reason.value if event.denial_reason is not None else None,
+                "denial_reason": event.denial_reason.value
+                if event.denial_reason is not None
+                else None,
                 "passport_jti": event.passport_jti,
                 "trace_id": event.trace_id,
                 "run_nonce": event.run_nonce,
                 "response_preview": (event.response or "")[:200],
                 "duration_ms": event.duration_ms,
-                "budget_delta": dict(event.budget_delta) if event.budget_delta is not None else None,
+                "budget_delta": dict(event.budget_delta)
+                if event.budget_delta is not None
+                else None,
             }
             for event in self.events
         ]
@@ -1633,12 +2001,16 @@ class GovernanceSession:
             "start_time": self.start_time,
             "summary": self.summary,
         }
+        if self.risk_policy_snapshot is not None:
+            payload["risk_policy_snapshot"] = copy.deepcopy(self.risk_policy_snapshot)
         if self.end_time is not None:
             payload["end_time"] = self.end_time
         if self.attestation_token is not None:
             payload["attestation_token"] = self.attestation_token
         if self.memory_compromised_stores:
-            payload["memory_compromised_stores"] = sorted(self.memory_compromised_stores)
+            payload["memory_compromised_stores"] = sorted(
+                self.memory_compromised_stores
+            )
         if self.last_receipt_id is not None:
             payload["last_receipt_id"] = self.last_receipt_id
         if self.last_receipt_full_hash is not None:
@@ -1651,10 +2023,16 @@ class GovernanceSession:
             passport_token=data["passport_token"],
             passport_claims=dict(data["passport_claims"]),
         )
-        session.events = [PolicyEvent.from_dict(item) for item in data.get("events", [])]
+        session.events = [
+            PolicyEvent.from_dict(item) for item in data.get("events", [])
+        ]
         session.tool_call_count = int(data.get("tool_call_count", 0))
-        session.tool_call_count_by_class = dict(data.get("tool_call_count_by_class", {}))
-        session.delegated_budget_reserved = int(data.get("delegated_budget_reserved", 0))
+        session.tool_call_count_by_class = dict(
+            data.get("tool_call_count_by_class", {})
+        )
+        session.delegated_budget_reserved = int(
+            data.get("delegated_budget_reserved", 0)
+        )
         session.delegated_children = list(data.get("delegated_children", []))
         raw_run_nonce = data.get("run_nonce")
         if isinstance(raw_run_nonce, str) and raw_run_nonce:
@@ -1671,14 +2049,127 @@ class GovernanceSession:
                     raw_end_time = None
         session.end_time = float(raw_end_time) if raw_end_time is not None else None
         session.attestation_token = data.get("attestation_token")
-        session.memory_compromised_stores = set(data.get("memory_compromised_stores", []))
+        session.memory_compromised_stores = set(
+            data.get("memory_compromised_stores", [])
+        )
         session.last_receipt_id = data.get("last_receipt_id")
         session.last_receipt_full_hash = data.get("last_receipt_full_hash")
+        raw_risk_snapshot = data.get("risk_policy_snapshot")
+        session.risk_policy_snapshot = (
+            copy.deepcopy(raw_risk_snapshot)
+            if isinstance(raw_risk_snapshot, dict)
+            else None
+        )
         session.memory_stores = {}
         return session
 
 
 class GovernanceProxy:
+    @staticmethod
+    def _ensure_private_state_directory(path: Path, *, label: str) -> None:
+        try:
+            path.mkdir(parents=True, mode=0o700, exist_ok=True)
+            path.chmod(0o700)
+            mode = path.stat().st_mode & 0o777
+        except OSError as exc:
+            raise PermissionError(
+                f"{label} must be private local secret state (0700)"
+            ) from exc
+        if not path.is_dir():
+            raise PermissionError(f"{label} must be a private directory")
+        if mode & 0o077:
+            raise PermissionError(
+                f"{label} must be private local secret state (0700); observed {mode:o}"
+            )
+
+    @staticmethod
+    def _normalized_delegation_string_list(
+        values: Sequence[str] | None,
+    ) -> list[str] | None:
+        if values is None:
+            return None
+        return sorted({str(value) for value in values})
+
+    @classmethod
+    def _delegation_request_metadata(
+        cls,
+        *,
+        parent_jti: str,
+        child_agent_id: str,
+        child_allowed_tools: Sequence[str],
+        child_mission: str,
+        child_ttl_s: int | None,
+        child_max_tool_calls: int | None,
+        child_resource_scope: Sequence[str] | None,
+        child_risk_budget: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "parent_jti": str(parent_jti),
+            "child_agent_id": str(child_agent_id),
+            "child_mission": str(child_mission),
+            "child_allowed_tools": cls._normalized_delegation_string_list(
+                child_allowed_tools
+            ),
+            "child_resource_scope": cls._normalized_delegation_string_list(
+                child_resource_scope
+            ),
+            "child_ttl_s": int(child_ttl_s) if child_ttl_s is not None else None,
+            "child_max_tool_calls": int(child_max_tool_calls)
+            if child_max_tool_calls is not None
+            else None,
+            "child_risk_budget": copy.deepcopy(child_risk_budget),
+        }
+
+    @staticmethod
+    def _delegation_request_fingerprint(metadata: Mapping[str, Any]) -> str:
+        material = json.dumps(
+            metadata,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(material).hexdigest()
+
+    @classmethod
+    def _delegation_claims_match_record(
+        cls,
+        claims: Mapping[str, Any],
+        *,
+        child_record: Mapping[str, Any],
+        existing_amount: int,
+    ) -> bool:
+        try:
+            claim_budget = int(claims.get("max_tool_calls", -1))
+        except (TypeError, ValueError):
+            return False
+        if claim_budget != existing_amount:
+            return False
+        if str(claims.get("jti")) != str(child_record.get("child_jti")):
+            return False
+        if str(claims.get("sub")) != str(child_record.get("child_agent_id")):
+            return False
+        if str(claims.get("mission")) != str(child_record.get("child_mission")):
+            return False
+        stored_tools = cls._normalized_delegation_string_list(
+            child_record.get("child_allowed_tools", [])
+        )
+        claim_tools = cls._normalized_delegation_string_list(
+            claims.get("allowed_tools", [])
+        )
+        if claim_tools != stored_tools:
+            return False
+        stored_scope = cls._normalized_delegation_string_list(
+            child_record.get("child_resource_scope", [])
+        )
+        claim_scope = cls._normalized_delegation_string_list(
+            claims.get("resource_scope", [])
+        )
+        if claim_scope != stored_scope:
+            return False
+        if claims.get("risk_budget") != child_record.get("child_risk_budget"):
+            return False
+        return True
+
     def __init__(
         self,
         log_path: str | Path | None = None,
@@ -1689,8 +2180,25 @@ class GovernanceProxy:
         receipts_log_path: str | Path | None = None,
         policy_store: Any | None = None,
         lineage_budget_ledger: LineageBudgetLedger | None = None,
+        risk_registry: ToolRiskRegistry | None = None,
+        risk_budget_ledger: FileRiskBudgetLedger | None = None,
+        spend_quote_store: StaticSpendQuoteStore | None = None,
+        spend_budget_ledger: SpendBudgetLedger | None = None,
         biscuit_issuer_public_key: Any | None = None,
+        biscuit_peer_trust_bundle: Any | None = None,
+        biscuit_svid_audience: str = "ardur-proxy",
+        workload_identity: Any | None = None,
+        aat_expected_audience: str = AAT_DEFAULT_AUDIENCE,
+        allow_aat_without_cnf: bool = False,
     ) -> None:
+        if workload_identity is not None:
+            from .spiffe_identity import SvidBundle
+
+            if not isinstance(workload_identity, SvidBundle):
+                raise TypeError("workload_identity must be an SvidBundle")
+        # Keep Workload API key material process-local. This reference is never
+        # serialized into proxy state, receipts, or the audit log.
+        self._workload_identity = workload_identity
         # policy_store: optional PolicyStore (see vibap.policy_store).
         # When provided, the proxy resolves additional_policies from
         # the store at session-start time, keyed by the credential's
@@ -1700,22 +2208,26 @@ class GovernanceProxy:
         # tests that want to bypass it pass None and populate
         # additional_policies directly in a mission dict.
         self.policy_store = policy_store
-        self.log_path = Path(log_path).expanduser() if log_path is not None else DEFAULT_LOG_PATH
+        self.log_path = (
+            Path(log_path).expanduser() if log_path is not None else DEFAULT_LOG_PATH
+        )
         if receipts_log_path is not None:
             self.receipts_log_path = Path(receipts_log_path).expanduser()
         elif log_path is not None:
             self.receipts_log_path = self.log_path.with_name("receipts_log.jsonl")
         else:
             self.receipts_log_path = DEFAULT_RECEIPTS_LOG_PATH
-        self._governance_log = RotatingJSONLLog(self.log_path)
-        self._receipts_log = RotatingJSONLLog(self.receipts_log_path)
-        self.state_dir = Path(state_dir).expanduser() if state_dir is not None else DEFAULT_STATE_DIR
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        if self.policy_store is None:
-            from vibap.backed_policy_store import FileBackedPolicyStore
-            self.policy_store = FileBackedPolicyStore(self.state_dir)
+        self.state_dir = (
+            Path(state_dir).expanduser() if state_dir is not None else DEFAULT_STATE_DIR
+        )
+        # When any path falls through to a DEFAULT_HOME-derived default,
+        # materialise the home with 0o700 before we start creating state
+        # directories inside it.
+        if log_path is None or state_dir is None:
+            _ensure_default_home_dir()
+        self._ensure_private_state_directory(self.state_dir, label="state_dir")
         self.sessions_dir = self.state_dir / "sessions"
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_private_state_directory(self.sessions_dir, label="sessions_dir")
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.receipts_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.replay_cache_path = self.state_dir / "replay_cache.json"
@@ -1724,7 +2236,63 @@ class GovernanceProxy:
         self.lineage_budget_ledger = lineage_budget_ledger or FileLineageBudgetLedger(
             self.state_dir
         )
+        self.risk_registry = risk_registry or ToolRiskRegistry()
+        self.risk_registry.freeze()
+        self.risk_budget_ledger = risk_budget_ledger or FileRiskBudgetLedger(
+            self.state_dir
+        )
+        self.spend_quote_store = spend_quote_store
+        self.spend_budget_ledger = spend_budget_ledger or FileSpendBudgetLedger(
+            self.state_dir
+        )
+        if (
+            not isinstance(aat_expected_audience, str)
+            or not aat_expected_audience.strip()
+        ):
+            raise ValueError("aat_expected_audience must be a non-empty server value")
+        if len(aat_expected_audience.encode("utf-8")) > 256:
+            raise ValueError("aat_expected_audience exceeds 256 bytes")
+        if not isinstance(allow_aat_without_cnf, bool):
+            raise TypeError("allow_aat_without_cnf must be a boolean")
+        self._aat_expected_audience = aat_expected_audience.strip()
+        self._allow_aat_without_cnf = allow_aat_without_cnf
         self._biscuit_issuer_public_key = biscuit_issuer_public_key
+        if (
+            not isinstance(biscuit_svid_audience, str)
+            or not biscuit_svid_audience.strip()
+        ):
+            raise ValueError("biscuit_svid_audience must be a non-empty server value")
+        if len(biscuit_svid_audience.encode("utf-8")) > 256:
+            raise ValueError("biscuit_svid_audience exceeds 256 bytes")
+        if biscuit_peer_trust_bundle is not None:
+            from .spiffe_identity import TrustBundle
+
+            if biscuit_issuer_public_key is None:
+                raise ValueError(
+                    "biscuit_peer_trust_bundle requires biscuit_issuer_public_key"
+                )
+            if not isinstance(biscuit_peer_trust_bundle, TrustBundle):
+                raise TypeError("biscuit_peer_trust_bundle must be a TrustBundle")
+            if (
+                not isinstance(biscuit_peer_trust_bundle.trust_domain, str)
+                or not biscuit_peer_trust_bundle.trust_domain.strip()
+            ):
+                raise ValueError("Biscuit peer trust domain must be non-empty")
+            if not isinstance(biscuit_peer_trust_bundle.jwks, dict):
+                raise ValueError("Biscuit peer trust bundle JWKS must be an object")
+            keys = biscuit_peer_trust_bundle.jwks.get("keys")
+            if not isinstance(keys, list) or not keys:
+                raise ValueError("Biscuit peer trust bundle must contain JWT keys")
+            if not any(
+                isinstance(key, dict)
+                and ("use" not in key or key["use"] == "jwt-svid")
+                for key in keys
+            ):
+                raise ValueError(
+                    "Biscuit peer trust bundle has no JWT-SVID signing keys"
+                )
+        self._biscuit_peer_trust_bundle = copy.deepcopy(biscuit_peer_trust_bundle)
+        self._biscuit_svid_audience = biscuit_svid_audience.strip()
         self.receipt_private_key = private_key or load_private_key(keys_dir=keys_dir)
         self.receipt_public_key = self.receipt_private_key.public_key()
         self._session_receipt_integrity_key = hashlib.sha256(
@@ -1759,19 +2327,49 @@ class GovernanceProxy:
         self._receipts_log_lock = threading.Lock()
         self._lineage_parent_cache_lock = threading.Lock()
         self._lineage_parent_cache: OrderedDict[str, str | None] = OrderedDict()
+        self._last_seen_receipts_lock = threading.Lock()
+        self._last_seen_receipts: dict[str, str] = {}
         self._replay_cache_sentinel: str | None = None
         self._revoked_sentinel: str | None = None
         self._lineage_hashes_sentinel: str | None = None
         self._approval_trackers_lock = threading.Lock()
         self._approval_trackers: dict[tuple[int, float], ApprovalRateTracker] = {}
-        self._last_seen_receipts: dict[str, str] = {}
-        self._last_seen_receipts_lock = threading.Lock()
         self.mission_cache = MissionCache(max_entries=256)
-        try:
-            get_backend("native")
-        except KeyError:
-            register_backend(NativeBackend())
+        get_backend("native")
         self._initialize_passport_state_files()
+
+    @property
+    def kill_switch_active(self) -> bool:
+        with self._kill_switch_lock:
+            return self._kill_switch_active
+
+    def activate_kill_switch(self) -> None:
+        with self._kill_switch_lock:
+            self._kill_switch_active = True
+        ardur_metrics.kill_switch_active.set(1)
+        self._log_event("kill_switch_activate", {"timestamp": int(time.time())})
+
+    def deactivate_kill_switch(self) -> None:
+        with self._kill_switch_lock:
+            self._kill_switch_active = False
+        ardur_metrics.kill_switch_active.set(0)
+        self._log_event("kill_switch_deactivate", {"timestamp": int(time.time())})
+
+    def _log_event(
+        self,
+        event_type: str,
+        detail: dict[str, Any],
+        correlation_id: str | None = None,
+    ) -> None:
+        self._log(
+            {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+                "event_type": event_type,
+                "severity": "INFO",
+                "correlation_id": correlation_id or "",
+                "detail": detail,
+            }
+        )
 
     def _approval_tracker(self, max_ap: int, window_s: float) -> ApprovalRateTracker:
         key = (max_ap, window_s)
@@ -1787,21 +2385,15 @@ class GovernanceProxy:
         passport_claims: dict[str, Any],
         arguments: dict[str, Any],
     ) -> str | None:
-        for raw_value in (passport_claims.get("operator_id"), arguments.get("operator_id")):
+        for raw_value in (
+            passport_claims.get("operator_id"),
+            arguments.get("operator_id"),
+        ):
             if isinstance(raw_value, str):
                 normalized = raw_value.strip()
                 if normalized:
                     return normalized
         return None
-
-    def _missing_required_telemetry(
-        policy_claims: dict[str, Any],
-        arguments: dict[str, Any],
-    ) -> list[str]:
-        required = _declared_required_telemetry(policy_claims)
-        if not required:
-            return []
-        return _missing_declared_telemetry(arguments, required)
 
     @staticmethod
     def _record_tool_policy_event(
@@ -1818,7 +2410,9 @@ class GovernanceProxy:
         actor = str(session.passport_claims.get("sub", "unknown"))
         target = _policy_event_target(tool_name, arguments)
         action_class = _policy_action_class(tool_name)
-        resource_family = _policy_resource_family(tool_name, arguments, target, action_class)
+        resource_family = _policy_resource_family(
+            tool_name, arguments, target, action_class
+        )
         session.events.append(
             PolicyEvent(
                 timestamp=timestamp,
@@ -1871,7 +2465,9 @@ class GovernanceProxy:
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         target = _policy_event_target(tool_name, arguments)
         action_class = _policy_action_class(tool_name)
-        resource_family = _policy_resource_family(tool_name, arguments, target, action_class)
+        resource_family = _policy_resource_family(
+            tool_name, arguments, target, action_class
+        )
         return PolicyEvent(
             timestamp=timestamp,
             step_id=_receipt_step_id(session.jti, timestamp, tool_name, arguments),
@@ -1882,7 +2478,9 @@ class GovernanceProxy:
             action_class=action_class,
             target=target,
             resource_family=resource_family,
-            side_effect_class=_policy_side_effect_class(tool_name, action_class, resource_family),
+            side_effect_class=_policy_side_effect_class(
+                tool_name, action_class, resource_family
+            ),
             decision=decision,
             reason=reason,
             passport_jti=session.jti,
@@ -1913,40 +2511,59 @@ class GovernanceProxy:
         audit_reason: str,
     ) -> list[dict[str, Any]]:
         if not event.policy_decisions:
-            return [{
-                "backend": "native",
-                "decision": "Allow" if decision == Decision.PERMIT else "Deny",
-                "reason": audit_reason or None,
-            }]
+            return [
+                {
+                    "backend": "native",
+                    "decision": "Allow" if decision == Decision.PERMIT else "Deny",
+                    "reason": audit_reason or None,
+                    "rule_id": "ardur_builtin",
+                }
+            ]
         compact: list[dict[str, Any]] = []
         for item in event.policy_decisions:
             backend = str(item.get("backend", "unknown"))
             if backend == "native_claims":
                 backend = "native"
             reasons = tuple(str(entry) for entry in item.get("reasons", []) or [])
-            compact.append(
-                {
-                    "backend": backend,
-                    "decision": str(item.get("decision", "Abstain")),
-                    "reason": "; ".join(reasons) if reasons else None,
-                }
-            )
+            signed_item = {
+                "backend": backend,
+                "decision": str(item.get("decision", "Abstain")),
+                "reason": "; ".join(reasons) if reasons else None,
+            }
+            rule_id = str(item.get("label", "")).strip()
+            if rule_id:
+                signed_item["rule_id"] = rule_id
+            compact.append(signed_item)
         return compact
 
     @staticmethod
     def _receipt_budget_remaining(
         session: GovernanceSession,
         policy_claims: dict[str, Any],
+        event: PolicyEvent,
     ) -> dict[str, int]:
         remaining: dict[str, int] = {}
-        for key, raw_cap in dict(policy_claims.get("max_tool_calls_per_class", {}) or {}).items():
+        for key, raw_cap in dict(
+            policy_claims.get("max_tool_calls_per_class", {}) or {}
+        ).items():
             try:
                 cap = int(raw_cap)
             except (TypeError, ValueError):
                 continue
             used = int(session.tool_call_count_by_class.get(str(key), 0))
             remaining[str(key)] = max(0, cap - used)
+        remaining.update(event.risk_budget_remaining)
         return remaining
+
+    @staticmethod
+    def _is_internal_risk_event(event: PolicyEvent) -> bool:
+        return (
+            event.tool_name == "risk_budget_lifecycle"
+            and event.action_class == "observe"
+            and event.resource_family == "governance"
+            and event.side_effect_class == "none"
+            and event.arguments == {}
+        )
 
     @staticmethod
     def _receipt_budget_delta(
@@ -1994,6 +2611,225 @@ class GovernanceProxy:
             "side_effect_class": event.side_effect_class,
         }
 
+    @staticmethod
+    def _zero_spend_amounts() -> dict[str, int]:
+        return {"tokens": 0, "currency_micros": 0}
+
+    @classmethod
+    def _spend_reservation_delta(
+        cls,
+        result: SpendReservationResult,
+    ) -> dict[str, Any]:
+        zero = cls._zero_spend_amounts()
+        return {
+            "operation": "reserve" if result.accepted else "reject",
+            "resource": "spend",
+            "requested": dict(result.reserved),
+            "reserved": dict(result.reserved) if result.accepted else zero,
+            "actual": cls._zero_spend_amounts(),
+            "refunded": cls._zero_spend_amounts(),
+            "remaining": copy.deepcopy(result.remaining),
+            "currency": result.currency,
+            "quote_digest": result.quote_digest,
+            "reservation_hash": result.reservation_hash,
+            "reason_code": result.reason_code,
+            "idempotent": result.idempotent,
+        }
+
+    @classmethod
+    def _spend_close_delta(cls, result: SpendCloseResult) -> dict[str, Any]:
+        retained = (
+            dict(result.reserved)
+            if result.operation == "quarantine"
+            else cls._zero_spend_amounts()
+        )
+        return {
+            "operation": result.operation,
+            "resource": "spend",
+            "requested": dict(result.reserved),
+            "reserved": retained,
+            "actual": dict(result.actual),
+            "refunded": dict(result.refunded),
+            "remaining": copy.deepcopy(result.remaining),
+            "currency": result.currency,
+            "quote_digest": result.quote_digest,
+            "reservation_hash": result.reservation_hash,
+            "reason_code": result.reason_code,
+            "idempotent": result.idempotent,
+            "reconciled": result.reconciled,
+        }
+
+    @staticmethod
+    def _spend_budget_remaining(delta: Mapping[str, Any]) -> dict[str, int]:
+        remaining: dict[str, int] = {}
+        raw_remaining = delta.get("remaining")
+        currency = str(delta.get("currency", "")).lower()
+        if not isinstance(raw_remaining, Mapping) or not currency:
+            return remaining
+        for scope in ("session", "agent", "lineage"):
+            amounts = raw_remaining.get(scope)
+            if not isinstance(amounts, Mapping):
+                continue
+            for dimension, bucket in (
+                ("tokens", "tokens"),
+                ("currency_micros", f"{currency}_micros"),
+            ):
+                raw_amount = amounts.get(dimension)
+                if isinstance(raw_amount, int) and not isinstance(raw_amount, bool):
+                    remaining[f"spend.{scope}.{bucket}"] = max(0, raw_amount)
+        return remaining
+
+    def _reserve_spend_if_required(
+        self,
+        session: GovernanceSession,
+        tool_name: str,
+        policy_claims: Mapping[str, Any],
+        spend_request: SpendReservationRequest | None,
+        reservation_state: dict[str, Any] | None = None,
+    ) -> SpendReservationResult | None:
+        raw_policy = policy_claims.get("spend_budget")
+        if raw_policy is None:
+            if spend_request is not None:
+                raise SpendBudgetError("spend_request_unexpected")
+            return None
+        policy = normalize_spend_budget(raw_policy, require_lineage_id=True)
+        if tool_name not in policy["metered_tools"]:
+            if spend_request is not None:
+                raise SpendBudgetError("spend_request_unexpected")
+            return None
+        if spend_request is None:
+            raise SpendBudgetError("spend_reservation_missing")
+        if not isinstance(spend_request, SpendReservationRequest):
+            raise SpendBudgetError("spend_request_invalid")
+        if self.spend_quote_store is None:
+            raise SpendBudgetError("spend_quote_store_unavailable")
+        quote = self.spend_quote_store.resolve(
+            spend_request.quote_id,
+            tool_name=tool_name,
+            model=spend_request.model,
+            currency=str(policy["currency"]),
+        )
+        result = self.spend_budget_ledger.reserve(
+            policy=policy,
+            session_id=session.jti,
+            agent_id=str(session.passport_claims.get("sub", "unknown")),
+            request=spend_request,
+            quote=quote,
+            retention_until=int(session.passport_claims["exp"]),
+        )
+        if result.accepted and reservation_state is not None:
+            reservation_state["spend"] = {
+                "accepted": True,
+                "closed": False,
+                "lineage_id": policy["lineage_id"],
+                "session_id": session.jti,
+                "request_id": spend_request.request_id,
+            }
+        return result
+
+    @staticmethod
+    def _record_spend_amount_metrics(
+        operation: str, amounts: Mapping[str, int]
+    ) -> None:
+        for unit in ("tokens", "currency_micros"):
+            amount = amounts.get(unit)
+            if isinstance(amount, int) and not isinstance(amount, bool):
+                ardur_metrics.spend_amount_total.add(
+                    max(0, amount),
+                    operation=operation,
+                    unit=unit,
+                )
+
+    @classmethod
+    def _record_spend_reservation_metrics(
+        cls,
+        result: SpendReservationResult,
+    ) -> None:
+        operation = "reserve" if result.accepted else "reject"
+        ardur_metrics.spend_events_total.inc(
+            operation=operation,
+            outcome=result.reason_code,
+        )
+        cls._record_spend_amount_metrics(operation, result.reserved)
+
+    @classmethod
+    def _record_spend_close_metrics(cls, result: SpendCloseResult) -> None:
+        ardur_metrics.spend_events_total.inc(
+            operation=result.operation,
+            outcome=result.reason_code,
+        )
+        if result.operation == "settle":
+            cls._record_spend_amount_metrics("settle", result.actual)
+            cls._record_spend_amount_metrics("refund", result.refunded)
+            if result.reconciled:
+                cls._record_spend_amount_metrics("reconcile", result.actual)
+        elif result.operation == "release":
+            cls._record_spend_amount_metrics("release", result.refunded)
+        elif result.operation == "quarantine":
+            cls._record_spend_amount_metrics("quarantine", result.reserved)
+
+    def _release_pre_action_reservations(
+        self,
+        reservations: dict[str, Any],
+        *,
+        spend_reason_code: str,
+    ) -> tuple[RiskOutcomeResult | None, SpendCloseResult | None]:
+        """Idempotently release every accepted pre-action reservation."""
+
+        risk_result: RiskOutcomeResult | None = None
+        spend_result: SpendCloseResult | None = None
+        failures: list[tuple[str, BaseException]] = []
+
+        spend = reservations.get("spend")
+        if (
+            isinstance(spend, dict)
+            and spend.get("accepted")
+            and not spend.get("closed")
+        ):
+            try:
+                spend_result = self.spend_budget_ledger.cancel(
+                    lineage_id=str(spend["lineage_id"]),
+                    session_id=str(spend["session_id"]),
+                    request_id=str(spend["request_id"]),
+                    reason_code=spend_reason_code,
+                )
+            except BaseException as exc:
+                failures.append(("spend", exc))
+            else:
+                spend["closed"] = True
+                try:
+                    self._record_spend_close_metrics(spend_result)
+                except Exception:  # pragma: no cover - observability boundary
+                    logger.exception("failed to record spend compensation metrics")
+
+        risk = reservations.get("risk")
+        if isinstance(risk, dict) and risk.get("accepted") and not risk.get("closed"):
+            try:
+                risk_result = self.risk_budget_ledger.record_outcome(
+                    lineage_id=str(risk["lineage_id"]),
+                    session_id=str(risk["session_id"]),
+                    request_id=str(risk["request_id"]),
+                    outcome="released",
+                )
+            except BaseException as exc:
+                failures.append(("risk", exc))
+            else:
+                risk["closed"] = True
+                try:
+                    self._risk_metric(operation="release", outcome="released")
+                except Exception:  # pragma: no cover - observability boundary
+                    logger.exception("failed to record risk compensation metrics")
+
+        if failures:
+            kind, failure = failures[0]
+            if kind == "spend":
+                raise SpendBudgetError(
+                    "spend_compensation_failed",
+                    "pre-action spend reservation compensation failed",
+                ) from failure
+            raise RiskBudgetError("risk_compensation_failed") from failure
+        return risk_result, spend_result
+
     def _build_receipt_log_entry(
         self,
         session: GovernanceSession,
@@ -2010,8 +2846,10 @@ class GovernanceProxy:
         # ``sys.modules`` cache lookup per call to this method.
         from .receipt import build_receipt, sign_receipt
 
-        signed_policy_decisions = self._signed_policy_decisions(event, decision, audit_reason)
-        if event.budget_delta is None:
+        signed_policy_decisions = self._signed_policy_decisions(
+            event, decision, audit_reason
+        )
+        if event.budget_delta is None and not self._is_internal_risk_event(event):
             event.budget_delta = self._receipt_budget_delta(
                 session,
                 event,
@@ -2027,23 +2865,33 @@ class GovernanceProxy:
                 "mission_ref": copy.deepcopy(policy_claims.get("mission_ref")),
                 "mission_digest": policy_claims.get("mission_digest"),
             }
+        budget_remaining = self._receipt_budget_remaining(
+            session,
+            policy_claims,
+            event,
+        )
+        if (
+            isinstance(event.budget_delta, Mapping)
+            and event.budget_delta.get("resource") == "spend"
+        ):
+            budget_remaining.update(self._spend_budget_remaining(event.budget_delta))
         receipt = build_receipt(
             decision,
             event,
             parent_receipt_hash=session.last_receipt_full_hash,
             policy_decisions=signed_policy_decisions,
             reason=audit_reason,
-            budget_remaining=self._receipt_budget_remaining(session, policy_claims),
+            budget_remaining=budget_remaining,
         )
         signed_jwt = sign_receipt(receipt, self.receipt_private_key)
         session.last_receipt_id = receipt.receipt_id
         session.last_receipt_full_hash = hashlib.sha256(
             signed_jwt.encode("ascii")
         ).hexdigest()
-        with self._last_seen_receipts_lock:
-            self._last_seen_receipts[receipt.grant_id] = receipt.receipt_id
         entry = {
             "type": "execution_receipt",
+            "schema_version": receipt.schema_version,
+            "receipt_kind": receipt.receipt_kind,
             "session_id": session.jti,
             "receipt_id": receipt.receipt_id,
             "parent_receipt_hash": receipt.parent_receipt_hash,
@@ -2083,8 +2931,36 @@ class GovernanceProxy:
                     Decision.VIOLATION,
                     "revoked",
                     DenialReason.REVOKED,
-            )
+                )
             claims = mission.policy_claims()
+            presented_risk = passport_claims.get("risk_budget")
+            authoritative_risk = claims.get("risk_budget")
+            if presented_risk is not None:
+                if not isinstance(presented_risk, dict) or not isinstance(
+                    authoritative_risk, dict
+                ):
+                    raise _MissionPolicyResolutionError(
+                        Decision.VIOLATION,
+                        "risk_policy_invalid",
+                        DenialReason.RISK_POLICY_INVALID,
+                    )
+                try:
+                    claims["risk_budget"] = attenuate_risk_budget(
+                        authoritative_risk,
+                        presented_risk,
+                    )
+                except (PermissionError, RiskBudgetError):
+                    try:
+                        claims["risk_budget"] = attenuate_risk_budget(
+                            presented_risk,
+                            authoritative_risk,
+                        )
+                    except (PermissionError, RiskBudgetError) as exc:
+                        raise _MissionPolicyResolutionError(
+                            Decision.VIOLATION,
+                            "risk_policy_invalid",
+                            DenialReason.RISK_POLICY_INVALID,
+                        ) from exc
             claims["mission_ref"] = copy.deepcopy(mission_ref_raw)
             claims["mission_digest"] = mission.payload_digest
             # H5 (2026-04-19): propagate mission_id from the session
@@ -2159,7 +3035,9 @@ class GovernanceProxy:
         session.memory_stores[store_id] = store
         return store
 
-    def _proxy_memory_write(self, session: GovernanceSession, arguments: dict[str, Any]) -> None:
+    def _proxy_memory_write(
+        self, session: GovernanceSession, arguments: dict[str, Any]
+    ) -> None:
         store_id = arguments.get("store_id")
         content = arguments.get("content")
         if not isinstance(store_id, str) or not store_id:
@@ -2185,7 +3063,9 @@ class GovernanceProxy:
         store = self._get_or_create_memory_store(session, arguments)
         session.last_memory_record_id = store.write(content, actor_key)
 
-    def _proxy_memory_read(self, session: GovernanceSession, arguments: dict[str, Any]) -> None:
+    def _proxy_memory_read(
+        self, session: GovernanceSession, arguments: dict[str, Any]
+    ) -> None:
         store_id = arguments.get("store_id")
         record_id = arguments.get("record_id")
         if not isinstance(store_id, str) or not store_id:
@@ -2211,6 +3091,89 @@ class GovernanceProxy:
             )
         verifier_key = self.public_key
         store.read(record_id, verifier_key)
+
+    def _apply_mic_conformance_checks(
+        self,
+        session: GovernanceSession,
+        tool_name: str,
+        arguments: dict[str, Any],
+        policy_claims: dict[str, Any],
+    ) -> tuple[Decision, str, DenialReason | None] | None:
+        """Apply MIC-State / MIC-Evidence conformance checks.
+
+        Returns ``None`` when all checks pass or the profile is
+        Delegation-Core (which applies no extra checks).  Otherwise
+        returns ``(decision, reason, denial_reason)`` for the first
+        failing check.
+        """
+        profile = policy_claims.get("conformance_profile") or "Delegation-Core"
+        if profile == "Delegation-Core":
+            return None
+
+        # -- Check 1: Manifest Digest (MIC-State, MIC-Evidence) --------------
+        expected_digest = policy_claims.get("tool_manifest_digest")
+        if expected_digest:  # only when a digest is pinned in the passport
+            observed = arguments.get("observed_manifest_digest")
+            if not observed or not isinstance(observed, str):
+                return (
+                    Decision.VIOLATION,
+                    "manifest_drift:missing",
+                    DenialReason.MANIFEST_DRIFT,
+                )
+            if observed.strip() != expected_digest.strip():
+                return (
+                    Decision.VIOLATION,
+                    f"manifest_drift:expected={expected_digest} observed={observed.strip()}",
+                    DenialReason.MANIFEST_DRIFT,
+                )
+
+        # -- Check 2: Envelope Signature (MIC-State, MIC-Evidence) -----------
+        env_sig = arguments.get("envelope_signature_valid")
+        if env_sig is not True:  # strict boolean check - rejects truthy strings
+            return (
+                Decision.VIOLATION,
+                "envelope_tampered",
+                DenialReason.ENVELOPE_TAMPERED,
+            )
+
+        # -- Check 3: Visibility (MIC-State, MIC-Evidence) -------------------
+        visibility = arguments.get("visibility")
+        if not isinstance(visibility, str) or visibility.strip().lower() != "full":
+            label = (
+                visibility if isinstance(visibility, str) else type(visibility).__name__
+            )
+            return (
+                Decision.UNKNOWN,
+                f"visibility_insufficient:{label}",
+                DenialReason.OBSERVATION_GAP,
+            )
+
+        if profile != "MIC-Evidence":
+            return None
+
+        # -- Check 4: Hidden-Hop Detection (MIC-Evidence only) ----------------
+        parent_jti = session.passport_claims.get("parent_jti")
+        if parent_jti:
+            with self._last_seen_receipts_lock:
+                if parent_jti not in self._last_seen_receipts:
+                    return (
+                        Decision.INSUFFICIENT_EVIDENCE,
+                        f"missing_parent_receipt:{parent_jti}",
+                        DenialReason.TELEMETRY_MISSING,
+                    )
+
+            chain = session.passport_claims.get("delegation_chain") or []
+            with self._last_seen_receipts_lock:
+                for entry in chain:
+                    entry_jti = entry.get("jti") if isinstance(entry, dict) else None
+                    if entry_jti and entry_jti not in self._last_seen_receipts:
+                        return (
+                            Decision.INSUFFICIENT_EVIDENCE,
+                            f"delegation_chain_receipt_gap:{entry_jti}",
+                            DenialReason.TELEMETRY_MISSING,
+                        )
+
+        return None
 
     def _apply_memory_post_permit(
         self,
@@ -2329,33 +3292,6 @@ class GovernanceProxy:
             revoked.setdefault(jti, int(time.time()))
             self._persist_revoked_locked(revoked)
 
-    @property
-    def kill_switch_active(self) -> bool:
-        with self._kill_switch_lock:
-            return self._kill_switch_active
-
-    def activate_kill_switch(self) -> None:
-        with self._kill_switch_lock:
-            self._kill_switch_active = True
-        ardur_metrics.kill_switch_active.set(1)
-        self._log_event("kill_switch_activate", {"timestamp": int(time.time())})
-
-    def deactivate_kill_switch(self) -> None:
-        with self._kill_switch_lock:
-            self._kill_switch_active = False
-        ardur_metrics.kill_switch_active.set(0)
-        self._log_event("kill_switch_deactivate", {"timestamp": int(time.time())})
-
-    def _log_event(self, event_type: str, detail: dict, correlation_id: str | None = None) -> None:
-        entry = {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-            "event_type": event_type,
-            "severity": "INFO",
-            "correlation_id": correlation_id or "",
-            "detail": detail,
-        }
-        self._governance_log.write(entry)
-
     def start_session(
         self,
         passport_token: str,
@@ -2376,6 +3312,7 @@ class GovernanceProxy:
         Phase 3.3m → 3.3o (K2 / Round 11 I6 + cryptographer review #07).
         """
         claims = self.verify_passport_token(passport_token)
+        _warn_explicit_unrestricted_resource_scope(claims)
 
         # K2 (I6): full Proof of Possession — key binding + KB-JWT.
         # Cryptographer review #07 identified that key binding alone
@@ -2383,6 +3320,7 @@ class GovernanceProxy:
         # JWT and the public key passes trivially. The KB-JWT proves the
         # presenter holds the PRIVATE key right now.
         from .passport import verify_pop
+
         # 2026-04-21 audit fix: `claims.get("cnf")` previously used a
         # truthy check, which treated `cnf={}`, `cnf=""`, `cnf=0`,
         # `cnf=False`, `cnf=[]` as bearer mode and silently skipped PoP.
@@ -2396,19 +3334,25 @@ class GovernanceProxy:
             if kb_jwt is not None:
                 import jwt as _jwt
                 from .passport import assert_iat_in_window
+
                 # Decode outside the nonce lock — decoding touches no shared
                 # state. Failure here is fail-closed: a malformed KB-JWT must
                 # not be accepted just because verify_pop already passed (the
                 # signature/freshness path validates a different code path).
                 try:
                     kb_claims = _jwt.decode(
-                        kb_jwt, holder_public_key, algorithms=["ES256"],
+                        kb_jwt,
+                        holder_public_key,
+                        algorithms=["ES256"],
                         options={"verify_aud": False, "verify_iat": False},
                     )
                 except _jwt.PyJWTError as exc:
-                    raise PermissionError(
-                        f"KB-JWT decode failed during nonce extraction: {exc}"
-                    ) from exc
+                    # Sanitize at the source: PyJWT error strings can carry
+                    # library internals (algorithm mismatch, key shape, claim
+                    # names). Surface a fixed code externally; the full
+                    # traceback is preserved via the `from exc` chain and the
+                    # HTTP handler's logger.exception() path.
+                    raise PermissionError("kb_jwt_decode_failed") from exc
                 # FIX-R6-9 (round-6, 2026-04-29): defense-in-depth iat bound
                 # on this second KB-JWT decode. verify_pop above already
                 # bounds the same JWT, but a future refactor that splits
@@ -2425,7 +3369,9 @@ class GovernanceProxy:
                         field_name="KB-JWT iat",
                     )
                 except _jwt.InvalidTokenError as exc:
-                    raise PermissionError(str(exc)) from exc
+                    # Same class as the PyJWTError branch above: PyJWT message
+                    # text is library-internal and must not reach API callers.
+                    raise PermissionError("kb_jwt_iat_invalid") from exc
                 nonce = kb_claims.get("nonce", "")
                 if not isinstance(nonce, str) or not nonce:
                     raise PermissionError("KB-JWT nonce must be a non-empty string")
@@ -2484,8 +3430,7 @@ class GovernanceProxy:
                 # sub so pre-H1 credentials in flight don't lose
                 # policy resolution.
                 mission_id_lookup = str(
-                    claims.get("mission_id")
-                    or claims.get("sub", "")
+                    claims.get("mission_id") or claims.get("sub", "")
                 )
                 stored_policies = self.policy_store.get_policies(
                     mission_id=mission_id_lookup,
@@ -2494,7 +3439,9 @@ class GovernanceProxy:
                 if stored_policies is not None:
                     claims["additional_policies"] = list(stored_policies)
 
-            session = GovernanceSession(passport_token=passport_token, passport_claims=claims)
+            session = GovernanceSession(
+                passport_token=passport_token, passport_claims=claims
+            )
             with self._sessions_lock:
                 # Double-check under lock (TOCTOU defense)
                 if jti in self.sessions:
@@ -2529,18 +3476,19 @@ class GovernanceProxy:
         maps it to an internal passport token with the same ``jti`` so receipts
         and delegated children keep the AAT grant id as their lineage anchor.
 
-        Proof-of-possession (default ``True`` since 2026-04-28): if the AAT
-        carries a ``cnf`` claim, the caller MUST supply ``holder_public_key``
-        + ``kb_jwt`` so the adapter can verify the presenter holds the matching
-        private key (RFC 7800 confirmation-bound AAT semantics). Bearer AATs
-        (no ``cnf``) bypass PoP regardless of the flag. Library callers that
-        legitimately need bearer-style acceptance of a cnf-bearing AAT MUST
-        opt out with ``require_pop=False`` so the security-relevant choice is
-        visible at the call site. See :func:`material_from_aat_grant` for the
-        H2 remediation rationale and the 2026-04-28 default flip.
+        The configured AAT audience must match. A ``cnf`` claim is required
+        unless this proxy was constructed with the temporary
+        ``allow_aat_without_cnf=True`` compatibility opt-out. When ``cnf`` is
+        present and ``require_pop=True``, the caller must supply
+        ``holder_public_key`` and ``kb_jwt`` to prove possession.
         """
         parent_claims = (
-            decode_aat_claims(parent_aat_token, self.public_key)
+            decode_aat_claims(
+                parent_aat_token,
+                self.public_key,
+                expected_audience=self._aat_expected_audience,
+                allow_aat_without_cnf=self._allow_aat_without_cnf,
+            )
             if parent_aat_token is not None
             else None
         )
@@ -2549,15 +3497,19 @@ class GovernanceProxy:
             self.public_key,
             self.mission_cache,
             parent_claims=parent_claims,
+            parent_token=parent_aat_token,
             holder_public_key=holder_public_key,
             kb_jwt=kb_jwt,
             require_pop=require_pop,
+            expected_audience=self._aat_expected_audience,
+            allow_aat_without_cnf=self._allow_aat_without_cnf,
         )
         internal_token = issue_passport(
             material.mission,
             signing_key or self.receipt_private_key,
             ttl_s=material.ttl_s,
             extra_claims=material.extra_claims,
+            jti_override=material.grant_id,
         )
         return self.start_session(internal_token)
 
@@ -2569,8 +3521,6 @@ class GovernanceProxy:
         audience: str = "ardur-proxy",
         now: int | None = None,
         peer_jwt_svid: str | None = None,
-        peer_trust_bundle=None,
-        svid_audience: str | None = None,
     ) -> GovernanceSession:
         """Start a governed session from a Biscuit mission passport.
 
@@ -2580,14 +3530,12 @@ class GovernanceProxy:
         produces, and runs the rest of the session-start machinery
         (single-use jti check, lineage revocation check, persistence).
 
-        Phase 5 integration (A1, 2026-04-17): when ``peer_jwt_svid`` and
-        ``peer_trust_bundle`` are supplied, this also performs SPIFFE
-        peer-identity binding. The JWT-SVID is verified against the
-        trust bundle (signature, expiry, audience) and the SVID's
-        SPIFFE ID is compared to the passport's ``holder_spiffe_id``
-        claim. Mismatch raises PermissionError. This closes the
-        bearer-token gap: a stolen Biscuit can no longer be replayed
-        by a party who doesn't also possess the holder's SVID.
+        When the proxy has a server-owned ``biscuit_peer_trust_bundle``,
+        every Biscuit session requires ``peer_jwt_svid``. The SVID is
+        verified against that pinned bundle and the server-configured
+        audience before its SPIFFE ID is compared with the passport's
+        ``holder_spiffe_id``. The request can never choose the trust root,
+        trust domain, or audience.
 
         After this call the session behaves identically to one started
         via :meth:`start_session` — every subsequent ``evaluate_tool_call``
@@ -2607,30 +3555,25 @@ class GovernanceProxy:
             audience: conventional ``aud`` claim for the synthesized
                 session; defaults to ``"ardur-proxy"``.
             now: optional unix timestamp override for expiry checking.
-            peer_jwt_svid: (optional) the JWT-SVID presented by the
-                peer agent at connection time. If supplied, SPIFFE
-                peer-identity binding is enforced.
-            peer_trust_bundle: (optional, required when
-                ``peer_jwt_svid`` is supplied) the SPIFFE
-                :class:`TrustBundle` against which the SVID is
-                verified.
-            svid_audience: (optional) expected ``aud`` claim on the
-                JWT-SVID. Defaults to ``audience`` if not supplied.
+            peer_jwt_svid: the JWT-SVID presented by the peer agent.
+                Required when the proxy has server-owned Biscuit peer
+                trust configured and forbidden otherwise.
 
         Raises:
             BiscuitVerifyError: the credential does not verify.
             PermissionError: SVID binding requested but the SVID
                 doesn't match the passport's holder_spiffe_id, or the
                 SVID fails its own verification.
-            ValueError: if the jti is already in use (single-use rule),
-                or if only one of (peer_jwt_svid, peer_trust_bundle) is
-                supplied without the other.
+            ValueError: if the jti is already in use (single-use rule).
         """
-        # Validate SVID binding args up-front.
-        if (peer_jwt_svid is None) != (peer_trust_bundle is None):
-            raise ValueError(
-                "peer_jwt_svid and peer_trust_bundle must be supplied "
-                "together or not at all"
+        peer_trust_bundle = self._biscuit_peer_trust_bundle
+        if peer_trust_bundle is None and peer_jwt_svid is not None:
+            raise PermissionError(
+                "peer JWT-SVID verification is not configured on this server"
+            )
+        if peer_trust_bundle is not None and not peer_jwt_svid:
+            raise PermissionError(
+                "peer JWT-SVID is required by the server's Biscuit binding policy"
             )
 
         from .biscuit_passport import (
@@ -2638,32 +3581,41 @@ class GovernanceProxy:
             encode_biscuit_b64,
         )
 
-        context = verify_biscuit_passport(
-            biscuit_token, issuer_public_key, now=now
+        verification_key = (
+            self._biscuit_issuer_public_key
+            if peer_trust_bundle is not None
+            else issuer_public_key
         )
+        context = verify_biscuit_passport(biscuit_token, verification_key, now=now)
 
-        # Phase 5 A1: SPIFFE peer-identity binding.
-        #
-        # If the caller supplied a peer JWT-SVID, verify it against the
-        # trust bundle and require its SPIFFE ID to equal the
-        # passport's holder_spiffe_id claim. This closes the bearer-
-        # token gap — a stolen Biscuit can't be replayed without the
-        # holder's SVID.
+        # The verifier owns both the bundle and expected audience. The peer
+        # supplies only its credential.
         svid_bound = False
         if peer_jwt_svid is not None:
             from .spiffe_identity import verify_jwt_svid
+            from spiffe import SpiffeId
 
-            expected_audience = svid_audience or audience
             try:
                 svid_claims = verify_jwt_svid(
                     peer_jwt_svid,
                     peer_trust_bundle,
-                    expected_audience,
+                    self._biscuit_svid_audience,
                 )
             except Exception as exc:
+                logger.debug(
+                    "peer JWT-SVID verification failed",
+                    exc_info=exc,
+                )
+                raise PermissionError("peer_jwt_svid_verification_failed") from exc
+
+            verified_trust_domain = SpiffeId(svid_claims.spiffe_id).trust_domain.name
+            if verified_trust_domain != peer_trust_bundle.trust_domain:
+                # Intentional caller-identifier reflection: this is parsed
+                # from the caller-presented SVID, not library exception text.
                 raise PermissionError(
-                    f"peer JWT-SVID verification failed: {exc}"
-                ) from exc
+                    f"SVID trust domain {verified_trust_domain!r} does not match "
+                    "the server-configured Biscuit peer trust domain"
+                )
 
             if context.spiffe_id is None or context.spiffe_id == "":
                 raise PermissionError(
@@ -2671,6 +3623,8 @@ class GovernanceProxy:
                     "was requested — cannot bind"
                 )
             if svid_claims.spiffe_id != context.spiffe_id:
+                # Intentional caller-identifier reflection: both identifiers
+                # are caller-presented credential fields, not library internals.
                 raise PermissionError(
                     f"SVID SPIFFE ID {svid_claims.spiffe_id!r} does not "
                     f"match passport's holder_spiffe_id "
@@ -2700,9 +3654,7 @@ class GovernanceProxy:
             "allowed_tools": list(context.allowed_tools),
             "forbidden_tools": list(context.forbidden_tools),
             "resource_scope": list(context.resource_scope),
-            "allowed_side_effect_classes": list(
-                context.allowed_side_effect_classes
-            ),
+            "allowed_side_effect_classes": list(context.allowed_side_effect_classes),
             "max_tool_calls": context.max_tool_calls,
             "max_duration_s": context.max_duration_s,
             "delegation_allowed": context.delegation_allowed,
@@ -2712,9 +3664,7 @@ class GovernanceProxy:
             "svid_bound": svid_bound,
         }
         if context.max_tool_calls_per_class:
-            claims["max_tool_calls_per_class"] = dict(
-                context.max_tool_calls_per_class
-            )
+            claims["max_tool_calls_per_class"] = dict(context.max_tool_calls_per_class)
         if context.cwd is not None:
             claims["cwd"] = context.cwd
         if context.parent_jti is not None:
@@ -2800,6 +3750,8 @@ class GovernanceProxy:
                 # fall through to whatever the credential carries.
                 claims["additional_policies"] = list(stored_policies)
 
+        _warn_explicit_unrestricted_resource_scope(claims)
+
         # The "passport_token" field for the session stores the base64
         # Biscuit string — so persisted sessions round-trip, and audit
         # tooling can show the original credential alongside the
@@ -2859,14 +3811,489 @@ class GovernanceProxy:
             self.sessions[session_id] = loaded
             return loaded
 
+    def synchronize_external_tool_usage_floor(
+        self,
+        session: GovernanceSession | str,
+        *,
+        tool_call_count: int,
+        tool_call_count_by_class: Mapping[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Advance a persisted session to a trusted external usage floor.
+
+        Integrations that already maintain a verified receipt chain can use
+        this method before delegation so the lineage ledger accounts for calls
+        made outside :meth:`evaluate_tool_call`. Floors are monotonic and may
+        never overlap capacity already reserved for descendants.
+        """
+
+        if isinstance(tool_call_count, bool) or not isinstance(tool_call_count, int):
+            raise TypeError("tool_call_count must be an integer")
+        if tool_call_count < 0:
+            raise ValueError("tool_call_count must be non-negative")
+        raw_by_class = tool_call_count_by_class or {}
+        if not isinstance(raw_by_class, Mapping):
+            raise TypeError("tool_call_count_by_class must be an object")
+        by_class: dict[str, int] = {}
+        for raw_name, raw_count in raw_by_class.items():
+            name = str(raw_name)
+            if not name:
+                raise ValueError("tool-call class names must be non-empty")
+            if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+                raise TypeError("tool-call class counts must be integers")
+            if raw_count < 0:
+                raise ValueError("tool-call class counts must be non-negative")
+            by_class[name] = raw_count
+        if sum(by_class.values()) > tool_call_count:
+            raise ValueError("per-class usage cannot exceed total tool-call usage")
+
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                if target.summary is not None or target.end_time is not None:
+                    raise PermissionError(
+                        "completed session cannot accept external usage"
+                    )
+                next_total = max(int(target.tool_call_count), tool_call_count)
+                next_by_class = dict(target.tool_call_count_by_class)
+                for name, count in by_class.items():
+                    next_by_class[name] = max(int(next_by_class.get(name, 0)), count)
+                if sum(next_by_class.values()) > next_total:
+                    raise ValueError(
+                        "merged per-class usage cannot exceed total tool-call usage"
+                    )
+                ceiling = int(target.passport_claims.get("max_tool_calls", 50))
+                reserved = int(target.delegated_budget_reserved)
+                if next_total + reserved > ceiling:
+                    raise PermissionError(
+                        "external usage overlaps delegated tool-call reservations"
+                    )
+                class_caps = dict(
+                    target.passport_claims.get("max_tool_calls_per_class", {}) or {}
+                )
+                for name, count in next_by_class.items():
+                    if name in class_caps and count > int(class_caps[name]):
+                        raise PermissionError(
+                            f"external usage exceeds tool-call class budget for {name}"
+                        )
+                changed = (
+                    next_total != target.tool_call_count
+                    or next_by_class != target.tool_call_count_by_class
+                )
+                target.tool_call_count = next_total
+                target.tool_call_count_by_class = next_by_class
+                if changed:
+                    self._persist_session(target)
+                return {
+                    "tool_call_count": target.tool_call_count,
+                    "tool_call_count_by_class": dict(target.tool_call_count_by_class),
+                    "delegated_budget_reserved": target.delegated_budget_reserved,
+                    "max_tool_calls": ceiling,
+                }
+
+    @staticmethod
+    def _risk_measurements(
+        facts: Mapping[str, int | str] | None = None,
+        *,
+        fact_digest: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        if (facts is None) == (fact_digest is None):
+            raise RiskBudgetError("exactly one risk fact source is required")
+        if fact_digest is None:
+            digest = hashlib.sha256(canonical_json_bytes(dict(facts or {}))).digest()
+        else:
+            if (
+                not fact_digest.startswith("sha256:")
+                or len(fact_digest) != 71
+                or fact_digest[7:] != fact_digest[7:].lower()
+            ):
+                raise RiskBudgetError("risk fact digest is invalid")
+            try:
+                digest = bytes.fromhex(fact_digest[7:])
+            except ValueError as exc:
+                raise RiskBudgetError("risk fact digest is invalid") from exc
+        hex_digest = f"sha256:{digest.hex()}"
+        encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+        return hex_digest, {
+            "risk_facts": {
+                "alg": "sha-256",
+                "canonicalization": "jcs-rfc8785",
+                "scope": "measurement",
+                "value": encoded,
+            }
+        }
+
+    @staticmethod
+    def _risk_metric(
+        *,
+        operation: str,
+        outcome: str,
+        facts: Sequence[str] = (),
+        reason: str = "none",
+    ) -> None:
+        for fact in facts or ("none",):
+            ardur_metrics.risk_budget_operations_total.inc(
+                operation=operation,
+                outcome=outcome,
+                fact=fact,
+                reason=reason,
+            )
+
+    def _risk_preflight(
+        self,
+        session: GovernanceSession,
+        tool_name: str,
+        arguments: dict[str, Any],
+        policy_claims: dict[str, Any],
+        risk_request_id: str | None,
+        reservation_state: dict[str, Any] | None = None,
+    ) -> _RiskPreflight:
+        raw_policy = policy_claims.get("risk_budget")
+        if raw_policy is None and session.risk_policy_snapshot is None:
+            return _RiskPreflight(governed=False, accepted=True)
+        try:
+            if raw_policy is None:
+                raise RiskBudgetError("snapshotted risk policy disappeared")
+            current_policy = normalize_risk_budget(raw_policy)
+            if session.risk_policy_snapshot is None:
+                session.risk_policy_snapshot = copy.deepcopy(current_policy)
+            elif current_policy != session.risk_policy_snapshot:
+                raise RiskBudgetError("risk policy changed during the session")
+            policy = copy.deepcopy(session.risk_policy_snapshot)
+        except RiskBudgetError:
+            self._risk_metric(
+                operation="preflight",
+                outcome="denied",
+                reason="policy_invalid",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_policy_invalid",
+                denial_reason=DenialReason.RISK_POLICY_INVALID,
+            )
+
+        contract = self.risk_registry.resolve(tool_name)
+        tool_policy = policy["tools"].get(tool_name)
+        if tool_name in {MEMORY_STORE_WRITE_TOOL, MEMORY_STORE_READ_TOOL} and (
+            contract is not None or tool_policy is not None
+        ):
+            self._risk_metric(
+                operation="preflight",
+                outcome="denied",
+                reason="contract_invalid",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_contract_invalid",
+                denial_reason=DenialReason.RISK_CONTRACT_INVALID,
+            )
+        if contract is None and tool_policy is None:
+            return _RiskPreflight(governed=False, accepted=True)
+        if contract is None or tool_policy is None:
+            self._risk_metric(
+                operation="preflight",
+                outcome="denied",
+                reason="contract_invalid",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_contract_invalid",
+                denial_reason=DenialReason.RISK_CONTRACT_INVALID,
+            )
+        if (
+            not isinstance(risk_request_id, str)
+            or not risk_request_id.strip()
+            or len(risk_request_id.encode("utf-8")) > 1024
+        ):
+            self._risk_metric(
+                operation="preflight",
+                outcome="denied",
+                reason="request_id_invalid",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_request_id_invalid",
+                denial_reason=DenialReason.RISK_REQUEST_ID_INVALID,
+            )
+
+        try:
+            facts = contract.extract(arguments)
+        except RiskFactError:
+            self._risk_metric(
+                operation="preflight",
+                outcome="denied",
+                reason="fact_invalid",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_fact_invalid",
+                denial_reason=DenialReason.RISK_FACT_INVALID,
+            )
+        fact_names = tuple(sorted(facts))
+        fact_digest, measurements = self._risk_measurements(facts)
+        try:
+            numeric_facts = validate_action_risk(policy, contract, facts)
+        except RiskBudgetError as exc:
+            reason = str(exc)
+            if reason == "risk_action_cap_exceeded":
+                denial_reason = DenialReason.RISK_ACTION_CAP_EXCEEDED
+                metric_reason = "action_cap"
+            elif reason == "risk_contract_digest_mismatch":
+                denial_reason = DenialReason.RISK_CONTRACT_INVALID
+                metric_reason = "contract_invalid"
+                reason = "risk_contract_invalid"
+            else:
+                denial_reason = DenialReason.RISK_POLICY_INVALID
+                metric_reason = "policy_invalid"
+                reason = "risk_policy_invalid"
+            self._risk_metric(
+                operation="preflight",
+                outcome="denied",
+                facts=fact_names,
+                reason=metric_reason,
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason=reason,
+                denial_reason=denial_reason,
+                measurements=measurements,
+            )
+
+        policy_digest = (
+            f"sha256:{hashlib.sha256(canonical_json_bytes(policy)).hexdigest()}"
+        )
+        fingerprint = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "session": session.jti,
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "risk_request_id": risk_request_id,
+                }
+            )
+        ).hexdigest()
+        try:
+            reservation = self.risk_budget_ledger.reserve(
+                lineage_id=policy["lineage_id"],
+                session_id=session.jti,
+                agent_id=str(session.passport_claims.get("sub", "unknown")),
+                request_id=risk_request_id,
+                fingerprint=fingerprint,
+                numeric_facts=numeric_facts,
+                ceilings=policy["ceilings"],
+                policy_digest=policy_digest,
+                contract_digest=contract.digest,
+                fact_digest=fact_digest,
+                expires_at=int(session.passport_claims["exp"]),
+            )
+        except RiskBudgetReplayError:
+            self._risk_metric(
+                operation="reserve",
+                outcome="denied",
+                facts=fact_names,
+                reason="replay",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_request_replay",
+                denial_reason=DenialReason.RISK_REPLAY,
+                measurements=measurements,
+            )
+        except (OSError, RiskBudgetError):
+            self._risk_metric(
+                operation="reserve",
+                outcome="error",
+                facts=fact_names,
+                reason="state_unavailable",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_state_unavailable",
+                denial_reason=DenialReason.RISK_STATE_UNAVAILABLE,
+                measurements=measurements,
+            )
+        if not reservation.accepted:
+            self._risk_metric(
+                operation="reserve",
+                outcome="denied",
+                facts=fact_names,
+                reason="budget_exhausted",
+            )
+            return _RiskPreflight(
+                governed=True,
+                accepted=False,
+                reason="risk_budget_exhausted",
+                denial_reason=DenialReason.RISK_BUDGET_EXHAUSTED,
+                measurements=measurements,
+                remaining=reservation.remaining,
+            )
+        if reservation_state is not None:
+            reservation_state["risk"] = {
+                "accepted": True,
+                "closed": False,
+                "lineage_id": policy["lineage_id"],
+                "session_id": session.jti,
+                "request_id": risk_request_id,
+            }
+        self._risk_metric(
+            operation="reserve",
+            outcome="accepted",
+            facts=fact_names,
+        )
+        return _RiskPreflight(
+            governed=True,
+            accepted=True,
+            reserved=True,
+            request_id=risk_request_id,
+            measurements=measurements,
+            remaining=reservation.remaining,
+        )
+
+    def _evaluate_ordinary_tool_policy(
+        self,
+        target: GovernanceSession,
+        tool_name: str,
+        arguments: dict[str, Any],
+        policy_claims: dict[str, Any],
+    ) -> tuple[Decision, str, PolicyEvent]:
+        ts = time.time()
+        approval_policy = policy_claims.get("approval_policy")
+        need_rate = (
+            isinstance(approval_policy, dict)
+            and approval_policy.get("max_approvals_per_hour_per_operator") is not None
+        )
+        tracker = None
+        operator_id = None
+        if need_rate:
+            try:
+                max_approvals = int(
+                    approval_policy["max_approvals_per_hour_per_operator"]
+                )
+                window_s = float(approval_policy.get("window_s", 3600.0))
+                tracker = self._approval_tracker(max_approvals, window_s)
+            except (TypeError, ValueError):
+                decision, reason = (
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    "approval_policy_invalid",
+                )
+                self._record_tool_policy_event(
+                    target,
+                    tool_name,
+                    arguments,
+                    decision,
+                    reason,
+                    DenialReason.TELEMETRY_MISSING,
+                    verifier_id=self.verifier_id,
+                )
+                return decision, reason, target.events[-1]
+            operator_id = self._approval_operator_id(policy_claims, arguments)
+            if operator_id is None:
+                decision, reason = (
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    "approval_operator_unavailable",
+                )
+                self._record_tool_policy_event(
+                    target,
+                    tool_name,
+                    arguments,
+                    decision,
+                    reason,
+                    DenialReason.APPROVAL_OPERATOR_UNAVAILABLE,
+                    verifier_id=self.verifier_id,
+                )
+                return decision, reason, target.events[-1]
+            if not tracker.check(operator_id, ts):
+                decision, reason = (
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    "approval_fatigue_threshold",
+                )
+                self._record_tool_policy_event(
+                    target,
+                    tool_name,
+                    arguments,
+                    decision,
+                    reason,
+                    DenialReason.APPROVAL_FATIGUE_THRESHOLD,
+                    verifier_id=self.verifier_id,
+                )
+                return decision, reason, target.events[-1]
+
+        decision, reason, event = target.check_and_record(
+            tool_name,
+            arguments,
+            policy_claims=policy_claims,
+            verifier_id=self.verifier_id,
+        )
+        if decision == Decision.PERMIT:
+            decision, reason = self._apply_memory_post_permit(
+                target,
+                tool_name,
+                arguments,
+            )
+            event = target.events[-1]
+        if (
+            decision == Decision.PERMIT
+            and tracker is not None
+            and operator_id is not None
+        ):
+            tracker.record_approval(operator_id, ts)
+        return decision, reason, event
+
     def evaluate_tool_call(
         self,
         session: GovernanceSession | str,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
+        risk_request_id: str | None = None,
+        receipt_callback: Callable[[str], None] | None = None,
+        spend_request: SpendReservationRequest | None = None,
+    ) -> tuple[Decision, str]:
+        self.flush_risk_lifecycle_outbox(session)
+        reservations: dict[str, Any] = {}
+        try:
+            return self._evaluate_tool_call(
+                session,
+                tool_name,
+                arguments,
+                risk_request_id=risk_request_id,
+                receipt_callback=receipt_callback,
+                spend_request=spend_request,
+                _pre_action_reservations=reservations,
+            )
+        except BaseException as exc:
+            try:
+                self._release_pre_action_reservations(
+                    reservations,
+                    spend_reason_code="spend_evaluation_failed",
+                )
+            except BaseException as compensation_exc:
+                raise compensation_exc from exc
+            raise
+
+    def _evaluate_tool_call(
+        self,
+        session: GovernanceSession | str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        risk_request_id: str | None,
+        receipt_callback: Callable[[str], None] | None,
+        spend_request: SpendReservationRequest | None,
+        _pre_action_reservations: dict[str, Any],
     ) -> tuple[Decision, str]:
         arguments_snapshot = copy.deepcopy(arguments)
         receipt_entry: dict[str, Any] | None = None
+        receipt_callback_id: str | None = None
+        released: RiskOutcomeResult | None = None
+        spend_reservation: SpendReservationResult | None = None
+        spend_close: SpendCloseResult | None = None
         # Refresh persisted state under a per-session coordination lock before
         # mutating. Without this, separate proxies that share a state_dir can
         # both approve from stale in-memory snapshots and last-writer-wins the
@@ -2914,7 +4341,8 @@ class GovernanceProxy:
                 elif (
                     tool_name == MEMORY_STORE_READ_TOOL
                     and isinstance(arguments_snapshot.get("store_id"), str)
-                    and arguments_snapshot["store_id"] in target.memory_compromised_stores
+                    and arguments_snapshot["store_id"]
+                    in target.memory_compromised_stores
                 ):
                     self._record_tool_policy_event(
                         target,
@@ -2930,127 +4358,150 @@ class GovernanceProxy:
                     event = target.events[-1]
                     self._persist_session(target)
                 else:
-                    mic_failure = self._pre_policy_integrity_check(target, arguments_snapshot)
-                    if mic_failure is not None:
-                        decision, reason, denial_reason = mic_failure
+                    try:
+                        policy_claims = self._resolve_authoritative_policy_claims(
+                            target.passport_claims
+                        )
+                    except _MissionPolicyResolutionError as exc:
+                        decision, reason = exc.decision, exc.reason
                         self._record_tool_policy_event(
-                            target, tool_name, arguments_snapshot,
-                            decision, reason, denial_reason,
+                            target,
+                            tool_name,
+                            arguments_snapshot,
+                            decision,
+                            reason,
+                            exc.denial_reason,
                             verifier_id=self.verifier_id,
                         )
                         event = target.events[-1]
                         self._persist_session(target)
                     else:
-                        try:
-                            policy_claims = self._resolve_authoritative_policy_claims(
-                                target.passport_claims
-                            )
-                        except _MissionPolicyResolutionError as exc:
-                            decision, reason = exc.decision, exc.reason
+                        receipt_policy_claims = dict(policy_claims)
+                        risk_preflight = self._risk_preflight(
+                            target,
+                            tool_name,
+                            arguments_snapshot,
+                            policy_claims,
+                            risk_request_id,
+                            _pre_action_reservations,
+                        )
+                        if not risk_preflight.accepted:
+                            denial_reason = risk_preflight.denial_reason
+                            if denial_reason in {
+                                DenialReason.RISK_ACTION_CAP_EXCEEDED,
+                                DenialReason.RISK_BUDGET_EXHAUSTED,
+                                DenialReason.RISK_REPLAY,
+                            }:
+                                decision = Decision.DENY
+                            else:
+                                decision = Decision.INSUFFICIENT_EVIDENCE
+                            reason = risk_preflight.reason or "risk_policy_invalid"
                             self._record_tool_policy_event(
                                 target,
                                 tool_name,
                                 arguments_snapshot,
                                 decision,
                                 reason,
-                                exc.denial_reason,
+                                denial_reason,
                                 verifier_id=self.verifier_id,
                             )
                             event = target.events[-1]
-                            self._persist_session(target)
                         else:
-                            receipt_policy_claims = dict(policy_claims)
-                            ts = time.time()
-                            ap = policy_claims.get("approval_policy")
-                            need_rate = (
-                                isinstance(ap, dict)
-                                and ap.get("max_approvals_per_hour_per_operator") is not None
-                            )
-                            if need_rate:
-                                try:
-                                    max_ap = int(ap["max_approvals_per_hour_per_operator"])
-                                    window_s = float(ap.get("window_s", 3600.0))
-                                    tracker = self._approval_tracker(max_ap, window_s)
-                                except (TypeError, ValueError):
-                                    decision, reason = (
-                                        Decision.INSUFFICIENT_EVIDENCE,
-                                        "approval_policy_invalid",
-                                    )
+                            try:
+                                spend_reservation = self._reserve_spend_if_required(
+                                    target,
+                                    tool_name,
+                                    policy_claims,
+                                    spend_request,
+                                    _pre_action_reservations,
+                                )
+                            except SpendBudgetError as exc:
+                                decision = Decision.INSUFFICIENT_EVIDENCE
+                                reason = exc.reason_code
+                                self._record_tool_policy_event(
+                                    target,
+                                    tool_name,
+                                    arguments_snapshot,
+                                    decision,
+                                    reason,
+                                    DenialReason.TELEMETRY_MISSING,
+                                    verifier_id=self.verifier_id,
+                                )
+                                event = target.events[-1]
+                            else:
+                                if (
+                                    spend_reservation is not None
+                                    and not spend_reservation.accepted
+                                ):
+                                    decision = Decision.DENY
+                                    reason = spend_reservation.reason_code
                                     self._record_tool_policy_event(
                                         target,
                                         tool_name,
                                         arguments_snapshot,
                                         decision,
                                         reason,
-                                        DenialReason.TELEMETRY_MISSING,
+                                        DenialReason.BUDGET_EXHAUSTED,
                                         verifier_id=self.verifier_id,
                                     )
                                     event = target.events[-1]
-                                    self._persist_session(target)
                                 else:
-                                    operator_id = self._approval_operator_id(
-                                        policy_claims, arguments_snapshot
+                                    mic_result = self._apply_mic_conformance_checks(
+                                        target,
+                                        tool_name,
+                                        arguments_snapshot,
+                                        receipt_policy_claims,
                                     )
-                                    if operator_id is None:
-                                        decision, reason = (
-                                            Decision.INSUFFICIENT_EVIDENCE,
-                                            "approval_operator_unavailable",
-                                        )
+                                    if mic_result is not None:
+                                        decision, reason, denial_reason = mic_result
                                         self._record_tool_policy_event(
                                             target,
                                             tool_name,
                                             arguments_snapshot,
                                             decision,
                                             reason,
-                                            DenialReason.APPROVAL_OPERATOR_UNAVAILABLE,
+                                            denial_reason,
                                             verifier_id=self.verifier_id,
                                         )
                                         event = target.events[-1]
-                                        self._persist_session(target)
-                                    elif not tracker.check(operator_id, ts):
-                                        decision, reason = (
-                                            Decision.INSUFFICIENT_EVIDENCE,
-                                            "approval_fatigue_threshold",
-                                        )
-                                        self._record_tool_policy_event(
-                                            target,
-                                            tool_name,
-                                            arguments_snapshot,
-                                            decision,
-                                            reason,
-                                            DenialReason.APPROVAL_FATIGUE_THRESHOLD,
-                                            verifier_id=self.verifier_id,
-                                        )
-                                        event = target.events[-1]
-                                        self._persist_session(target)
                                     else:
-                                        decision, reason, _event = target.check_and_record(
-                                            tool_name,
-                                            arguments_snapshot,
-                                            policy_claims=policy_claims,
-                                            verifier_id=self.verifier_id,
-                                        )
-                                        if decision == Decision.PERMIT:
-                                            decision, reason = self._apply_memory_post_permit(
-                                                target, tool_name, arguments_snapshot
+                                        decision, reason, event = (
+                                            self._evaluate_ordinary_tool_policy(
+                                                target,
+                                                tool_name,
+                                                arguments_snapshot,
+                                                policy_claims,
                                             )
-                                        if decision == Decision.PERMIT:
-                                            tracker.record_approval(operator_id, ts)
-                                        event = target.events[-1]
-                                        self._persist_session(target)
-                            else:
-                                decision, reason, _event = target.check_and_record(
-                                    tool_name,
-                                    arguments_snapshot,
-                                    policy_claims=policy_claims,
-                                    verifier_id=self.verifier_id,
-                                )
-                                if decision == Decision.PERMIT:
-                                    decision, reason = self._apply_memory_post_permit(
-                                        target, tool_name, arguments_snapshot
+                                        )
+                            if decision != Decision.PERMIT:
+                                released, spend_close = (
+                                    self._release_pre_action_reservations(
+                                        _pre_action_reservations,
+                                        spend_reason_code="spend_action_not_permitted",
                                     )
-                                event = target.events[-1]
-                                self._persist_session(target)
+                                )
+                                if released is not None:
+                                    risk_preflight = _RiskPreflight(
+                                        governed=True,
+                                        accepted=True,
+                                        remaining=released.remaining,
+                                        measurements=risk_preflight.measurements,
+                                    )
+                                    event.risk_lifecycle_id = released.lifecycle_id
+                            if spend_reservation is not None:
+                                event.budget_delta = (
+                                    self._spend_close_delta(spend_close)
+                                    if spend_close is not None
+                                    else self._spend_reservation_delta(
+                                        spend_reservation
+                                    )
+                                )
+                                self._record_spend_reservation_metrics(
+                                    spend_reservation
+                                )
+                        event.measurements = copy.deepcopy(risk_preflight.measurements)
+                        event.risk_budget_remaining = dict(risk_preflight.remaining)
+                        self._persist_session(target)
                 receipt_entry = self._build_receipt_log_entry(
                     target,
                     event,
@@ -3058,7 +4509,26 @@ class GovernanceProxy:
                     reason,
                     receipt_policy_claims,
                 )
+                if event.risk_lifecycle_id is not None:
+                    event.risk_receipt_entry = copy.deepcopy(receipt_entry)
                 self._persist_session(target)
+                if event.risk_lifecycle_id is not None:
+                    self._log_receipt_once(receipt_entry)
+                    policy = target.risk_policy_snapshot
+                    if policy is None or released is None:
+                        raise RiskBudgetError(
+                            "risk lifecycle delivery state is unavailable"
+                        )
+                    self.risk_budget_ledger.mark_lifecycle_delivered(
+                        lineage_id=policy["lineage_id"],
+                        session_id=target.jti,
+                        request_hash=released.request_hash,
+                        lifecycle_id=released.lifecycle_id,
+                        receipt_id=str(receipt_entry["receipt_id"]),
+                    )
+                else:
+                    self._log_receipt(receipt_entry)
+                receipt_callback_id = str(receipt_entry["receipt_id"])
                 call_number = target.tool_call_count
         self._log(
             {
@@ -3070,9 +4540,197 @@ class GovernanceProxy:
                 "call_number": call_number,
             }
         )
+        if receipt_callback is not None and receipt_callback_id is not None:
+            receipt_callback(receipt_callback_id)
+        return decision, reason
+
+    def settle_spend(
+        self,
+        session: GovernanceSession | str,
+        *,
+        request_id: str,
+        actual_input_tokens: int,
+        actual_output_tokens: int,
+        usage_proof_digest: str | None,
+    ) -> SpendCloseResult:
+        """Settle a reservation against trusted adapter usage evidence."""
+
+        receipt_entry: dict[str, Any] | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                self._assert_spend_lifecycle_open(target)
+                policy_claims = self._resolve_authoritative_policy_claims(
+                    target.passport_claims
+                )
+                raw_policy = policy_claims.get("spend_budget")
+                if raw_policy is None:
+                    raise SpendBudgetError("spend_policy_missing")
+                policy = normalize_spend_budget(raw_policy, require_lineage_id=True)
+                result = self.spend_budget_ledger.settle(
+                    lineage_id=str(policy["lineage_id"]),
+                    session_id=target.jti,
+                    request_id=request_id,
+                    actual_input_tokens=actual_input_tokens,
+                    actual_output_tokens=actual_output_tokens,
+                    usage_proof_digest=usage_proof_digest,
+                )
+                decision = (
+                    Decision.PERMIT
+                    if result.operation == "settle"
+                    else Decision.INSUFFICIENT_EVIDENCE
+                )
+                event = self._spend_lifecycle_event(
+                    target,
+                    result,
+                    decision=decision,
+                )
+                target.events.append(event)
+                receipt_entry = self._build_receipt_log_entry(
+                    target,
+                    event,
+                    decision,
+                    result.reason_code,
+                    dict(policy_claims),
+                )
+                self._persist_session(target)
+        self._record_spend_close_metrics(result)
         if receipt_entry is not None:
             self._log_receipt(receipt_entry)
-        return decision, reason
+        return result
+
+    def quarantine_spend(
+        self,
+        session: GovernanceSession | str,
+        *,
+        request_id: str,
+        reason_code: str = "spend_settlement_evidence_missing",
+    ) -> SpendCloseResult:
+        """Retain a reservation when trusted settlement cannot be produced."""
+
+        receipt_entry: dict[str, Any] | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                self._assert_spend_lifecycle_open(target)
+                policy_claims = self._resolve_authoritative_policy_claims(
+                    target.passport_claims
+                )
+                policy = normalize_spend_budget(
+                    policy_claims.get("spend_budget"),
+                    require_lineage_id=True,
+                )
+                result = self.spend_budget_ledger.quarantine(
+                    lineage_id=str(policy["lineage_id"]),
+                    session_id=target.jti,
+                    request_id=request_id,
+                    reason_code=reason_code,
+                )
+                event = self._spend_lifecycle_event(
+                    target,
+                    result,
+                    decision=Decision.INSUFFICIENT_EVIDENCE,
+                )
+                target.events.append(event)
+                receipt_entry = self._build_receipt_log_entry(
+                    target,
+                    event,
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    result.reason_code,
+                    dict(policy_claims),
+                )
+                self._persist_session(target)
+        self._record_spend_close_metrics(result)
+        if receipt_entry is not None:
+            self._log_receipt(receipt_entry)
+        return result
+
+    def quarantine_stale_spend(
+        self,
+        session: GovernanceSession | str,
+        *,
+        older_than_s: int,
+        now: int | None = None,
+    ) -> list[SpendCloseResult]:
+        """Quarantine stale active reservations without refunding authority."""
+
+        receipt_entries: list[dict[str, Any]] = []
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                self._assert_spend_lifecycle_open(target)
+                policy_claims = self._resolve_authoritative_policy_claims(
+                    target.passport_claims
+                )
+                policy = normalize_spend_budget(
+                    policy_claims.get("spend_budget"),
+                    require_lineage_id=True,
+                )
+                results = self.spend_budget_ledger.quarantine_stale(
+                    lineage_id=str(policy["lineage_id"]),
+                    session_id=target.jti,
+                    older_than_s=older_than_s,
+                    now=now,
+                )
+                for result in results:
+                    event = self._spend_lifecycle_event(
+                        target,
+                        result,
+                        decision=Decision.INSUFFICIENT_EVIDENCE,
+                    )
+                    target.events.append(event)
+                    receipt_entries.append(
+                        self._build_receipt_log_entry(
+                            target,
+                            event,
+                            Decision.INSUFFICIENT_EVIDENCE,
+                            result.reason_code,
+                            dict(policy_claims),
+                        )
+                    )
+                if results:
+                    self._persist_session(target)
+        for result in results:
+            self._record_spend_close_metrics(result)
+        for entry in receipt_entries:
+            self._log_receipt(entry)
+        return results
+
+    def _spend_lifecycle_event(
+        self,
+        session: GovernanceSession,
+        result: SpendCloseResult,
+        *,
+        decision: Decision,
+    ) -> PolicyEvent:
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        arguments = {
+            "reservation_hash": result.reservation_hash,
+            "quote_digest": result.quote_digest,
+        }
+        return PolicyEvent(
+            timestamp=timestamp,
+            step_id=_receipt_step_id(
+                session.jti,
+                timestamp,
+                f"spend_{result.operation}",
+                arguments,
+            ),
+            actor=str(session.passport_claims.get("sub", "unknown")),
+            verifier_id=self.verifier_id,
+            tool_name=f"spend_{result.operation}",
+            arguments=arguments,
+            action_class="observe",
+            target="spend_budget",
+            resource_family="budget",
+            side_effect_class="none",
+            decision=decision,
+            reason=result.reason_code,
+            passport_jti=session.jti,
+            trace_id=session.jti,
+            run_nonce=session.run_nonce,
+            denial_reason=(
+                None if decision == Decision.PERMIT else DenialReason.TELEMETRY_MISSING
+            ),
+            budget_delta=self._spend_close_delta(result),
+        )
 
     def record_tool_result(
         self,
@@ -3084,11 +4742,219 @@ class GovernanceProxy:
             with target._lock:
                 if target.summary is not None:
                     raise PermissionError("session already ended")
-                if not target.events:
-                    raise ValueError("cannot record tool result without a prior tool event")
-                target.events[-1].response = response
-                target.events[-1].duration_ms = duration_ms
+                tool_event = next(
+                    (
+                        event
+                        for event in reversed(target.events)
+                        if not self._is_internal_risk_event(event)
+                    ),
+                    None,
+                )
+                if tool_event is None or tool_event.decision != Decision.PERMIT:
+                    raise ValueError(
+                        "cannot record tool result without a prior permitted tool event"
+                    )
+                tool_event.response = response
+                tool_event.duration_ms = duration_ms
                 self._persist_session(target)
+
+    def record_risk_outcome(
+        self,
+        session: GovernanceSession | str,
+        *,
+        risk_request_id: str,
+        outcome: str,
+        receipt_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """Close a pre-action risk reservation with explicit executor evidence.
+
+        ``released`` is valid only when the executor did not start the action.
+        Once execution may have started, callers must record ``committed``.
+        Quarantined crash records remain charged until reconciled here.
+        """
+
+        receipt_entry: dict[str, Any] | None = None
+        policy: dict[str, Any] | None = None
+        receipt_callback_id: str | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                if target.summary is not None:
+                    raise PermissionError("session already ended")
+                if target.risk_policy_snapshot is None:
+                    raw_policy = target.passport_claims.get("risk_budget")
+                    if raw_policy is not None:
+                        target.risk_policy_snapshot = normalize_risk_budget(raw_policy)
+                if target.risk_policy_snapshot is None:
+                    raise ValueError("session has no risk_budget policy")
+                policy = copy.deepcopy(target.risk_policy_snapshot)
+                result = self.risk_budget_ledger.record_outcome(
+                    lineage_id=policy["lineage_id"],
+                    session_id=target.jti,
+                    request_id=risk_request_id,
+                    outcome=outcome,
+                )
+                receipt_entry = self._ensure_risk_lifecycle_event(target, result)
+                self._persist_session(target)
+                self._log_receipt_once(receipt_entry)
+                self.risk_budget_ledger.mark_lifecycle_delivered(
+                    lineage_id=policy["lineage_id"],
+                    session_id=target.jti,
+                    request_hash=result.request_hash,
+                    lifecycle_id=result.lifecycle_id,
+                    receipt_id=str(receipt_entry["receipt_id"]),
+                )
+                receipt_callback_id = str(receipt_entry["receipt_id"])
+                self._risk_metric(
+                    operation="outcome",
+                    outcome=result.status,
+                )
+        if receipt_callback is not None and receipt_callback_id is not None:
+            receipt_callback(receipt_callback_id)
+        return {
+            "status": result.status,
+            "idempotent": result.idempotent,
+            "remaining": dict(result.remaining),
+            "receipt_id": (
+                str(receipt_entry["receipt_id"]) if receipt_entry is not None else None
+            ),
+        }
+
+    def quarantine_stale_risk_reservations(
+        self,
+        session: GovernanceSession | str,
+        *,
+        stale_after_s: float,
+    ) -> int:
+        if stale_after_s < 0:
+            raise ValueError("stale_after_s must be non-negative")
+        receipt_entries: list[tuple[RiskOutcomeResult, dict[str, Any]]] = []
+        policy: dict[str, Any] | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                if target.risk_policy_snapshot is None:
+                    raw_policy = target.passport_claims.get("risk_budget")
+                    if raw_policy is not None:
+                        target.risk_policy_snapshot = normalize_risk_budget(raw_policy)
+                if target.risk_policy_snapshot is None:
+                    return 0
+                policy = copy.deepcopy(target.risk_policy_snapshot)
+                quarantined = self.risk_budget_ledger.quarantine_stale(
+                    lineage_id=policy["lineage_id"],
+                    session_id=target.jti,
+                    stale_before=time.time() - stale_after_s,
+                )
+                for result in quarantined:
+                    receipt_entries.append(
+                        (result, self._ensure_risk_lifecycle_event(target, result))
+                    )
+                if receipt_entries:
+                    self._persist_session(target)
+                    for result, receipt_entry in receipt_entries:
+                        self._log_receipt_once(receipt_entry)
+                        self.risk_budget_ledger.mark_lifecycle_delivered(
+                            lineage_id=policy["lineage_id"],
+                            session_id=target.jti,
+                            request_hash=result.request_hash,
+                            lifecycle_id=result.lifecycle_id,
+                            receipt_id=str(receipt_entry["receipt_id"]),
+                        )
+        if quarantined:
+            self._risk_metric(
+                operation="quarantine",
+                outcome="quarantined",
+            )
+        return sum(not result.idempotent for result in quarantined)
+
+    def _ensure_risk_lifecycle_event(
+        self,
+        session: GovernanceSession,
+        result: RiskOutcomeResult,
+    ) -> dict[str, Any]:
+        for event in session.events:
+            if event.risk_lifecycle_id == result.lifecycle_id:
+                if not isinstance(event.risk_receipt_entry, dict):
+                    raise RiskBudgetError("risk lifecycle outbox is incomplete")
+                return copy.deepcopy(event.risk_receipt_entry)
+
+        _, measurements = self._risk_measurements(fact_digest=result.fact_digest)
+        now = time.time()
+        timestamp = (
+            time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now))
+            + f".{int((now % 1) * 1_000_000_000):09d}Z"
+        )
+        event = PolicyEvent(
+            timestamp=timestamp,
+            step_id=_receipt_step_id(
+                session.jti,
+                timestamp,
+                "risk_budget_lifecycle",
+                {},
+            ),
+            actor=str(session.passport_claims.get("sub", "unknown")),
+            verifier_id=self.verifier_id,
+            tool_name="risk_budget_lifecycle",
+            arguments={},
+            action_class="observe",
+            target="risk_budget",
+            resource_family="governance",
+            side_effect_class="none",
+            decision=Decision.PERMIT,
+            reason=f"risk_outcome_{result.status}",
+            passport_jti=session.jti,
+            trace_id=session.jti,
+            run_nonce=session.run_nonce,
+            measurements=measurements,
+            risk_budget_remaining=dict(result.remaining),
+            risk_lifecycle_id=result.lifecycle_id,
+        )
+        session.events.append(event)
+        receipt_entry = self._build_receipt_log_entry(
+            session,
+            event,
+            Decision.PERMIT,
+            event.reason,
+            dict(session.passport_claims),
+        )
+        event.risk_receipt_entry = copy.deepcopy(receipt_entry)
+        return receipt_entry
+
+    def flush_risk_lifecycle_outbox(
+        self,
+        session: GovernanceSession | str,
+    ) -> int:
+        """Deliver every pending lifecycle receipt for one governed session."""
+
+        receipt_entries: list[tuple[RiskOutcomeResult, dict[str, Any]]] = []
+        policy: dict[str, Any] | None = None
+        with self._locked_persisted_session(session) as target:
+            with target._lock:
+                if target.risk_policy_snapshot is None:
+                    raw_policy = target.passport_claims.get("risk_budget")
+                    if raw_policy is not None:
+                        target.risk_policy_snapshot = normalize_risk_budget(raw_policy)
+                if target.risk_policy_snapshot is None:
+                    return 0
+                policy = copy.deepcopy(target.risk_policy_snapshot)
+                pending = self.risk_budget_ledger.pending_lifecycles_for_session(
+                    lineage_id=policy["lineage_id"],
+                    session_id=target.jti,
+                )
+                for result in pending:
+                    receipt_entries.append(
+                        (result, self._ensure_risk_lifecycle_event(target, result))
+                    )
+                if receipt_entries:
+                    self._persist_session(target)
+                    for result, receipt_entry in receipt_entries:
+                        self._log_receipt_once(receipt_entry)
+                        self.risk_budget_ledger.mark_lifecycle_delivered(
+                            lineage_id=policy["lineage_id"],
+                            session_id=target.jti,
+                            request_hash=result.request_hash,
+                            lifecycle_id=result.lifecycle_id,
+                            receipt_id=str(receipt_entry["receipt_id"]),
+                        )
+        return len(receipt_entries)
 
     def summarize_session(self, session: GovernanceSession | str) -> dict[str, Any]:
         with self._locked_persisted_session(session) as target:
@@ -3096,6 +4962,7 @@ class GovernanceProxy:
                 return self._build_summary(target)
 
     def end_session(self, session: GovernanceSession | str) -> dict[str, Any]:
+        self.flush_risk_lifecycle_outbox(session)
         created_summary = False
         with self._locked_persisted_session(session) as target:
             with target._lock:
@@ -3110,19 +4977,46 @@ class GovernanceProxy:
         self,
         session_id: str,
         private_key: ec.EllipticCurvePrivateKey,
+        *,
+        kernel_enforcement: dict[str, Any] | None = None,
+        process_lifecycle: dict[str, Any] | None = None,
     ) -> tuple[str, dict[str, Any]]:
+        self.flush_risk_lifecycle_outbox(session_id)
         created_summary = False
         token = ""
         with self._locked_persisted_session(session_id) as target:
             with target._lock:
                 summary, created_summary = self._finalize_session_locked(target)
                 if target.attestation_token is None:
-                    lifecycle_claims = self._lifecycle_rollup_for_session_unlocked(target)
-                    extra_claims = (
-                        lifecycle_claims
-                        if int(lifecycle_claims["delegation_count"]) > 0
-                        else None
+                    lifecycle_claims = self._lifecycle_rollup_for_session_unlocked(
+                        target
                     )
+                    extra_claims: dict[str, Any] = {}
+                    # Verdict breakdown: sign the honest-abstention counts
+                    # and denied tool names into the JWT itself so an auditor
+                    # can independently verify *why* a session was
+                    # non-compliant from the signed token alone — without
+                    # trusting the unsigned summary dict.  (2026-08-10)
+                    extra_claims["unknowns"] = int(summary.get("unknowns", 0))
+                    extra_claims["insufficient_evidence"] = int(
+                        summary.get("insufficient_evidence", 0)
+                    )
+                    extra_claims["violations"] = int(summary.get("violations", 0))
+                    extra_claims["denied_tools"] = list(
+                        summary.get("denied_tools") or []
+                    )
+                    if int(lifecycle_claims["delegation_count"]) > 0:
+                        extra_claims.update(lifecycle_claims)
+                    if target.last_receipt_id and target.last_receipt_full_hash:
+                        extra_claims["receipt_chain_head"] = {
+                            "hash_algorithm": "sha-256",
+                            "receipt_id": target.last_receipt_id,
+                            "receipt_jwt_sha256": target.last_receipt_full_hash,
+                        }
+                    if kernel_enforcement is not None:
+                        extra_claims["kernel_enforcement"] = kernel_enforcement
+                    if process_lifecycle:
+                        extra_claims["process_lifecycle"] = process_lifecycle
                     target.attestation_token = issue_attestation(
                         passport_jti=target.jti,
                         agent_id=target.passport_claims["sub"],
@@ -3153,7 +5047,49 @@ class GovernanceProxy:
             with target._lock:
                 return self._lifecycle_rollup_for_session_unlocked(target)
 
-    def _finalize_session_locked(self, session: GovernanceSession) -> tuple[dict[str, Any], bool]:
+    def _finalize_session_locked(
+        self, session: GovernanceSession
+    ) -> tuple[dict[str, Any], bool]:
+        risk_budget = (
+            session.risk_policy_snapshot
+            if session.risk_policy_snapshot is not None
+            else session.passport_claims.get("risk_budget")
+        )
+        if risk_budget is not None:
+            try:
+                normalized = normalize_risk_budget(risk_budget)
+            except RiskBudgetError as exc:
+                raise PermissionError("risk_budget_policy_invalid") from exc
+            unresolved = self.risk_budget_ledger.unresolved_for_session(
+                lineage_id=normalized["lineage_id"],
+                session_id=session.jti,
+            )
+            if unresolved:
+                raise PermissionError(
+                    "risk_budget_outcome_unresolved: record committed or released outcome"
+                )
+            pending = self.risk_budget_ledger.pending_lifecycles_for_session(
+                lineage_id=normalized["lineage_id"],
+                session_id=session.jti,
+            )
+            if pending:
+                raise PermissionError(
+                    "risk_budget_lifecycle_pending: deliver lifecycle receipts before finalization"
+                )
+        policy_claims = self._resolve_authoritative_policy_claims(
+            session.passport_claims
+        )
+        raw_spend_policy = policy_claims.get("spend_budget")
+        if raw_spend_policy is not None:
+            spend_policy = normalize_spend_budget(
+                raw_spend_policy,
+                require_lineage_id=True,
+            )
+            if self.spend_budget_ledger.has_active_reservations(
+                lineage_id=str(spend_policy["lineage_id"]),
+                session_id=session.jti,
+            ):
+                raise PermissionError("spend_reservations_unresolved")
         if session.summary is not None:
             return dict(session.summary), False
         session.end_time = time.time()
@@ -3162,14 +5098,48 @@ class GovernanceProxy:
         return dict(summary), True
 
     def _build_summary(self, session: GovernanceSession) -> dict[str, Any]:
-        events = list(session.events)
+        events = [
+            event for event in session.events if not self._is_internal_risk_event(event)
+        ]
         permits = sum(1 for e in events if e.decision == Decision.PERMIT)
+        # Every non-PERMIT decision is a denial (fail-closed).  UNKNOWN and
+        # INSUFFICIENT_EVIDENCE are counted here so the aggregate denial count
+        # is never understated, but they are also broken out separately for
+        # audit clarity (see ``unknowns`` / ``insufficient_evidence`` below).
         denials = sum(
             1
             for e in events
             if e.decision
-            in (Decision.DENY, Decision.INSUFFICIENT_EVIDENCE, Decision.VIOLATION)
+            in (
+                Decision.DENY,
+                Decision.INSUFFICIENT_EVIDENCE,
+                Decision.VIOLATION,
+                Decision.UNKNOWN,
+            )
         )
+        unknowns = sum(1 for e in events if e.decision == Decision.UNKNOWN)
+        insufficient = sum(
+            1 for e in events if e.decision == Decision.INSUFFICIENT_EVIDENCE
+        )
+        violations = sum(1 for e in events if e.decision == Decision.VIOLATION)
+        # Collect unique tool names from denied events so the summary can
+        # show *which* tools were blocked, not just a count.  Order is
+        # preserved by first occurrence so the line is deterministic.
+        denied_tools: list[str] = []
+        _seen: set[str] = set()
+        for e in events:
+            if (
+                e.decision
+                in (
+                    Decision.DENY,
+                    Decision.INSUFFICIENT_EVIDENCE,
+                    Decision.VIOLATION,
+                    Decision.UNKNOWN,
+                )
+                and e.tool_name not in _seen
+            ):
+                _seen.add(e.tool_name)
+                denied_tools.append(e.tool_name)
         return {
             "type": "session_end",
             "jti": session.jti,
@@ -3178,6 +5148,10 @@ class GovernanceProxy:
             "total_events": len(events),
             "permits": permits,
             "denials": denials,
+            "unknowns": unknowns,
+            "insufficient_evidence": insufficient,
+            "violations": violations,
+            "denied_tools": denied_tools,
             "elapsed_s": round(session.elapsed_s, 3),
             "scope_compliance": "full" if denials == 0 else "violated",
             "delegation_count": len(session.delegated_children),
@@ -3205,9 +5179,7 @@ class GovernanceProxy:
             for record in session.delegated_children
         ]
         child_jtis = [
-            str(child["child_jti"])
-            for child in children
-            if child.get("child_jti")
+            str(child["child_jti"]) for child in children if child.get("child_jti")
         ]
         closed_child_count = sum(
             1
@@ -3217,14 +5189,10 @@ class GovernanceProxy:
             and child["attestation_present"]
         )
         delegation_attempts = [
-            event
-            for event in session.events
-            if event.tool_name == "delegate_passport"
+            event for event in session.events if event.tool_name == "delegate_passport"
         ]
         delegation_denials = sum(
-            1
-            for event in delegation_attempts
-            if event.decision != Decision.PERMIT
+            1 for event in delegation_attempts if event.decision != Decision.PERMIT
         )
         return {
             "lifecycle_schema": LIFECYCLE_ATTESTATION_SCHEMA,
@@ -3258,6 +5226,9 @@ class GovernanceProxy:
             "receipt_count": 0,
             "permits": 0,
             "denials": 0,
+            "unknowns": 0,
+            "insufficient_evidence": 0,
+            "violations": 0,
             "total_events": 0,
             "scope_compliance": "unknown",
         }
@@ -3268,7 +5239,7 @@ class GovernanceProxy:
         try:
             child_session = self.get_session(child_jti)
         except Exception as exc:  # pragma: no cover - defensive audit metadata
-            summary["error"] = f"child session unavailable: {exc}"
+            summary["error"] = f"child session unavailable: {type(exc).__name__}"
             return summary
 
         child_summary = (
@@ -3283,7 +5254,14 @@ class GovernanceProxy:
                 "receipt_count": len(child_session.events),
                 "permits": int(child_summary.get("permits", 0)),
                 "denials": int(child_summary.get("denials", 0)),
-                "total_events": int(child_summary.get("total_events", len(child_session.events))),
+                "unknowns": int(child_summary.get("unknowns", 0)),
+                "insufficient_evidence": int(
+                    child_summary.get("insufficient_evidence", 0)
+                ),
+                "violations": int(child_summary.get("violations", 0)),
+                "total_events": int(
+                    child_summary.get("total_events", len(child_session.events))
+                ),
                 "scope_compliance": child_summary.get("scope_compliance", "unknown"),
                 "no_out_of_scope_permits": self._session_no_out_of_scope_permits(
                     child_session
@@ -3314,7 +5292,16 @@ class GovernanceProxy:
         allowed = set(claims.get("allowed_tools", []) or [])
         tool_scope_mode = str(claims.get("tool_scope_mode", "allowlist"))
         for event in session.events:
+            if GovernanceProxy._is_internal_risk_event(event):
+                continue
             if event.decision != Decision.PERMIT:
+                continue
+            if (
+                event.resource_family == "budget"
+                and event.target == "spend_budget"
+                and event.tool_name
+                in {"spend_release", "spend_settle", "spend_quarantine"}
+            ):
                 continue
             if event.tool_name in forbidden:
                 return False
@@ -3322,9 +5309,14 @@ class GovernanceProxy:
                 return False
         return True
 
+    @staticmethod
+    def _assert_spend_lifecycle_open(session: GovernanceSession) -> None:
+        if session.summary is not None or session.attestation_token is not None:
+            raise PermissionError("session already finalized")
+
     def _session_path(self, session_id: str) -> Path:
         if not _SESSION_ID_RE.match(session_id):
-            raise ValueError(f"invalid session ID format: must be UUID")
+            raise ValueError("invalid session ID format: must be UUID")
         return self.sessions_dir / f"{session_id}.json"
 
     def _session_lock_path(self, session_id: str) -> Path:
@@ -3361,7 +5353,9 @@ class GovernanceProxy:
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        return hmac.new(self._session_receipt_integrity_key, material, "sha256").hexdigest()
+        return hmac.new(
+            self._session_receipt_integrity_key, material, "sha256"
+        ).hexdigest()
 
     def _add_session_receipt_integrity(
         self,
@@ -3409,7 +5403,9 @@ class GovernanceProxy:
         ):
             raise ValueError("session receipt-chain anchor is malformed")
         if not isinstance(integrity, dict):
-            raise ValueError("session receipt-chain anchor is missing its integrity tag")
+            raise ValueError(
+                "session receipt-chain anchor is missing its integrity tag"
+            )
         if integrity.get("version") != _SESSION_RECEIPT_INTEGRITY_VERSION:
             raise ValueError("session receipt-chain integrity version mismatch")
         mac = integrity.get("mac")
@@ -3475,7 +5471,9 @@ class GovernanceProxy:
 
     def _initialize_passport_state_files(self) -> None:
         with self._passport_state_lock():
-            can_bootstrap = self._passport_state_can_bootstrap_locked(ignore_lockfile=True)
+            can_bootstrap = self._passport_state_can_bootstrap_locked(
+                ignore_lockfile=True
+            )
             try:
                 self._replay_cache_sentinel = self._initialize_replay_cache_locked(
                     can_bootstrap=can_bootstrap
@@ -3673,9 +5671,13 @@ class GovernanceProxy:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise PassportStateUnavailableError(error_code, f"{path.name} is invalid JSON") from exc
+            raise PassportStateUnavailableError(
+                error_code, f"{path.name} is invalid JSON"
+            ) from exc
         if not isinstance(payload, dict):
-            raise PassportStateUnavailableError(error_code, f"{path.name} must contain a JSON object")
+            raise PassportStateUnavailableError(
+                error_code, f"{path.name} must contain a JSON object"
+            )
         return payload
 
     def _parse_replay_cache_payload(
@@ -3861,7 +5863,8 @@ class GovernanceProxy:
                     "lineage_hashes.json contains malformed parent_jti metadata",
                 )
             if parent_hash is not None and (
-                not isinstance(parent_hash, str) or not _SHA256_HEX_RE.match(parent_hash)
+                not isinstance(parent_hash, str)
+                or not _SHA256_HEX_RE.match(parent_hash)
             ):
                 raise PassportStateUnavailableError(
                     "lineage_hashes_unavailable",
@@ -3882,86 +5885,11 @@ class GovernanceProxy:
         if session.summary is not None or session.end_time is not None:
             return "session already ended"
         with self._passport_state_lock():
-            if self._first_revoked_jti_in_lineage_locked(session.passport_claims) is not None:
+            if (
+                self._first_revoked_jti_in_lineage_locked(session.passport_claims)
+                is not None
+            ):
                 return "passport_revoked"
-        return None
-
-    @staticmethod
-    def _active_conformance_profile(policy_claims: dict[str, Any]) -> str:
-        profile = policy_claims.get("conformance_profile")
-        if isinstance(profile, str) and profile:
-            return profile
-        return "Delegation-Core"
-
-    def _detect_hidden_hop(self, session: GovernanceSession) -> bool:
-        claims = session.passport_claims
-        parent_jti = claims.get("parent_jti")
-        if parent_jti is None:
-            return False
-        parent_jti_str = str(parent_jti)
-        with self._lineage_parent_cache_lock:
-            return parent_jti_str not in self._lineage_parent_cache
-
-    def _detect_missing_parent_receipt(self, session: GovernanceSession) -> bool:
-        claims = session.passport_claims
-        parent_jti = claims.get("parent_jti")
-        if parent_jti is None:
-            return False
-        parent_jti_str = str(parent_jti)
-        with self._last_seen_receipts_lock:
-            return parent_jti_str not in self._last_seen_receipts
-
-    def _pre_policy_integrity_check(
-        self,
-        session: GovernanceSession,
-        arguments: dict[str, Any],
-    ) -> tuple[Decision, str, DenialReason] | None:
-        profile = self._active_conformance_profile(session.passport_claims)
-        if profile == "Delegation-Core":
-            return None
-
-        # Visibility check (§6.4)
-        visibility = arguments.get("visibility")
-        if visibility != "full":
-            return (
-                Decision.INSUFFICIENT_EVIDENCE,
-                "visibility_not_full",
-                DenialReason.TELEMETRY_MISSING,
-            )
-
-        # Envelope signature verification (§9.5) — fail-closed
-        if arguments.get("envelope_signature_valid") is not True:
-            return (
-                Decision.VIOLATION,
-                "envelope_tampered",
-                DenialReason.ENVELOPE_TAMPERED,
-            )
-
-        # Manifest digest comparison (§9.6)
-        expected_digest = session.passport_claims.get("tool_manifest_digest")
-        if isinstance(expected_digest, str) and expected_digest:
-            observed = arguments.get("observed_manifest_digest")
-            if not isinstance(observed, str) or observed != expected_digest:
-                return (
-                    Decision.VIOLATION,
-                    "manifest_drift",
-                    DenialReason.MANIFEST_DRIFT,
-                )
-
-        if profile == "MIC-Evidence":
-            if self._detect_hidden_hop(session):
-                return (
-                    Decision.INSUFFICIENT_EVIDENCE,
-                    "hidden_hop_detected",
-                    DenialReason.TELEMETRY_MISSING,
-                )
-            if self._detect_missing_parent_receipt(session):
-                return (
-                    Decision.INSUFFICIENT_EVIDENCE,
-                    "missing_parent_receipt",
-                    DenialReason.TELEMETRY_MISSING,
-                )
-
         return None
 
     def _try_initialize_replay_cache_locked(self) -> str | None:
@@ -4038,18 +5966,24 @@ class GovernanceProxy:
                 return lineage
             current_jti = parent_jti
 
-    def _first_revoked_jti_in_lineage_locked(self, claims: dict[str, Any]) -> str | None:
+    def _first_revoked_jti_in_lineage_locked(
+        self, claims: dict[str, Any]
+    ) -> str | None:
         revoked = self._load_revoked_locked()
         for lineage_jti in self._passport_lineage_jtis(claims):
             if lineage_jti in revoked:
                 return lineage_jti
         return None
 
-    def _assert_passport_lineage_not_revoked_locked(self, claims: dict[str, Any]) -> None:
+    def _assert_passport_lineage_not_revoked_locked(
+        self, claims: dict[str, Any]
+    ) -> None:
         if self._first_revoked_jti_in_lineage_locked(claims) is not None:
             raise PermissionError("passport_revoked")
 
-    def _copy_session_state(self, target: GovernanceSession, source: GovernanceSession) -> None:
+    def _copy_session_state(
+        self, target: GovernanceSession, source: GovernanceSession
+    ) -> None:
         # B.9: in-process memory store state is not fully rehydrated from disk
         # (dict-backed prototype). Refreshing from JSON must not wipe live
         # GovernedMemoryStore instances or compromise flags mid-session.
@@ -4067,15 +6001,22 @@ class GovernanceProxy:
         target.end_time = source.end_time
         target.summary = source.summary
         target.attestation_token = source.attestation_token
-        target.memory_stores = preserved_stores if preserved_stores else getattr(source, "memory_stores", {})
+        target.memory_stores = (
+            preserved_stores
+            if preserved_stores
+            else getattr(source, "memory_stores", {})
+        )
         target.memory_compromised_stores = preserved_compromised | set(
             getattr(source, "memory_compromised_stores", ())
         )
         target.last_receipt_id = getattr(source, "last_receipt_id", None)
         target.last_receipt_full_hash = getattr(source, "last_receipt_full_hash", None)
+        target.risk_policy_snapshot = copy.deepcopy(source.risk_policy_snapshot)
         target.run_nonce = getattr(source, "run_nonce", target.run_nonce)
         target.last_memory_record_id = (
-            preserved_last if preserved_last is not None else getattr(source, "last_memory_record_id", None)
+            preserved_last
+            if preserved_last is not None
+            else getattr(source, "last_memory_record_id", None)
         )
 
     def _install_or_refresh_session(
@@ -4098,11 +6039,15 @@ class GovernanceProxy:
 
     @contextlib.contextmanager
     def _locked_persisted_session(self, session: GovernanceSession | str):
-        session_id = session.jti if isinstance(session, GovernanceSession) else str(session)
+        session_id = (
+            session.jti if isinstance(session, GovernanceSession) else str(session)
+        )
         preferred = session if isinstance(session, GovernanceSession) else None
         with self._session_coordination_lock(session_id):
             fresh = self._load_session_from_disk(session_id)
-            yield self._install_or_refresh_session(session_id, fresh, preferred=preferred)
+            yield self._install_or_refresh_session(
+                session_id, fresh, preferred=preferred
+            )
 
     def _delegation_parent_token_and_claims(
         self,
@@ -4116,21 +6061,30 @@ class GovernanceProxy:
             # AAT grant" — without ``from``, an expired passport appears as an
             # AAT validation failure in the audit log, misleading responders.
             try:
-                aat_claims = decode_aat_claims(parent_token, self.public_key)
+                aat_claims = decode_aat_claims(
+                    parent_token,
+                    self.public_key,
+                    expected_audience=self._aat_expected_audience,
+                    allow_aat_without_cnf=self._allow_aat_without_cnf,
+                )
             except jwt.PyJWTError:
                 # Token is unparseable as either format. Re-raise PyJWTError so
                 # the outer HTTP handler responds 401 (not 403).
                 raise
             except PermissionError as aat_err:
-                # Token parses as AAT but fails shape validation. Include the
-                # original passport error in the message so responders see both
-                # decode attempts, not just the AAT-specific failure.
-                raise PermissionError(
-                    f"parent token failed passport decode ({passport_err}) "
-                    f"and AAT validation ({aat_err})"
-                ) from aat_err
+                # Token parses as AAT but fails shape validation. Keep both
+                # details in the chained traceback (aat_err was raised while
+                # handling passport_err) and expose only a fixed external code.
+                logger.debug(
+                    "parent token failed passport decode and AAT validation",
+                    exc_info=aat_err,
+                )
+                raise PermissionError("parent_token_aat_validation_failed") from aat_err
             session = self.get_session(str(aat_claims["jti"]))
-            if session.passport_claims.get("credential_format") != AAT_CREDENTIAL_FORMAT:
+            if (
+                session.passport_claims.get("credential_format")
+                != AAT_CREDENTIAL_FORMAT
+            ):
                 raise PermissionError(
                     "AAT delegation parent session is not active"
                 ) from passport_err
@@ -4146,13 +6100,28 @@ class GovernanceProxy:
         child_ttl_s: int | None = None,
         child_max_tool_calls: int | None = None,
         child_resource_scope: list[str] | None = None,
+        child_risk_budget: Mapping[str, Any] | None = None,
         delegation_request_id: str | None = None,
     ) -> tuple[str, dict[str, Any], int]:
-        derivation_parent_token, parent_claims = self._delegation_parent_token_and_claims(
-            parent_token
+        derivation_parent_token, parent_claims = (
+            self._delegation_parent_token_and_claims(parent_token)
         )
         parent_jti = str(parent_claims["jti"])
         request_id = delegation_request_id or uuid.uuid4().hex
+        # Treat replay identity as safety-relevant request intent, not only
+        # child_jti/budget. TTL participates so a narrower retry cannot
+        # silently receive an older longer-lived bearer credential.
+        request_metadata = self._delegation_request_metadata(
+            parent_jti=parent_jti,
+            child_agent_id=child_agent_id,
+            child_allowed_tools=child_allowed_tools,
+            child_mission=child_mission,
+            child_ttl_s=child_ttl_s,
+            child_max_tool_calls=child_max_tool_calls,
+            child_resource_scope=child_resource_scope,
+            child_risk_budget=child_risk_budget,
+        )
+        request_fingerprint = self._delegation_request_fingerprint(request_metadata)
         receipt_entry: dict[str, Any] | None = None
         child_budget = 0
         parent_calls_remaining = 0
@@ -4180,6 +6149,53 @@ class GovernanceProxy:
                             "delegation_request_id already used for a different reservation"
                         )
                     existing_amount = int(existing_reservation.get("amount", 0))
+                    for child in parent_session.delegated_children:
+                        if child.get("delegation_request_id") != request_id:
+                            continue
+                        if (
+                            child.get("delegation_request_fingerprint")
+                            != request_fingerprint
+                        ):
+                            raise LineageBudgetConflictError(
+                                "delegation_request_id already used for a different reservation"
+                            )
+                        if child.get("delegation_request") != request_metadata:
+                            raise LineageBudgetConflictError(
+                                "delegation_request_id already used for a different reservation"
+                            )
+                        replay_token = child.get("child_token")
+                        if not isinstance(replay_token, str) or not replay_token:
+                            raise LineageBudgetConflictError(
+                                "delegation_request_id already used; "
+                                "original child credential is unavailable"
+                            )
+                        replay_claims = self.verify_passport_token(
+                            replay_token,
+                            parent_token=derivation_parent_token,
+                        )
+                        if not self._delegation_claims_match_record(
+                            replay_claims,
+                            child_record=child,
+                            existing_amount=existing_amount,
+                        ) or str(replay_claims.get("jti")) != str(
+                            existing_reservation.get("child_jti")
+                        ):
+                            raise LineageBudgetConflictError(
+                                "delegation_request_id already used for a different reservation"
+                            )
+                        replay_remaining = child.get(
+                            "parent_calls_remaining_at_delegation"
+                        )
+                        if replay_remaining is None:
+                            replay_remaining = max(
+                                0,
+                                ceiling - used - max(0, reserved - existing_amount),
+                            )
+                        return replay_token, replay_claims, int(replay_remaining)
+                    raise LineageBudgetConflictError(
+                        "delegation_request_id already used; "
+                        "original child credential is unavailable"
+                    )
                 parent_calls_remaining = max(0, ceiling - used - reserved)
                 derivation_remaining = (
                     existing_amount
@@ -4211,6 +6227,7 @@ class GovernanceProxy:
                     # conservation rule.
                     parent_reserved_for_descendants=reserved_for_derivation,
                     child_resource_scope=child_resource_scope,
+                    child_risk_budget=child_risk_budget,
                 )
                 child_claims = self.verify_passport_token(
                     child_token,
@@ -4228,29 +6245,38 @@ class GovernanceProxy:
                     child_jti=str(child_claims.get("jti")),
                     floor_reserved_total=parent_session.delegated_budget_reserved,
                 )
-                if (
-                    not reservation.accepted
-                    or (
-                        not reservation.idempotent
-                        and child_budget > reservation.remaining_before
-                    )
+                if not reservation.accepted or (
+                    not reservation.idempotent
+                    and child_budget > reservation.remaining_before
                 ):
-                    raise PermissionError("child delegation would over-reserve parent budget")
+                    raise PermissionError(
+                        "child delegation would over-reserve parent budget"
+                    )
                 parent_session.delegated_budget_reserved = reservation.reserved_total
                 child_record = {
                     "delegation_request_id": request_id,
+                    "delegation_request": request_metadata,
+                    "delegation_request_fingerprint": request_fingerprint,
                     "parent_jti": parent_jti,
+                    "child_token": child_token,
                     "child_jti": child_jti,
                     "child_agent_id": child_agent_id,
                     "child_mission": child_mission,
                     "child_allowed_tools": list(child_claims.get("allowed_tools", [])),
+                    "child_resource_scope": list(
+                        child_claims.get("resource_scope", [])
+                    ),
+                    "child_risk_budget": copy.deepcopy(child_claims.get("risk_budget")),
                     "child_tool_scope_mode": child_claims.get(
                         "tool_scope_mode",
                         "allowlist",
                     ),
-                    "child_forbidden_tools": list(child_claims.get("forbidden_tools", [])),
+                    "child_forbidden_tools": list(
+                        child_claims.get("forbidden_tools", [])
+                    ),
                     "child_max_tool_calls": child_budget,
                     "delegated_budget_reserved": reservation.amount,
+                    "parent_calls_remaining_at_delegation": reservation.remaining_before,
                     "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 }
                 parent_session.delegated_children = [
@@ -4326,6 +6352,7 @@ class GovernanceProxy:
                     parent_session.passport_claims,
                 )
                 self._persist_session(parent_session)
+                self._log_receipt(receipt_entry)
         self._log(
             {
                 "type": "delegation",
@@ -4335,8 +6362,6 @@ class GovernanceProxy:
                 "parent_calls_remaining_at_delegation": parent_calls_remaining,
             }
         )
-        if receipt_entry is not None:
-            self._log_receipt(receipt_entry)
         return child_token, child_claims, parent_calls_remaining
 
     def _load_replay_cache_locked(self) -> dict[str, dict[str, int]]:
@@ -4391,7 +6416,10 @@ class GovernanceProxy:
                 "replay_cache.json requires operator re-initialization",
             )
         ordered_entries = dict(
-            sorted(entries.items(), key=lambda item: (item[1]["exp"], item[1]["first_seen"]))
+            sorted(
+                entries.items(),
+                key=lambda item: (item[1]["exp"], item[1]["first_seen"]),
+            )
         )
         self._persist_json_file(
             self.replay_cache_path,
@@ -4535,7 +6563,9 @@ class GovernanceProxy:
             )
         return normalized_parent_jti, parent_hash.lower()
 
-    def _load_lineage_index_locked(self) -> tuple[dict[str, str], dict[str, LineageEdge]]:
+    def _load_lineage_index_locked(
+        self,
+    ) -> tuple[dict[str, str], dict[str, LineageEdge]]:
         if self._lineage_hashes_sentinel is None:
             self._lineage_hashes_sentinel = self._try_initialize_lineage_hashes_locked()
             if self._lineage_hashes_sentinel is None:
@@ -4605,13 +6635,26 @@ class GovernanceProxy:
 
     def _persist_json_file(self, path: Path, payload: dict[str, Any]) -> None:
         tmp = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.tmp")
+        fd: int | None = None
         try:
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                fd = None
+                handle.write(json.dumps(payload, indent=2))
+            tmp.chmod(0o600)
             os.replace(tmp, path)
+            path.chmod(0o600)
         except Exception:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    # Best-effort cleanup during error unwinding.
+                    pass
             try:
                 tmp.unlink()
             except OSError:
+                # Best-effort cleanup during error unwinding.
                 pass
             raise
 
@@ -4625,10 +6668,87 @@ class GovernanceProxy:
         self._persist_json_file(self._session_path(session.jti), payload)
 
     def _log(self, entry: dict[str, Any]) -> None:
-        self._governance_log.write(entry)
+        # Under _log_lock to prevent interleaved JSONL lines on concurrent writes.
+        line = json.dumps(entry) + "\n"
+        with self._log_lock:
+            with self.log_path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
 
     def _log_receipt(self, entry: dict[str, Any]) -> None:
-        self._receipts_log.write(entry)
+        line = json.dumps(entry) + "\n"
+        with self._receipts_log_lock:
+            with self.receipts_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+        signed_jwt = entry.get("jwt")
+        if isinstance(signed_jwt, str):
+            # Queueing is local-only and best effort; an unavailable anchor
+            # store must never change the governance decision just recorded.
+            from .transparency import queue_receipt_anchor_best_effort
+
+            queue_receipt_anchor_best_effort(signed_jwt, self.receipts_log_path)
+        grant_id = entry.get("grant_id")
+        receipt_id = entry.get("receipt_id")
+        if grant_id and receipt_id:
+            with self._last_seen_receipts_lock:
+                self._last_seen_receipts[grant_id] = receipt_id
+
+    @contextlib.contextmanager
+    def _receipt_log_file_lock(self):
+        lock_path = self.receipts_log_path.with_name(
+            f"{self.receipts_log_path.name}.lock"
+        )
+        if lock_path.is_symlink():
+            raise RiskBudgetError("receipt log lock must not be a symlink")
+        fd = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        os.fchmod(fd, 0o600)
+        try:
+            with os.fdopen(fd, "a+b", closefd=False) as lock_handle:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+    def _log_receipt_once(self, entry: dict[str, Any]) -> None:
+        """Durably append one receipt id at most once for outbox recovery."""
+
+        receipt_id = entry.get("receipt_id")
+        if not isinstance(receipt_id, str) or not receipt_id:
+            raise ValueError("receipt entry requires a non-empty receipt_id")
+        line = json.dumps(entry) + "\n"
+        found = False
+        with self._receipts_log_lock:
+            with self._receipt_log_file_lock():
+                if self.receipts_log_path.exists():
+                    with self.receipts_log_path.open("r", encoding="utf-8") as handle:
+                        for raw_line in handle:
+                            try:
+                                existing = json.loads(raw_line)
+                            except json.JSONDecodeError:
+                                continue
+                            if existing.get("receipt_id") == receipt_id:
+                                found = True
+                                break
+                if not found:
+                    with self.receipts_log_path.open("a", encoding="utf-8") as handle:
+                        handle.write(line)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+        signed_jwt = entry.get("jwt")
+        if isinstance(signed_jwt, str):
+            from .transparency import queue_receipt_anchor_best_effort
+
+            queue_receipt_anchor_best_effort(signed_jwt, self.receipts_log_path)
+        grant_id = entry.get("grant_id")
+        if grant_id:
+            with self._last_seen_receipts_lock:
+                self._last_seen_receipts[grant_id] = receipt_id
 
 
 PUBLIC_PATHS = frozenset({"/health", "/healthz", "/.well-known/jwks.json"})
@@ -4656,23 +6776,22 @@ def _public_key_to_jwk(public_key: ec.EllipticCurvePublicKey) -> dict[str, str]:
 
 def _generate_api_token() -> str:
     """Generate a 32-byte random token, base64-encoded (urlsafe, no padding)."""
-    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+    return (
+        base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+    )
 
 
-def _redact_token(token: str) -> str:
-    """Return a short fingerprint of a token safe to print or log."""
-    if not token:
-        return "<empty>"
-    if len(token) <= 12:
-        return f"{token[:4]}...{token[-4:]}"
-    return f"{token[:8]}...{token[-4:]}"
+def _api_token_compare_material(token: bytes) -> bytes:
+    """Return fixed-length bearer-token material for constant-time compare."""
+    if len(token) > _API_TOKEN_COMPARE_MAX_BYTES:
+        raise ValueError("bearer token too long")
+    return len(token).to_bytes(4, "big") + token.ljust(
+        _API_TOKEN_COMPARE_MAX_BYTES, b"\0"
+    )
 
 
-def _display_token(token: str) -> str:
-    """Return the token value for the startup banner, redacted by default."""
-    if os.environ.get("VIBAP_PRINT_FULL_TOKEN") == "1":
-        return token
-    return _redact_token(token)
+class TLSConfigurationError(RuntimeError):
+    """TLS was required but no usable server context could be constructed."""
 
 
 def serve_proxy(
@@ -4712,23 +6831,55 @@ def serve_proxy(
         # from a YAML ``command:`` block) would create the same
         # operator-confusion failure mode R9-1 closed for env vars.
         api_token = api_token.strip()
+        if not api_token:
+            # Defense-in-depth: a whitespace-only token is truthy before
+            # stripping but resolves to an empty string after. Without this
+            # guard the proxy starts with an effectively empty auth token
+            # that any client can match with ``Authorization: Bearer `` (an
+            # empty bearer). ``cmd_start`` and ``proxy.main()`` reject this
+            # at their CLI layers, but ``serve_proxy`` is also a library
+            # entry point — close the bypass at the security boundary.
+            raise ValueError(
+                "api_token must be a non-empty token after trimming whitespace"
+            )
         token_source = "argument"
     else:
         api_token = _generate_api_token()
         token_source = "generated"
 
-    # Pre-encode once for the hot path. Round-8 (FIX-R8-1, 2026-04-29):
-    # the bearer-auth comparison now hashes both presented and expected
-    # tokens through SHA-256 before ``hmac.compare_digest``, normalizing
-    # both inputs to a fixed 32-byte length. CPython's ``_tscmp`` (the
+    # Pre-normalize once for the hot path. Round-8 (FIX-R8-1, 2026-04-29)
+    # normalized bearer auth before ``hmac.compare_digest``. This version
+    # avoids hashing token material entirely: compare material includes a fixed
+    # width length prefix plus a NUL-padded token body, so both operands passed
+    # to compare_digest always have identical length.
+    # CPython's ``_tscmp`` (the
     # C function backing ``hmac.compare_digest``) iterates ``min(len_a,
     # len_b)`` and short-circuits on length mismatch, leaking the
     # expected token's length to a remote attacker. Round-7 closed this
     # for the Go control-plane services (cmd/authority + pkg/governance);
     # round-8 closes the symmetric Python proxy gap that round-7 audit
     # flagged as MED-NEW-1.
-    api_token_bytes = api_token.encode("ascii")
-    api_token_hash = hashlib.sha256(api_token_bytes).digest()
+    api_token_compare_material = _api_token_compare_material(api_token.encode("ascii"))
+
+    tls_context = None
+    cert_fingerprint = None
+    if not no_tls:
+        try:
+            tls_result = resolve_tls_paths(tls_cert, tls_key, hostname=host)
+            if tls_result is None:
+                raise TLSConfigurationError(
+                    "TLS configuration is unavailable; use --no-tls only when "
+                    "plain HTTP is explicitly intended"
+                )
+            cert_path, key_path, cert_fingerprint = tls_result
+            tls_context = create_ssl_context(cert_path, key_path)
+        except TLSConfigurationError:
+            raise
+        except (OSError, ValueError) as exc:
+            raise TLSConfigurationError(
+                "TLS configuration is unavailable; verify the certificate and key"
+            ) from exc
+    tls_active = tls_context is not None
 
     active_session_ref = {"id": initial_session_id}
     active_session_lock = threading.Lock()
@@ -4752,11 +6903,15 @@ def serve_proxy(
 
             # Snapshot under proxy._sessions_lock — same reason as active_session_count
             with proxy._sessions_lock:
-                active_session_ids = [sid for sid, s in proxy.sessions.items() if s.summary is None]
+                active_session_ids = [
+                    sid for sid, s in proxy.sessions.items() if s.summary is None
+                ]
             if not active_session_ids:
                 raise ValueError("no active session; call POST /session/start first")
             if len(active_session_ids) > 1:
-                raise ValueError("multiple active sessions; specify session_id explicitly")
+                raise ValueError(
+                    "multiple active sessions; specify session_id explicitly"
+                )
 
             active_session_ref["id"] = active_session_ids[0]
             return active_session_ids[0]
@@ -4771,40 +6926,28 @@ def serve_proxy(
         server_version = f"VIBAPProxy/{API_VERSION}"
 
         def _check_rate_limit(self) -> bool:
-            """Return True if the request is within rate limits, emit 429 otherwise."""
             client_ip = self.client_address[0] if self.client_address else "unknown"
             if not rate_limiter.allow(client_ip):
-                self._send_json(429, {"error": "rate limit exceeded"}, headers={"Retry-After": "1"})
+                self._send_json(
+                    429,
+                    {"error": "rate limit exceeded"},
+                    headers={"Retry-After": "1"},
+                )
                 return False
             return True
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A003
-            duration_ms = 0
-            if hasattr(self, "_request_start_time"):
-                duration_ms = (time.time() - self._request_start_time) * 1000  # type: ignore[has-attr]
-            remote = self.client_address[0] if self.client_address else "-"
-            entry = {
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-                "remote_addr": remote,
-                "method": self.command,
-                "path": self._sanitize_path_for_log(),
-                "status": self.responses.get(self.command, (None,))[0] if hasattr(self, "responses") else None,
-                "response_size": 0,
-                "duration_ms": round(duration_ms, 3),
-                "correlation_id": getattr(self, "_correlation_id", "-"),
-                "session_id": getattr(self, "_active_session", "-"),
-            }
-            print(json.dumps(entry), file=sys.stderr, flush=True)
-
-        def _sanitize_path_for_log(self) -> str:
-            path = self.path.split("?", 1)[0] if hasattr(self, "path") else "?"
-            # Redact session-ids / tokens from query strings
-            return path[:256]
+            return
 
         def _read_json(self) -> dict[str, Any]:
+            transfer_encoding = self.headers.get("Transfer-Encoding")
+            if transfer_encoding and transfer_encoding.strip().lower() != "identity":
+                raise ValueError("unsupported Transfer-Encoding")
             length = int(self.headers.get("Content-Length", "0"))
             if length > MAX_REQUEST_BODY:
-                raise ValueError(f"request body too large ({length} bytes, max {MAX_REQUEST_BODY})")
+                raise ValueError(
+                    f"request body too large ({length} bytes, max {MAX_REQUEST_BODY})"
+                )
             if length < 0:
                 raise ValueError("invalid Content-Length")
             raw = self.rfile.read(length) if length else b"{}"
@@ -4865,7 +7008,6 @@ def serve_proxy(
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
-            # Security headers
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Content-Security-Policy", "default-src 'none'")
@@ -4873,9 +7015,6 @@ def serve_proxy(
             self.send_header("Cache-Control", "no-store")
             if tls_active:
                 self.send_header("Strict-Transport-Security", "max-age=31536000")
-            corr_id = getattr(self, "_correlation_id", None)
-            if corr_id:
-                self.send_header("X-Correlation-ID", corr_id)
             if status == 401:
                 self.send_header(
                     "WWW-Authenticate",
@@ -4885,13 +7024,11 @@ def serve_proxy(
                 self.send_header(header_name, header_value)
             self.end_headers()
             self.wfile.write(body)
-            # Metrics
-            method = getattr(self, "command", "?")
-            path = self._request_path()
-            ardur_metrics.requests_total.inc(method=method, path=path, status=str(status))
-            if hasattr(self, "_request_start_time"):
-                dur = time.time() - self._request_start_time
-                ardur_metrics.request_duration_seconds.observe(dur)
+            ardur_metrics.requests_total.inc(
+                method=getattr(self, "command", "?"),
+                path=self._request_path(),
+                status=str(status),
+            )
 
         def _check_auth(self) -> bool:
             """Return True if the request is authorized (or auth is disabled / path is public).
@@ -4904,7 +7041,9 @@ def serve_proxy(
                 return True
             header = self.headers.get("Authorization", "")
             if not header or not header.lower().startswith("bearer "):
-                self._send_json(401, {"error": "missing or malformed Authorization header"})
+                self._send_json(
+                    401, {"error": "missing or malformed Authorization header"}
+                )
                 return False
             # FIX-R9-5 (round-9, 2026-04-29): symmetric ASCII handling.
             # Round-8 audit (LOW-NEW-4) flagged asymmetric error
@@ -4920,20 +7059,67 @@ def serve_proxy(
             except UnicodeEncodeError:
                 self._send_json(401, {"error": "bearer token must be ASCII"})
                 return False
-            # FIX-R8-1: hash-then-compare normalizes lengths and defeats
-            # the length oracle; see api_token_hash construction above.
-            provided_hash = hashlib.sha256(provided).digest()
-            if not hmac.compare_digest(provided_hash, api_token_hash):
+            # FIX-R8-1: compare fixed-length material to defeat the length
+            # oracle; see api_token_compare_material construction above.
+            try:
+                provided_compare_material = _api_token_compare_material(provided)
+            except ValueError:
+                self._send_json(401, {"error": "invalid bearer token"})
+                return False
+            if not hmac.compare_digest(provided_compare_material, api_token_compare_material):  # fmt: skip
                 self._send_json(401, {"error": "invalid bearer token"})
                 return False
             return True
 
         def do_GET(self) -> None:  # noqa: N802
             self._request_start_time = time.time()
-            self._correlation_id = self.headers.get("X-Correlation-ID", str(uuid.uuid4()))
             path = self._request_path()
-            # Public endpoints respond without auth.
-            if path in {"/health", "/healthz"}:
+            try:
+                # Public endpoints respond without auth.
+                if path in {"/health", "/healthz"}:
+                    self._send_json(
+                        200,
+                        {
+                            "status": "ok",
+                            "version": API_VERSION,
+                            "sessions": active_session_count(),
+                        },
+                    )
+                    return
+                if path == "/.well-known/jwks.json":
+                    self._send_json(
+                        200, {"keys": [_public_key_to_jwk(proxy.public_key)]}
+                    )
+                    return
+                if not self._check_rate_limit():
+                    return
+                if not self._check_auth():
+                    return
+                if path == "/metrics":
+                    body = ardur_metrics.render().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("X-Frame-Options", "DENY")
+                    self.send_header("Content-Security-Policy", "default-src 'none'")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.send_header("Cache-Control", "no-store")
+                    if tls_active:
+                        self.send_header(
+                            "Strict-Transport-Security", "max-age=31536000"
+                        )
+                    self.end_headers()
+                    self.wfile.write(body)
+                    ardur_metrics.requests_total.inc(
+                        method=getattr(self, "command", "?"),
+                        path=path,
+                        status="200",
+                    )
+                    return
+                if path != "/":
+                    self._send_json(404, {"error": "not found"})
+                    return
                 self._send_json(
                     200,
                     {
@@ -4942,35 +7128,18 @@ def serve_proxy(
                         "sessions": active_session_count(),
                     },
                 )
-                return
-            if path == "/.well-known/jwks.json":
-                self._send_json(200, {"keys": [_public_key_to_jwk(proxy.public_key)]})
-                return
-            if not self._check_rate_limit():
-                return
-            if not self._check_auth():
-                return
-            if path == "/metrics":
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(ardur_metrics.render().encode("utf-8"))
-                return
-            if path != "/":
-                self._send_json(404, {"error": "not found"})
-                return
-            self._send_json(
-                200,
-                {
-                    "status": "ok",
-                    "version": API_VERSION,
-                    "sessions": active_session_count(),
-                },
-            )
+            except Exception:  # noqa: BLE001 - defensive server boundary
+                logger.exception(
+                    "Unhandled exception in VIBAP proxy HTTP GET handler",
+                    extra={
+                        "method": "GET",
+                        "path": "<request-path-redacted>",
+                    },
+                )
+                self._send_json(500, {"error": "internal server error"})
 
         def do_POST(self) -> None:  # noqa: N802
             self._request_start_time = time.time()
-            self._correlation_id = self.headers.get("X-Correlation-ID", str(uuid.uuid4()))
             if not self._check_rate_limit():
                 return
             if not self._check_auth():
@@ -4988,8 +7157,13 @@ def serve_proxy(
                         self._send_json(200, {"kill_switch": "activated"})
                     return
 
-                # Kill-switch guard: deny state-changing endpoints when active
-                if proxy.kill_switch_active and path in {"/session/start", "/sessions", "/evaluate", "/delegate", "/issue"}:
+                if proxy.kill_switch_active and path in {
+                    "/session/start",
+                    "/sessions",
+                    "/evaluate",
+                    "/delegate",
+                    "/issue",
+                }:
                     self._send_json(503, {"error": "kill_switch_active"})
                     return
 
@@ -4998,13 +7172,23 @@ def serve_proxy(
                     if not isinstance(mission_payload, dict):
                         raise ValueError("mission must be a JSON object")
                     mission = MissionPassport.from_dict(mission_payload)
-                    token = issue_passport(mission, private_key, ttl_s=payload.get("ttl_s"))
+                    token = issue_passport(
+                        mission, private_key, ttl_s=payload.get("ttl_s")
+                    )
                     claims = verify_passport(token, proxy.public_key)
-                    self._send_json(200, {"token": token, "claims": claims})
+                    response: dict[str, Any] = {"token": token, "claims": claims}
+                    if mission.resource_scope == [UNRESTRICTED_RESOURCE_SCOPE_PATTERN]:
+                        response["warnings"] = [
+                            "resource_scope explicitly permits all resources via "
+                            "the sole '**' pattern"
+                        ]
+                    self._send_json(200, response)
                     return
 
                 if path == "/verify":
-                    claims = proxy.verify_passport_token(str(self._require_field(payload, "token")))
+                    claims = proxy.verify_passport_token(
+                        str(self._require_field(payload, "token"))
+                    )
                     self._send_json(200, {"claims": claims})
                     return
 
@@ -5013,15 +7197,18 @@ def serve_proxy(
                     token_type = str(payload.get("token_type", "passport")).lower()
                     if token_type == "aat":
                         parent_aat_token = payload.get("parent_token")
-                        if parent_aat_token is not None and not isinstance(parent_aat_token, str):
-                            raise ValueError("parent_token must be a string when token_type=aat")
-                        # PoP plumbing — defaults secure (require_pop=True). The
-                        # adapter only enforces PoP for AATs that actually carry
-                        # a `cnf` claim, so bearer-mode AATs continue to work
-                        # without any new fields. Callers who legitimately need
-                        # bearer acceptance of a cnf-bearing AAT must pass
-                        # "require_pop": false explicitly so the security
-                        # downgrade is visible in request logs.
+                        if parent_aat_token is not None and not isinstance(
+                            parent_aat_token, str
+                        ):
+                            raise ValueError(
+                                "parent_token must be a string when token_type=aat"
+                            )
+                        # PoP plumbing defaults secure (require_pop=True).
+                        # The proxy separately requires `cnf` unless its
+                        # constructor enables temporary bearer compatibility.
+                        # For a `cnf`-bearing AAT, callers that deliberately
+                        # bypass proof verification must pass "require_pop":
+                        # false so the downgrade is visible in request logs.
                         require_pop_field = payload.get("require_pop", True)
                         if not isinstance(require_pop_field, bool):
                             raise ValueError(
@@ -5033,7 +7220,9 @@ def serve_proxy(
                                 "holder_public_key_pem must be a PEM-encoded string"
                             )
                         kb_jwt_field = payload.get("kb_jwt")
-                        if kb_jwt_field is not None and not isinstance(kb_jwt_field, str):
+                        if kb_jwt_field is not None and not isinstance(
+                            kb_jwt_field, str
+                        ):
                             raise ValueError("kb_jwt must be a string when provided")
                         # Round 3 (2026-04-28) DoS guard: a well-formed
                         # KB-JWT is small (<2KB). Bound the field length
@@ -5055,13 +7244,16 @@ def serve_proxy(
                             from cryptography.hazmat.primitives.serialization import (
                                 load_pem_public_key,
                             )
+
                             try:
-                                loaded = load_pem_public_key(
-                                    holder_pem.encode("utf-8")
-                                )
+                                loaded = load_pem_public_key(holder_pem.encode("utf-8"))
                             except Exception as exc:  # noqa: BLE001
+                                logger.debug(
+                                    "cryptography error loading holder_public_key_pem",
+                                    exc_info=exc,
+                                )
                                 raise ValueError(
-                                    f"invalid holder_public_key_pem: {exc}"
+                                    "holder_public_key_pem_invalid"
                                 ) from exc
                             if not isinstance(loaded, ec.EllipticCurvePublicKey):
                                 raise ValueError(
@@ -5089,47 +7281,24 @@ def serve_proxy(
 
                         biscuit_bytes = decode_biscuit_b64(token)
                         peer_jwt_svid = payload.get("peer_jwt_svid")
+                        caller_trust_fields = {
+                            "peer_trust_jwks",
+                            "peer_trust_domain",
+                            "svid_audience",
+                        }.intersection(payload)
+                        if caller_trust_fields:
+                            raise ValueError(
+                                "caller-supplied JWT-SVID trust or audience fields "
+                                "are forbidden; configure them on the proxy server"
+                            )
                         if peer_jwt_svid is not None:
                             if not isinstance(peer_jwt_svid, str):
                                 raise ValueError("peer_jwt_svid must be a string")
-                            # Peer trust bundle must be provided as a JWKS dict
-                            # in the payload. In Docker, the SPIRE agent
-                            # provides this via the Workload API.
-                            peer_trust_jwks = payload.get("peer_trust_jwks")
-                            if not isinstance(peer_trust_jwks, dict):
-                                raise ValueError(
-                                    "peer_trust_jwks is required when "
-                                    "peer_jwt_svid is supplied"
-                                )
-                            from vibap.spiffe_identity import TrustBundle
-
-                            peer_trust_domain = str(
-                                payload.get("peer_trust_domain", "ardur.dev")
-                            )
-                            peer_trust_bundle = TrustBundle(
-                                trust_domain=peer_trust_domain,
-                                jwks=peer_trust_jwks,
-                                federated_bundles={},
-                            )
-                            svid_audience = payload.get("svid_audience")
-                            kwargs: dict[str, Any] = {
-                                "peer_jwt_svid": peer_jwt_svid,
-                                "peer_trust_bundle": peer_trust_bundle,
-                            }
-                            if svid_audience is not None:
-                                if not isinstance(svid_audience, str):
-                                    raise ValueError("svid_audience must be a string")
-                                kwargs["svid_audience"] = svid_audience
-                            session = proxy.start_session_from_biscuit(
-                                biscuit_bytes,
-                                proxy._biscuit_issuer_public_key,
-                                **kwargs,
-                            )
-                        else:
-                            session = proxy.start_session_from_biscuit(
-                                biscuit_bytes,
-                                proxy._biscuit_issuer_public_key,
-                            )
+                        session = proxy.start_session_from_biscuit(
+                            biscuit_bytes,
+                            proxy._biscuit_issuer_public_key,
+                            peer_jwt_svid=peer_jwt_svid,
+                        )
                     else:
                         raise ValueError(f"unsupported token_type: {token_type}")
                     set_active_session_id(session.jti)
@@ -5139,7 +7308,9 @@ def serve_proxy(
                             {
                                 "session_id": session.jti,
                                 "agent_id": session.passport_claims["sub"],
-                                "allowed_tools": list(session.passport_claims.get("allowed_tools", [])),
+                                "allowed_tools": list(
+                                    session.passport_claims.get("allowed_tools", [])
+                                ),
                                 "credential_format": session.passport_claims.get(
                                     "credential_format",
                                     "passport",
@@ -5147,7 +7318,10 @@ def serve_proxy(
                             },
                         )
                         return
-                    self._send_json(200, {"session_id": session.jti, "claims": session.passport_claims})
+                    self._send_json(
+                        200,
+                        {"session_id": session.jti, "claims": session.passport_claims},
+                    )
                     return
 
                 if path == "/evaluate":
@@ -5160,10 +7334,17 @@ def serve_proxy(
                     session_id = payload.get("session_id") or payload.get("session")
                     if session_id is None:
                         session_id = get_active_session_id()
+                    risk_request_id = payload.get("risk_request_id")
+                    if risk_request_id is not None and (
+                        not isinstance(risk_request_id, str)
+                        or not risk_request_id.strip()
+                    ):
+                        raise ValueError("risk_request_id must be a non-empty string")
                     decision, reason = proxy.evaluate_tool_call(
                         str(session_id),
                         str(self._require_field(payload, "tool_name")),
                         dict(arguments),
+                        risk_request_id=risk_request_id,
                     )
                     if reason == "passport_revoked":
                         self._send_json(403, {"error": "passport_revoked"})
@@ -5181,29 +7362,60 @@ def serve_proxy(
 
                 if path == "/result":
                     proxy.record_tool_result(
-                        str(payload.get("session_id") or self._require_field(payload, "session")),
+                        str(
+                            payload.get("session_id")
+                            or self._require_field(payload, "session")
+                        ),
                         str(payload.get("response", "")),
                         float(payload.get("duration_ms", 0.0)),
                     )
                     self._send_json(200, {"status": "recorded"})
                     return
 
+                if path == "/risk/outcome":
+                    session_id = str(
+                        payload.get("session_id")
+                        or self._require_field(payload, "session")
+                    )
+                    risk_request_id = self._require_string_field(
+                        payload,
+                        "risk_request_id",
+                    )
+                    outcome = self._require_string_field(payload, "outcome")
+                    result = proxy.record_risk_outcome(
+                        session_id,
+                        risk_request_id=risk_request_id,
+                        outcome=outcome,
+                    )
+                    self._send_json(200, result)
+                    return
+
                 if path in {"/session/end", "/end"}:
-                    session_id = str(payload.get("session_id") or self._require_field(payload, "session"))
+                    session_id = str(
+                        payload.get("session_id")
+                        or self._require_field(payload, "session")
+                    )
                     summary = proxy.end_session(session_id)
                     with active_session_lock:
                         if active_session_ref["id"] == session_id:
                             active_session_ref["id"] = None
                     if path == "/session/end":
-                        token, _ = proxy.issue_attestation_for_session(session_id, private_key)
-                        self._send_json(200, {"attestation_token": token, "summary": summary})
+                        token, _ = proxy.issue_attestation_for_session(
+                            session_id, private_key
+                        )
+                        self._send_json(
+                            200, {"attestation_token": token, "summary": summary}
+                        )
                         return
                     self._send_json(200, {"summary": summary})
                     return
 
                 if path == "/attest":
                     token, claims = proxy.issue_attestation_for_session(
-                        str(payload.get("session_id") or self._require_field(payload, "session")),
+                        str(
+                            payload.get("session_id")
+                            or self._require_field(payload, "session")
+                        ),
                         private_key,
                     )
                     self._send_json(200, {"token": token, "claims": claims})
@@ -5211,7 +7423,9 @@ def serve_proxy(
 
                 if path == "/delegate":
                     parent_token = self._require_string_field(payload, "parent_token")
-                    child_agent_id = self._require_string_field(payload, "child_agent_id")
+                    child_agent_id = self._require_string_field(
+                        payload, "child_agent_id"
+                    )
                     child_mission = self._require_string_field(payload, "child_mission")
                     child_tools = self._string_list_field(
                         self._require_field(payload, "child_allowed_tools"),
@@ -5220,6 +7434,12 @@ def serve_proxy(
                     child_ttl = payload.get("child_ttl_s")
                     child_max_calls = payload.get("child_max_tool_calls")
                     child_scope = payload.get("child_resource_scope")
+                    child_risk_budget = payload.get("child_risk_budget")
+                    if child_risk_budget is not None and not isinstance(
+                        child_risk_budget,
+                        dict,
+                    ):
+                        raise ValueError("child_risk_budget must be a JSON object")
                     delegation_request_id = payload.get("delegation_request_id")
                     if delegation_request_id is not None and (
                         not isinstance(delegation_request_id, str)
@@ -5243,36 +7463,65 @@ def serve_proxy(
                     )
 
                     try:
-                        child_token, child_claims, parent_calls_remaining = proxy.delegate_passport(
-                            parent_token=parent_token,
-                            private_key=private_key,
-                            child_agent_id=child_agent_id,
-                            child_allowed_tools=child_tools,
-                            child_mission=child_mission,
-                            child_ttl_s=child_ttl_int,
-                            child_max_tool_calls=child_max_calls_int,
-                            child_resource_scope=child_scope_list,
-                            delegation_request_id=delegation_request_id,
+                        child_token, child_claims, parent_calls_remaining = (
+                            proxy.delegate_passport(
+                                parent_token=parent_token,
+                                private_key=private_key,
+                                child_agent_id=child_agent_id,
+                                child_allowed_tools=child_tools,
+                                child_mission=child_mission,
+                                child_ttl_s=child_ttl_int,
+                                child_max_tool_calls=child_max_calls_int,
+                                child_resource_scope=child_scope_list,
+                                child_risk_budget=child_risk_budget,
+                                delegation_request_id=delegation_request_id,
+                            )
                         )
                     except LineageBudgetConflictError as exc:
+                        # Controlled string (not a path/secret leak), but log
+                        # full detail for operator triage parity with the
+                        # catch-all. See L6800 for the reference pattern.
+                        logger.debug(
+                            "LineageBudgetConflictError in /delegate",
+                            exc_info=exc,
+                        )
                         self._send_json(409, {"error": str(exc)})
                     except ValueError:
-                        parent_jti = str(verify_passport(parent_token, proxy.public_key)["jti"])
-                        self._send_json(403, {"error": (
-                            f"delegation requires parent session to exist; "
-                            f"start the parent passport via /session/start before delegating "
-                            f"(parent_jti={parent_jti})"
-                        )})
+                        parent_jti = str(
+                            verify_passport(parent_token, proxy.public_key)["jti"]
+                        )
+                        self._send_json(
+                            403,
+                            {
+                                "error": (
+                                    f"delegation requires parent session to exist; "
+                                    f"start the parent passport via /session/start before delegating "
+                                    f"(parent_jti={parent_jti})"
+                                )
+                            },
+                        )
                     except PermissionError as exc:
+                        # PermissionError messages here come from
+                        # delegate_passport and are controlled API-contract
+                        # strings (scope escalation, MIC conformance, budget
+                        # exhausted, depth exceeded, AAT parent-session). The
+                        # PyJWT/AAT-internal leak vectors that previously
+                        # reached this site are sanitized at their sources, so
+                        # str(exc) is safe to surface. Log full detail for
+                        # operator triage.
+                        logger.debug("PermissionError in /delegate", exc_info=exc)
                         self._send_json(403, {"error": str(exc)})
                     else:
-                        self._send_json(200, {
-                            "child_token": child_token,
-                            "child_claims": child_claims,
-                            "parent_jti": child_claims.get("parent_jti"),
-                            "parent_calls_remaining_at_delegation": parent_calls_remaining,
-                            "delegation_request_id": delegation_request_id,
-                        })
+                        self._send_json(
+                            200,
+                            {
+                                "child_token": child_token,
+                                "child_claims": child_claims,
+                                "parent_jti": child_claims.get("parent_jti"),
+                                "parent_calls_remaining_at_delegation": parent_calls_remaining,
+                                "delegation_request_id": delegation_request_id,
+                            },
+                        )
                     return
 
                 self._send_json(404, {"error": "not found"})
@@ -5287,33 +7536,61 @@ def serve_proxy(
             except PassportStateUnavailableError as exc:
                 self._send_json(503, {"error": exc.error_code})
             except PermissionError as exc:
+                # Controlled API-contract messages (PoP, session ended,
+                # passport_revoked, SVID binding). The PyJWT/SVID-internal leak
+                # vectors are sanitized at source. Log full detail for operator
+                # triage; str(exc) is safe to surface.
+                logger.debug(
+                    "PermissionError in VIBAP proxy HTTP handler",
+                    exc_info=exc,
+                )
                 self._send_json(403, {"error": str(exc)})
-            except (TypeError, AttributeError, ValueError, KeyError) as exc:
+            except (ValueError, KeyError) as exc:
+                # ValueError and KeyError are the handler's controlled
+                # 400-response channels for input validation (mission shape,
+                # token_type, risk fields, MAX_KB_JWT_BYTES, missing-field
+                # KeyErrors from MissionPassport.from_dict, etc.). Messages
+                # are authored field names / validation strings, not leaks.
+                # Preserve the message so the API contract and existing
+                # clients/tests keep working; log full detail for triage.
+                logger.debug(
+                    "ValueError/KeyError in VIBAP proxy HTTP handler",
+                    exc_info=exc,
+                )
                 self._send_json(400, {"error": str(exc)})
+            except (TypeError, AttributeError) as exc:
+                # Genuine uncontrolled-leak bucket: arbitrary Python internals,
+                # attribute names, type info from deep library code. Sanitize
+                # to the exception class name only; log the full
+                # message/traceback so operators can triage without exposing
+                # internals to callers.
+                logger.debug(
+                    "Unhandled %s in VIBAP proxy HTTP handler",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+                self._send_json(400, {"error": type(exc).__name__})
             except Exception:  # noqa: BLE001
                 # Catch-all: log with full traceback so operators can triage.
                 # Without this, cryptography faults / invariant trips / disk I/O
                 # errors become anonymous 500s with no audit signal.
+                safe_method = getattr(self, "command", "OTHER")
+                if safe_method not in {"GET", "POST", "OPTIONS", "HEAD"}:
+                    safe_method = "OTHER"
                 logger.exception(
                     "Unhandled exception in VIBAP proxy HTTP handler",
                     extra={
-                        "method": getattr(self, "command", "?"),
-                        "path": getattr(self, "path", "?"),
+                        "method": safe_method,
+                        "path": "<request-path-redacted>",
                     },
                 )
                 self._send_json(500, {"error": "internal server error"})
 
     httpd = ThreadingHTTPServer((host, port), Handler)
 
-    tls_active = False
-    if not no_tls:
-        tls_result = resolve_tls_paths(tls_cert, tls_key, hostname=host)
-        if tls_result:
-            cert_path, key_path, cert_fingerprint = tls_result
-            ssl_ctx = create_ssl_context(cert_path, key_path)
-            httpd.socket = ssl_ctx.wrap_socket(httpd.socket, server_side=True)
-            tls_active = True
-            print(f"[tls] cert fingerprint: {cert_fingerprint}", file=sys.stderr)
+    if tls_context is not None:
+        httpd.socket = tls_context.wrap_socket(httpd.socket, server_side=True)
+        print(f"[tls] cert fingerprint: {cert_fingerprint}", file=sys.stderr)
     if no_tls:
         print("[tls] WARNING: TLS disabled — plain HTTP only", file=sys.stderr)
 
@@ -5330,22 +7607,24 @@ def serve_proxy(
         "/sessions, /evaluate, /result, /end, /attest, /delegate"
     )
     if require_auth:
-        display_token = _display_token(api_token)
         print("")
         print("=" * 72)
-        print(f"Bearer auth REQUIRED on all endpoints except: {', '.join(sorted(PUBLIC_PATHS))}")
-        print(f"API token ({token_source}):")
-        print(f"    {display_token}")
-        if display_token != api_token:
-            print("Set VIBAP_PRINT_FULL_TOKEN=1 to print the full token once on stdout.")
-        print("Copy this value and send it as:  Authorization: Bearer <token>")
+        print(
+            f"Bearer auth REQUIRED on all endpoints except: {', '.join(sorted(PUBLIC_PATHS))}"
+        )
+        print(f"API token ({token_source}): [redacted]")
+        if token_source == "generated":
+            print(
+                "Generated tokens are no longer printed; set VIBAP_API_TOKEN or pass --api-token for clients."
+            )
+        print("Send the actual configured token as:  Authorization: Bearer ***")
         print("Export for hooks/clients:        export VIBAP_API_TOKEN='<token>'")
         print("=" * 72)
         print("")
-        # Log-safe fingerprint only (never the full token).
+        # Log only redacted auth state; never emit token material.
         # The proxy's log_message is suppressed; emit a structured stderr line for audit.
         print(
-            f"[vibap] auth=on source={token_source} token_fp={_redact_token(api_token)}",
+            f"[vibap] auth=on source={token_source} token=redacted",
             file=sys.stderr,
         )
     else:
@@ -5354,7 +7633,8 @@ def serve_proxy(
             "!! WARNING: VIBAP proxy is running WITHOUT authentication.            !!\n"
             "!! All endpoints are exposed to anyone who can reach this port.       !!\n"
             "!! DO NOT use --no-require-auth in production or on untrusted networks.!!\n"
-            + "!" * 72 + "\n"
+            + "!" * 72
+            + "\n"
         )
         print(warning)
         print(warning, file=sys.stderr)
@@ -5363,7 +7643,148 @@ def serve_proxy(
     except KeyboardInterrupt:
         print("\nShutting down VIBAP proxy.")
     finally:
+        rate_limiter.stop()
         httpd.server_close()
+
+
+def _proxy_port_failure_condition() -> str:
+    return "proxy_port_invalid"
+
+
+def _proxy_port_failure_next_steps(condition: str) -> list[dict[str, str]]:
+    return [
+        {
+            "condition": condition,
+            "action": "choose_valid_proxy_port",
+            "command": ("python -m vibap.proxy --host <loopback-host> --port <port>"),
+            "detail": (
+                "Use an integer TCP port from 0 through 65535. Use 0 when you "
+                "want the operating system to choose an available local port."
+            ),
+        },
+    ]
+
+
+def _proxy_port_failure_response() -> dict:
+    condition = _proxy_port_failure_condition()
+    return {
+        "ok": False,
+        "error": condition,
+        "error_code": condition,
+        "condition": condition,
+        "message": "Ardur governance proxy port must be within the valid TCP port range.",
+        "detail": "Choose an integer port from 0 through 65535 before starting the proxy.",
+        "next_steps": _proxy_port_failure_next_steps(condition),
+    }
+
+
+def _proxy_port_failure_exit_code(port: int) -> int | None:
+    if 0 <= port <= 65535:
+        return None
+    json.dump(_proxy_port_failure_response(), sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 1
+
+
+_PROXY_PATH_ARG_NAMES = ("keys_dir", "log_path", "state_dir", "tls_cert", "tls_key")
+
+
+def _proxy_path_arg_invalid_response(arg_name: str) -> dict[str, object]:
+    option = arg_name.replace("_", "-")
+    return {
+        "ok": False,
+        "error": "proxy_path_arg_invalid",
+        "error_code": "proxy_path_arg_invalid",
+        "condition": "proxy_path_arg_invalid",
+        "message": f"python -m vibap.proxy --{option} must be a non-empty path after trimming whitespace.",
+        "detail": (
+            "An empty or whitespace-only path argument was provided. "
+            "Pass an explicit directory or file path, or use '.' for the current working directory."
+        ),
+        "next_steps": [
+            {
+                "action": f"pass_{arg_name}",
+                "command": f"python -m vibap.proxy --{option} <{option}>",
+                "detail": f"Provide an explicit --{option} path.",
+            },
+            {
+                "action": "use_cwd",
+                "command": f"python -m vibap.proxy --{option} .",
+                "detail": "Use '.' explicitly to target the current working directory.",
+            },
+        ],
+    }
+
+
+def _proxy_path_arg_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
+    for arg_name in _PROXY_PATH_ARG_NAMES:
+        value = getattr(args, arg_name, None)
+        if isinstance(value, str) and not value.strip():
+            return _proxy_path_arg_invalid_response(arg_name)
+    return None
+
+
+def _proxy_api_token_invalid_response() -> dict[str, object]:
+    """Failure response for a whitespace-only ``--api-token`` on the proxy.
+
+    ``serve_proxy`` strips the CLI-supplied token. A whitespace-only argument
+    is truthy before stripping but resolves to an empty string after, starting
+    the proxy with an effectively empty auth token that any client can match
+    with ``Authorization: Bearer `` (empty bearer). Reject it before key
+    generation, mirroring the ``ardur start --api-token`` guard.
+    """
+    return {
+        "ok": False,
+        "error": "proxy_api_token_invalid",
+        "error_code": "proxy_api_token_invalid",
+        "condition": "proxy_api_token_invalid",
+        "message": (
+            "python -m vibap.proxy --api-token must be a non-empty token "
+            "after trimming whitespace."
+        ),
+        "detail": (
+            "A whitespace-only --api-token is truthy before stripping but "
+            "resolves to an empty string after, starting the proxy with an "
+            "effectively empty auth token. Pass a real token or omit "
+            "--api-token to let the proxy generate one."
+        ),
+        "next_steps": [
+            {
+                "action": "pass_real_token",
+                "command": ("python -m vibap.proxy --api-token <your-secret-token>"),
+                "detail": "Provide a non-empty API token.",
+            },
+            {
+                "action": "use_env",
+                "command": (
+                    "export VIBAP_API_TOKEN=<your-secret-token> && "
+                    "python -m vibap.proxy"
+                ),
+                "detail": "Set the token via the VIBAP_API_TOKEN environment variable.",
+            },
+            {
+                "action": "autogenerate",
+                "command": "python -m vibap.proxy",
+                "detail": "Omit --api-token to let the proxy generate a random token.",
+            },
+        ],
+    }
+
+
+def _proxy_api_token_invalid_failure(
+    args: argparse.Namespace,
+) -> dict[str, object] | None:
+    """Return the api-token-invalid response when --api-token is whitespace-only.
+
+    ``None`` means the argument is acceptable: either unset (None), an empty
+    string (falsy, falls through to autogeneration), or a real token.
+    """
+    value = getattr(args, "api_token", None)
+    if isinstance(value, str) and value and not value.strip():
+        return _proxy_api_token_invalid_response()
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -5379,8 +7800,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--revoke", metavar="JTI")
     parser.add_argument("--tls-cert", help="TLS certificate PEM file")
     parser.add_argument("--tls-key", help="TLS private key PEM file")
-    parser.add_argument("--no-tls", action="store_true", help="disable TLS (plain HTTP only)")
+    parser.add_argument(
+        "--no-tls", action="store_true", help="disable TLS (plain HTTP only)"
+    )
     args = parser.parse_args(argv)
+
+    port_failure = _proxy_port_failure_exit_code(args.port)
+    if port_failure is not None:
+        return port_failure
+
+    path_failure = _proxy_path_arg_invalid_failure(args)
+    if path_failure is not None:
+        json.dump(path_failure, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
+
+    api_token_failure = _proxy_api_token_invalid_failure(args)
+    if api_token_failure is not None:
+        json.dump(api_token_failure, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 1
 
     private_key, public_key = generate_keypair(keys_dir=args.keys_dir)
     proxy = GovernanceProxy(
@@ -5395,18 +7834,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"revoked passport jti {args.revoke} in {proxy.revoked_path}")
         return 0
 
-    serve_proxy(
-        proxy=proxy,
-        private_key=private_key,
-        host=args.host,
-        port=args.port,
-        initial_session_id=args.initial_session,
-        require_auth=not args.no_require_auth,
-        api_token=args.api_token,
-        tls_cert=args.tls_cert,
-        tls_key=args.tls_key,
-        no_tls=args.no_tls,
-    )
+    try:
+        serve_proxy(
+            proxy=proxy,
+            private_key=private_key,
+            host=args.host,
+            port=args.port,
+            initial_session_id=args.initial_session,
+            require_auth=not args.no_require_auth,
+            api_token=args.api_token,
+            tls_cert=args.tls_cert,
+            tls_key=args.tls_key,
+            no_tls=args.no_tls,
+        )
+    except TLSConfigurationError as exc:
+        print(f"[tls] ERROR: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

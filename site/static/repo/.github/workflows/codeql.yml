@@ -30,7 +30,7 @@ jobs:
     outputs:
       languages: ${{ steps.detect.outputs.languages }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
       - id: detect
         name: Detect supported languages present in the tree
@@ -62,13 +62,12 @@ jobs:
       matrix:
         language: ${{ fromJSON(needs.detect-languages.outputs.languages) }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      # v3 is an annotated tag (tag-object 865f5f5c... → commit ce64ddcb...).
       # Pin to the commit SHA per the same discipline as the other
       # workflows; comment shows the human-readable version.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a  # v3 (commit)
+        uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
         with:
           languages: ${{ matrix.language }}
           # `security-and-quality` is the broadest pack — covers
@@ -79,9 +78,33 @@ jobs:
           queries: security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a  # v3 (commit)
+        uses: github/codeql-action/autobuild@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a  # v3 (commit)
+        uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
         with:
           category: "/language:${{ matrix.language }}"
+
+  codeql:
+    name: codeql
+    if: ${{ always() }}
+    needs:
+      - detect-languages
+      - analyze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require language detection and applicable analyses
+        env:
+          DETECT: ${{ needs['detect-languages'].result }}
+          LANGUAGES: ${{ needs['detect-languages'].outputs.languages }}
+          ANALYZE: ${{ needs.analyze.result }}
+        run: |
+          set -euo pipefail
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::Language detection concluded $DETECT"
+            exit 1
+          fi
+          if [ "$LANGUAGES" != "[]" ] && [ "$ANALYZE" != "success" ]; then
+            echo "::error::CodeQL analysis concluded $ANALYZE"
+            exit 1
+          fi

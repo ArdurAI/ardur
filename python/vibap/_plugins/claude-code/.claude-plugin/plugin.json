@@ -1,0 +1,8 @@
+{
+  "name": "ardur-claude-code-hook",
+  "version": "0.1.0",
+  "description": "Ardur runtime governance for Claude Code: mission-bound deny gating and signed Execution Receipts on tool calls.",
+  "author": {
+    "name": "Ardur"
+  }
+}
