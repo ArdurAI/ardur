@@ -449,8 +449,12 @@ func needsUnverifiedIdentityMigration(ap *vibapv1alpha1.AgentPassport) bool {
 	// Status is controller-owned. Decode classifies the artifact conservatively;
 	// it is not treated as independent proof of signature authenticity.
 	decoded, err := credential.Decode(ap.Status.Credential)
-	if err != nil || decoded.Claims.Identity != nil ||
-		strings.Contains(strings.ToLower(decoded.Claims.Subject), "spiffe://") {
+	if err != nil {
+		return true
+	}
+	subject := strings.TrimSpace(decoded.Claims.Subject)
+	if subject == "" || decoded.Claims.Identity != nil ||
+		strings.Contains(strings.ToLower(subject), "spiffe://") {
 		return true
 	}
 	for _, condition := range ap.Status.Conditions {

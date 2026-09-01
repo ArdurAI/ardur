@@ -411,6 +411,51 @@ func TestReconcile_ExistingMissingSPIFFEIDRemediatesLegacyCredential(t *testing.
 	t.Fatal("IdentityUnverified condition disappeared after migration completed")
 }
 
+func TestReconcile_ExistingMissingSPIFFEIDRemediatesEmptySubjectCredential(t *testing.T) {
+	ap := testPassport("empty-subject", "default")
+	ap.Finalizers = []string{vibapv1alpha1.FinalizerName}
+
+	invalidEncoded := spiffeSubjectOnlyEncodedCredential(t, "")
+	ap.Status.Credential = invalidEncoded
+	ap.Status.ObservedGeneration = ap.Generation
+	expiresAt := metav1.NewTime(time.Now().Add(2 * time.Hour))
+	ap.Status.ExpiresAt = &expiresAt
+	ap.Status.Conditions = []metav1.Condition{{
+		Type:               vibapv1alpha1.ConditionIdentityUnverified,
+		Status:             metav1.ConditionTrue,
+		Reason:             vibapv1alpha1.ReasonMissingSPIFFEID,
+		ObservedGeneration: ap.Generation,
+	}}
+
+	r, err := testReconciler(ap)
+	if err != nil {
+		t.Fatalf("creating reconciler: %v", err)
+	}
+	nn := types.NamespacedName{Name: ap.Name, Namespace: ap.Namespace}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: nn}); err != nil {
+		t.Fatalf("reconciling empty-subject credential: %v", err)
+	}
+
+	var updated vibapv1alpha1.AgentPassport
+	if err := r.Get(context.Background(), nn, &updated); err != nil {
+		t.Fatalf("getting reconciled resource: %v", err)
+	}
+	if updated.Status.Credential == invalidEncoded {
+		t.Fatal("reconcile retained an empty-subject credential that the verifier rejects")
+	}
+	decoded, err := credential.Decode(updated.Status.Credential)
+	if err != nil {
+		t.Fatalf("decoding replacement credential: %v", err)
+	}
+	const expectedSubject = "default/empty-subject"
+	if decoded.Claims.Subject != expectedSubject {
+		t.Fatalf("replacement subject = %q, want %q", decoded.Claims.Subject, expectedSubject)
+	}
+	if decoded.Claims.Identity != nil {
+		t.Fatalf("replacement credential must remain identity-less: %+v", decoded.Claims.Identity)
+	}
+}
+
 func TestNeedsUnverifiedIdentityMigration_InspectsCredentialDespiteCondition(t *testing.T) {
 	ap := testPassport("stale-condition", "default")
 	const legacySPIFFEID = "spiffe://ardur.dev/ns/default/agent/stale-condition"
